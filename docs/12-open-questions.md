@@ -1,0 +1,32 @@
+# 12 — Open Questions & Decision Log
+
+Status: Living document. Open questions carry an ID, the docs they block, the live options, and a decide-by phase ([11-roadmap.md](11-roadmap.md)). Resolved questions move to the decision log below — **append-only, with rationale** — so we never re-litigate silently.
+
+## Open questions
+
+| ID | Question | Blocks | Options on the table | Decide by |
+| --- | --- | --- | --- | --- |
+| Q1 | **Monetization model.** Deliberately undecided; hard-constrained by the no-pay-to-win pillar ([01](01-vision.md)) and the meta-components-only-in-the-Mutator rule ([05](05-component-economy.md)). | Phase 5 planning | Cosmetic-only (pigment palettes, Notebook themes, Vat skins); battle-pass of *part-family discovery* (aesthetic, not power — needs scrutiny against pillar 1); premium title | Phase 4 |
+| Q2 | **Match-server sim implementation.** Headless Unity build (shares code with client) vs. custom sim in Go/Rust/C# (leaner fleet, duplicated logic). The fixed-point sim core ([04](04-combat-model.md)) is small enough to keep this genuinely open. | [09](09-multiplayer-architecture.md), [10](10-engine-evaluation.md) | Headless Unity; custom Go; custom Rust; C# shared-source library used by both | End of Phase 2 (before netcode build) |
+| Q3 | **Mutator API service language.** | [07](07-mutator-server-architecture.md) | Node/TypeScript; Go (team-familiarity call) | Start of Phase 1 Track B |
+| Q4 | **Team sizes beyond 1v1.** 2v2 and FFA change map anatomy, pause rules, and matchmaking math. | [02](02-gameplay-overview.md), [09](09-multiplayer-architecture.md) | Defer entirely; design-doc-only in Phase 4; 2v2 in live roadmap | Phase 5 |
+| Q5 | **Genome trading/sharing between players.** Huge feature: marketplace, gifting, breeding-with-a-friend's-monster. The immutable-genome data model already supports it ([07](07-mutator-server-architecture.md)) — *deliberately deferred*, not forgotten; economy and moderation implications are large. | none (by design) | Gifting only; splice-rights lending; full marketplace | Post-launch |
+| Q6 | **Name / trademark check.** "Mad Doctor's Construction Set" and "MadDr.MCs" need a proper trademark and store-listing search; also verify no conflict with historical "Construction Set" marks (EA's *Adventure Construction Set* lineage). | store listing | Keep; rename | Phase 4 |
+| Q7 | **Offline single-player scope.** Phase 2's skirmish-vs-AI exists for development; how much ships? Mobile players expect *something* on the subway besides the lab queue. | [02](02-gameplay-overview.md) FTUE, retention | Tutorial-only; full offline skirmish; offline "haunting" puzzle campaign | Phase 4 |
+| Q8 | **Input-automation / screen-reading cheats.** Accepted surface for v1 per [09](09-multiplayer-architecture.md); revisit if competitive play emerges. | none | Behavioral detection; report tooling; ignore | Post-launch |
+| Q9 | **Soft-launch retention targets** (D1/D7) and the region choice. | [11](11-roadmap.md) Phase 5 exit | — | Start of Phase 5 |
+
+## Decision log (append-only)
+
+| Date | Decision | Rationale | Recorded in |
+| --- | --- | --- | --- |
+| 2026-06 | Design docs before any code | Greenfield; two existential risks need cheap paper-stage definition first | [11](11-roadmap.md) Phase 0 |
+| 2026-06 | 3D creatures & map | Creator decision; the Mutator's output deserves silhouette-level variety | [08](08-creature-visualization.md) |
+| 2026-06 | Real-time 1v1 multiplayer from the start | Creator decision; drives the server-authoritative architecture | [09](09-multiplayer-architecture.md) |
+| 2026-06 | Server-authoritative state sync, **not** lockstep | Mobile jitter, cross-platform determinism burden, reconnect simplicity, ≤60 entities | [09](09-multiplayer-architecture.md) |
+| 2026-06 | Modular socketed parts, **not** Spore-style procedural mesh or texture swaps | Risk/team-size vs. pillar-1 variety; full rationale recorded | [08](08-creature-visualization.md) |
+| 2026-06 | Engine recommendation: **Unity** (provisional on the Phase-1 spike) | Weighted matrix 49/39/40 vs. Godot/Unreal; runtime skinned-mesh assembly maturity decisive | [10](10-engine-evaluation.md) |
+| 2026-06 | Dual currency: mana = energy, components = material | Keeps territory (tempo) and harvesting (size) as separate strategic dials | [03](03-mana-system.md) |
+| 2026-06 | No to-hit rolls; bounded magnitude luck only | Misses feel terrible at mobile match length; pillar 3 | [04](04-combat-model.md) |
+| 2026-06 | Meta components spend only in the Mutator | The pay-to-win firewall, whatever Q1 resolves to | [05](05-component-economy.md) |
+| 2026-06 | Immutable genome rows with parent lineage | Pedigrees, auditability, signing, and Q5 future-proofing for free at ~80 GB/1M-player worst case | [07](07-mutator-server-architecture.md) |
