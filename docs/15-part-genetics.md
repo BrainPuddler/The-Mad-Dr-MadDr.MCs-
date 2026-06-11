@@ -1,0 +1,80 @@
+# 15 — Part Genetics: Growing & Mixing Recognizable Parts
+
+Status: Draft v0.1 · Pillars served: 1 (*Every monster is yours*) · Extends [06-mutator-design.md](06-mutator-design.md); demonstrated by the runnable prototype in [`/prototype/mutator/`](../prototype/mutator/). Schema implications tracked as Q10 in [12-open-questions.md](12-open-questions.md).
+
+## The problem
+
+The genetic algorithm wants variety; the player needs **legibility**. A claw must read as a claw at battlefield zoom — even after fifty generations of mutation, even spliced with a tentacle. If mutation can produce unrecognizable mush, players can't read fights ([04-combat-model.md](04-combat-model.md) readability requirement) and the Mutator's output stops feeling like *parts* and starts feeling like noise. The El-Fish magic is precisely that offspring are *surprising but recognizable*.
+
+Six strategies, designed to interlock:
+
+## Strategy 1 — Identity invariants vs. variation parameters
+
+Every part family splits its design into two layers:
+
+- **Identity invariants** — the features that make the part read as what it is. These are *hard-coded into the part's construction* (in 3D: the base mesh topology and socket conventions, [08-creature-visualization.md](08-creature-visualization.md); in the prototype: the drawing logic). **No gene can touch them.**
+- **Variation parameters** — everything else, fully owned by the genome.
+
+| Family | Invariant (never varies) | Varies (gene-driven) |
+| --- | --- | --- |
+| Claw hand | A palm bearing 2–5 hard, curved, tapering talons | Talon count, length, thickness, curvature, knuckle spikes |
+| Pincer | Two opposing crescent jaws meeting at a gap | Jaw reach, thickness, gap/closure, shell studs |
+| Tentacle | One smooth limb tapering to a curling tip | Length, girth, taper rate, curl, sucker density |
+| Antenna | Thin *paired* stalks, segmented, tip bulbs | Stalk length, bend, segment count, bulb size |
+| Bug eyes | A clustered constellation of **3+** round eyes with pupils | Eye count, sizes, cluster spread, lashes |
+| Stalk eyes | Eyeballs held aloft on flexible stalks | Stalk length, bend, eyeball size |
+
+Recognizability is not a tuning outcome — it's a structural guarantee. The genome literally cannot express "a claw with no talons."
+
+## Strategy 2 — Shared semantic axes (the breedability key)
+
+Every part family interprets the **same six parameter genes**, identically named:
+
+`length · girth · taper · curl · count · ornament`
+
+Each axis means the same *kind* of thing everywhere: `curl` bends a tentacle, hooks a talon, closes a pincer, kinks an antenna. This is what makes **cross-family breeding meaningful** rather than nonsensical: when a tentacle (long, thin, strongly curled) is spliced with a claw (stubby, thick, straight), a child that lands in the claw family still inherits the tentacle parent's *build* — it comes out as a long, thin, hooked claw. The prototype's Exhibit 3 shows exactly this, and its property test verifies children always land between their parents on every axis.
+
+Without shared axes, cross-family crossover would have to either discard parameters (children resemble one parent only) or blend incompatible meanings (noise). With them, every pair of parts in the catalog is breedable by construction.
+
+## Strategy 3 — Homologous slot grammar (the Hox rule)
+
+Parts occupy **homolog classes**, named after the biology that inspired them: claw, pincer, and tentacle are all *hand* homologs; antenna and horn are *sensor* homologs; bug-eyes, cyclops, and stalk-eyes are *eye* homologs. The grammar rule:
+
+> Crossover and mutation family-jumps only ever swap a part for another part **in the same homolog class**.
+
+A hand can become a different hand; it can never become an eye. Like Hox genes in real development, this guarantees every child is anatomically coherent — no creature with an eyeball for a fist (unless we someday *author* an eye-fist as a hand-homolog family, which is a content decision, not a GA accident). Graft ([06](06-mutator-design.md)) enforces the same grammar and rejects violations as failed experiments.
+
+## Strategy 4 — Canalized expression
+
+Genotype space is always the full 0–1 range on every axis; **phenotype space is the family's authored-safe sub-range**. Each family declares per-axis bounds (an antenna's `girth` expresses into a thin band; a horn's into a thick one), and genes map into those bounds at expression time. Borrowed from developmental biology's *canalization*: extreme genes produce visual *outliers*, never *broken* parts. This also means a gene's value survives family jumps intact — `girth 0.9` is "as thick as this family allows," whatever the family — which keeps lineages coherent across jumps.
+
+## Strategy 5 — Authored extremes, interpolated interiors (the 3D mapping)
+
+The prototype draws parts procedurally from the six axes. In the production 3D pipeline ([08-creature-visualization.md](08-creature-visualization.md)) the same axes drive: `length`/`girth` → socket bone scaling; `taper`/`curl` → bone-chain scale and rotation distributions; `count` → variant mesh selection or repeated socket elements (talon count, eye count); `ornament` → detail-layer blend shapes and the stitch/stud overlays. Artists author the *extremes* (the blend-shape endpoints and min/max bounds); the GA only ever explores the interpolated interior — every reachable phenotype is, by construction, within authored quality.
+
+## Strategy 6 — Recognizability validation (the back-stop)
+
+Strategies 1–5 make unrecognizable parts structurally unreachable, but content will grow and rules will get bent. The server-side viability check ([06](06-mutator-design.md)) gains one rule: **ornament may never obscure an invariant** (e.g., sucker density that buries a tentacle's silhouette caps at the value where the silhouette test still passes). For 3D, the planned check is a silhouette-envelope test at part-import time ([08](08-creature-visualization.md) authoring validation): each family ships authored silhouette envelopes, and a part configuration whose rendered silhouette drifts outside its family envelope fails import — catching authoring mistakes before the GA can find them.
+
+## The prototype (run it)
+
+[`/prototype/mutator/`](../prototype/mutator/) — pure-Python, no dependencies:
+
+```
+python3 test_mutator.py   # property tests: closure, grammar, determinism, inheritance
+python3 demo.py           # writes out/gallery.svg (committed sample included)
+```
+
+The gallery's three exhibits map to the claims above: **(1)** eight random genomes per family — different yet recognizable (Strategies 1, 4); **(2)** seven generations of mutation drift on one claw — identity preserved (Strategies 1, 3); **(3)** tentacle × claw splice children — shared-axis inheritance visible (Strategy 2). The property tests pin the contracts: operators are closed over valid genomes, family jumps never leave the homolog class, equal seeds give equal lineages (the server-determinism requirement, [07](07-mutator-server-architecture.md)), and splice children land between parents on every axis.
+
+The 2D ink renderer is a stand-in for the 3D pipeline, chosen because silhouette is exactly what recognizability is about — if identity survives at sketch fidelity, the 3D version starts from proof, not hope.
+
+## Proposed genome schema extension (v2) — decision pending (Q10)
+
+The v1 slot allele `{partFamilyId, sizeGene, variantGene}` ([06](06-mutator-design.md)) compresses all variation into two scalars. This doc proposes widening it to:
+
+```jsonc
+{ "partFamilyId": 22, "paramGenes": [180, 40, 220, 90, 128, 60] }  // six axes, 0–255
+```
+
+Migration: `sizeGene` → `length`+`girth`; `variantGene` → remaining axes. Costs ~4 bytes per slot (genome stays well under the 400 B envelope, [07](07-mutator-server-architecture.md)). Per the normative-schema rule in [06](06-mutator-design.md), adopting this requires updating 06/07/08 together — tracked as **Q10 in [12-open-questions.md](12-open-questions.md)**, decide at the start of Phase 1 Track B ([11-roadmap.md](11-roadmap.md)).

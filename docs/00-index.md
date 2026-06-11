@@ -20,6 +20,7 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | [12-open-questions.md](12-open-questions.md) | Open questions with decide-by dates; append-only decision log | Living |
 | [13-lens-review.md](13-lens-review.md) | Book of Lenses design review: uniqueness, fun, marketability ratings | Reviewed |
 | [14-ip-licensing.md](14-ip-licensing.md) | Classic-monster IP analysis, public-domain timeline, authoring guardrails | Reviewed |
+| [15-part-genetics.md](15-part-genetics.md) | How parts mutate & crossbreed yet stay recognizable; prototyped in [`/prototype/mutator/`](../prototype/mutator/) | Draft |
 
 **Status legend**: *Draft* (numbers are v0.1 proposals) → *Reviewed* (survived Phase-0 paper playtest and a read-through) → *Locked* (implementation depends on it; changes require a decision-log entry in [12](12-open-questions.md)).
 

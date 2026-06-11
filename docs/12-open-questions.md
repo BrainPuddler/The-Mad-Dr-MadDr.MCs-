@@ -15,6 +15,7 @@ Status: Living document. Open questions carry an ID, the docs they block, the li
 | Q7 | **Offline single-player scope.** Phase 2's skirmish-vs-AI exists for development; how much ships? Mobile players expect *something* on the subway besides the lab queue. | [02](02-gameplay-overview.md) FTUE, retention | Tutorial-only; full offline skirmish; offline "haunting" puzzle campaign | Phase 4 |
 | Q8 | **Input-automation / screen-reading cheats.** Accepted surface for v1 per [09](09-multiplayer-architecture.md); revisit if competitive play emerges. | none | Behavioral detection; report tooling; ignore | Post-launch |
 | Q9 | **Soft-launch retention targets** (D1/D7) and the region choice. | [11](11-roadmap.md) Phase 5 exit | — | Start of Phase 5 |
+| Q10 | **Adopt the genome v2 slot allele** (six shared parameter axes per [15-part-genetics.md](15-part-genetics.md)) in place of v1's `{sizeGene, variantGene}`? The prototype validates breedability and recognizability; adoption requires updating docs 06/07/08 together per the normative-schema rule. | [06](06-mutator-design.md), [07](07-mutator-server-architecture.md), [08](08-creature-visualization.md) | Adopt v2; keep v1; hybrid (v2 for limbs only) | Start of Phase 1 Track B |
 
 ## Decision log (append-only)
 

@@ -2,7 +2,7 @@
 
 A real-time strategy game about building movie monsters. You are the nephew of Dr. Frankenstein, bequeathed his notebooks. From blood, bones, body parts, and brains you reanimate monsters and deploy them to conquer territory on a battlefield whose mana emitters wax and wane with the time of day (an Archon homage). Between battles, a server-side genetic algorithm — **the Mutator** — lets you breed, splice, and mutate your creations from your phone on the commute or your PC at home, El-Fish style. No two players ever field the same army.
 
-**Status: design phase — no code yet.** The complete design documentation lives in [`docs/`](docs/).
+**Status: design phase + first prototype.** The complete design documentation lives in [`docs/`](docs/); a runnable part-genetics prototype of the Mutator lives in [`prototype/mutator/`](prototype/mutator/) (sample output: [gallery.svg](prototype/mutator/out/gallery.svg)).
 
 ## Start here
 
@@ -27,6 +27,7 @@ Read [docs/01-vision.md](docs/01-vision.md), then [docs/02-gameplay-overview.md]
 | [12-open-questions.md](docs/12-open-questions.md) | Open questions and the decision log |
 | [13-lens-review.md](docs/13-lens-review.md) | Book of Lenses design review (uniqueness, fun, marketability) |
 | [14-ip-licensing.md](docs/14-ip-licensing.md) | Classic-monster IP analysis and art guardrails |
+| [15-part-genetics.md](docs/15-part-genetics.md) | Part genetics: recognizable yet breedable parts (with runnable prototype) |
 
 ## A note on the engine
 

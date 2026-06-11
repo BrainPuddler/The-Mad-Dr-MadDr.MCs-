@@ -3,6 +3,8 @@
 Status: Draft v0.1 · Pillars served: 1 (*Every monster is yours*), 4 (*Design anywhere*) · Terms: [glossary](00-index.md#glossary).
 
 > **Normative schema notice.** The genome schema in this document is the single source of truth for creature representation. [07-mutator-server-architecture.md](07-mutator-server-architecture.md) stores and transports it; [08-creature-visualization.md](08-creature-visualization.md) renders it; [04-combat-model.md](04-combat-model.md) derives stats from it. Any change to this schema requires updating all three consumers in the same revision.
+>
+> A v2 extension of the slot allele (six shared parameter axes, prototyped and working) is proposed in [15-part-genetics.md](15-part-genetics.md) — adoption tracked as Q10 in [12-open-questions.md](12-open-questions.md).
 
 ## The fantasy (the El-Fish promise)
 
