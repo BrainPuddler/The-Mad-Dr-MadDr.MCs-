@@ -59,6 +59,10 @@ Part-family catalog growth is the live-ops content lever ([11-roadmap.md](11-roa
 | Draw calls | Runtime mesh combining at assembly (one skinned mesh per monster) **or** GPU instancing per part family — engine-dependent choice, see [10-engine-evaluation.md](10-engine-evaluation.md) |
 | Assembly time | All match monsters pre-assembled during the loading handshake ([09](09-multiplayer-architecture.md)); zero assembly hitches mid-match |
 
+## IP guardrails for part authoring
+
+Part designs must follow the art-direction guardrails in [14-ip-licensing.md](14-ip-licensing.md): evoke the classic-monster *archetype*, never the specific famous film design (no Karloff flat-head-plus-neck-bolts combination pending clearance, no Gill-man replicas ever, no actor likenesses, no "Universal Monsters"-adjacent trade dress). Each part-family concept sheet carries a one-line prior-art note at authoring time.
+
 ## Authoring workflow
 
 1. Artist authors a part against the archetype's socket template (provided as a DCC kit: skeleton, socket gizmos, scale-bounds rig, blendshape naming convention).

@@ -18,6 +18,8 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | [10-engine-evaluation.md](10-engine-evaluation.md) | Unity vs Godot vs Unreal — scored matrix, recommendation, validation spike | Draft |
 | [11-roadmap.md](11-roadmap.md) | Risk-first phases from paper playtest to launch; de-scope ladder | Draft |
 | [12-open-questions.md](12-open-questions.md) | Open questions with decide-by dates; append-only decision log | Living |
+| [13-lens-review.md](13-lens-review.md) | Book of Lenses design review: uniqueness, fun, marketability ratings | Reviewed |
+| [14-ip-licensing.md](14-ip-licensing.md) | Classic-monster IP analysis, public-domain timeline, authoring guardrails | Reviewed |
 
 **Status legend**: *Draft* (numbers are v0.1 proposals) → *Reviewed* (survived Phase-0 paper playtest and a read-through) → *Locked* (implementation depends on it; changes require a decision-log entry in [12](12-open-questions.md)).
 

@@ -25,7 +25,7 @@ Two independent tracks; neither blocks the other, and **no netcode in either**.
 
 - **Track A — Combat sandbox**: single-device, local-only, ugly-box units on a hex map. Implements [03](03-mana-system.md) + [04](04-combat-model.md) + the in-match half of [05](05-component-economy.md) exactly as written (the sim core is built headless-first with recorded-input replay — the same core later goes inside the match server, [09](09-multiplayer-architecture.md)).
 - **Track B — Mutator vertical slice**: genome schema ([06](06-mutator-design.md)) implemented; server `POST /mutate` + Postgres end-to-end ([07](07-mutator-server-architecture.md)); and the **engine validation spike** from [10](10-engine-evaluation.md) — runtime-assemble genomes into 3D monsters, 30 on screen at 60 fps on the mid-range Android reference device ([08](08-creature-visualization.md)).
-- **Exit criteria**: (a) three devs play the sandbox and *choose* to play again — fights demonstrably swing on position and Lumen timing; (b) a mutated genome round-trips server → phone → recognizable 3D monster; (c) the spike passes and the engine decision locks ([10](10-engine-evaluation.md)).
+- **Exit criteria**: (a) three devs play the sandbox and *choose* to play again — fights demonstrably swing on position and Lumen timing; (b) **the sandbox test is run on a phone, not a dev PC** — ordering a flank with a thumb under time pressure must feel good, since touchscreen positional input is the design's biggest fun risk ([13-lens-review.md](13-lens-review.md)); (c) a mutated genome round-trips server → phone → recognizable 3D monster; (d) the spike passes and the engine decision locks ([10](10-engine-evaluation.md)).
 
 ## Phase 2 — The Stitching
 

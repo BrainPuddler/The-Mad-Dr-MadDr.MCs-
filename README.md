@@ -25,6 +25,8 @@ Read [docs/01-vision.md](docs/01-vision.md), then [docs/02-gameplay-overview.md]
 | [10-engine-evaluation.md](docs/10-engine-evaluation.md) | Unity vs Godot vs Unreal |
 | [11-roadmap.md](docs/11-roadmap.md) | Risk-first phases from paper playtest to launch |
 | [12-open-questions.md](docs/12-open-questions.md) | Open questions and the decision log |
+| [13-lens-review.md](docs/13-lens-review.md) | Book of Lenses design review (uniqueness, fun, marketability) |
+| [14-ip-licensing.md](docs/14-ip-licensing.md) | Classic-monster IP analysis and art guardrails |
 
 ## A note on the engine
 
