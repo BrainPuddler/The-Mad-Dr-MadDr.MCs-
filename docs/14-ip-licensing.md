@@ -36,7 +36,25 @@ Given the roadmap ([11-roadmap.md](11-roadmap.md)), the iconic 1931 Frankenstein
 
 Major-studio character licensing for games typically means a six-to-seven-figure minimum guarantee, 10–20% royalties, approval rights over every asset and marketing beat, months of negotiation — and studios rarely license to unproven teams at all. The cost is not legal fees; it is minimum guarantees and an unreturned phone call. The design gains nothing from it: famous fixed characters would *undermine* pillar 1.
 
-## What we can use freely
+## Does renaming protect us? (No)
+
+Leaving a creature unnamed while keeping it visually recognizable provides almost no protection. Names are mostly a *trademark* matter; the claim we would actually face is *copyright* infringement, which protects the **visual design itself**. The test is "substantial similarity" through an ordinary observer's eyes: if a regular person would recognize our creature as *the* movie creature, the absence of a name is nearly worthless as a defense. Settled case law maps directly onto this fact pattern:
+
+- *Sid & Marty Krofft Television Productions v. McDonald's Corp.* (9th Cir. 1977): McDonaldland never used the name "H.R. Pufnstuf"; visual similarity alone was infringement.
+- *Atari, Inc. v. North American Philips Consumer Electronics Corp.* (7th Cir. 1982): "K.C. Munchkin" wasn't named Pac-Man and differed in details, but *felt* like Pac-Man to an ordinary observer — infringement. A video game case; exactly our fact pattern.
+
+A renamed-but-recognizable design can read to a court as *deliberate* copying (the resemblance can't be coincidence), and marketing that winks at the resemblance adds trade-dress and unfair-competition exposure — again with no name used.
+
+**The risk spectrum** (the doctrine that helps us is *scènes à faire* — stock genre elements are unprotectable; only the specific distinctive expression is owned):
+
+| Similarity level | Exposure |
+| --- | --- |
+| **Archetype-similar** — genre tropes only ("a frankenstein-type stitched monster") | Low — this is the pastiche lane the guardrails define |
+| **Evocative-but-distinct** — inspired, but no ordinary-observer mistake | Gray zone; defensible ≠ immune |
+| **Recognizable replica, unnamed** — "that's obviously the Gill-man" | High; the missing name changes almost nothing |
+
+**Practical reality**: even in the gray zone, the realistic sequence is a cease-and-desist plus store-platform takedown (Apple/Google/Steam comply *before* any court weighs merits), and defending even a winnable suit runs six figures. Protection comes from the authoring guardrails below, not from clever similarity calibration — and the Mutator's pillar-1 promise means replica-adjacent parts would undercut the design while adding risk: paying twice for the same mistake. The public-domain timeline above relaxes this for the 1931–33 designs starting 2027 (US copyright only; trademark and non-US angles still need the attorney's read); it never relaxes for the Gill-man.
+
 
 - The name **"Frankenstein"**, the doctor, the nephew-inherits-the-notebooks fiction — all Shelley, public domain everywhere ([01-vision.md](01-vision.md) frame is clear).
 - Genre vocabulary nobody owns: fog, gothic labs, lightning, stitches, full moons, hunchbacked assistants, torch-bearing mobs.
