@@ -24,7 +24,10 @@ BODY_AXES = ("posture", "bulk", "limb", "tail")
 #   will:        independence -- resists being controlled, costs more to hold
 #   temperament: 0 steady .. 1 volatile (loyalty swings harder either way)
 #   guile:       drives ambition -- a high-guile subordinate seeks to usurp
-BRAIN_AXES = ("command", "will", "temperament", "guile")
+#   fury:        berserk tendency -- rage builds under stress (amplified at
+#                Night); past threshold the unit goes berserk: stronger and
+#                tougher, but strikes at friend and foe alike
+BRAIN_AXES = ("command", "will", "temperament", "guile", "fury")
 
 # Brain quality tiers gate the stat budget (docs/06) AND set brain "size",
 # the scalar that scales both control capacity and control cost.

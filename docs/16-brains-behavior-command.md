@@ -18,6 +18,7 @@ Four behavioral axes join the genome alongside the part and body axes (`genome.B
 | `will` | Independence — resists being controlled; a willful unit costs more to hold |
 | `temperament` | 0 steady … 1 volatile — how fast and how noisily loyalty swings |
 | `guile` | Ambition — a guileful subordinate plots, and can usurp its commander |
+| `fury` | Berserk tendency — rage builds under stress; past threshold the unit snaps (below) |
 | **tier → size** | Dim 1 · Average 2 · Gifted 3 · Mastermind 4 — scales both capacity and cost |
 
 These breed exactly like every other gene (shared-axis blending, canalized expression, tier can drift one step on mutation) — so command ability is something you *breed for*, and a brilliant commander bloodline is a genuine asset in your Menagerie.
@@ -62,6 +63,30 @@ What happens at the break depends on the brain — and this is where it gets dra
 
 And the headline event: **decapitation**. Killing a commander hits every direct subordinate with a loyalty shock (−0.45 in v0.1). Against a deep chain of command this cascades — a Mastermind overlord's death can shatter its lieutenants, who then go feral or lead their grunts off in revolt. Targeting the enemy's brain becomes a real tactic, and protecting your own commander a real responsibility.
 
+## Berserk: the werewolf problem
+
+`fury` is the double-edged gene. Alongside loyalty, every unit carries a **rage** value that builds with combat stress — amplified by fury, and amplified again **at Night** ([03](03-mana-system.md): the moon stirs the blood; this is the lycanthropy coupling, and pairing high fury with lunar affinity is *the* werewolf build). Past a fury-set threshold, the unit goes **BERSERK** (v0.1 numbers, prototype `command.py`):
+
+| Quantity | Formula | Effect |
+| --- | --- | --- |
+| Threshold | `1.05 − 0.6 × fury` | High fury snaps easily; **low fury can never berserk** (threshold sits above the rage cap) |
+| Power | `× (1.3 + 0.5 × fury)` | Up to +80% damage |
+| Armor | `+ (2 + 4 × fury)` | Up to +6 — harder to put down |
+| Targeting | **nearest unit, friend or foe** | The price: it kills indiscriminately, including its own |
+| Control | suspended | Loyalty freezes; orders mean nothing until the fury is spent |
+| Burnout | rage decays in frenzy; below 0.35 → **EXHAUSTED** (~6 ticks helpless) | Then its commander can **re-assert control** — if still alive and in range |
+
+The demo scenario (`demo_berserk.py` → `out/berserk.svg`) plays the cautionary tale: a skirmish runs into the Night, Lupex (fury 0.85) outgrows its leash, mauls both of its own packmates while shrugging off blows, collapses at dawn, and the Houndmaster quietly takes back the leash over what's left.
+
+**Design intent:** berserkers are discounted power with a blast radius. The fury gene buys real combat stats cheaply (it should *lower* a design's power-budget cost, [09](09-multiplayer-architecture.md) matchmaking note), and the player manages the risk spatially — send the wolf in *alone and first*, keep the line back until the frenzy fades, never field it at Night next to anything you love. Counterplay writes itself: stall the wolf until it turns, bait it into its own formation, or simply outlast the burnout. Positioning skill again, per pillar 3.
+
+## Harvested brains close the loop
+
+Brains are already a battlefield commodity: corpses drop 40–60% of their components ([04](04-combat-model.md)) and brains specifically salvage at 50% ([05](05-component-economy.md)) — *from enemy corpses too*. With behavioral genes, that rule gets teeth:
+
+- A salvaged brain keeps its **tier**: kill the enemy's Mastermind and you can carry its brain home — the single most valuable drop on any battlefield, and one more reason decapitation strikes pay.
+- **Proposed (Q12):** a harvested brain used as Mutator feedstock ([06](06-mutator-design.md) component biasing) biases *brain-axis* mutations toward the donor's genes. Feed your bloodline the brain of a great enemy commander and `command` drifts up — but its `guile` comes along in the bargain. Treachery is contagious; the trophy might be a trojan. A very El-Fish risk/reward, and pure Frankenstein fiction: of course the doctor harvests the brains of brilliant rivals.
+
 ## Strategic intent
 
 - **Risk/reward (triangularity, [13](13-lens-review.md)):** controlling a big army is powerful but fragile. The more you press past capacity or spread beyond radius, the closer the whole structure sits to collapse. Honest combat ([04](04-combat-model.md)) now has a psychological front.
@@ -80,9 +105,11 @@ And the headline event: **decapitation**. Killing a commander hits every direct 
 [`/prototype/mutator/command.py`](../prototype/mutator/command.py) implements the model; [`demo_command.py`](../prototype/mutator/demo_command.py) runs a three-tier chain under one Mastermind overlord, assassinates the overlord mid-battle, and writes a loyalty-timeline chart (`out/command.svg`) plus a narrative log:
 
 ```
-python3 demo_command.py        # -> out/command.svg + printed event log
+python3 demo_command.py        # chain of command + assassination -> out/command.svg
+python3 demo_berserk.py        # the werewolf problem            -> out/berserk.svg
 python3 test_mutator.py        # includes brain-expression, loyalty, rebellion,
-                               # decapitation, and command-determinism tests
+                               # decapitation, berserk (trigger, friendly fire,
+                               # recovery, low-fury immunity), determinism
 ```
 
 In the sample run, a willful far-flung grunt rebels early; when the overlord falls, the loyal lieutenant goes feral and abandons its squad while the schemer lieutenant leads a breakaway warband — all emergent from the genes, all reproducible from the seed.

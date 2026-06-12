@@ -21,8 +21,8 @@ DEATH_TICK = 35
 TICKS = 70
 
 
-def brain(tier, command, will, temperament, guile):
-    return BrainGenes(tier, (command, will, temperament, guile))
+def brain(tier, command, will, temperament, guile, fury=0.1):
+    return BrainGenes(tier, (command, will, temperament, guile, fury))
 
 
 def build():

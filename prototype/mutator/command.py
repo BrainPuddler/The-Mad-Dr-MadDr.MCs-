@@ -25,8 +25,11 @@ import math
 
 WAVER = 0.45      # below this, a subordinate wavers (obeys unreliably)
 REBEL = 0.20      # below this, control snaps: feral or open rebellion
+RAGE_EXIT = 0.35  # berserk burns out when rage falls below this
+EXHAUST_TICKS = 6
 
 CONTROLLED, WAVERING, FERAL, REBEL_STATE = "controlled", "wavering", "feral", "rebel"
+BERSERK, EXHAUSTED = "berserk", "exhausted"
 
 
 def capacity(brain):
@@ -41,6 +44,22 @@ def radius(brain):
     return 4.0 + 8.0 * brain.axis("command")
 
 
+# --- berserk expression (docs/16): power and toughness up, control gone ----
+
+def berserk_threshold(brain):
+    """Rage level at which the unit snaps. For low fury the threshold sits
+    above the rage cap (1.0) -- a placid brain can NEVER berserk."""
+    return 1.05 - 0.6 * brain.axis("fury")
+
+
+def berserk_power_mult(brain):
+    return 1.3 + 0.5 * brain.axis("fury")
+
+
+def berserk_armor_bonus(brain):
+    return 2.0 + 4.0 * brain.axis("fury")
+
+
 @dataclass
 class Unit:
     name: str
@@ -52,8 +71,12 @@ class Unit:
     commander: "Unit" = None      # who controls me (None = independent/own will)
     loyalty: float = 0.8          # to my commander
     state: str = CONTROLLED
+    rage: float = 0.0             # builds under stress; berserk past threshold
+    exhaust_timer: int = 0
     subordinates: list = field(default_factory=list)
-    history: list = field(default_factory=list)   # loyalty per tick, for plots
+    history: list = field(default_factory=list)        # loyalty per tick
+    rage_history: list = field(default_factory=list)   # rage per tick
+    hp_history: list = field(default_factory=list)     # hp per tick
 
     # convenience gene accessors
     @property
@@ -64,6 +87,8 @@ class Unit:
     def temperament(self): return self.brain.axis("temperament")
     @property
     def guile(self): return self.brain.axis("guile")
+    @property
+    def fury(self): return self.brain.axis("fury")
 
 
 def _dist(a, b):
@@ -104,17 +129,57 @@ def loyalty_equilibrium(sub, commander):
     return max(0.0, min(1.0, eq))
 
 
-def step(units, rng, stress=None):
+def step(units, rng, stress=None, lumen="day"):
     """Advance one tick. Returns a list of human-readable events.
 
     stress: optional dict {unit_name: loyalty_hit} for combat damage etc.
+            (the same stress also feeds rage)
+    lumen:  "day" | "night" -- Night amplifies fury (docs/03 x docs/16:
+            the werewolf coupling).
     """
     stress = stress or {}
     events = []
 
-    # 1) loyalty integration toward equilibrium (only for the controlled)
+    # 0) rage & berserk dynamics
     for u in units:
-        if not u.alive or u.commander is None:
+        if not u.alive:
+            continue
+        hit = stress.get(u.name, 0.0)
+        gain = hit * (0.4 + 3.0 * u.fury)
+        if lumen == "night":
+            gain *= 1.0 + 1.2 * u.fury          # the moon stirs the blood
+        u.rage = max(0.0, min(1.0, u.rage + gain - (0.025 if hit == 0.0 else 0.0)))
+
+        if u.state == BERSERK:
+            u.rage = max(0.0, u.rage - 0.05)    # the frenzy burns itself out
+            _berserk_attack(u, units, events)
+            if u.rage < RAGE_EXIT:
+                u.state = EXHAUSTED
+                u.exhaust_timer = EXHAUST_TICKS
+                events.append(f"{u.name} collapses, EXHAUSTED, the fury spent")
+        elif u.state == EXHAUSTED:
+            u.exhaust_timer -= 1
+            if u.exhaust_timer <= 0:
+                if u.commander is not None and u.commander.alive:
+                    u.state = CONTROLLED
+                    u.loyalty = max(u.loyalty, 0.5)
+                    events.append(f"{u.commander.name} re-asserts control over {u.name}")
+                else:
+                    u.state = FERAL
+                    events.append(f"{u.name} rises with no master -- feral")
+        elif u.rage > berserk_threshold(u.brain):
+            u.state = BERSERK
+            events.append(
+                f"{u.name} goes BERSERK ({'+%d%%' % round((berserk_power_mult(u.brain) - 1) * 100)} power, "
+                f"+{berserk_armor_bonus(u.brain):.0f} armor) -- strikes at friend and foe alike")
+
+        u.rage_history.append(u.rage)
+        u.hp_history.append(u.hp if u.alive else 0.0)
+
+    # 1) loyalty integration toward equilibrium (only for the controlled;
+    #    berserk/exhausted units are beyond loyalty -- it is frozen)
+    for u in units:
+        if not u.alive or u.commander is None or u.state in (BERSERK, EXHAUSTED):
             if u.alive:
                 u.history.append(u.loyalty)
             continue
@@ -130,7 +195,7 @@ def step(units, rng, stress=None):
 
     # 2) state transitions + control snaps
     for u in units:
-        if not u.alive or u.commander is None:
+        if not u.alive or u.commander is None or u.state in (BERSERK, EXHAUSTED):
             continue
         prev = u.state
         if u.loyalty >= WAVER:
@@ -189,6 +254,25 @@ def _try_usurp(rebel, events):
             events.append(f"  -> {rebel.name} USURPS {master.name}, seizing {len(seized)} of its troops")
         return True
     return False
+
+
+def _berserk_attack(u, units, events):
+    """A berserk unit savages whatever is nearest -- friend or foe."""
+    targets = [t for t in units if t is not u and t.alive]
+    if not targets:
+        return
+    target = min(targets, key=lambda t: _dist(u, t))
+    armor = berserk_armor_bonus(target.brain) if target.state == BERSERK else 0.0
+    dmg = max(1.0, 11.0 * berserk_power_mult(u.brain) - armor)
+    target.hp -= dmg
+    if target.hp <= 0:
+        same = "its own" if target.side == u.side else "the enemy"
+        events.append(f"{u.name} MAULS {target.name} to death -- {same} unit")
+        kill(target, units, events)
+    else:
+        # surviving allies nearby are shaken
+        if target.side == u.side and target.commander is not None:
+            target.loyalty = max(0.0, target.loyalty - 0.08)
 
 
 def kill(unit, units, events):

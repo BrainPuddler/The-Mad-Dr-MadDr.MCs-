@@ -100,8 +100,8 @@ def test_shared_axis_inheritance():
     print(f"ok: shared-axis inheritance (claw child {hits}/200 times)")
 
 
-def _brain(tier, command, will, temperament, guile):
-    return BrainGenes(tier, (command, will, temperament, guile))
+def _brain(tier, command, will, temperament, guile, fury=0.05):
+    return BrainGenes(tier, (command, will, temperament, guile, fury))
 
 
 def test_brain_expression():
@@ -175,6 +175,55 @@ def test_command_determinism():
     print("ok: command determinism")
 
 
+def test_berserk_buffs_monotonic():
+    """Berserk power/armor rise with fury; threshold falls (snaps easier)."""
+    hi = _brain("average", 0.2, 0.2, 0.2, 0.2, fury=0.95)
+    lo = _brain("average", 0.2, 0.2, 0.2, 0.2, fury=0.10)
+    assert cmd.berserk_power_mult(hi) > cmd.berserk_power_mult(lo)
+    assert cmd.berserk_armor_bonus(hi) > cmd.berserk_armor_bonus(lo)
+    assert cmd.berserk_threshold(hi) < cmd.berserk_threshold(lo)
+    print("ok: berserk buffs monotonic in fury")
+
+
+def test_berserk_friendly_fire_and_recovery():
+    """Under night stress a high-fury unit goes berserk, damages its own
+    side, burns out, and its commander re-asserts control."""
+    rng = random.Random(6)
+    boss = cmd.Unit("boss", _brain("gifted", 0.85, 0.1, 0.1, 0.1), pos=(0, 0))
+    wolf = cmd.Unit("wolf", _brain("average", 0.2, 0.4, 0.4, 0.2, fury=0.95), pos=(2, 0))
+    pack = cmd.Unit("pack", _brain("dim", 0.1, 0.1, 0.2, 0.1), pos=(2.5, 0))
+    units = [boss, wolf, pack]
+    cmd.assign(boss, wolf); cmd.assign(boss, pack)
+    went_berserk = recovered = False
+    for t in range(80):
+        stress = {"wolf": 0.06, "pack": 0.01} if t < 25 else {}
+        cmd.step(units, rng, stress=stress, lumen="night" if t < 40 else "day")
+        if wolf.state == cmd.BERSERK:
+            went_berserk = True
+        # recovered = frenzy over, back under its commander (may still waver)
+        if went_berserk and wolf.state in (cmd.CONTROLLED, cmd.WAVERING) \
+                and wolf.commander is boss:
+            recovered = True
+            break
+    assert went_berserk, "high-fury unit never went berserk under night stress"
+    assert pack.hp < 100.0 or not pack.alive, "berserker never hurt its own side"
+    assert recovered, f"wolf never recovered (state {wolf.state})"
+    print(f"ok: berserk friendly fire (pack hp {max(0, pack.hp):.0f}) and recovery")
+
+
+def test_low_fury_never_berserks():
+    """The same stress leaves a low-fury brain merely disloyal, not berserk."""
+    rng = random.Random(6)
+    boss = cmd.Unit("boss", _brain("gifted", 0.85, 0.1, 0.1, 0.1), pos=(0, 0))
+    ox = cmd.Unit("ox", _brain("average", 0.2, 0.4, 0.4, 0.2, fury=0.05), pos=(2, 0))
+    cmd.assign(boss, ox)
+    for t in range(80):
+        stress = {"ox": 0.06} if t < 25 else {}
+        cmd.step([boss, ox], rng, stress=stress, lumen="night" if t < 40 else "day")
+        assert ox.state != cmd.BERSERK
+    print("ok: low fury never berserks under identical stress")
+
+
 def test_brain_survives_breeding():
     """Mutate and splice keep a valid brain on the genome."""
     rng = random.Random(4)
@@ -198,5 +247,8 @@ if __name__ == "__main__":
     test_rebellion_when_overstretched()
     test_decapitation_shock()
     test_command_determinism()
+    test_berserk_buffs_monotonic()
+    test_berserk_friendly_fire_and_recovery()
+    test_low_fury_never_berserks()
     test_brain_survives_breeding()
     print("all tests passed")
