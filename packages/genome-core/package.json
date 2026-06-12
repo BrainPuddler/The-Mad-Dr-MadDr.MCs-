@@ -1,0 +1,19 @@
+{
+  "name": "@maddr/genome-core",
+  "version": "0.1.0",
+  "description": "MadDr.MCs genome core: the production v2 genome schema, Mutate/Splice/Graft operators, validation, and behavior expression. Engine-independent by design (docs/06, 07, 15, 16, 17). No graphics: this is the genotype side of the genotype/phenotype split.",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node --test dist/tests/*.test.js",
+    "test:update-golden": "tsc && UPDATE_GOLDEN=1 node --test dist/tests/*.test.js"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

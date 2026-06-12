@@ -109,3 +109,7 @@ InitTestScene*.unity*
 __pycache__/
 *.pyc
 prototype/mutator/out/*.png
+
+# Node
+node_modules/
+packages/*/dist/
