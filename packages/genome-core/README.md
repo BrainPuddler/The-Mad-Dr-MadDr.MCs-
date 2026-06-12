@@ -23,6 +23,7 @@ npm test        # build + 16 property/golden tests
 | `src/operators.ts` | Mutate / Splice / Graft with the full rule set: homolog grammar, origin rules (tech inert, biotech breeds), component-feeding bias, plan/tier jumps, lineage recording |
 | `src/validate.ts` | Server-side viability validation ("failed experiment", never silent clamping) |
 | `src/behavior.ts` | Brain → behavior expression: control capacity/cost/radius, berserk threshold/buffs, power-budget contribution |
+| `src/energy.ts` | Energy demand: upkeep per minute typed by part origin (organic→blood, tech→fuel, biotech→ichor), reanimation surge |
 | `src/serialize.ts` | Canonical JSON (byte-stable for hashing/signing) with validating deserialization |
 
 ## Determinism contract

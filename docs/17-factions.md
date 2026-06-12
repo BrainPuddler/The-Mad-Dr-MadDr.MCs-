@@ -43,6 +43,27 @@ Their bodies answer the brief — **a mix of technology and physical alien flesh
 
 The doctors' menagerie keeps the full system from [15](15-part-genetics.md)/[16](16-brains-behavior-command.md): unrestricted brain spectrum, organic parts, feral/rebel/usurp snaps, berserkers. Monsters are the *expressive* faction — the widest possibility space, the least institutional safety. Humans have drill and aliens have the song; the doctor has only the leash he stitched himself.
 
+## Energy: blood, fuel, and ichor
+
+The upkeep identity from [05-component-economy.md](05-component-economy.md) (Blood as the flowing commodity that fielded monsters consume) generalizes across factions through the part-origin system — **the energy type follows the part's origin**, computed per-genome in `packages/genome-core/src/energy.ts`:
+
+| Origin | Energy | Who | Fiction |
+| --- | --- | --- | --- |
+| organic | **Blood** | the doctors' monsters; every living frame | flesh must be fed |
+| tech | **Fuel** | the human army's machines | engines burn; supply lines matter |
+| biotech | **Ichor** | the hive's grown weapons and organs | the alien fuel — secreted, not refined |
+
+Demand rules (v0.1, implemented and tested):
+
+- The **living frame always drinks blood** — body (scaled by bulk) plus brain (bigger minds are hungrier). Even a rifleman must eat.
+- Each **part pays by its origin**, scaled by its expressed mass (length × girth through the canalized bounds): a vestigial arm sips, a titan arm gulps.
+- **Mixed bodies pay mixed bills.** An alien drone (chitin legs + plasma lance) drinks blood *and* ichor; graft one piston leg onto a monster and a fuel line appears on its bill. Cross-origin grafting is thus a real strategic decision, not a free upgrade.
+- **Silent genes are free**: slots a body plan ignores ([15](15-part-genetics.md) atavism) cost nothing to carry.
+- **Starvation is typed**: running a pool dry starves exactly the parts that pool feeds — blood-starved flesh takes decay damage ([05](05-component-economy.md)), fuel-starved equipment goes *inert* (a rifleman with an empty tank still has fists), ichor-starved biotech decays *and* misfires (match-sim behavior, Phase-2 tuning).
+- The **reanimation mana surge** scales with total upkeep demand plus a brain premium — hungrier designs take a bigger jolt to start ([03](03-mana-system.md) dual-currency split).
+
+Supply is each faction's strategic texture, and deliberately asymmetric: monsters get the **territory blood trickle** and corpse salvage ([05](05-component-economy.md)); humans get **fuel depots and convoys** — point-supply that makes their logistics *attackable* (cut the convoy and the platoon's machines wind down); the hive gets **digestion pits** that convert biomass (corpses included) into ichor — the swarm eats the battlefield. Supply-side numbers are Phase-2 sandbox work.
+
 ## Strategic asymmetry (intent)
 
 - **vs Humans**: kill officers to shatter squads — but expect rallies; humans must be *broken repeatedly* or routed off objectives. Their tech is reliable and un-counterable by breeding tricks.
