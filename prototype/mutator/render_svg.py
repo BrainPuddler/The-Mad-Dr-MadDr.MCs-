@@ -228,6 +228,83 @@ def draw_stalk_eyes(allele):
     return out
 
 
+def leg_height(allele):
+    """Drawn height of a leg part from its top anchor (50, 8) to the foot.
+
+    Shared across all leg families so creature renderers can place hips:
+    hip_y = GROUND - scale * leg_height(allele).
+    """
+    e = _e(allele)
+    return 64 + 24 * e["length"]
+
+
+def draw_hoofed_leg(allele):
+    e = _e(allele)
+    out = []
+    x0, y0 = 50, 8
+    h = leg_height(allele)
+    w = 5 + 8 * e["girth"]
+    bend = (e["curl"] - 0.3) * 18
+    kx, ky = x0 + bend, y0 + h * 0.52
+    fx, fy = x0 + bend * 0.4, y0 + h - 7
+    out.append(_path(f"M {x0} {y0} Q {x0 + bend * 0.5:.1f} {y0 + h * 0.25:.1f} {kx:.1f} {ky:.1f} "
+                     f"Q {kx:.1f} {ky + h * 0.2:.1f} {fx:.1f} {fy:.1f}",
+                     fill="none", width=w))
+    # cloven hoof (invariant)
+    out.append(_path(f"M {fx - w * 0.9:.1f} {fy:.1f} L {fx - w * 0.7:.1f} {fy + 7:.1f} "
+                     f"L {fx - 0.8:.1f} {fy + 7:.1f} L {fx - 0.8:.1f} {fy:.1f} Z", fill=INK, width=1))
+    out.append(_path(f"M {fx + 0.8:.1f} {fy:.1f} L {fx + 0.8:.1f} {fy + 7:.1f} "
+                     f"L {fx + w * 0.7:.1f} {fy + 7:.1f} L {fx + w * 0.9:.1f} {fy:.1f} Z", fill=INK, width=1))
+    for i in range(round(e["ornament"] * 5)):          # shaggy fetlock strokes
+        out.append(_path(f"M {kx - w * 0.5 + i * w * 0.25:.1f} {ky:.1f} l -2 7", fill="none", width=1))
+    return out
+
+
+def draw_talon_leg(allele):
+    e = _e(allele)
+    out = []
+    x0, y0 = 50, 8
+    h = leg_height(allele)
+    w = 2.5 + 5 * e["girth"]
+    bend = 10 + (e["curl"]) * 14
+    kx, ky = x0 + bend, y0 + h * 0.45              # backward knee (invariant)
+    ax, ay = x0 - bend * 0.3, y0 + h * 0.8
+    fx, fy = x0 + 2, y0 + h - 4
+    out.append(_path(f"M {x0} {y0} Q {x0 + bend * 0.7:.1f} {y0 + h * 0.2:.1f} {kx:.1f} {ky:.1f} "
+                     f"Q {kx - bend * 0.5:.1f} {ky + h * 0.18:.1f} {ax:.1f} {ay:.1f} L {fx:.1f} {fy:.1f}",
+                     fill="none", width=w))
+    n = 2 + round(e["count"] * 2)                  # 2-4 splayed fore-toes (invariant: 3+ incl. hallux)
+    for i in range(n):
+        t = (i / (n - 1) - 0.5) if n > 1 else 0
+        out.append(_path(_digit(fx, fy, math.pi / 2 * 0.15 + t * 1.5 + math.pi * 0.45,
+                                7 + 6 * e["length"], 2.2, 0.8, 0.35)))
+    out.append(_path(_digit(fx, fy, math.pi * 1.05, 5 + 3 * e["length"], 2.0, 0.7, -0.3)))  # hallux
+    return out
+
+
+def draw_insect_leg(allele):
+    e = _e(allele)
+    out = []
+    x0, y0 = 50, 8
+    h = leg_height(allele)
+    w = 2 + 4 * e["girth"]
+    spread = 12 + 16 * e["curl"]
+    j1 = (x0 + spread, y0 + h * 0.3)               # coxa/femur joint
+    j2 = (x0 + spread * 0.2, y0 + h * 0.62)        # femur/tibia joint
+    j3 = (x0 + spread * 0.55, y0 + h - 5)          # tarsus
+    out.append(_path(f"M {x0} {y0} L {j1[0]:.1f} {j1[1]:.1f} L {j2[0]:.1f} {j2[1]:.1f} "
+                     f"L {j3[0]:.1f} {j3[1]:.1f}", fill="none", width=w))
+    for (jx, jy) in (j1, j2):                      # joint nodes
+        out.append(_circle(jx, jy, w * 0.8, fill=INK, width=0.6))
+    out.append(_path(f"M {j3[0]:.1f} {j3[1]:.1f} q 5 2 7 6 q -5 -1 -7 1 Z", fill=INK, width=1))  # tarsal hook
+    for i in range(round(e["ornament"] * 6)):      # spines
+        t = i / 6
+        sx = j1[0] + (j2[0] - j1[0]) * t
+        sy = j1[1] + (j2[1] - j1[1]) * t
+        out.append(_path(f"M {sx:.1f} {sy:.1f} l 4 -3", fill="none", width=1))
+    return out
+
+
 DRAWERS = {
     "claw_hand": draw_claw_hand,
     "pincer": draw_pincer,
@@ -237,6 +314,9 @@ DRAWERS = {
     "bug_eyes": draw_bug_eyes,
     "cyclops_eye": draw_cyclops_eye,
     "stalk_eyes": draw_stalk_eyes,
+    "hoofed_leg": draw_hoofed_leg,
+    "talon_leg": draw_talon_leg,
+    "insect_leg": draw_insect_leg,
 }
 
 

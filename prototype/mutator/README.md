@@ -16,10 +16,10 @@ python3 demo_creatures.py [seed]  # body plans  -> out/creatures.svg
 | File | What it is |
 | --- | --- |
 | `genome.py` | Body genes (plan + posture/bulk/limb/tail) and slot alleles with six shared semantic axes |
-| `catalog.py` | Part families (homolog classes, invariants, canalized bounds) and body plans |
+| `catalog.py` | 11 part families in 4 homolog classes (hand/sensor/eye/leg) and 4 body plans |
 | `operators.py` | Mutate / Splice / Graft (seeded-RNG deterministic) |
 | `render_svg.py` | Procedural ink-sketch part renderer (2D stand-in for the 3D pipeline) |
-| `render_creature.py` | Full-creature assembly: tetrapod (biped↔monkey↔quadruped posture continuum) and blob plans |
+| `render_creature.py` | Full-creature assembly: tetrapod (biped↔monkey↔quadruped posture continuum), blob, serpentine, winged |
 | `demo.py` | Parts gallery: family variation, mutation lineage, splice inheritance |
 | `demo_creatures.py` | Creature gallery: posture sweep, populations, cross-plan splice |
 | `out/gallery.svg`, `out/creatures.svg` | Committed sample output (seed 2026) |

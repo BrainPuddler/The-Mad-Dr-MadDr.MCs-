@@ -6,7 +6,7 @@ from genome import AXES, BODY_AXES, Genome, PartAllele
 from catalog import BODY_PLANS, FAMILIES, homolog_of, families_in_class, express
 from operators import random_genome, mutate, splice, graft
 
-SLOT_SPEC = (("hand", "hand"), ("sensor", "sensor"), ("eye", "eye"))
+SLOT_SPEC = (("hand", "hand"), ("sensor", "sensor"), ("eye", "eye"), ("leg", "leg"))
 
 
 def test_closure_and_bounds():

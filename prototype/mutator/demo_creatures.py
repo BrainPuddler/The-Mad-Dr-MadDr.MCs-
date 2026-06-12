@@ -18,7 +18,7 @@ from render_creature import render_creature_cell
 from render_svg import svg_document, INK
 
 CELL = 152
-SLOTS = (("hand", "hand"), ("sensor", "sensor"), ("eye", "eye"))
+SLOTS = (("hand", "hand"), ("sensor", "sensor"), ("eye", "eye"), ("leg", "leg"))
 
 
 def _creature(rng, plan, posture=None, limb=None):
@@ -66,6 +66,8 @@ def main(seed=2026):
         ("monkey-types", [_creature(rng, "tetrapod", posture=rng.uniform(0.42, 0.62), limb=rng.uniform(0.65, 1.0)) for _ in range(7)]),
         ("quadrupeds", [_creature(rng, "tetrapod", posture=rng.uniform(0.85, 1.0)) for _ in range(7)]),
         ("blobs", [_creature(rng, "blob") for _ in range(7)]),
+        ("serpentines", [_creature(rng, "serpentine") for _ in range(7)]),
+        ("winged", [_creature(rng, "winged") for _ in range(7)]),
     )
     for name, genomes in rows:
         body.append(_row(genomes, 20, y, [name] * 7))
@@ -82,6 +84,22 @@ def main(seed=2026):
         child = splice(blob, biped, rng)
         cells.append(child)
         labels.append(f"child {i + 1}: {child.body.plan}")
+    body.append(_row(cells, 20, y, labels))
+    y += CELL
+
+    # -- Exhibit 4: the atavism -------------------------------------------------
+    y += 24
+    body.append(_heading("Exhibit 4 — Atavism: serpentine carries silent leg genes; a cross to winged re-expresses them", y))
+    y += 8
+    serp = _creature(rng, "serpentine")
+    wing = _creature(rng, "winged")
+    cells, labels = [serp, wing], ["parent A: serpentine", "parent B: winged"]
+    shown = 0
+    while shown < 5:
+        child = splice(serp, wing, rng)
+        cells.append(child)
+        labels.append(f"child {shown + 1}: {child.body.plan}")
+        shown += 1
     body.append(_row(cells, 20, y, labels))
     y += CELL + 20
 

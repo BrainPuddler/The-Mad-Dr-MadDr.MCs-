@@ -38,7 +38,8 @@ def main(seed=2026):
     # -- Exhibit 1: variation within families --------------------------------
     body.append(_heading("Exhibit 1 — Eight random genomes per family: different, yet recognizable", y))
     y += 8
-    for fam in ("claw_hand", "tentacle", "pincer", "antenna", "bug_eyes", "stalk_eyes"):
+    for fam in ("claw_hand", "tentacle", "pincer", "antenna", "bug_eyes", "stalk_eyes",
+                "hoofed_leg", "talon_leg", "insect_leg"):
         alleles = [PartAllele(fam, tuple(rng.random() for _ in range(6))) for _ in range(8)]
         body.append(_row(alleles, 20, y, labels=[fam.replace("_", " ")] * 8))
         y += CELL

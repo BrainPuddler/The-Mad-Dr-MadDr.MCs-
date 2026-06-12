@@ -64,6 +64,24 @@ FAMILIES = {
         "bounds": _bounds(length=(0.3, 1.0), girth=(0.0, 0.5)),
         "invariants": "eyeballs held aloft on flexible stalks",
     },
+    # ---- leg homologs -----------------------------------------------------
+    # Legs draw DOWNWARD from a top anchor (50, 8) so creatures can mount
+    # them at the hip; see render_svg.leg_height for the mounting math.
+    "hoofed_leg": {
+        "homolog": "leg",
+        "bounds": _bounds(girth=(0.35, 1.0), curl=(0.0, 0.6)),
+        "invariants": "a sturdy column ending in a hard cloven hoof",
+    },
+    "talon_leg": {
+        "homolog": "leg",
+        "bounds": _bounds(girth=(0.0, 0.4), count=(0.2, 1.0)),
+        "invariants": "a thin bird leg, backward knee, ending in splayed clawed toes",
+    },
+    "insect_leg": {
+        "homolog": "leg",
+        "bounds": _bounds(girth=(0.0, 0.35), curl=(0.3, 1.0)),
+        "invariants": "a segmented zigzag of chitinous struts with a tarsal hook",
+    },
 }
 
 
@@ -71,14 +89,24 @@ FAMILIES = {
 # "tetrapod" is one CONTINUOUS plan family: the posture axis spans upright
 # biped (0) -> knuckle-walking brachiator/"monkey" (~0.5) -> all-fours
 # quadruped (1), so those creature types interbreed smoothly within one rig.
-# "blob" is a genuinely DISCRETE plan (no rigid skeleton): crossing into or
-# out of it is the rare cross-plan splice jackpot (docs/06).
+# "blob", "serpentine", and "winged" are genuinely DISCRETE plans: crossing
+# into or out of them is the rare cross-plan splice jackpot (docs/06).
+#
+# Plans may IGNORE slots (serpentine ignores the leg slot; its leg genes
+# ride along silently and re-express if a descendant jumps back to a legged
+# plan -- an atavism, mirroring docs/08's retarget rules).
 BODY_PLANS = {
     "tetrapod": {
         "invariants": "a torso on limbs with a head: posture spans biped to quadruped",
     },
     "blob": {
         "invariants": "a single amorphous mass; parts surface-mount on the membrane",
+    },
+    "serpentine": {
+        "invariants": "one long tapering body coiling along the ground, head at the fore",
+    },
+    "winged": {
+        "invariants": "a small body slung between two membrane wings, standing on legs",
     },
 }
 
