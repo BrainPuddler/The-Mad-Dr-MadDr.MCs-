@@ -8,7 +8,7 @@ import random
 
 from genome import (AXES, BODY_AXES, BRAIN_AXES, BRAIN_TIERS, BodyGenes,
                     BrainGenes, Genome, PartAllele)
-from catalog import BODY_PLANS, FAMILIES, families_in_class, homolog_of
+from catalog import BODY_PLANS, FAMILIES, families_in_class, homolog_of, origin_of
 
 
 def _clamp(x):
@@ -74,10 +74,16 @@ def mutate(g: Genome, rng: random.Random, rate=0.45, sigma=0.16,
     """
     new = []
     for slot, allele in g.slots:
+        if origin_of(allele.family) == "tech":
+            new.append((slot, allele))    # issued equipment: flesh mutates, steel doesn't
+            continue
         boost = 3.0 if slot == bias_slot else 1.0
         family = allele.family
         if rng.random() < family_jump * boost:
-            choices = [f for f in families_in_class(homolog_of(family)) if f != family]
+            # jumps stay within the allele's origin: organic stays flesh,
+            # biotech stays grown-tech
+            choices = [f for f in families_in_class(homolog_of(family), (origin_of(family),))
+                       if f != family]
             if choices:
                 family = rng.choice(choices)
         params = tuple(
@@ -98,12 +104,16 @@ def splice(a: Genome, b: Genome, rng: random.Random, noise=0.05) -> Genome:
     """
     new = []
     for (slot, al_a), (_, al_b) in zip(a.slots, b.slots):
-        family = al_a.family if rng.random() < 0.5 else al_b.family
+        src = al_a if rng.random() < 0.5 else al_b
+        if origin_of(src.family) == "tech":
+            # you don't gene-splice a rifle: the issued item passes whole
+            new.append((slot, src))
+            continue
         params = tuple(
             _clamp(pa + rng.random() * (pb - pa) + rng.gauss(0.0, noise))
             for pa, pb in zip(al_a.params, al_b.params)
         )
-        new.append((slot, PartAllele(family, params)))
+        new.append((slot, PartAllele(src.family, params)))
     body = None
     if a.body is not None and b.body is not None:
         plan = a.body.plan if rng.random() < 0.5 else b.body.plan

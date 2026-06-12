@@ -305,6 +305,140 @@ def draw_insect_leg(allele):
     return out
 
 
+STEEL = "#7d8088"
+
+
+def draw_rifle_arm(allele):
+    e = _e(allele)
+    out = []
+    sx, sy = 50, 92                                   # shoulder anchor
+    # arm: two segments to a grip position
+    ex, ey = sx + 16, sy - 22                          # elbow
+    gx, gy = sx + 30, sy - 34                          # grip
+    out.append(_path(f"M {sx} {sy} L {ex} {ey} L {gx} {gy}", fill="none",
+                     width=4.5 + 2.5 * e["girth"]))
+    # the gun (invariant: barrel, stock, trigger group), pitched upward
+    blen = 26 + 26 * e["length"]
+    bw = 2.2 + 3.0 * e["girth"]
+    out.append(f'<g transform="rotate(-18 {gx} {gy})">')
+    out.append(f'<rect x="{gx - 12:.1f}" y="{gy - bw:.1f}" width="{12 + blen:.1f}" height="{bw * 2:.1f}" '
+               f'fill="{STEEL}" stroke="{INK}" stroke-width="1.4"/>')                  # receiver+barrel
+    out.append(f'<rect x="{gx + blen - 2:.1f}" y="{gy - bw * 0.45:.1f}" width="9" height="{bw * 0.9:.1f}" '
+               f'fill="{INK}"/>')                                                       # muzzle
+    out.append(f'<path d="M {gx - 12:.1f} {gy - bw:.1f} l -9 {bw * 2 + 7:.1f} l 7 0 l 5 -{bw + 2:.1f} Z" '
+               f'fill="{STEEL}" stroke="{INK}" stroke-width="1.2"/>')                  # stock
+    out.append(f'<path d="M {gx:.1f} {gy + bw:.1f} q 1 5 5 5" fill="none" stroke="{INK}" stroke-width="1.4"/>')  # trigger
+    if e["ornament"] > 0.5:                            # scope
+        out.append(f'<rect x="{gx + 4:.1f}" y="{gy - bw - 5:.1f}" width="14" height="4" rx="2" '
+                   f'fill="{INK}"/>')
+    for i in range(round(e["count"] * 4)):             # rail ticks
+        out.append(f'<rect x="{gx + 2 + i * 5:.1f}" y="{gy - bw - 1.6:.1f}" width="2.6" height="1.6" fill="{INK}"/>')
+    out.append('</g>')
+    return out
+
+
+def draw_piston_leg(allele):
+    e = _e(allele)
+    out = []
+    x0, y0 = 50, 8
+    h = leg_height(allele)
+    cw = 5 + 6 * e["girth"]                            # cylinder width
+    lean = (e["curl"]) * 10
+    cyl_h = h * 0.45
+    # cylinder (invariant)
+    out.append(f'<rect x="{x0 - cw:.1f}" y="{y0:.1f}" width="{cw * 2:.1f}" height="{cyl_h:.1f}" rx="2.5" '
+               f'fill="{STEEL}" stroke="{INK}" stroke-width="1.6"/>')
+    for i in range(1, 2 + round(e["count"] * 3)):      # cooling rings
+        yy = y0 + cyl_h * i / (2 + round(e["count"] * 3))
+        out.append(f'<line x1="{x0 - cw:.1f}" y1="{yy:.1f}" x2="{x0 + cw:.1f}" y2="{yy:.1f}" '
+                   f'stroke="{INK}" stroke-width="0.9"/>')
+    # piston rod (invariant)
+    rod_w = max(1.6, cw * 0.35 * (1 - 0.4 * e["taper"]))
+    fx = x0 + lean
+    out.append(f'<path d="M {x0:.1f} {y0 + cyl_h:.1f} L {fx:.1f} {y0 + h - 4:.1f}" '
+               f'fill="none" stroke="{STEEL}" stroke-width="{rod_w * 2:.1f}"/>')
+    out.append(f'<path d="M {x0:.1f} {y0 + cyl_h:.1f} L {fx:.1f} {y0 + h - 4:.1f}" '
+               f'fill="none" stroke="{INK}" stroke-width="{rod_w * 2:.1f}" stroke-opacity="0.25"/>')
+    out.append(_circle(x0, y0 + cyl_h, cw * 0.55, fill=INK, width=0.8))   # joint
+    # foot plate (invariant)
+    out.append(f'<rect x="{fx - 9:.1f}" y="{y0 + h - 4:.1f}" width="18" height="4.5" rx="1.5" '
+               f'fill="{INK}"/>')
+    return out
+
+
+def draw_optic_visor(allele):
+    e = _e(allele)
+    out = []
+    cx, cy = 50, 58
+    vw, vh = 24 + 14 * e["length"], 9 + 7 * e["girth"]
+    out.append(f'<rect x="{cx - vw / 2:.1f}" y="{cy - vh / 2:.1f}" width="{vw:.1f}" height="{vh:.1f}" '
+               f'rx="3" fill="{STEEL}" stroke="{INK}" stroke-width="1.8"/>')
+    n = 1 + round(e["count"] * 2)                      # 1-3 lenses (invariant)
+    for i in range(n):
+        lx = cx + (i - (n - 1) / 2) * (vw / (n + 0.4))
+        r = min(vh * 0.38, 3.2 + 3.2 * e["girth"])
+        out.append(_circle(lx, cy, r, fill=ACCENT, width=1.2))
+        out.append(_circle(lx, cy, max(0.8, r * 0.4), fill=INK, width=0.6))
+    if e["ornament"] > 0.4:                            # side strap rivets
+        for sx in (cx - vw / 2 - 2.5, cx + vw / 2 + 2.5):
+            out.append(_circle(sx, cy, 1.4, fill=INK, width=0.6))
+    return out
+
+
+def draw_sensor_mast(allele):
+    e = _e(allele)
+    out = []
+    cx, cy = 50, 92
+    out.append(f'<rect x="{cx - 9:.1f}" y="{cy - 5:.1f}" width="18" height="7" rx="2" '
+               f'fill="{STEEL}" stroke="{INK}" stroke-width="1.6"/>')
+    h = 36 + 44 * e["length"]
+    lean = (e["curl"] - 0.3) * 16
+    tx, ty = cx + lean, cy - h
+    out.append(f'<line x1="{cx}" y1="{cy - 5}" x2="{tx:.1f}" y2="{ty:.1f}" '
+               f'stroke="{INK}" stroke-width="{1.8 + 3 * e["girth"]:.1f}"/>')
+    for i in range(1, 2 + round(e["count"] * 3)):      # guy-ring stages
+        t = i / (2 + round(e["count"] * 3))
+        out.append(f'<line x1="{cx + lean * t - 5:.1f}" y1="{cy - 5 - (h - 5) * t:.1f}" '
+                   f'x2="{cx + lean * t + 5:.1f}" y2="{cy - 5 - (h - 5) * t:.1f}" '
+                   f'stroke="{INK}" stroke-width="1"/>')
+    # dish or vane at the tip (invariant)
+    if e["ornament"] > 0.45:
+        out.append(f'<path d="M {tx - 8:.1f} {ty:.1f} a 8 8 0 0 1 16 0 Z" '
+                   f'fill="{STEEL}" stroke="{INK}" stroke-width="1.4" '
+                   f'transform="rotate(-25 {tx:.1f} {ty:.1f})"/>')
+    else:
+        out.append(f'<path d="M {tx:.1f} {ty:.1f} l 9 -4 l 0 8 Z" fill="{INK}"/>')
+    out.append(_circle(tx, ty, 1.8, fill=ACCENT, width=0.8))
+    return out
+
+
+def draw_plasma_lance(allele):
+    e = _e(allele)
+    out = []
+    sx, sy = 50, 92
+    # fleshy arm (organic half)
+    ex, ey = sx + 10, sy - 24
+    wx, wy = sx + 18, sy - 44
+    out.append(_path(f"M {sx} {sy} Q {ex:.1f} {ey:.1f} {wx:.1f} {wy:.1f}", fill="none",
+                     width=5.5 + 4 * e["girth"]))
+    for i in range(round(e["ornament"] * 4)):          # vein nodules
+        t = (i + 1) / 5
+        vx = sx + (wx - sx) * t + 3
+        vy = sy + (wy - sy) * t
+        out.append(_circle(vx, vy, 1.6, fill=ACCENT, width=0.7))
+    # charge bulb (invariant)
+    out.append(_circle(wx, wy, 4.5 + 4 * e["girth"], fill=ACCENT, width=1.6))
+    # the lance emitter (invariant): glowing taper
+    llen = 22 + 26 * e["length"]
+    lw = (3.5 + 3 * e["girth"]) * (1 - 0.5 * e["taper"]) + 1.5
+    tipx, tipy = wx + llen * 0.45, wy - llen
+    out.append(f'<path d="M {wx - lw:.1f} {wy:.1f} Q {wx - lw * 0.3 + 4:.1f} {wy - llen * 0.5:.1f} '
+               f'{tipx:.1f} {tipy:.1f} Q {wx + lw * 0.6 + 4:.1f} {wy - llen * 0.5:.1f} {wx + lw:.1f} {wy:.1f} Z" '
+               f'fill="#d8c8e8" stroke="{INK}" stroke-width="1.6"/>')
+    out.append(_circle(tipx, tipy, 2.2, fill="#d8c8e8", width=1.0))     # glow tip
+    return out
+
+
 DRAWERS = {
     "claw_hand": draw_claw_hand,
     "pincer": draw_pincer,
@@ -317,6 +451,11 @@ DRAWERS = {
     "hoofed_leg": draw_hoofed_leg,
     "talon_leg": draw_talon_leg,
     "insect_leg": draw_insect_leg,
+    "rifle_arm": draw_rifle_arm,
+    "piston_leg": draw_piston_leg,
+    "optic_visor": draw_optic_visor,
+    "sensor_mast": draw_sensor_mast,
+    "plasma_lance": draw_plasma_lance,
 }
 
 

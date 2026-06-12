@@ -29,7 +29,35 @@ RAGE_EXIT = 0.35  # berserk burns out when rage falls below this
 EXHAUST_TICKS = 6
 
 CONTROLLED, WAVERING, FERAL, REBEL_STATE = "controlled", "wavering", "feral", "rebel"
-BERSERK, EXHAUSTED = "berserk", "exhausted"
+BERSERK, EXHAUSTED, ROUT = "berserk", "exhausted", "rout"
+
+# --- faction expression profiles (docs/17): same simulation, different
+# canalization. A faction decides what a control snap MEANS, how hard
+# decapitation hits, and how much formation cohesion shores loyalty up.
+MONSTER_PROFILE = {
+    "name": "monsters",
+    "snap_calm": FERAL,          # low guile: mindless break
+    "snap_ambitious": REBEL_STATE,  # high guile: coup
+    "decap_shock": 0.45,
+    "cohesion": 0.0,             # no drill, no pheromones -- just the leash
+    "rally_rate": 0.0,
+}
+HUMAN_PROFILE = {
+    "name": "humans",
+    "snap_calm": ROUT,           # soldiers don't go feral -- they run
+    "snap_ambitious": ROUT,
+    "decap_shock": 0.50,
+    "cohesion": 0.10,            # drill: holding formation steadies morale
+    "rally_rate": 0.05,          # and the routed can be rallied back
+}
+ALIEN_PROFILE = {
+    "name": "aliens",
+    "snap_calm": FERAL,          # a drone without the song is a frenzied animal
+    "snap_ambitious": FERAL,
+    "decap_shock": 0.85,         # the hive dies with its queen
+    "cohesion": 0.30,            # pheromone pinning: near the queen, unbreakable
+    "rally_rate": 0.0,
+}
 
 
 def capacity(brain):
@@ -73,6 +101,7 @@ class Unit:
     state: str = CONTROLLED
     rage: float = 0.0             # builds under stress; berserk past threshold
     exhaust_timer: int = 0
+    profile: dict = field(default_factory=lambda: MONSTER_PROFILE)
     subordinates: list = field(default_factory=list)
     history: list = field(default_factory=list)        # loyalty per tick
     rage_history: list = field(default_factory=list)   # rage per tick
@@ -126,6 +155,8 @@ def loyalty_equilibrium(sub, commander):
           - 0.30 * out_of_range          # out of sight, out of control
           - 0.35 * ambition              # the ambitious plot
           + 0.20 * (commander.command - 0.5))  # a commanding presence holds them
+    if out_of_range == 0.0:
+        eq += sub.profile["cohesion"]    # drill / pheromones: in formation, steadied
     return max(0.0, min(1.0, eq))
 
 
@@ -167,6 +198,13 @@ def step(units, rng, stress=None, lumen="day"):
                 else:
                     u.state = FERAL
                     events.append(f"{u.name} rises with no master -- feral")
+        elif u.state == ROUT:
+            # the routed flee the fray; out of it, morale slowly recovers,
+            # and a living commander can rally them back to the line
+            u.loyalty = min(1.0, u.loyalty + u.profile["rally_rate"])
+            if u.loyalty >= WAVER and u.commander is not None and u.commander.alive:
+                u.state = CONTROLLED
+                events.append(f"{u.name} RALLIES back to {u.commander.name}'s line")
         elif u.rage > berserk_threshold(u.brain):
             u.state = BERSERK
             events.append(
@@ -177,9 +215,9 @@ def step(units, rng, stress=None, lumen="day"):
         u.hp_history.append(u.hp if u.alive else 0.0)
 
     # 1) loyalty integration toward equilibrium (only for the controlled;
-    #    berserk/exhausted units are beyond loyalty -- it is frozen)
+    #    berserk/exhausted/routing units have their own dynamics)
     for u in units:
-        if not u.alive or u.commander is None or u.state in (BERSERK, EXHAUSTED):
+        if not u.alive or u.commander is None or u.state in (BERSERK, EXHAUSTED, ROUT):
             if u.alive:
                 u.history.append(u.loyalty)
             continue
@@ -193,9 +231,9 @@ def step(units, rng, stress=None, lumen="day"):
         u.loyalty = max(0.0, u.loyalty - stress.get(u.name, 0.0))
         u.history.append(u.loyalty)
 
-    # 2) state transitions + control snaps
+    # 2) state transitions + control snaps (what a snap MEANS is the faction's)
     for u in units:
-        if not u.alive or u.commander is None or u.state in (BERSERK, EXHAUSTED):
+        if not u.alive or u.commander is None or u.state in (BERSERK, EXHAUSTED, ROUT):
             continue
         prev = u.state
         if u.loyalty >= WAVER:
@@ -203,8 +241,7 @@ def step(units, rng, stress=None, lumen="day"):
         elif u.loyalty >= REBEL:
             u.state = WAVERING
         else:
-            # control snaps. Ambition/guile -> open rebellion; otherwise feral.
-            u.state = REBEL_STATE if u.guile > 0.5 else FERAL
+            u.state = u.profile["snap_ambitious"] if u.guile > 0.5 else u.profile["snap_calm"]
 
         if u.state == prev:
             continue
@@ -220,6 +257,10 @@ def step(units, rng, stress=None, lumen="day"):
             events.append(f"{u.name} REBELS against {u.commander.name}!")
             _try_usurp(u, events)
             _unlink(u)              # keeps its own subordinates -- a breakaway warband
+        elif u.state == ROUT:
+            # Soldiers break and run -- but they stay soldiers: the link to
+            # their commander holds, and they can be rallied (phase 0).
+            events.append(f"{u.name} breaks and ROUTS (morale {u.loyalty:.2f})")
 
     return events
 
@@ -276,13 +317,14 @@ def _berserk_attack(u, units, events):
 
 
 def kill(unit, units, events):
-    """Kill a unit. Its subordinates suffer a leadership-vacuum loyalty shock;
-    decapitating a commander can collapse a whole branch."""
+    """Kill a unit. Its subordinates suffer a leadership-vacuum loyalty shock
+    (sized by THEIR faction profile -- hive drones are nothing without the
+    queen); decapitating a commander can collapse a whole branch."""
     unit.alive = False
     unit.state = "dead"
     orphans = [s for s in units if s.commander is unit and s.alive]
     for s in orphans:
-        s.loyalty = max(0.0, s.loyalty - 0.45)
+        s.loyalty = max(0.0, s.loyalty - s.profile["decap_shock"])
         events.append(f"{s.name} loses its commander {unit.name} (loyalty -> {s.loyalty:.2f})")
     return orphans
 

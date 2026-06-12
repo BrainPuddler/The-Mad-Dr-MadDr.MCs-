@@ -82,6 +82,39 @@ FAMILIES = {
         "bounds": _bounds(girth=(0.0, 0.35), curl=(0.3, 1.0)),
         "invariants": "a segmented zigzag of chitinous struts with a tarsal hook",
     },
+    # ---- TECH families (docs/17) -------------------------------------------
+    # origin "tech": ISSUED equipment, not flesh. Never mutates, never blends
+    # in a splice (you don't gene-splice a rifle) -- changed only by Graft
+    # (the quartermaster). The human army's catalog.
+    "rifle_arm": {
+        "homolog": "hand", "origin": "tech",
+        "bounds": _bounds(curl=(0.0, 0.2)),
+        "invariants": "an arm shouldering a long gun: barrel, stock, trigger group",
+    },
+    "piston_leg": {
+        "homolog": "leg", "origin": "tech",
+        "bounds": _bounds(girth=(0.3, 0.9), curl=(0.0, 0.3)),
+        "invariants": "a hydraulic strut: cylinder, piston rod, flat foot-plate",
+    },
+    "optic_visor": {
+        "homolog": "eye", "origin": "tech",
+        "bounds": _bounds(count=(0.0, 0.6)),
+        "invariants": "a rectangular visor band with 1-3 round lenses",
+    },
+    "sensor_mast": {
+        "homolog": "sensor", "origin": "tech",
+        "bounds": _bounds(girth=(0.0, 0.4)),
+        "invariants": "a single rigid antenna mast with a dish or vane at the tip",
+    },
+    # ---- BIOTECH families (docs/17) ----------------------------------------
+    # origin "biotech": grown technology -- alien organs that ARE machines.
+    # Breeds exactly like organic flesh (the alien advantage and the alien
+    # horror): guns you can gene-splice.
+    "plasma_lance": {
+        "homolog": "hand", "origin": "biotech",
+        "bounds": _bounds(taper=(0.5, 1.0)),
+        "invariants": "a fleshy arm ending in a glowing lance emitter with a charge bulb",
+    },
 }
 
 
@@ -115,8 +148,17 @@ def homolog_of(family: str) -> str:
     return FAMILIES[family]["homolog"]
 
 
-def families_in_class(homolog: str):
-    return sorted(f for f, spec in FAMILIES.items() if spec["homolog"] == homolog)
+def origin_of(family: str) -> str:
+    return FAMILIES[family].get("origin", "organic")
+
+
+def families_in_class(homolog: str, origins=("organic",)):
+    """Families fitting a slot, filtered by origin. Mutation family-jumps and
+    random monster generation stay organic by default; tech enters a genome
+    only by explicit issue (Graft) or faction templates (docs/17)."""
+    return sorted(f for f, spec in FAMILIES.items()
+                  if spec["homolog"] == homolog
+                  and spec.get("origin", "organic") in origins)
 
 
 def express(family: str, axis_name: str, gene: float) -> float:

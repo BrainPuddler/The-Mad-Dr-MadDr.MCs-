@@ -78,7 +78,8 @@ def test_canalization():
     """Expression maps full genotype range into authored phenotype bounds."""
     for fam, spec in FAMILIES.items():
         for axis, (lo, hi) in spec["bounds"].items():
-            assert express(fam, axis, 0.0) == lo and express(fam, axis, 1.0) == hi
+            assert abs(express(fam, axis, 0.0) - lo) < 1e-9
+            assert abs(express(fam, axis, 1.0) - hi) < 1e-9
     print("ok: canalized expression bounds")
 
 
@@ -224,6 +225,69 @@ def test_low_fury_never_berserks():
     print("ok: low fury never berserks under identical stress")
 
 
+def test_human_rout_and_rally():
+    """Humans never go feral or rebel: they ROUT, and they can RALLY."""
+    import factions
+    rng = random.Random(11)
+    units, captain, (squad_a, _) = factions.human_platoon(rng)
+    routed = rallied = False
+    for t in range(60):
+        stress = {u.name: 0.14 for u in squad_a} if 10 <= t < 28 else {}
+        cmd.step(units, rng, stress=stress)
+        for u in units:
+            assert u.state not in (cmd.FERAL, cmd.REBEL_STATE), (u.name, u.state)
+            if u.state == cmd.ROUT:
+                routed = True
+            if routed and u.state == cmd.CONTROLLED and u.name.startswith("Pvt-A"):
+                rallied = True
+    assert routed, "no one routed under the barrage"
+    assert rallied, "no one rallied back"
+    print("ok: humans rout and rally, never feral/rebel")
+
+
+def test_alien_cohesion_and_collapse():
+    """The barrage that breaks humans cannot break the hive; killing the
+    Queen collapses every drone at once."""
+    import factions
+    rng = random.Random(12)
+    units, queen, drones = factions.alien_hive(rng, n_drones=10)
+    for t in range(30):
+        stress = {d.name: 0.14 for d in drones[:5]} if 5 <= t < 25 else {}
+        cmd.step(units, rng, stress=stress)
+        for d in drones:
+            assert d.commander is queen, f"{d.name} broke during the barrage ({d.state})"
+    cmd.kill(queen, units, [])
+    for _ in range(4):
+        cmd.step(units, rng)
+    feral = sum(1 for d in drones if d.state == cmd.FERAL)
+    assert feral >= 8, f"hive failed to collapse (only {feral}/10 feral)"
+    print(f"ok: hive holds under barrage, collapses on queen death ({feral}/10 feral)")
+
+
+def test_tech_inert_biotech_breeds():
+    """Issued tech never mutates or blends; alien biotech breeds like flesh."""
+    import factions
+    rng = random.Random(13)
+    trooper = factions.human_trooper("t1", rng).genome
+    rifle_before = trooper.get("hand")
+    g = trooper
+    for _ in range(50):
+        g = mutate(g, rng, rate=0.9, family_jump=0.9, bias_slot="hand")
+    assert g.get("hand") == rifle_before, "issued rifle mutated"
+    child = splice(trooper, factions.human_trooper("t2", rng).genome, rng)
+    assert child.get("hand").family == "rifle_arm"
+    assert child.get("hand") in (trooper.get("hand"),) or child.get("hand").family == "rifle_arm"
+
+    drone = factions.alien_drone("d1", rng).genome
+    lance_before = drone.get("hand")
+    g = drone
+    for _ in range(50):
+        g = mutate(g, rng, rate=0.9, bias_slot="hand")
+    assert g.get("hand").family == "plasma_lance" and g.get("hand") != lance_before, \
+        "biotech failed to drift under mutation"
+    print("ok: tech inert under breeding; biotech breeds")
+
+
 def test_brain_survives_breeding():
     """Mutate and splice keep a valid brain on the genome."""
     rng = random.Random(4)
@@ -250,5 +314,8 @@ if __name__ == "__main__":
     test_berserk_buffs_monotonic()
     test_berserk_friendly_fire_and_recovery()
     test_low_fury_never_berserks()
+    test_human_rout_and_rally()
+    test_alien_cohesion_and_collapse()
+    test_tech_inert_biotech_breeds()
     test_brain_survives_breeding()
     print("all tests passed")
