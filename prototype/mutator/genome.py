@@ -12,6 +12,20 @@ from dataclasses import dataclass
 # The six shared semantic axes, each 0..1 in genotype space.
 AXES = ("length", "girth", "taper", "curl", "count", "ornament")
 
+# Body-plan axes, each 0..1. Axes are shared across plans but may carry
+# plan-specific meaning (for blobs, "posture" expresses as wobble and
+# "limb" as pseudopod reach) -- the same canalization idea as part axes.
+BODY_AXES = ("posture", "bulk", "limb", "tail")
+
+
+@dataclass(frozen=True)
+class BodyGenes:
+    plan: str             # "tetrapod" | "blob"
+    params: tuple         # four floats in [0, 1], ordered as BODY_AXES
+
+    def axis(self, name: str) -> float:
+        return self.params[BODY_AXES.index(name)]
+
 
 @dataclass(frozen=True)
 class PartAllele:
@@ -24,16 +38,18 @@ class PartAllele:
 
 @dataclass(frozen=True)
 class Genome:
-    """A creature is a mapping of homolog slots to alleles.
+    """A creature is a body plan plus a mapping of homolog slots to alleles.
 
     Slots are homolog classes (hand, sensor, eye ...): crossover and family
     jumps only ever swap within a slot's homolog class, so every child is
     anatomically valid by construction (the Hox-grammar strategy).
     """
     slots: tuple          # tuple of (slot_name, PartAllele), stable order
+    body: BodyGenes = None  # None for parts-only experiments
 
     def get(self, slot: str) -> PartAllele:
         return dict(self.slots)[slot]
 
     def replace(self, slot: str, allele: PartAllele) -> "Genome":
-        return Genome(tuple((s, allele if s == slot else a) for s, a in self.slots))
+        return Genome(tuple((s, allele if s == slot else a) for s, a in self.slots),
+                      self.body)

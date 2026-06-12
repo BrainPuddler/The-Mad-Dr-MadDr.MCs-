@@ -56,6 +56,16 @@ The prototype draws parts procedurally from the six axes. In the production 3D p
 
 Strategies 1–5 make unrecognizable parts structurally unreachable, but content will grow and rules will get bent. The server-side viability check ([06](06-mutator-design.md)) gains one rule: **ornament may never obscure an invariant** (e.g., sucker density that buries a tentacle's silhouette caps at the value where the silhouette test still passes). For 3D, the planned check is a silhouette-envelope test at part-import time ([08](08-creature-visualization.md) authoring validation): each family ships authored silhouette envelopes, and a part configuration whose rendered silhouette drifts outside its family envelope fails import — catching authoring mistakes before the GA can find them.
 
+## Body plans: discrete where necessary, continuous where possible
+
+The same recognizability-vs-variety logic applies one level up, at the body-plan layer — with a finding the prototype makes concrete. Creature types like *upright biped*, *monkey-type knuckle-walker*, and *quadruped* do not need to be three separate archetypes: they are one **continuous plan family** (`tetrapod`) whose **posture axis** sweeps upright (0) → brachiator (~0.5) → all-fours (1), with `bulk`, `limb` (arm reach), and `tail` as further body axes. Everything inside a continuous plan family interbreeds smoothly — a biped × quadruped child is simply a mid-posture monkey-type, no special case needed.
+
+Truly different anatomies — a **blob** has no rigid skeleton at all; parts surface-mount on its membrane — remain **discrete plans**, and crossing between them is the rare cross-plan splice jackpot ([06](06-mutator-design.md) cross-archetype rules). Body axes are shared across plans with plan-specific expression (for a blob, `posture` expresses as membrane wobble and `limb` as pseudopod reach) — the same canalization idea as the part axes, so body genes survive plan jumps meaningfully.
+
+Implication for the archetype list in [06](06-mutator-design.md): `biped`, `quadruped`, and `hulking` may collapse into one tetrapod plan family with posture/bulk axes (fewer rigs to author, smoother breeding), while `serpentine`, `winged`, and `amorphous` stay discrete. Tracked as **Q11 in [12-open-questions.md](12-open-questions.md)**. For the 3D pipeline ([08](08-creature-visualization.md)), a continuous plan family means one rig whose rest pose and locomotion blend by posture — standard blend-tree territory — versus a full extra rig and animation set per discrete archetype; that authoring-cost difference is the main reason to prefer continuous families wherever anatomy allows.
+
+The prototype's second gallery (`demo_creatures.py` → `out/creatures.svg`) shows the posture sweep on one fixed genome, random populations of bipeds / monkey-types / quadrupeds / blobs, and blob × biped splice children.
+
 ## The prototype (run it)
 
 [`/prototype/mutator/`](../prototype/mutator/) — pure-Python, no dependencies:

@@ -2,8 +2,8 @@
 
 import random
 
-from genome import AXES, Genome, PartAllele
-from catalog import FAMILIES, homolog_of, families_in_class, express
+from genome import AXES, BODY_AXES, Genome, PartAllele
+from catalog import BODY_PLANS, FAMILIES, homolog_of, families_in_class, express
 from operators import random_genome, mutate, splice, graft
 
 SLOT_SPEC = (("hand", "hand"), ("sensor", "sensor"), ("eye", "eye"))
@@ -21,8 +21,23 @@ def test_closure_and_bounds():
             assert homolog_of(allele.family) == slot, (slot, allele.family)
             assert len(allele.params) == len(AXES)
             assert all(0.0 <= p <= 1.0 for p in allele.params), allele.params
+        assert g.body.plan in BODY_PLANS, g.body.plan
+        assert len(g.body.params) == len(BODY_AXES)
+        assert all(0.0 <= p <= 1.0 for p in g.body.params), g.body.params
         pop.append(g)
-    print("ok: closure & bounds (340 genomes)")
+    print("ok: closure & bounds incl. body plans (340 genomes)")
+
+
+def test_body_renderable():
+    """Every genome the operators can produce renders without error."""
+    from render_creature import render_creature_cell
+    rng = random.Random(5)
+    g = random_genome(SLOT_SPEC, rng)
+    for i in range(120):
+        g = splice(g, random_genome(SLOT_SPEC, rng), rng) if i % 2 else mutate(g, rng)
+        svg = render_creature_cell(g, 0, 0)
+        assert svg.startswith("<g") and g.body.plan in BODY_PLANS
+    print("ok: 120 mutated/spliced creatures all render")
 
 
 def test_homolog_grammar():
@@ -86,4 +101,5 @@ if __name__ == "__main__":
     test_determinism()
     test_canalization()
     test_shared_axis_inheritance()
+    test_body_renderable()
     print("all tests passed")

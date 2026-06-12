@@ -67,6 +67,22 @@ FAMILIES = {
 }
 
 
+# ---- body plans ----------------------------------------------------------
+# "tetrapod" is one CONTINUOUS plan family: the posture axis spans upright
+# biped (0) -> knuckle-walking brachiator/"monkey" (~0.5) -> all-fours
+# quadruped (1), so those creature types interbreed smoothly within one rig.
+# "blob" is a genuinely DISCRETE plan (no rigid skeleton): crossing into or
+# out of it is the rare cross-plan splice jackpot (docs/06).
+BODY_PLANS = {
+    "tetrapod": {
+        "invariants": "a torso on limbs with a head: posture spans biped to quadruped",
+    },
+    "blob": {
+        "invariants": "a single amorphous mass; parts surface-mount on the membrane",
+    },
+}
+
+
 def homolog_of(family: str) -> str:
     return FAMILIES[family]["homolog"]
 

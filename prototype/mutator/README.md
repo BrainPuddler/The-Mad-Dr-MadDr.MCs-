@@ -8,18 +8,21 @@ and crossbreed freely while always staying recognizable as what they are
 Pure Python 3, no dependencies.
 
 ```
-python3 test_mutator.py   # property tests
-python3 demo.py [seed]    # writes out/gallery.svg
+python3 test_mutator.py        # property tests
+python3 demo.py [seed]         # parts gallery -> out/gallery.svg
+python3 demo_creatures.py [seed]  # body plans  -> out/creatures.svg
 ```
 
 | File | What it is |
 | --- | --- |
-| `genome.py` | Slot/allele genome with six shared semantic axes |
-| `catalog.py` | Part families: homolog classes, invariants, canalized bounds |
+| `genome.py` | Body genes (plan + posture/bulk/limb/tail) and slot alleles with six shared semantic axes |
+| `catalog.py` | Part families (homolog classes, invariants, canalized bounds) and body plans |
 | `operators.py` | Mutate / Splice / Graft (seeded-RNG deterministic) |
-| `render_svg.py` | Procedural ink-sketch renderer (2D stand-in for the 3D pipeline) |
-| `demo.py` | Generates the three-exhibit gallery |
-| `out/gallery.svg` | Committed sample output (seed 2026) |
+| `render_svg.py` | Procedural ink-sketch part renderer (2D stand-in for the 3D pipeline) |
+| `render_creature.py` | Full-creature assembly: tetrapod (biped↔monkey↔quadruped posture continuum) and blob plans |
+| `demo.py` | Parts gallery: family variation, mutation lineage, splice inheritance |
+| `demo_creatures.py` | Creature gallery: posture sweep, populations, cross-plan splice |
+| `out/gallery.svg`, `out/creatures.svg` | Committed sample output (seed 2026) |
 
 This is a Phase-1 Track B exploration ([docs/11-roadmap.md](../../docs/11-roadmap.md)).
 Python is for prototyping speed only — the genome schema is the contract, not
