@@ -12,13 +12,17 @@ import {
   BRAIN_AXES,
   BRAIN_TIERS,
   GENOME_VERSION,
+  HEART_TIERS,
   PART_AXES,
   SLOT_NAMES,
   clamp01,
+  heartVigor,
   type BodyGenes,
   type BrainGenes,
   type BrainTier,
   type Genome,
+  type HeartGenes,
+  type HeartTier,
   type Params4,
   type Params5,
   type Params6,
@@ -32,6 +36,7 @@ import {
   originOf,
   type Origin,
 } from "./catalog.js";
+import { viability } from "./energy.js";
 import type { Rng } from "./rng.js";
 
 export interface MutateOptions {
@@ -48,6 +53,8 @@ export interface MutateOptions {
   planJump?: number;
   /** Probability brain tier drifts one step. */
   tierShift?: number;
+  /** Probability the heart tier drifts one step. */
+  heartShift?: number;
 }
 
 const DEFAULTS: Required<Omit<MutateOptions, "biasSlot">> = {
@@ -56,6 +63,7 @@ const DEFAULTS: Required<Omit<MutateOptions, "biasSlot">> = {
   familyJump: 0.1,
   planJump: 0.03,
   tierShift: 0.06,
+  heartShift: 0.06,
 };
 
 const FEED_BOOST = 3;
@@ -81,19 +89,57 @@ export function randomBrain(rng: Rng, tier?: BrainTier): BrainGenes {
   return { tier: t, params: fiveOf(() => rng.next()) };
 }
 
+export function randomHeart(rng: Rng, tier?: HeartTier): HeartGenes {
+  const t = tier ?? rng.choice(HEART_TIERS);
+  return { tier: t, params: sixOf(() => rng.next()) };
+}
+
+/** Return g with its heart grown just big enough to be viable with
+ * headroom -- a primordial creature is born able to run its own body.
+ * Raises vigor first, then steps up the tier, until viable (or maxed). */
+function fitHeart(g: Genome, headroom = 1.15): Genome {
+  let out = g;
+  for (let guard = 0; guard < 16; guard++) {
+    const v = viability(out);
+    if (v.capacity >= v.load * headroom) return out;
+    const i = HEART_TIERS.indexOf(out.heart.tier);
+    if (heartVigor(out.heart) < 0.99) {
+      // crank vigor to the top of the current tier
+      out = { ...out, heart: { ...out.heart, params: setVigor(out.heart.params, 1) } };
+    } else if (i < HEART_TIERS.length - 1) {
+      // step to the next tier, reset vigor mid-range to leave room to drift
+      out = {
+        ...out,
+        heart: { tier: HEART_TIERS[i + 1]!, params: setVigor(out.heart.params, 0.5) },
+      };
+    } else {
+      return out; // already a titan at full vigor: nothing bigger exists
+    }
+  }
+  return out;
+}
+
 export function randomGenome(
   rng: Rng,
-  opts: { plan?: string; tier?: BrainTier; origins?: readonly Origin[] } = {},
+  opts: {
+    plan?: string;
+    tier?: BrainTier;
+    heartTier?: HeartTier;
+    origins?: readonly Origin[];
+  } = {},
 ): Genome {
   const slots = {} as Record<SlotName, PartAllele>;
   for (const s of SLOT_NAMES) slots[s] = randomAllele(s, rng, opts.origins);
-  return {
+  const g: Genome = {
     genomeVersion: GENOME_VERSION,
     parentIds: [],
     body: randomBody(rng, opts.plan),
     brain: randomBrain(rng, opts.tier),
+    heart: randomHeart(rng, opts.heartTier),
     slots,
   };
+  // a primordial monster is born viable; a forced heartTier is left as-is
+  return opts.heartTier ? g : fitHeart(g);
 }
 
 // ---- Mutate -------------------------------------------------------------------
@@ -149,11 +195,25 @@ export function mutate(g: Genome, rng: Rng, opts: MutateOptions = {}): Genome {
     ),
   };
 
+  let heartTier = g.heart.tier;
+  if (rng.next() < o.heartShift) {
+    const i = HEART_TIERS.indexOf(heartTier);
+    const j = Math.max(0, Math.min(HEART_TIERS.length - 1, i + (rng.bool() ? 1 : -1)));
+    heartTier = HEART_TIERS[j]!;
+  }
+  const heart: HeartGenes = {
+    tier: heartTier,
+    params: mapParams6(g.heart.params, (p) =>
+      rng.next() < o.rate ? clamp01(p + rng.gauss(0, o.sigma)) : p,
+    ),
+  };
+
   return {
     genomeVersion: GENOME_VERSION,
     parentIds: g.creatureId ? [g.creatureId] : [],
     body,
     brain,
+    heart,
     slots,
   };
 }
@@ -189,11 +249,17 @@ export function splice(a: Genome, b: Genome, rng: Rng, noise = 0.05): Genome {
       clamp01(pa + rng.next() * (pb - pa) + rng.gauss(0, noise)),
     ),
   };
+  const heart: HeartGenes = {
+    tier: rng.bool() ? a.heart.tier : b.heart.tier,
+    params: zipParams6(a.heart.params, b.heart.params, (pa, pb) =>
+      clamp01(pa + rng.next() * (pb - pa) + rng.gauss(0, noise)),
+    ),
+  };
 
   const parents: string[] = [];
   if (a.creatureId) parents.push(a.creatureId);
   if (b.creatureId) parents.push(b.creatureId);
-  return { genomeVersion: GENOME_VERSION, parentIds: parents, body, brain, slots };
+  return { genomeVersion: GENOME_VERSION, parentIds: parents, body, brain, heart, slots };
 }
 
 // ---- Graft --------------------------------------------------------------------
@@ -223,6 +289,9 @@ export function graft(
 
 function sixOf(f: () => number): Params6 {
   return [f(), f(), f(), f(), f(), f()];
+}
+function setVigor(p: Params6, vigor: number): Params6 {
+  return [vigor, p[1], p[2], p[3], p[4], p[5]];
 }
 function fiveOf(f: () => number): Params5 {
   return [f(), f(), f(), f(), f()];

@@ -23,6 +23,12 @@ export interface PartFamily {
   readonly origin: Origin;
   readonly bounds: Bounds;
   readonly invariants: string;
+  /** A vestigial family is a healed-over STUMP left when a part is
+   * harvested (surgery.ts). It is a real, valid family -- so a stumped
+   * genome still passes validation -- but it is excluded from random
+   * generation and mutation jumps: you never randomly grow a stump, you
+   * cut your way to one. Vestigial parts cost almost no energy. */
+  readonly vestigial?: boolean;
 }
 
 const FULL: readonly [number, number] = [0, 1];
@@ -118,6 +124,35 @@ export const FAMILIES: Readonly<Record<string, PartFamily>> = {
     bounds: bounds({ girth: [0.3, 0.9], curl: [0.0, 0.3] }),
     invariants: "a hydraulic strut: cylinder, piston rod, flat foot-plate",
   },
+  // ---- stumps: what a slot heals to after a part is harvested --------------
+  hand_stump: {
+    homolog: "hand", origin: "organic", vestigial: true,
+    bounds: bounds({ length: [0, 0.1], girth: [0, 0.15] }),
+    invariants: "a rounded, scarred-over stump where an arm was",
+  },
+  sensor_stub: {
+    homolog: "sensor", origin: "organic", vestigial: true,
+    bounds: bounds({ length: [0, 0.1], girth: [0, 0.1] }),
+    invariants: "a healed nub where a sensor was",
+  },
+  eye_socket: {
+    homolog: "eye", origin: "organic", vestigial: true,
+    bounds: bounds({ length: [0, 0.05], girth: [0, 0.15] }),
+    invariants: "an empty closed socket",
+  },
+  leg_stump: {
+    homolog: "leg", origin: "organic", vestigial: true,
+    bounds: bounds({ length: [0, 0.1], girth: [0, 0.2] }),
+    invariants: "a scarred-over stump where a leg was",
+  },
+};
+
+/** The stump family a slot heals to when its part is harvested. */
+export const STUMP_OF: Record<SlotName, string> = {
+  hand: "hand_stump",
+  sensor: "sensor_stub",
+  eye: "eye_socket",
+  leg: "leg_stump",
 };
 
 /** Body plans. "tetrapod" is the continuous plan family (posture spans
@@ -166,9 +201,14 @@ export function originOf(family: string): Origin {
   return f.origin;
 }
 
+export function isVestigial(family: string): boolean {
+  return FAMILIES[family]?.vestigial === true;
+}
+
 /** Families fitting a slot, filtered by origin. Mutation family-jumps stay
  * within the allele's own origin; random generation defaults to organic --
- * tech enters a genome only by explicit issue (docs/17). */
+ * tech enters a genome only by explicit issue (docs/17). Vestigial stumps
+ * are never offered: you cut your way to a stump, you don't grow one. */
 export function familiesInClass(
   homolog: SlotName,
   origins: readonly Origin[] = ["organic"],
@@ -176,7 +216,7 @@ export function familiesInClass(
   return Object.keys(FAMILIES)
     .filter((f) => {
       const spec = FAMILIES[f]!;
-      return spec.homolog === homolog && origins.includes(spec.origin);
+      return spec.homolog === homolog && origins.includes(spec.origin) && !spec.vestigial;
     })
     .sort();
 }

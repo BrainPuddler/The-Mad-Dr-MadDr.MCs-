@@ -19,14 +19,17 @@
  */
 
 import {
+  HEART_OUTPUT,
   SLOT_NAMES,
   bodyAxis,
   brainSize,
+  heartVigor,
   partAxis,
   type Genome,
+  type HeartGenes,
   type PartAllele,
 } from "./genome.js";
-import { BODY_PLANS, express, originOf, type Origin } from "./catalog.js";
+import { BODY_PLANS, express, isVestigial, originOf, type Origin } from "./catalog.js";
 
 export const ENERGY_TYPES = ["blood", "fuel", "ichor"] as const;
 export type EnergyType = (typeof ENERGY_TYPES)[number];
@@ -44,20 +47,23 @@ export type Upkeep = Record<EnergyType, number>;
 const BODY_BASE = 4.0; // blood/min for the smallest living frame
 const BODY_BULK = 8.0; // additional blood/min at full bulk
 const BRAIN_PER_SIZE = 1.5; // blood/min per brain size step (minds are hungry)
+const HEART_PER_OUTPUT = 0.05; // blood/min the pump itself draws, per output unit
 const PART_BASE = 2.5; // energy/min for a part at minimal mass
 const PART_MASS = 2.5; // additional energy/min at full expressed mass
+const STUMP_UPKEEP = 0.3; // a healed stump barely costs anything
 
 /** A part's energy demand scales with its expressed mass (length x girth
  * through the family's canalized bounds: a vestigial arm sips, a titan
  * arm gulps). */
 export function partUpkeep(allele: PartAllele): { type: EnergyType; perMin: number } {
+  const type = ORIGIN_ENERGY[originOf(allele.family)];
+  if (isVestigial(allele.family)) {
+    return { type, perMin: STUMP_UPKEEP };
+  }
   const length = express(allele.family, "length", partAxis(allele, "length"));
   const girth = express(allele.family, "girth", partAxis(allele, "girth"));
   const mass = (length + girth) / 2;
-  return {
-    type: ORIGIN_ENERGY[originOf(allele.family)],
-    perMin: PART_BASE + PART_MASS * mass,
-  };
+  return { type, perMin: PART_BASE + PART_MASS * mass };
 }
 
 /** Total upkeep demand per minute. The living frame (body + brain) always
@@ -69,6 +75,7 @@ export function upkeep(g: Genome): Upkeep {
 
   out.blood += BODY_BASE + BODY_BULK * bodyAxis(g.body, "bulk");
   out.blood += BRAIN_PER_SIZE * brainSize(g.brain);
+  out.blood += HEART_PER_OUTPUT * heartCapacity(g.heart); // the pump feeds itself
 
   const ignored = BODY_PLANS[g.body.plan]?.ignoresSlots ?? [];
   for (const slot of SLOT_NAMES) {
@@ -77,6 +84,52 @@ export function upkeep(g: Genome): Upkeep {
     out[p.type] += p.perMin;
   }
   return out;
+}
+
+// ---- viability: supply vs. demand --------------------------------------------
+
+/** How severely an over-capacity graft can exceed the heart before the
+ * patient dies on the table rather than merely rejecting the limb. Below
+ * this, the limb necrotizes (rejected) and the creature survives the
+ * shock; above it, the heart stops. (docs/06 grafting.) */
+export const SHOCK_FACTOR = 1.5;
+
+/** Circulatory output the heart can sustain, in energy-units/min. Tier
+ * sets the base; vigor (params[0]) tunes it +/-30%. This is the SUPPLY
+ * ceiling every transplant is measured against. */
+export function heartCapacity(heart: HeartGenes): number {
+  return HEART_OUTPUT[heart.tier] * (0.7 + 0.6 * heartVigor(heart));
+}
+
+/** Total circulatory load: the whole upkeep bill the heart must drive,
+ * across every energy type (the pump moves the vehicle; fuel and ichor
+ * lines tap the same circulation). */
+export function circulatoryLoad(g: Genome): number {
+  const u = upkeep(g);
+  return u.blood + u.fuel + u.ichor;
+}
+
+export type ViabilityState = "viable" | "strained" | "nonviable";
+
+export interface Viability {
+  readonly state: ViabilityState;
+  readonly capacity: number;
+  readonly load: number;
+  /** capacity - load: positive is headroom, negative is overload. */
+  readonly margin: number;
+}
+
+/** Is this body's heart big enough to run it? "strained" means the body
+ * is over capacity but within the shock factor -- it lives, but a graft
+ * here will be rejected; "nonviable" means the heart cannot sustain the
+ * body at all (a corpse on the table). */
+export function viability(g: Genome): Viability {
+  const capacity = heartCapacity(g.heart);
+  const load = circulatoryLoad(g);
+  const margin = capacity - load;
+  const state: ViabilityState =
+    load <= capacity ? "viable" : load <= capacity * SHOCK_FACTOR ? "strained" : "nonviable";
+  return { state, capacity, load, margin };
 }
 
 /** The mana surge paid at reanimation (docs/03 dual-currency split: mana

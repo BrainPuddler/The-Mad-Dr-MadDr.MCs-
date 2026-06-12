@@ -10,6 +10,7 @@ import {
   BRAIN_AXES,
   BRAIN_TIERS,
   GENOME_VERSION,
+  HEART_TIERS,
   PART_AXES,
   SLOT_NAMES,
   type Genome,
@@ -50,6 +51,16 @@ export function validateGenome(g: Genome): ValidationResult {
     errors.push(`brain params must have ${BRAIN_AXES.length} entries`);
   } else if (!inUnit(g.brain.params)) {
     errors.push("brain params out of [0,1]");
+  }
+
+  // heart
+  if (!HEART_TIERS.includes(g.heart?.tier)) {
+    errors.push(`unknown heart tier: ${String(g.heart?.tier)}`);
+  }
+  if (!Array.isArray(g.heart?.params) || g.heart.params.length !== PART_AXES.length) {
+    errors.push(`heart params must have ${PART_AXES.length} entries`);
+  } else if (!inUnit(g.heart.params)) {
+    errors.push("heart params out of [0,1]");
   }
 
   // slots: exactly the standard set, each allele fitting its slot's homolog

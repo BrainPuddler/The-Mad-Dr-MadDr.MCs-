@@ -85,6 +85,22 @@ Feed one creature plus **optional components**; components bias the outcome (the
 
 Pay Body Parts to set one slot's allele directly — choose the family, set size/variant sliders. Costs **3× the Mutate fee** plus the part itself. Graft exists so the GA never feels like a pure slot machine (pillar 1 demands ownership, not gambling): when you need *that claw* on *that monster*, you can have it — expensively.
 
+This is the **lab** graft: composing a genome on the bench, where viability is checked *before* you commit. Its violent twin is **surgery** below.
+
+## Grafting as surgery: cut parts off, sew them on
+
+The literal fantasy: **cut a body part off one creature and sew it onto another.** A creature is not a sealed unit — it is a bag of reusable parts, and so is every corpse on the battlefield ([05](05-component-economy.md), "nothing is wasted").
+
+- **Harvest.** Cut a part off a donor (living or dead). The slot heals to a **stump**; the part comes away as a durable **part item** that carries its genes intact and expresses identically wherever it is sewn next. You can also harvest the **heart** — but that leaves a corpse.
+- **The heart is the gate.** Every part demands energy to run ([05](05-component-economy.md), [17](17-factions.md)); the **heart** is the organ that supplies it, with a finite **circulatory capacity** (set by its tier and vigor — a heritable, mutable, *transplantable* organ). Sewing a part on is only safe if the heart can drive the result:
+  - **Within capacity** → the graft takes.
+  - **Over capacity, within the shock factor** → the new limb **necrotizes and is rejected** — it doesn't take, but the creature survives and the part is returned.
+  - **Far over capacity** → the **heart stops: the creature dies on the table.**
+- **Nothing is wasted.** In *both* failure cases the part is handed back **still usable** — a botched operation costs you the operation, never the part. (A failed *lab* graft is a comic "failed experiment"; a failed *surgery* is a body on the slab and a part back in the tray.)
+- **The counterplay is a bigger heart.** Want to hang a titan's arm on a small frame? Transplant in a stronger heart first (`sewHeart`) — the old heart pops out as a reusable item. "If the heart isn't big enough, the limb or the creature dies" is therefore a real resource decision, not a dead end: grow the supply to match the demand.
+
+Implemented in `packages/genome-core` (`surgery.ts`, `energy.ts`): `harvestPart`/`harvestHeart`, `sewPart`/`sewHeart`, `viability()`.
+
 ## Viability & balance constraints (server-enforced)
 
 All operators execute server-side ([07](07-mutator-server-architecture.md)). The server validates every resulting genome:
@@ -92,6 +108,7 @@ All operators execute server-side ([07](07-mutator-server-architecture.md)). The
 1. **Schema validity**: slots match body plan; part families fit their slots; genes in range.
 2. **Power budget**: stat-point sum within Mastermind cap (1300) — nothing un-reanimatable can exist.
 3. **Authored bounds**: size genes within the part family's min/max.
+4. **Viability (heart vs. body)**: the heart's circulatory capacity must meet the body's total upkeep demand. This is *separate* from schema validity — a structurally valid genome can still be a non-viable corpse — and it is what the surgery gate above enforces on the table.
 
 An operation that would produce an invalid genome returns a **failed experiment**: a fiction-friendly comic result (the Notebook sketches the abomination, the marginalia mock you, you get a small component refund). **Never silent clamping** — players must be able to trust that what the machine returns is exactly what the dice said.
 

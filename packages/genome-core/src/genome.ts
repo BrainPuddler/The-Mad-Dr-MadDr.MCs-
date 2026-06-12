@@ -63,6 +63,25 @@ export const BRAIN_SIZE: Record<BrainTier, number> = {
 export const SLOT_NAMES = ["hand", "sensor", "eye", "leg"] as const;
 export type SlotName = (typeof SLOT_NAMES)[number];
 
+/** Heart (circulatory) tiers. The heart is the SUPPLY organ: it sets how
+ * much upkeep the body can sustain (docs/06 viability). Tier sets the base
+ * pumping output; the first param (vigor) tunes it within the tier. A
+ * heart that cannot drive the body's parts kills the creature on the
+ * operating table (docs/06 grafting; surgery.ts). */
+export const HEART_TIERS = ["faint", "steady", "strong", "titan"] as const;
+export type HeartTier = (typeof HEART_TIERS)[number];
+/** Base circulatory output by tier, in energy-units/min (see energy.ts). */
+export const HEART_OUTPUT: Record<HeartTier, number> = {
+  faint: 14,
+  steady: 26,
+  strong: 42,
+  titan: 64,
+};
+/** Heart genes use the part axes for shape (so a heart can be harvested and
+ * expressed like any organ); only the first three are read today:
+ * [vigor, girth (mass/cost), reserve]. */
+export type HeartParams = Params6;
+
 export interface PartAllele {
   readonly family: string;
   readonly params: Params6;
@@ -78,6 +97,11 @@ export interface BrainGenes {
   readonly params: Params5;
 }
 
+export interface HeartGenes {
+  readonly tier: HeartTier;
+  readonly params: HeartParams;
+}
+
 export interface Genome {
   readonly genomeVersion: typeof GENOME_VERSION;
   /** Assigned by the Mutator service on creation; absent on unsaved
@@ -88,6 +112,9 @@ export interface Genome {
   readonly parentIds: readonly string[];
   readonly body: BodyGenes;
   readonly brain: BrainGenes;
+  /** The circulatory organ: the supply side of viability. Transplantable
+   * (surgery.ts) -- a bigger heart is how you support heavier grafts. */
+  readonly heart: HeartGenes;
   readonly slots: Readonly<Record<SlotName, PartAllele>>;
 }
 
@@ -107,6 +134,11 @@ export function brainAxis(brain: BrainGenes, axis: BrainAxis): number {
 
 export function brainSize(brain: BrainGenes): number {
   return BRAIN_SIZE[brain.tier];
+}
+
+/** Heart vigor: tunes pumping output within the tier (params[0]). */
+export function heartVigor(heart: HeartGenes): number {
+  return heart.params[0];
 }
 
 /** Structural replace of one slot; carries everything else through. */

@@ -72,6 +72,12 @@ Implication for the archetype list in [06](06-mutator-design.md): `biped`, `quad
 
 The prototype's second gallery (`demo_creatures.py` → `out/creatures.svg`) shows the posture sweep on one fixed genome; random populations of bipeds, monkey-types, quadrupeds, blobs, serpentines, and winged creatures; blob × biped splice children; and the serpentine × winged atavism row.
 
+### The heart: the supply organ (and a transplant target)
+
+Parts cost energy to run ([05](05-component-economy.md), [17](17-factions.md)); something has to pay for them. That organ is the **heart** — a genome-level gene (a quality **tier**: faint / steady / strong / titan, plus a **vigor** parameter that tunes output within the tier) that sets the body's **circulatory capacity**. A creature is **viable** only if its heart's capacity meets the sum of its parts' upkeep demand. This is deliberately a *separate* axis from schema validity: a structurally perfect genome can still be a non-viable corpse because its heart is too small for its body.
+
+The heart matters most under **surgical grafting** ([06](06-mutator-design.md)): sew on a limb the heart can't afford and the limb necrotizes (rejected) or, if the overload is severe, the patient dies on the table — but the part is always recovered, still usable. The heart is itself a **harvestable, transplantable part** (it rides the same six part axes so it can be expressed like any organ), which makes "grow a bigger heart, then hang the heavier arm" a real progression loop rather than a hard ceiling. Implemented in `packages/genome-core` (`heart` in the genome schema; `energy.viability()`; `surgery.ts`).
+
 ## The prototype (run it)
 
 [`/prototype/mutator/`](../prototype/mutator/) — pure-Python, no dependencies:

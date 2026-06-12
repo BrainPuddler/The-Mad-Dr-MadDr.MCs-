@@ -15,7 +15,7 @@ import {
   type Params5,
   type Params6,
 } from "./genome.js";
-import type { BrainTier } from "./genome.js";
+import type { BrainTier, HeartTier } from "./genome.js";
 import { validateGenome } from "./validate.js";
 
 export function toJson(g: Genome): string {
@@ -31,6 +31,7 @@ export function toJson(g: Genome): string {
     parentIds: g.parentIds,
     body: { plan: g.body.plan, params: g.body.params },
     brain: { tier: g.brain.tier, params: g.brain.params },
+    heart: { tier: g.heart.tier, params: g.heart.params },
     slots,
   });
 }
@@ -65,6 +66,7 @@ export function fromJson(json: string): Genome {
   // structural lift with no trust: validation decides what's acceptable
   const body = o.body as { plan: string; params: number[] };
   const brain = o.brain as { tier: BrainTier; params: number[] };
+  const heart = o.heart as { tier: HeartTier; params: number[] };
   const slotsRaw = (o.slots ?? {}) as Record<string, { family: string; params: number[] }>;
   const g: Genome = {
     genomeVersion: GENOME_VERSION,
@@ -72,6 +74,7 @@ export function fromJson(json: string): Genome {
     parentIds: Array.isArray(o.parentIds) ? (o.parentIds as string[]) : [],
     body: { plan: body?.plan, params: (body?.params ?? []) as unknown as Params4 },
     brain: { tier: brain?.tier, params: (brain?.params ?? []) as unknown as Params5 },
+    heart: { tier: heart?.tier, params: (heart?.params ?? []) as unknown as Params6 },
     slots: Object.fromEntries(
       Object.entries(slotsRaw).map(([k, v]) => [
         k,
