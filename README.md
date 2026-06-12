@@ -6,6 +6,7 @@ A real-time strategy game about building movie monsters. You are the nephew of D
 
 - [`packages/genome-core`](packages/genome-core/) — the TypeScript genome library (schema v2, the Mutate/Splice/Graft operators, energy upkeep, surgical grafting + the heart, validation, behavior expression, deterministic RNG). Engine- and graphics-independent by design.
 - [`packages/mutator-service`](packages/mutator-service/) — the Mutator API service ([docs/07](docs/07-mutator-server-architecture.md)): stateless HTTP, immutable genome rows, mandatory idempotency, server-seeded auditable RNG, signed rosters. Imports `genome-core` for all mutation math.
+- [`site/`](site/) — **The Lab**, a browser test bench deployed via GitHub Pages: spawn/mutate/splice specimens, chop parts off, transplant hearts, and read the data screen. Runs `genome-core` entirely client-side.
 
 ## Start here
 

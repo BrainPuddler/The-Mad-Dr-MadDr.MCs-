@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Lab — MadDr.MCs test bench</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>⚗️ THE LAB</h1>
+  <div class="sub">MadDr.MCs test bench — mutator &amp; chop shop · runs entirely in your browser</div>
+  <div class="header-right">
+    <span id="wallet" class="wallet">🩸 500</span>
+    <button id="btn-reset" class="danger small" title="Wipe the lab and start over">Reset lab</button>
+  </div>
+</header>
+
+<main>
+  <section id="roster-panel" class="panel">
+    <div class="panel-head">
+      <h2>Specimens</h2>
+      <button id="btn-spawn" class="primary">⚡ Spawn specimen</button>
+    </div>
+    <div id="roster" class="roster"></div>
+  </section>
+
+  <section id="screen-panel" class="panel">
+    <div class="panel-head"><h2>Data screen</h2></div>
+    <div id="actions" class="actions"></div>
+    <div id="screen" class="screen"><div class="empty">Spawn a specimen, then select it.</div></div>
+  </section>
+
+  <aside id="side-panel">
+    <section class="panel">
+      <div class="panel-head"><h2>Surgical tray</h2></div>
+      <div id="tray" class="tray"><div class="empty">Harvest a part to fill the tray.</div></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2>Lab notebook</h2></div>
+      <div id="log" class="log"></div>
+    </section>
+  </aside>
+</main>
+
+<footer>
+  All genetics run client-side via <code>@maddr/genome-core</code> (the same library the server uses).
+  Specimens persist in this browser only — the real persistent, anti-cheat lab is the Mutator service.
+</footer>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>
