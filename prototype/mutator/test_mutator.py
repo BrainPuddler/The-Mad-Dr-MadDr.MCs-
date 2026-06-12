@@ -2,9 +2,11 @@
 
 import random
 
-from genome import AXES, BODY_AXES, Genome, PartAllele
+from genome import (AXES, BODY_AXES, BRAIN_AXES, BRAIN_TIERS, BrainGenes,
+                    Genome, PartAllele)
 from catalog import BODY_PLANS, FAMILIES, homolog_of, families_in_class, express
 from operators import random_genome, mutate, splice, graft
+import command as cmd
 
 SLOT_SPEC = (("hand", "hand"), ("sensor", "sensor"), ("eye", "eye"), ("leg", "leg"))
 
@@ -24,8 +26,11 @@ def test_closure_and_bounds():
         assert g.body.plan in BODY_PLANS, g.body.plan
         assert len(g.body.params) == len(BODY_AXES)
         assert all(0.0 <= p <= 1.0 for p in g.body.params), g.body.params
+        assert g.brain.tier in BRAIN_TIERS, g.brain.tier
+        assert len(g.brain.params) == len(BRAIN_AXES)
+        assert all(0.0 <= p <= 1.0 for p in g.brain.params), g.brain.params
         pop.append(g)
-    print("ok: closure & bounds incl. body plans (340 genomes)")
+    print("ok: closure & bounds incl. body & brain (340 genomes)")
 
 
 def test_body_renderable():
@@ -95,6 +100,92 @@ def test_shared_axis_inheritance():
     print(f"ok: shared-axis inheritance (claw child {hits}/200 times)")
 
 
+def _brain(tier, command, will, temperament, guile):
+    return BrainGenes(tier, (command, will, temperament, guile))
+
+
+def test_brain_expression():
+    """Capacity rises with command & size; cost rises with will & size; radius with command."""
+    big = _brain("mastermind", 0.9, 0.1, 0.2, 0.2)
+    small = _brain("dim", 0.1, 0.1, 0.2, 0.2)
+    assert cmd.capacity(big) > cmd.capacity(small)
+    assert cmd.capacity(_brain("dim", 0.9, 0, 0, 0)) > cmd.capacity(_brain("dim", 0.1, 0, 0, 0))
+    assert cmd.cost(_brain("dim", 0, 0.9, 0, 0)) > cmd.cost(_brain("dim", 0, 0.1, 0, 0))
+    assert cmd.radius(_brain("dim", 0.9, 0, 0, 0)) > cmd.radius(_brain("dim", 0.1, 0, 0, 0))
+    print("ok: brain expression (capacity/cost/radius monotonic)")
+
+
+def test_loyalty_stable_when_matched():
+    """A strong commander + a docile, nearby subordinate stays controlled."""
+    rng = random.Random(1)
+    boss = cmd.Unit("boss", _brain("gifted", 0.85, 0.1, 0.1, 0.1), pos=(0, 0))
+    sub = cmd.Unit("sub", _brain("dim", 0.1, 0.10, 0.10, 0.1), pos=(1, 0))
+    cmd.assign(boss, sub, loyalty=0.85)
+    for _ in range(60):
+        cmd.step([boss, sub], rng)
+    assert sub.state == cmd.CONTROLLED and sub.commander is boss, (sub.state, sub.loyalty)
+    print(f"ok: loyalty stable when matched (final {sub.loyalty:.2f})")
+
+
+def test_rebellion_when_overstretched():
+    """A willful subordinate, far out of a weak commander's range, breaks free."""
+    rng = random.Random(2)
+    boss = cmd.Unit("boss", _brain("dim", 0.15, 0.1, 0.1, 0.1), pos=(0, 0))
+    sub = cmd.Unit("sub", _brain("gifted", 0.2, 0.95, 0.2, 0.1), pos=(40, 0))  # far, willful
+    cmd.assign(boss, sub, loyalty=0.7)
+    broke = False
+    for _ in range(40):
+        cmd.step([boss, sub], rng)
+        if sub.commander is None:
+            broke = True
+            break
+    assert broke and sub.state in (cmd.FERAL, cmd.REBEL_STATE), (sub.state, sub.loyalty)
+    print(f"ok: rebellion when overstretched ({sub.state})")
+
+
+def test_decapitation_shock():
+    """Killing a commander drops every direct subordinate's loyalty."""
+    rng = random.Random(3)
+    boss = cmd.Unit("boss", _brain("mastermind", 0.9, 0.1, 0.1, 0.1), pos=(0, 0))
+    subs = [cmd.Unit(f"s{i}", _brain("dim", 0.1, 0.2, 0.1, 0.1), pos=(1, i)) for i in range(3)]
+    for s in subs:
+        cmd.assign(boss, s, loyalty=0.85)
+    for _ in range(10):
+        cmd.step([boss] + subs, rng)
+    before = [s.loyalty for s in subs]
+    cmd.kill(boss, [boss] + subs, [])
+    assert all(s.loyalty < b for s, b in zip(subs, before)), (before, [s.loyalty for s in subs])
+    print("ok: decapitation shock (all subordinates' loyalty dropped)")
+
+
+def test_command_determinism():
+    """Same seed -> identical loyalty trajectory and final states."""
+    def trajectory(seed):
+        rng = random.Random(seed)
+        boss = cmd.Unit("boss", _brain("gifted", 0.6, 0.2, 0.4, 0.2), pos=(0, 0))
+        sub = cmd.Unit("sub", _brain("dim", 0.2, 0.6, 0.5, 0.3), pos=(8, 0))
+        cmd.assign(boss, sub)
+        out = []
+        for _ in range(50):
+            cmd.step([boss, sub], rng)
+            out.append(round(sub.loyalty, 6))
+        return out, sub.state
+    assert trajectory(9) == trajectory(9)
+    assert trajectory(9) != trajectory(10)
+    print("ok: command determinism")
+
+
+def test_brain_survives_breeding():
+    """Mutate and splice keep a valid brain on the genome."""
+    rng = random.Random(4)
+    g = random_genome(SLOT_SPEC, rng)
+    for i in range(60):
+        g = splice(g, random_genome(SLOT_SPEC, rng), rng) if i % 2 else mutate(g, rng)
+        assert g.brain.tier in BRAIN_TIERS
+        assert all(0.0 <= p <= 1.0 for p in g.brain.params)
+    print("ok: brain survives 60 breeding ops")
+
+
 if __name__ == "__main__":
     test_closure_and_bounds()
     test_homolog_grammar()
@@ -102,4 +193,10 @@ if __name__ == "__main__":
     test_canalization()
     test_shared_axis_inheritance()
     test_body_renderable()
+    test_brain_expression()
+    test_loyalty_stable_when_matched()
+    test_rebellion_when_overstretched()
+    test_decapitation_shock()
+    test_command_determinism()
+    test_brain_survives_breeding()
     print("all tests passed")

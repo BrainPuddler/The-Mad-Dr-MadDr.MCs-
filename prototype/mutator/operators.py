@@ -6,7 +6,8 @@ server-seeded determinism requirement (docs/07): same seed, same monster.
 
 import random
 
-from genome import AXES, BODY_AXES, BodyGenes, Genome, PartAllele
+from genome import (AXES, BODY_AXES, BRAIN_AXES, BRAIN_TIERS, BodyGenes,
+                    BrainGenes, Genome, PartAllele)
 from catalog import BODY_PLANS, FAMILIES, families_in_class, homolog_of
 
 
@@ -24,10 +25,30 @@ def random_body(rng: random.Random, plan=None) -> BodyGenes:
     return BodyGenes(plan, tuple(rng.random() for _ in BODY_AXES))
 
 
-def random_genome(slot_spec, rng: random.Random, plan=None) -> Genome:
+def random_brain(rng: random.Random, tier=None) -> BrainGenes:
+    tier = tier or rng.choice(BRAIN_TIERS)
+    return BrainGenes(tier, tuple(rng.random() for _ in BRAIN_AXES))
+
+
+def random_genome(slot_spec, rng: random.Random, plan=None, tier=None) -> Genome:
     """slot_spec: iterable of (slot_name, homolog_class)."""
     return Genome(tuple((s, random_allele(h, rng)) for s, h in slot_spec),
-                  random_body(rng, plan))
+                  random_body(rng, plan), random_brain(rng, tier))
+
+
+def _mutate_brain(brain, rng, rate, sigma, tier_shift=0.06):
+    if brain is None:
+        return None
+    tier = brain.tier
+    if rng.random() < tier_shift:                     # brain quality can drift one tier
+        i = BRAIN_TIERS.index(tier)
+        i = max(0, min(len(BRAIN_TIERS) - 1, i + rng.choice((-1, 1))))
+        tier = BRAIN_TIERS[i]
+    params = tuple(
+        _clamp(p + rng.gauss(0.0, sigma)) if rng.random() < rate else p
+        for p in brain.params
+    )
+    return BrainGenes(tier, params)
 
 
 def _mutate_body(body, rng, rate, sigma, plan_jump=0.03):
@@ -64,7 +85,8 @@ def mutate(g: Genome, rng: random.Random, rate=0.45, sigma=0.16,
             for p in allele.params
         )
         new.append((slot, PartAllele(family, params)))
-    return Genome(tuple(new), _mutate_body(g.body, rng, rate, sigma))
+    return Genome(tuple(new), _mutate_body(g.body, rng, rate, sigma),
+                  _mutate_brain(g.brain, rng, rate, sigma))
 
 
 def splice(a: Genome, b: Genome, rng: random.Random, noise=0.05) -> Genome:
@@ -90,7 +112,15 @@ def splice(a: Genome, b: Genome, rng: random.Random, noise=0.05) -> Genome:
             for pa, pb in zip(a.body.params, b.body.params)
         )
         body = BodyGenes(plan, bparams)
-    return Genome(tuple(new), body)
+    brain = None
+    if a.brain is not None and b.brain is not None:
+        tier = a.brain.tier if rng.random() < 0.5 else b.brain.tier
+        nparams = tuple(
+            _clamp(pa + rng.random() * (pb - pa) + rng.gauss(0.0, noise))
+            for pa, pb in zip(a.brain.params, b.brain.params)
+        )
+        brain = BrainGenes(tier, nparams)
+    return Genome(tuple(new), body, brain)
 
 
 def graft(g: Genome, slot: str, family: str, params: tuple) -> Genome:

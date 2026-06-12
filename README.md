@@ -28,6 +28,7 @@ Read [docs/01-vision.md](docs/01-vision.md), then [docs/02-gameplay-overview.md]
 | [13-lens-review.md](docs/13-lens-review.md) | Book of Lenses design review (uniqueness, fun, marketability) |
 | [14-ip-licensing.md](docs/14-ip-licensing.md) | Classic-monster IP analysis and art guardrails |
 | [15-part-genetics.md](docs/15-part-genetics.md) | Part genetics: recognizable yet breedable parts (with runnable prototype) |
+| [16-brains-behavior-command.md](docs/16-brains-behavior-command.md) | Brains → behavior: commanders, loyalty, and rebellion (with runnable prototype) |
 
 ## A note on the engine
 
