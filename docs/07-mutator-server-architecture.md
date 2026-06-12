@@ -2,6 +2,8 @@
 
 Status: Draft v0.1 · Pillars served: 1, 4 · Implements the normative genome schema and operators from [06-mutator-design.md](06-mutator-design.md).
 
+> **Implementation:** a first slice of this architecture is built in [`packages/mutator-service`](../packages/mutator-service/) — the REST surface, idempotency, server-seeded RNG, genome signing, the component economy, and the surgery (harvest/sew) endpoints, over a pluggable `Store` (in-memory today; Postgres maps directly onto the data model below). All mutation math comes from [`packages/genome-core`](../packages/genome-core/).
+
 ## Why a server
 
 1. **Cross-device consistency** (pillar 4): the lab state lives server-side, so phone and PC are two windows onto one laboratory — no sync conflicts to invent, nothing to merge.

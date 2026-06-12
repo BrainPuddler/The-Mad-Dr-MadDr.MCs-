@@ -2,7 +2,10 @@
 
 A real-time strategy game about building movie monsters. You are the nephew of Dr. Frankenstein, bequeathed his notebooks. From blood, bones, body parts, and brains you reanimate monsters and deploy them to conquer territory on a battlefield whose mana emitters wax and wane with the time of day (an Archon homage). Between battles, a server-side genetic algorithm — **the Mutator** — lets you breed, splice, and mutate your creations from your phone on the commute or your PC at home, El-Fish style. No two players ever field the same army.
 
-**Status: design + early code.** The complete design documentation lives in [`docs/`](docs/). The exploratory Python prototype lives in [`prototype/mutator/`](prototype/mutator/) (sample output: [gallery.svg](prototype/mutator/out/gallery.svg)). Production code begins with [`packages/genome-core`](packages/genome-core/) — the TypeScript genome library (schema v2, operators, validation, behavior expression; engine- and graphics-independent by design).
+**Status: design + early code.** The complete design documentation lives in [`docs/`](docs/). The exploratory Python prototype lives in [`prototype/mutator/`](prototype/mutator/) (sample output: [gallery.svg](prototype/mutator/out/gallery.svg)). Production code has begun:
+
+- [`packages/genome-core`](packages/genome-core/) — the TypeScript genome library (schema v2, the Mutate/Splice/Graft operators, energy upkeep, surgical grafting + the heart, validation, behavior expression, deterministic RNG). Engine- and graphics-independent by design.
+- [`packages/mutator-service`](packages/mutator-service/) — the Mutator API service ([docs/07](docs/07-mutator-server-architecture.md)): stateless HTTP, immutable genome rows, mandatory idempotency, server-seeded auditable RNG, signed rosters. Imports `genome-core` for all mutation math.
 
 ## Start here
 

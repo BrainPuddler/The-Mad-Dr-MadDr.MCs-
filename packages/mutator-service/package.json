@@ -1,0 +1,22 @@
+{
+  "name": "@maddr/mutator-service",
+  "version": "0.1.0",
+  "description": "The Mutator API service (docs/07): the server-side authority over genomes. Stateless HTTP over a pluggable store; immutable genome rows with parentIds lineage, mandatory idempotency, server-seeded auditable RNG, and signed rosters for match servers. Imports @maddr/genome-core for all mutation math; no graphics, no game engine.",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/src/server.js",
+    "test": "tsc && node --test dist/tests/*.test.js"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@maddr/genome-core": "file:../genome-core"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}
