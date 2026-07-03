@@ -1,0 +1,12 @@
+.git
+.gitignore
+node_modules
+packages/genome-core/node_modules
+packages/genome-core/dist
+packages/mutator-service/node_modules
+packages/mutator-service/dist
+prototype
+site
+docs
+*.md
+render.yaml

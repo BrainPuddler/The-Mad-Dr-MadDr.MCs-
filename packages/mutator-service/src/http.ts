@@ -13,6 +13,21 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { ServiceError, badRequest, unauthorized } from "./errors.js";
 import type { MutatorService } from "./service.js";
 
+// Allowed browser origins for CORS (comma-separated in env).
+const CORS_ORIGINS = new Set(
+  (process.env.CORS_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+);
+
+function setCors(req: IncomingMessage, res: ServerResponse): void {
+  const origin = req.headers["origin"] as string | undefined;
+  if (!origin || !CORS_ORIGINS.has(origin)) return;
+  res.setHeader("access-control-allow-origin", origin);
+  res.setHeader("vary", "Origin");
+  res.setHeader("access-control-allow-methods", "GET, POST, PUT, OPTIONS");
+  res.setHeader("access-control-allow-headers", "content-type, x-account-id");
+  res.setHeader("access-control-max-age", "86400");
+}
+
 type Handler = (ctx: Ctx) => unknown | Promise<unknown>;
 interface Route {
   method: string;
@@ -112,6 +127,9 @@ export function createApp(service: MutatorService): ReturnType<typeof createServ
   );
 
   return createServer((req, res) => {
+    setCors(req, res);
+    if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
+    if (req.url === "/health") { send(res, 200, { ok: true }); return; }
     void handle(req, res, routes, service);
   });
 }

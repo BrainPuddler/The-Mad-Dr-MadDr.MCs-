@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: maddr-mutator
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CORS_ORIGINS
+        value: https://brainpuddler.github.io
+      - key: SIGNING_KEY
+        generateValue: true
+      - key: INTERNAL_KEY
+        generateValue: true
