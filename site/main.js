@@ -15,6 +15,7 @@ import {
   originOf, isVestigial, homologOf, brainSize, bodyAxis, brainAxis, heartVigor,
   capacity as controlCapacity, controlCost, controlRadius, berserkThreshold,
 } from "./lib/index.js";
+import { initRenderer, updateGenome, destroyRenderer } from "./creature-renderer.js";
 
 const COSTS = { spawn: 0, mutate: 10, splice: 20, surgery: 5 };
 const REFUND = 0.75;
@@ -160,6 +161,7 @@ function doSew(itemId) {
 
 function doReset() {
   if (!confirm("Wipe the lab? All specimens, tray parts, and the notebook are lost.")) return;
+  destroyRenderer(); _lastPortraitId = null;
   state = { creatures: [], tray: [], blood: 500, log: [], seq: 0, selected: null };
   log("🧹 The lab is scrubbed clean. Fresh slab, fresh blood.");
   save(); render();
@@ -179,9 +181,48 @@ function bar(x) { return `<span class="bar"><i style="width:${Math.round(x * 100
 
 // ---- render ----------------------------------------------------------------------
 
+let _lastPortraitId = null;
+
 function render() {
   document.getElementById("wallet").textContent = `🩸 ${state.blood}`;
   renderRoster(); renderActions(); renderScreen(); renderTray(); renderLog();
+  renderPortrait();
+}
+
+function renderPortrait() {
+  const wrap   = document.getElementById("portrait-wrap");
+  const canvas = document.getElementById("portrait");
+  const label  = document.getElementById("portrait-label");
+  const c = selected();
+  if (!c) {
+    destroyRenderer();
+    _lastPortraitId = null;
+    wrap.style.display = "none";
+    label.innerHTML = "";
+    return;
+  }
+  wrap.style.display = "flex";
+  const g = c.genome;
+  const v = viability(g);
+  const vClass = !c.alive ? "bad" : v.state === "viable" ? "ok" : v.state === "strained" ? "warn" : "bad";
+  const parts = SLOT_NAMES
+    .filter((s) => !isVestigial(g.slots[s].family))
+    .map((s) => g.slots[s].family.replace(/_/g, " "))
+    .join(" · ") || "—";
+
+  label.innerHTML = `
+    <div class="pl-name">${c.alive ? "" : "💀 "}${esc(c.name)}</div>
+    <div class="pl-plan">${esc(g.body.plan)} · ${esc(g.brain.tier)} brain · ${esc(g.heart.tier)} heart</div>
+    <div class="pl-stat ${vClass}">${c.alive ? v.state.toUpperCase() : "DEAD ON THE TABLE"}</div>
+    <div class="pl-stat">load <span>${circulatoryLoad(g).toFixed(1)}</span> / cap <span>${heartCapacity(g).toFixed(1)}</span></div>
+    <div class="pl-stat" style="max-width:200px;line-height:1.5">${esc(parts)}</div>`;
+
+  if (c.id !== _lastPortraitId) {
+    initRenderer(canvas, g);
+    _lastPortraitId = c.id;
+  } else {
+    updateGenome(g);
+  }
 }
 
 function renderRoster() {

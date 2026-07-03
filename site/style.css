@@ -74,6 +74,24 @@ select {
 .badge.biotech { color: var(--ichor); }
 .badge.stump { color: var(--dead); }
 
+#portrait-wrap {
+  display: none; align-items: center; gap: 16px;
+  padding: 12px 16px; background: #060d0b; border-bottom: 1px solid var(--line);
+}
+#portrait {
+  width: 240px; height: 288px;   /* 3× the 80×96 native canvas */
+  image-rendering: pixelated; image-rendering: crisp-edges;
+  flex-shrink: 0;
+}
+#portrait-label {
+  font-size: 11px; color: var(--dim); line-height: 1.7;
+  display: flex; flex-direction: column; gap: 4px;
+}
+#portrait-label .pl-name { font-size: 15px; color: var(--ink); font-weight: bold; letter-spacing: 1px; }
+#portrait-label .pl-plan { color: var(--acid); text-transform: uppercase; letter-spacing: 2px; font-size: 10px; }
+#portrait-label .pl-stat { color: var(--dim); }
+#portrait-label .pl-stat span { color: var(--ink); }
+
 .actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); align-items: center; }
 .actions .group { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border: 1px dashed var(--line); border-radius: 6px; }
 .actions .group .lbl { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; }
