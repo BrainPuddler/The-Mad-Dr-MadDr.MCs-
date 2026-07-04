@@ -407,7 +407,7 @@ function renderPortrait() {
     <div class="pl-plan">${esc(g.body.plan)} · ${esc(g.brain.tier)} brain · ${esc(g.heart.tier)} heart</div>
     <div class="pl-stat ${vClass}">${c.alive ? v.state.toUpperCase() : "DEAD ON THE TABLE"}</div>
     <div class="pl-stat">load <span>${circulatoryLoad(g).toFixed(1)}</span> / cap <span>${heartCapacity(g.heart).toFixed(1)}</span></div>
-    <div class="pl-stat" style="max-width:200px;line-height:1.5">${esc(parts)}</div>`;
+    <div class="pl-stat" style="line-height:1.5">${esc(parts)}</div>`;
   if (c.id !== _lastPortraitId) { initRenderer(canvas, g); _lastPortraitId = c.id; }
   else updateGenome(g);
 }
