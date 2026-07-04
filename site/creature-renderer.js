@@ -102,13 +102,25 @@ function mat4mul(a, b) {
 }
 
 // ── mesh builder ────────────────────────────────────────────────────────────
-// Interleaved: pos(3) normal(3) colour(3, 0..1) gloss(1) emissive(1) = 11
+// Interleaved: pos(3) normal(3) colour(3, 0..1) gloss(1) emissive(1)
+// anim(4) = 15 floats.
+//
+// The anim channel drives the idle animation in the vertex shader:
+//   x — breath weight (displace along the normal with the breath cycle)
+//   y — >0: wing-flap weight (vertical sine) / <0: blink drop (lids)
+//   z — sway weight (gentle x/z pendulum, tentacles & tails)
+//   w — sway phase offset (staggers limbs; makes waves travel)
+
+const ANIM0 = [0, 0, 0, 0];
 
 class MeshB {
-  constructor() { this.v = []; this.idx = []; this.glows = []; }
+  constructor() { this.v = []; this.idx = []; this.glows = []; this.anim = ANIM0; }
+  setAnim(a) { this.anim = a; }
   vert(p, n, c, g, e) {
-    this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], c[0]/255, c[1]/255, c[2]/255, g, e);
-    return this.v.length / 11 - 1;
+    const a = this.anim;
+    this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], c[0]/255, c[1]/255, c[2]/255, g, e,
+      a[0], a[1], a[2], a[3]);
+    return this.v.length / 15 - 1;
   }
   tri(a, b, c) { this.idx.push(a, b, c); }
   quad(a, b, c, d) { this.idx.push(a, b, c, a, c, d); }
@@ -137,8 +149,10 @@ function ellipsoid(mb, c, r, col, gloss = 0.25, emis = 0, seg = 14, colorFn = nu
       mb.quad(rows[i][j], rows[i][j+1], rows[i+1][j+1], rows[i+1][j]);
 }
 
-/** Swept tube along path with per-point radii; parallel-transport frames. */
-function tube(mb, path, radii, col, gloss = 0.25, emis = 0, sides = 10, caps = 3, colorFn = null) {
+/** Swept tube along path with per-point radii; parallel-transport frames.
+ * animFn(t) may vary the anim channel along the path (traveling sway). */
+function tube(mb, path, radii, col, gloss = 0.25, emis = 0, sides = 10, caps = 3, colorFn = null, animFn = null) {
+  const prevAnim = mb.anim;
   // sanitize path: drop zero-length steps, floor radii
   const P = [path[0]];
   for (let i = 1; i < path.length; i++)
@@ -154,13 +168,15 @@ function tube(mb, path, radii, col, gloss = 0.25, emis = 0, sides = 10, caps = 3
 
   const rows = [];
   for (let i = 0; i < P.length; i++) {
+    const t = i / (P.length - 1);
+    if (animFn) mb.setAnim(animFn(t));
     n = V.norm(V.sub(n, V.scale(T[i], V.dot(n, T[i]))));   // transport
     const b = V.cross(T[i], n);
     const row = [];
     for (let j = 0; j <= sides; j++) {
       const ph = (j / sides) * Math.PI * 2;
       const dir = V.add(V.scale(n, Math.cos(ph)), V.scale(b, Math.sin(ph)));
-      const cc = colorFn ? colorFn(i / (P.length - 1)) : col;
+      const cc = colorFn ? colorFn(t) : col;
       row.push(mb.vert(V.add(P[i], V.scale(dir, R[i])), dir, cc, gloss, emis));
     }
     rows.push(row);
@@ -172,11 +188,13 @@ function tube(mb, path, radii, col, gloss = 0.25, emis = 0, sides = 10, caps = 3
   // caps (bit 1 = start, bit 2 = end)
   for (const [on, k, dirSign] of [[caps & 1, 0, -1], [caps & 2, P.length - 1, 1]]) {
     if (!on) continue;
+    if (animFn) mb.setAnim(animFn(k ? 1 : 0));
     const nrm = V.scale(T[k], dirSign);
     const cv = mb.vert(P[k], nrm, colorFn ? colorFn(k ? 1 : 0) : col, gloss, emis);
     for (let j = 0; j < sides; j++)
       dirSign > 0 ? mb.tri(cv, rows[k][j], rows[k][j+1]) : mb.tri(cv, rows[k][j+1], rows[k][j]);
   }
+  mb.setAnim(prevAnim);
 }
 
 /** Curved horn/claw: cone bending toward `bend` (a world-space offset). */
@@ -299,16 +317,20 @@ function planTetrapod(mb, o) {
   const hR = [2.0 + 0.5*o.headScale, 1.85 + 0.6*o.headScale, 1.95 + 0.4*o.headScale];
   const hC = [0, tC[1] + tR[1] - 0.35 + hR[1] * 0.72, 0.25];
 
+  const BREATH_T = [0.09, 0, 0, 0], BREATH_H = [0.04, 0, 0, 0];
+  mb.setAnim(BREATH_T);
   ellipsoid(mb, tC, tR, o.skin, 0.28, 0, 16, o.skinFn);
+  stitchSeam(mb, 0, tC[1] + 0.4, tR[0], tR[2], tC, tR);
+  mb.setAnim(BREATH_H);
   ellipsoid(mb, hC, hR, o.skin, 0.3, 0, 16, o.skinFn);
   frankenDetails(mb, hC, hR, o.heartLevel, o.skin);
-  stitchSeam(mb, 0, tC[1] + 0.4, tR[0], tR[2], tC, tR);
+  mb.setAnim(ANIM0);
 
   return {
     hand:   { p: [tR[0]*0.88, tC[1] + tR[1]*0.42, 0.2], mirror: true },
     leg:    { p: [tR[0]*0.42, o.legLen, 0], mirror: true, len: o.legLen },
-    sensor: { p: [hR[0]*0.52, hC[1] + hR[1]*0.82, 0], mirror: true, out: 1 },
-    eye:    { p: [0, hC[1] + hR[1]*0.18, hC[2] + hR[2]*0.92], mirror: false, faceR: hR[0] },
+    sensor: { p: [hR[0]*0.52, hC[1] + hR[1]*0.82, 0], mirror: true, out: 1, anim: BREATH_H },
+    eye:    { p: [0, hC[1] + hR[1]*0.18, hC[2] + hR[2]*0.92], mirror: false, faceR: hR[0], anim: BREATH_H },
   };
 }
 
@@ -316,19 +338,24 @@ function planBlob(mb, o) {
   const dr = 3.0 + 1.3*o.bulk;
   const dR = [dr, 2.5 + 1.0*o.bulk, dr];
   const dC = [0, dR[1]*0.9, 0];
+  const JELLY = [0.13, 0, 0.10, 0.7];
+  mb.setAnim(JELLY);
   ellipsoid(mb, dC, dR, o.skin, 0.34, 0, 18, o.skinFn);
   // drooping skirt
+  mb.setAnim([0.05, 0, 0.05, 0.7]);
   ellipsoid(mb, [0, 0.62, 0], [dr*1.14, 0.85, dr*1.14], sh(o.skin, 0.92), 0.3, 0, 12, o.skinFn);
   // surface boils
+  mb.setAnim(JELLY);
   for (let a = 0; a < 6; a++) {
     const th = a * 1.047 + 0.4;
     ellipsoid(mb, [Math.cos(th)*dr*0.9, 1.1 + (a%3)*0.5, Math.sin(th)*dr*0.9],
       [0.5, 0.42, 0.5], sh(o.skin, 0.88), 0.4, 0, 6);
   }
+  mb.setAnim(ANIM0);
   return {
-    hand:   { p: [dr*0.92, dC[1] + 0.4, 0], mirror: true },
-    sensor: { p: [dr*0.5, dC[1] + dR[1]*0.85, 0], mirror: true, out: 1 },
-    eye:    { p: [0, dC[1] + dR[1]*0.35, dR[2]*0.9], mirror: false, faceR: dr*0.8 },
+    hand:   { p: [dr*0.92, dC[1] + 0.4, 0], mirror: true, anim: JELLY },
+    sensor: { p: [dr*0.5, dC[1] + dR[1]*0.85, 0], mirror: true, out: 1, anim: JELLY },
+    eye:    { p: [0, dC[1] + dR[1]*0.35, dR[2]*0.9], mirror: false, faceR: dr*0.8, anim: JELLY },
   };
 }
 
@@ -355,9 +382,14 @@ function planSerpentine(mb, o) {
     ]);
     radii.push(baseR * (1 - 0.42 * s));
   }
+  // sway travels up the coil and grows toward the raised neck
+  const swayFn = (t) => [0.02 + 0.02*t, 0, 0.5*t*t, t*5.2];
+  const SWAY_H = [0.03, 0, 0.5, 5.2];   // the head rides the neck tip
   tube(mb, path, radii, o.skin, 0.3, 0, 12, 3,
-    (t) => sh(o.skin, 0.84 + 0.16 * Math.sin(t * 40) * 0.5 + 0.16));  // belly-band shimmer
+    (t) => sh(o.skin, 0.84 + 0.16 * Math.sin(t * 40) * 0.5 + 0.16),   // belly-band shimmer
+    swayFn);
 
+  mb.setAnim(SWAY_H);
   const hC = [0.35, headY + 0.9, 1.25];
   const hR = [1.5 + 0.4*o.headScale, 1.3 + 0.4*o.headScale, 1.7];
   ellipsoid(mb, hC, hR, o.skin, 0.3, 0, 14, o.skinFn);
@@ -370,11 +402,12 @@ function planSerpentine(mb, o) {
   for (const s of [-1, 1])
     curvedCone(mb, [hC[0] + s*hR[0]*0.3, hC[1] - hR[1]*0.42, mz], [0, -1, 0.1],
       0.6, 0.13, [0, 0, 0.04], CLAW, 0.6);
+  mb.setAnim(ANIM0);
 
   return {
-    hand:   { p: [hC[0] + 1.0, headY - 1.3, 0.9], mirror: true, tiny: true },
-    sensor: { p: [hC[0] + 0.5, hC[1] + hR[1]*0.8, hC[2] - 0.3], mirror: false, out: 1 },
-    eye:    { p: [hC[0], hC[1] + hR[1]*0.25, hC[2] + hR[2]*0.85], mirror: false, faceR: hR[0] },
+    hand:   { p: [hC[0] + 1.0, headY - 1.3, 0.9], mirror: true, tiny: true, anim: SWAY_H },
+    sensor: { p: [hC[0] + 0.5, hC[1] + hR[1]*0.8, hC[2] - 0.3], mirror: false, out: 1, anim: SWAY_H },
+    eye:    { p: [hC[0], hC[1] + hR[1]*0.25, hC[2] + hR[2]*0.85], mirror: false, faceR: hR[0], anim: SWAY_H },
   };
 }
 
@@ -383,9 +416,13 @@ function planWinged(mb, o) {
   const bC = [0, o.legLen + bR[1]*0.85, 0];
   const hR = [2.05 + 0.4*o.headScale, 1.9 + 0.5*o.headScale, 1.95];
   const hC = [0, bC[1] + bR[1] - 0.3 + hR[1]*0.7, 0.2];
+  const BREATH_B = [0.07, 0, 0, 0], BREATH_H = [0.035, 0, 0, 0];
+  mb.setAnim(BREATH_B);
   ellipsoid(mb, bC, bR, o.skin, 0.28, 0, 14, o.skinFn);
+  mb.setAnim(BREATH_H);
   ellipsoid(mb, hC, hR, o.skin, 0.3, 0, 16, o.skinFn);
   frankenDetails(mb, hC, hR, o.heartLevel, o.skin);
+  mb.setAnim(ANIM0);
 
   // bat wings: membrane grid + bone leading edge + finger struts
   const span = 4.6 + 3.6 * o.limb;
@@ -404,6 +441,7 @@ function planWinged(mb, o) {
       const row = [];
       for (let iv = 0; iv <= nV; iv++) {
         const v = iv / nV;
+        mb.setAnim([0, 0.6 * u * u + 0.05 * u, 0.05 * u, u * 1.6 + (s > 0 ? 0 : 0.4)]);
         row.push(mb.vert(
           [lx, ly - v * chord, lz + v * 0.35],
           [0, 0.25, s > 0 ? 0.97 : 0.97],   // soft fake normal; shader two-sides it
@@ -411,23 +449,27 @@ function planWinged(mb, o) {
       }
       grid.push(row);
     }
+    mb.setAnim(ANIM0);
     for (let iu = 0; iu < nU; iu++)
       for (let iv = 0; iv < nV; iv++)
         mb.quad(grid[iu][iv], grid[iu][iv+1], grid[iu+1][iv+1], grid[iu+1][iv]);
-    tube(mb, lead, lead.map((_, i) => 0.24 * (1 - i / lead.length) + 0.08), BONDK, 0.35, 0, 7);
+    const wingAnim = (t) => [0, 0.6 * t * t + 0.05 * t, 0.05 * t, t * 1.6 + (s > 0 ? 0 : 0.4)];
+    tube(mb, lead, lead.map((_, i) => 0.24 * (1 - i / lead.length) + 0.08), BONDK, 0.35, 0, 7, 3, null, wingAnim);
     for (const fu of [0.45, 0.75]) {
       const k = Math.round(fu * nU);
       const a = lead[k];
       const chord = (2.5 * (1 - 0.5 * fu) + 0.5);
+      mb.setAnim(wingAnim(fu));
       tube(mb, [a, [a[0], a[1] - chord, a[2] + 0.35]], [0.12, 0.05], BONDK, 0.3, 0, 6);
     }
+    mb.setAnim(ANIM0);
   }
 
   return {
     hand:   { p: [bR[0]*0.95, bC[1] + 0.3, 0.35], mirror: true, tiny: true },
     leg:    { p: [0.85, o.legLen, 0], mirror: true, len: o.legLen },
-    sensor: { p: [hR[0]*0.5, hC[1] + hR[1]*0.8, 0], mirror: true, out: 1 },
-    eye:    { p: [0, hC[1] + hR[1]*0.2, hC[2] + hR[2]*0.9], mirror: false, faceR: hR[0] },
+    sensor: { p: [hR[0]*0.5, hC[1] + hR[1]*0.8, 0], mirror: true, out: 1, anim: BREATH_H },
+    eye:    { p: [0, hC[1] + hR[1]*0.2, hC[2] + hR[2]*0.9], mirror: false, faceR: hR[0], anim: BREATH_H },
   };
 }
 
@@ -443,6 +485,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
   const [len=0.5, girth=0.5, taper=0.5, curl=0.5, count=0.5, orn=0.5] = params;
   const S = [side * sock.p[0], sock.p[1], sock.p[2]];
   const scale = sock.tiny ? 0.62 : 1;
+  mb.setAnim(sock.anim ?? ANIM0);   // parts ride whatever their mount does
 
   switch (family) {
     // ---- hands ----
@@ -481,7 +524,8 @@ function buildPart(mb, slot, family, params, side, sock, o) {
         ]);
       }
       tube(mb, path, path.map((_, i) =>
-        baseR * (1 - (i/10) * clamp(0.35 + 0.6*taper, 0.35, 0.92))), o.skin, 0.3, 0, 9, 3);
+        baseR * (1 - (i/10) * clamp(0.35 + 0.6*taper, 0.35, 0.92))), o.skin, 0.3, 0, 9, 3,
+        null, (t) => [0, 0, 0.1 + 0.45*t*t, side*2 + t*3.2]);   // wave travels to the tip
       break;
     }
     case 'rifle_arm': {
@@ -564,23 +608,29 @@ function buildPart(mb, slot, family, params, side, sock, o) {
         eyeball(mb, [S[0] + ex*sock.faceR, S[1] + ey*1.4, S[2] - Math.abs(ex)*0.35],
           R * (i === 0 ? 1.15 : 0.9), o.skin, i === 0 ? 0.55 : 0.3);
       }
-      // angry V-brows over the cluster
+      // angry V-brows over the cluster; they knit down on each blink
+      const bBase = mb.anim;
+      mb.setAnim([bBase[0], -0.26, bBase[2], bBase[3]]);
       for (const s of [-1, 1])
         tube(mb, [
           [S[0] + s*sock.faceR*0.62, S[1] + 1.05, S[2] - 0.05],
           [S[0] + s*0.12,            S[1] + 0.58, S[2] + 0.14],
         ], [0.17, 0.13], sh(o.skin, 0.55), 0.25, 0, 6);
+      mb.setAnim(bBase);
       break;
     }
     case 'cyclops_eye': {
       const R = 0.85 + 0.55*girth;
       eyeball(mb, S, R, o.skin, 0.7);
-      // one heavy scowling unibrow
+      // one heavy scowling unibrow; knits down on each blink
+      const uBase = mb.anim;
+      mb.setAnim([uBase[0], -R * 0.3, uBase[2], uBase[3]]);
       tube(mb, [
         [S[0] - R*1.05, S[1] + R*0.72, S[2] - 0.15],
         [S[0],          S[1] + R*0.98, S[2] + 0.05],
         [S[0] + R*1.05, S[1] + R*0.72, S[2] - 0.15],
       ], [0.2, 0.26, 0.2], sh(o.skin, 0.5), 0.25, 0, 7);
+      mb.setAnim(uBase);
       break;
     }
     case 'stalk_eyes': {
@@ -654,23 +704,34 @@ function buildPart(mb, slot, family, params, side, sock, o) {
   }
 }
 
-/** Chunky little arm from shoulder to a hanging wrist; returns wrist pos. */
+/** Chunky little arm from shoulder to a hanging wrist; returns wrist pos.
+ * The arm dangles with a slight pendulum sway that grows toward the hand;
+ * the builder's anim state is left at the wrist value so whatever the
+ * caller attaches next (claws, gun, lance) swings along with it. */
 function armDrop(mb, S, side, armR, scale, o) {
   const elbow = [S[0] + side*0.9*scale, S[1] - 1.1*scale, S[2] + 0.15];
   const wrist = [S[0] + side*1.15*scale, S[1] - 2.3*scale, S[2] + 0.45];
+  const phase = side * 1.3 + 2.0;
+  const swing = (t) => [0, 0, 0.04 + 0.11 * t, phase];
   tube(mb, [S, elbow, wrist], [armR*1.2, armR, armR*0.85],
-    o.skinFn ? o.skin : CHITIN, 0.3, 0, 9, 1, o.skinFn ? null : undefined);
+    o.skinFn ? o.skin : CHITIN, 0.3, 0, 9, 1, null, swing);
+  mb.setAnim(swing(1));
   return wrist;
 }
 
 /** Glossy toy eye with a hooded, skin-coloured upper lid. `hood` 0..1 sets
- * how heavily the lid droops — the b-movie menace dial. */
+ * how heavily the lid droops — the b-movie menace dial. The lid carries a
+ * blink weight: the shader slides it down over the eyeball on uBlink. */
 function eyeball(mb, c, r, skin, hood = 0.4) {
+  const base = mb.anim;
   ellipsoid(mb, c, [r, r, r], EYEWH, 0.85, 0, 10);
   ellipsoid(mb, [c[0], c[1], c[2] + r*0.72], [r*0.42, r*0.42, r*0.3], PUPIL, 0.95, 0, 8);
-  if (hood > 0)
+  if (hood > 0) {
+    mb.setAnim([base[0], -r * 1.05, base[2], base[3]]);
     ellipsoid(mb, [c[0], c[1] + r*(0.62 - 0.28*hood), c[2] - r*0.10],
       [r*1.07, r*(0.42 + 0.34*hood), r*1.03], skin, 0.3, 0, 8);
+    mb.setAnim(base);
+  }
 }
 
 function ringStitch(mb, c, r) {
@@ -844,12 +905,21 @@ function buildBackground() {
 const VS_CREATURE = `
 attribute vec3 aPos, aNor, aCol;
 attribute vec2 aMat;
+attribute vec4 aAnim;
 uniform mat4 uPV;
 uniform float uCos, uSin;
+uniform float uTime, uBreath, uFlap, uBlink;
 varying vec3 vNor, vCol, vPos;
 varying vec2 vMat;
 void main() {
-  vec3 p = vec3(aPos.x*uCos - aPos.z*uSin, aPos.y, aPos.x*uSin + aPos.z*uCos);
+  vec3 lp = aPos;
+  lp += aNor * (aAnim.x * uBreath);                          // breathing
+  lp.y += max(aAnim.y, 0.0) * uFlap;                         // wing flap
+  lp.y -= max(-aAnim.y, 0.0) * uBlink;                       // eyelid blink
+  float sway = aAnim.z * sin(uTime * 1.4 + aAnim.w);         // pendulum sway
+  lp.x += sway * 0.6;
+  lp.z += aAnim.z * cos(uTime * 1.1 + aAnim.w) * 0.35;
+  vec3 p = vec3(lp.x*uCos - lp.z*uSin, lp.y, lp.x*uSin + lp.z*uCos);
   vec3 n = vec3(aNor.x*uCos - aNor.z*uSin, aNor.y, aNor.x*uSin + aNor.z*uCos);
   vNor = n; vCol = aCol; vMat = aMat; vPos = p;
   gl_Position = uPV * vec4(p, 1.0);
@@ -929,6 +999,37 @@ let _frame = 0;
 let _theta = 0;
 const ROT_SPEED = 0.008;
 const FLASH_CYCLE = 900;
+
+// Natural blink cadence: snap shut (~4 frames), brief hold, ease open
+// (~10 frames), at randomized 2–6 s intervals with occasional double
+// blinks. Deterministic per creature (seeded from its mesh).
+const _blink = { next: 130, phase: -1, t: 0, seed: 1 };
+
+function blinkRnd() {
+  _blink.seed = (_blink.seed * 1103515245 + 12345) >>> 0;
+  return _blink.seed / 4294967296;
+}
+
+function blinkLevel() {
+  const B = _blink;
+  if (B.phase < 0) {
+    if (--B.next <= 0) { B.phase = 0; B.t = 0; }
+    return 0;
+  }
+  const t = B.t++;
+  if (t < 4) {                     // snap shut
+    const x = t / 4;
+    return x * x;
+  }
+  if (t < 7) return 1;             // hold
+  if (t < 17) {                    // ease open
+    const x = 1 - (t - 7) / 10;
+    return x * x * (3 - 2 * x);
+  }
+  B.phase = -1;
+  B.next = blinkRnd() < 0.25 ? 20 : 120 + Math.floor(blinkRnd() * 240);
+  return 0;
+}
 
 function makeProgram(gl, vsSrc, fsSrc) {
   const mk = (type, src) => {
@@ -1020,9 +1121,14 @@ function uploadCreature(genome) {
   R.glowCount = mb.glows.length;
 
   let mr = 2.5;
-  for (let i = 0; i < mb.v.length; i += 11)
+  for (let i = 0; i < mb.v.length; i += 15)
     mr = Math.max(mr, Math.hypot(mb.v[i], mb.v[i + 2]));
   R.maxR = Math.min(mr, 13);
+
+  // per-creature blink rhythm
+  _blink.seed = (mb.v.length * 2654435761) >>> 0 || 1;
+  _blink.next = 60 + Math.floor(blinkRnd() * 180);
+  _blink.phase = -1;
 }
 
 function drawQuad(x0, y0, x1, y1, u0, v0, u1, v1, tex, color, useTex) {
@@ -1077,19 +1183,26 @@ function drawFrame() {
   const p = R.progC;
   gl.useProgram(p);
   gl.bindBuffer(gl.ARRAY_BUFFER, R.meshBuf);
-  const stride = 44;
+  const stride = 60;
   const attr = (name, size, off) => {
     const a = gl.getAttribLocation(p, name);
     gl.enableVertexAttribArray(a);
     gl.vertexAttribPointer(a, size, gl.FLOAT, false, stride, off);
   };
-  attr('aPos', 3, 0); attr('aNor', 3, 12); attr('aCol', 3, 24); attr('aMat', 2, 36);
+  attr('aPos', 3, 0); attr('aNor', 3, 12); attr('aCol', 3, 24); attr('aMat', 2, 36); attr('aAnim', 4, 44);
+  const t = _frame / 60;
+  const breathRaw = (Math.sin(t * 1.65) + 1) / 2;
+  const breath = breathRaw * breathRaw * (3 - 2 * breathRaw);   // eased in-out
   gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uPV'), false, R.pv);
   gl.uniform1f(gl.getUniformLocation(p, 'uCos'), Math.cos(_theta));
   gl.uniform1f(gl.getUniformLocation(p, 'uSin'), Math.sin(_theta));
   gl.uniform3fv(gl.getUniformLocation(p, 'uEye'), R.eye);
   gl.uniform1f(gl.getUniformLocation(p, 'uFlash'), flash);
   gl.uniform1f(gl.getUniformLocation(p, 'uPulse'), pulse);
+  gl.uniform1f(gl.getUniformLocation(p, 'uTime'), t);
+  gl.uniform1f(gl.getUniformLocation(p, 'uBreath'), breath);
+  gl.uniform1f(gl.getUniformLocation(p, 'uFlap'), Math.sin(t * 2.42));
+  gl.uniform1f(gl.getUniformLocation(p, 'uBlink'), blinkLevel());
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, R.idxBuf);
   gl.drawElements(gl.TRIANGLES, R.idxCount, gl.UNSIGNED_SHORT, 0);
 
