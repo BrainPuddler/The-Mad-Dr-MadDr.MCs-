@@ -208,18 +208,32 @@ function tube(mb, path, radii, col, gloss = 0.25, emis = 0, sides = 10, caps = 3
   mb.setAnim(prevAnim);
 }
 
-/** Mad-science joint hardware: a brass socket flange with iron bolt studs,
- * placed where a part clicks into the body. Oriented along `axis`. */
-function boltedSocket(mb, c, axis, R) {
-  const a = V.norm(axis);
-  const p0 = V.sub(c, V.scale(a, R * 0.24)), p1 = V.add(c, V.scale(a, R * 0.24));
-  tube(mb, [p0, p1], [R * 1.18, R * 1.18], BRASS, 0.85, 0, 12);
-  let n = Math.abs(a[1]) < 0.9 ? V.norm(V.cross([0, 1, 0], a)) : V.norm(V.cross([1, 0, 0], a));
-  const b = V.cross(a, n);
+/** Mad-science joint hardware. The linkage, body outward:
+ *  1. an IRON BALL seated in the body at the mount point,
+ *  2. a rod running out along the limb's own axis,
+ *  3. a BRASS COLLAR clamped around the limb — slightly bigger than the
+ *     limb, at the limb's angle, studded with six radial iron bolts.
+ * `limbR` is the limb's actual radius at the joint, so the hardware
+ * scales with the limb it holds. */
+function limbJoint(mb, ballAt, dir, limbR) {
+  const d = V.norm(dir);
+  const R = Math.max(0.14, limbR);
+  // ball seated in the body
+  ellipsoid(mb, ballAt, [R, R, R], IRON, 0.85, 0, 8);
+  // rod from ball out through the collar
+  tube(mb, [ballAt, V.add(ballAt, V.scale(d, R * 2.3))], [R*0.5, R*0.5], IRON, 0.85, 0, 8);
+  // brass collar around the limb, matching its angle
+  const c0 = V.add(ballAt, V.scale(d, R * 1.55));
+  const c1 = V.add(ballAt, V.scale(d, R * 2.45));
+  tube(mb, [c0, c1], [R * 1.3, R * 1.3], BRASS, 0.85, 0, 12);
+  // radial bolts on the collar's midline
+  const mid = V.add(ballAt, V.scale(d, R * 2.0));
+  let n = Math.abs(d[1]) < 0.9 ? V.norm(V.cross([0, 1, 0], d)) : V.norm(V.cross([1, 0, 0], d));
+  const b = V.cross(d, n);
   for (let i = 0; i < 6; i++) {
     const th = (i / 6) * Math.PI * 2;
-    const dir = V.add(V.scale(n, Math.cos(th)), V.scale(b, Math.sin(th)));
-    ellipsoid(mb, V.add(c, V.scale(dir, R * 1.18)), [R*0.17, R*0.17, R*0.17], IRON, 0.75, 0, 5);
+    const dirR = V.add(V.scale(n, Math.cos(th)), V.scale(b, Math.sin(th)));
+    ellipsoid(mb, V.add(mid, V.scale(dirR, R * 1.32)), [R*0.2, R*0.2, R*0.2], IRON, 0.8, 0, 5);
   }
 }
 
@@ -473,8 +487,8 @@ function planWinged(mb, o) {
   const wingCol = sh(lp(o.skin, spineOf(o.skin), 0.25), 0.95);
   for (const s of [-1, 1]) {
     const wingAnim = (t) => [0, 0.55 * t * t + 0.04, 0.05 * t, t * 2.2 + (s > 0 ? 0 : 0.4)];
-    // brass socket where the wing bolts into the shoulder blade
-    boltedSocket(mb, [s * 0.95, shY, rootZ], [s, 0.25, -0.45], 0.42);
+    // ball in the shoulder blade, rod out, brass collar around the wing bone
+    limbJoint(mb, [s * 0.5, shY - 0.2, rootZ + 0.2], [s * 0.8, 0.6, -0.25], 0.34);
     const nU = 9, nV = 3, grid = [];
     const lead = [];
     for (let iu = 0; iu <= nU; iu++) {
@@ -531,12 +545,8 @@ function buildPart(mb, slot, family, params, side, sock, o) {
   const S = [side * sock.p[0], sock.p[1], sock.p[2]];
   const scale = sock.tiny ? 0.62 : 1;
   mb.setAnim(sock.anim ?? ANIM0);   // parts ride whatever their mount does
-
-  // every joint is hardware: a brass socket the part clicks into, studded
-  // with iron bolts (harvest a part and the socket stays — nothing wasted)
-  if (slot === 'hand')        boltedSocket(mb, S, [side, 0, 0], 0.5 * scale);
-  else if (slot === 'sensor') boltedSocket(mb, S, [side * 0.3, 1, 0], 0.3);
-  else if (slot === 'leg')    boltedSocket(mb, [S[0], sock.len + 0.42, S[2]], [0, 1, 0], 0.48);
+  // joint hardware (limbJoint) is placed per family below, sized from the
+  // same girth genes as the limb it clamps — collar always fits the limb
 
   switch (family) {
     // ---- hands ----
@@ -565,6 +575,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     case 'tentacle': {
       const baseR = (0.5 + 0.42*girth) * scale;
       const L = (2.6 + 2.6*len) * scale;
+      limbJoint(mb, S, [side * 0.2, -1, 0.15], baseR);
       const path = [];
       for (let i = 0; i <= 10; i++) {
         const t = i / 10;
@@ -621,23 +632,28 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     // ---- sensors (paired via sock.mirror) ----
     case 'antenna': {
       const L = (1.5 + 1.7*len);
+      const aR = 0.11 + 0.09*girth;
+      limbJoint(mb, S, [side * 0.5, 1, 0.05], aR);
       const path = [];
       for (let i = 0; i <= 6; i++) {
         const t = i / 6;
-        path.push([S[0] + side*(0.4 + t*1.1), S[1] + t*L, S[2] + Math.sin(t*2.2)*0.25]);
+        path.push([S[0] + side*(t*1.5), S[1] + t*L, S[2] + Math.sin(t*2.2)*0.25]);
       }
-      tube(mb, path, path.map(() => 0.11 + 0.09*girth), BONE, 0.35, 0, 6);
+      tube(mb, path, path.map(() => aR), BONE, 0.35, 0, 6);
       if (girth > 0.3)
         ellipsoid(mb, path[6], [0.3, 0.3, 0.3], BONDK, 0.5, 0, 6);
       break;
     }
     case 'horn': {
-      curvedCone(mb, S, [side*0.45, 1, -0.1], 1.2 + 1.5*girth, 0.3 + 0.4*girth,
+      const hornR = 0.3 + 0.4*girth;
+      limbJoint(mb, S, [side*0.45, 1, -0.1], hornR * 0.85);
+      curvedCone(mb, S, [side*0.45, 1, -0.1], 1.2 + 1.5*girth, hornR,
         [side*(0.3 + curl*0.9), curl*0.4, -0.2], lp(BONE, o.skin, 0.25), 0.4);
       break;
     }
     case 'sensor_mast': {
       const L = 1.5 + 1.0*len;
+      limbJoint(mb, S, [side * 0.13, 1, 0], 0.2);
       tube(mb, [S, [S[0]+side*0.2, S[1]+L, S[2]]], [0.22, 0.16], METAL, 0.8, 0, 8);
       ellipsoid(mb, [S[0]+side*0.2, S[1]+L, S[2]+0.15], [0.68, 0.68, 0.18], METDK, 0.7, 0, 10);
       ellipsoid(mb, [S[0]+side*0.2, S[1]+L, S[2]+0.34], [0.16,0.16,0.16], GLOW, 0.5, 1, 6);
@@ -712,12 +728,14 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     // ---- legs (paired) ----
     case 'hoofed_leg': {
       const R = (0.5 + 0.35*girth);
+      limbJoint(mb, [S[0], sock.len + 0.85, S[2]], [0, -1, 0], R * 1.05);
       tube(mb, [[S[0], sock.len + 0.6, S[2]], [S[0], 0.7, S[2]]], [R*1.15, R], o.skin, 0.28, 0, 9);
       tube(mb, [[S[0], 0.75, S[2]], [S[0], 0.0, S[2] + 0.1]], [R*1.02, R*1.15], HOOF, 0.5, 0, 9, 2);
       break;
     }
     case 'talon_leg': {
       const R = 0.24 + 0.12*girth;
+      limbJoint(mb, [S[0], sock.len + 0.75, S[2]], [side * 0.1, -1, -0.35], R * 1.2);
       tube(mb, [
         [S[0], sock.len + 0.6, S[2]],
         [S[0] + side*0.15, sock.len*0.55, S[2] - 0.55],
@@ -733,6 +751,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     }
     case 'insect_leg': {
       const R = 0.2 + 0.1*girth;
+      limbJoint(mb, [S[0], sock.len + 0.5, S[2]], [side * 1.3, 0.6, -0.2], R * 1.15);
       tube(mb, [
         [S[0], sock.len + 0.5, S[2]],
         [S[0] + side*1.3, sock.len + 1.1 + curl*0.8, S[2] - 0.2],
@@ -742,6 +761,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       break;
     }
     case 'piston_leg': {
+      limbJoint(mb, [S[0], sock.len + 0.95, S[2]], [0, -1, 0], 0.52);
       tube(mb, [[S[0], sock.len + 0.7, S[2]], [S[0], 0.85, S[2]]], [0.5, 0.5], METAL, 0.8, 0, 10);
       tube(mb, [[S[0], 0.9, S[2]], [S[0], 0.25, S[2]]], [0.26, 0.26], sh(METAL, 1.25), 0.9, 0, 8);
       tube(mb, [[S[0], 0.3, S[2]], [S[0], 0.0, S[2]]], [0.72, 0.78], METDK, 0.6, 0, 10, 2);
@@ -764,6 +784,7 @@ function armDrop(mb, S, side, armR, scale, o) {
   const wrist = [S[0] + side*1.15*scale, S[1] - 2.3*scale, S[2] + 0.45];
   const phase = side * 1.3 + 2.0;
   const swing = (t) => [0, 0, 0.04 + 0.11 * t, phase];
+  limbJoint(mb, S, V.sub(elbow, S), armR * 1.15);   // ball-rod-collar, sized to this arm
   tube(mb, [S, elbow, wrist], [armR*1.2, armR, armR*0.85],
     o.skinFn ? o.skin : CHITIN, 0.3, 0, 9, 1, null, swing);
   mb.setAnim(swing(1));
