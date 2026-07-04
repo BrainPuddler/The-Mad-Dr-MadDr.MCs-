@@ -33,6 +33,24 @@ const HORIZON = 150;
 // ── colours [r,g,b] ─────────────────────────────────────────────────────────
 const FLESH   = [195, 118,  78];
 const PALLOR  = [192, 172, 152];   // sickly low-vigor flesh
+
+// The b-movie skin swatch book. The body's posture gene doubles as the
+// pigment gene (it has no other visual expression yet): a monster's hue
+// breeds and drifts like any other trait.
+const SKIN_ANCHORS = [
+  [ 92, 138,  74],   // bog green
+  [148, 152,  66],   // olive
+  [195, 118,  78],   // classic flesh
+  [124, 134, 152],   // cadaver grey-blue
+  [142,  92, 168],   // mutant violet
+  [172,  70,  58],   // rust red
+];
+
+function skinTone(t) {
+  const s = Math.min(0.999, Math.max(0, t)) * (SKIN_ANCHORS.length - 1);
+  const i = Math.floor(s);
+  return lp(SKIN_ANCHORS[i], SKIN_ANCHORS[i + 1], s - i);
+}
 const BONE    = [212, 200, 170];
 const BONDK   = [158, 148, 118];
 const METAL   = [ 96, 110, 124];
@@ -182,40 +200,45 @@ function shapeHandStump(right) {
 
 // sensor / eye
 
-function shapeAntenna(params) {
+// Sensors mount as MIRRORED PAIRS on the head sides (except on the
+// asymmetric serpentine): feelers, devil horns, twin masts — never a
+// single flagpole in the middle of the skull.
+
+function shapeAntenna(params, right) {
   const [len, girth] = params;
-  const stalkH = 3 + Math.round(len * 4);
+  const stalkH = 2 + Math.round(len * 3);
   const v = [];
   for (let j = 0; j < stalkH; j++)
-    v.push([0, j, 0, ...BONE]);
-  v.push(...sph(0, stalkH, 0, girth > 0.3 ? 1 : 0, BONDK));
-  return v;
+    v.push([Math.floor(j / 2), j, 0, ...BONE]);          // feeler drifts outward
+  v.push(...sph(Math.floor(stalkH / 2), stalkH, 0, girth > 0.3 ? 1 : 0, BONDK));
+  return right ? mirrorX(v) : v;
 }
 
-function shapeHorn(params, fc) {
+function shapeHorn(params, fc, right) {
   const [, girth, , curl] = params;
   const v = [];
   const w = 1 + Math.round(girth * 1.5);
   v.push(...box(0, 0, 0, w, 1, w, fc));
   v.push(...box(0, 1, 0, Math.max(1, w-1), 2, Math.max(1, w-1), sh(fc, 0.85)));
-  v.push(...box(0, 3, 0, 1, 2, 1, sh(fc, 0.7)));
-  if (curl > 0.4) v.push(...vox(-1, 4, 0, sh(fc, 0.7)));
-  return v;
+  v.push(...box(Math.max(0, w - 2), 3, 0, 1, 2, 1, sh(fc, 0.7)));   // tip leans outward
+  if (curl > 0.4) v.push(...vox(Math.max(1, w - 1), 4, 0, sh(fc, 0.7)));
+  return right ? mirrorX(v) : v;
 }
 
-function shapeSensorMast(params) {
+function shapeSensorMast(params, right) {
   const [len] = params;
-  const h = 4 + Math.round(len * 3);
+  const h = 3 + Math.round(len * 2);
   const v = [];
   for (let j = 0; j < h; j++) v.push([0, j, 0, ...METAL]);
   v.push([0, h, 0, ...GLOW]);
   v.push([-1, h, 0, ...METDK]);
   v.push([1, h, 0, ...METDK]);
-  return v;
+  return right ? mirrorX(v) : v;
 }
 
-function shapeSensorStub() {
-  return box(0, 0, 0, 1, 1, 1, PALLOR);
+function shapeSensorStub(right) {
+  const v = box(0, 0, 0, 1, 1, 1, PALLOR);
+  return right ? mirrorX(v) : v;
 }
 
 function shapeBugEyes(params) {
@@ -373,7 +396,7 @@ function buildTetrapod(g, fleshCol) {
   const sockets = {
     hand:   [Math.ceil(tw / 2), headY - 3, 0],        // arm: just outside torso edge
     leg:    [Math.floor(tw / 4), 0, 0],               // leg: under torso (mirrored = other foot)
-    sensor: [0, topY, 0],                             // top of head
+    sensor: [Math.max(1, Math.floor(hw / 2) - 1), topY, 0],  // paired, on the skull's corners
     eye:    [hx + Math.floor(hw/2) - 1, headY + Math.floor(hh/2) - 1, Math.floor(hw/2) + 1],
   };
 
@@ -423,11 +446,10 @@ function buildBlob(g, fleshCol) {
     v.push([ax, r + 1, az, ...sh(fleshCol, 0.75)]);
   }
 
-  const top = r * 2 + 2;
   const sockets = {
     hand:   [r, r + 1, 0],
     leg:    [r * 0.4, 0, 0],
-    sensor: [0, top + 1, 0],
+    sensor: [2, r * 2, 0],       // paired, on the dome's shoulders
     eye:    [0, r + 2, r + 1],
   };
   return { voxels: v, sockets };
@@ -491,7 +513,7 @@ function buildWinged(g, fleshCol) {
   const sockets = {
     hand:   [3, 4, 0],
     leg:    [1, 0, 0],
-    sensor: [0, 12, 0],
+    sensor: [1, 12, 0],          // paired, on the skull's corners
     eye:    [0, 9, 2],
   };
   return { voxels: v, sockets };
@@ -500,9 +522,11 @@ function buildWinged(g, fleshCol) {
 // ── full creature assembly ───────────────────────────────────────────────────
 
 export function assembleCreature(genome) {
-  // flesh color: lerp from healthy to pallor based on heart vigor
+  // skin: the posture gene picks the pigment, heart vigor washes it toward
+  // sickly pallor when the pump is weak
   const vigor = genome.heart?.params?.[0] ?? 0.5;
-  const fleshCol = lp(PALLOR, FLESH, vigor);
+  const hue   = genome.body?.params?.[0] ?? 0.5;
+  const fleshCol = lp(PALLOR, skinTone(hue), 0.40 + 0.60 * vigor);
 
   const plan = genome.body?.plan ?? 'tetrapod';
   const builders = { tetrapod: buildTetrapod, blob: buildBlob, serpentine: buildSerpentine, winged: buildWinged };
@@ -527,8 +551,10 @@ export function assembleCreature(genome) {
     for (const pv of partVoxels)
       allVoxels.push([pv[0] + sx, pv[1] + sy, pv[2] + sz, pv[3], pv[4], pv[5]]);
 
-    // mirrored copy for bilateral parts (hands and legs)
-    if (slotName === 'hand' || slotName === 'leg') {
+    // mirrored copy for bilateral parts (hands, legs, and paired sensors —
+    // the serpentine keeps its single crest, its head is off-axis)
+    if (slotName === 'hand' || slotName === 'leg' ||
+        (slotName === 'sensor' && plan !== 'serpentine')) {
       const partVoxelsR = buildPart(slotName, family, params, fleshCol, true);
       const [rx, ry, rz] = [-sx - 1, sy, sz];  // X mirror of socket
       for (const pv of partVoxelsR)
@@ -554,10 +580,10 @@ function buildPart(slotName, family, params, fc, right = false) {
     case 'plasma_lance':return shapePlasmaLance(params, right);
     case 'hand_stump':  return shapeHandStump(right);
     // sensor homologs
-    case 'antenna':     return shapeAntenna(params);
-    case 'horn':        return shapeHorn(params, partCol);
-    case 'sensor_mast': return shapeSensorMast(params);
-    case 'sensor_stub': return shapeSensorStub();
+    case 'antenna':     return shapeAntenna(params, right);
+    case 'horn':        return shapeHorn(params, partCol, right);
+    case 'sensor_mast': return shapeSensorMast(params, right);
+    case 'sensor_stub': return shapeSensorStub(right);
     // eye homologs
     case 'bug_eyes':    return shapeBugEyes(params);
     case 'cyclops_eye': return shapeCyclopsEye(params);
