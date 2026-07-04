@@ -208,11 +208,41 @@ function tube(mb, path, radii, col, gloss = 0.25, emis = 0, sides = 10, caps = 3
   mb.setAnim(prevAnim);
 }
 
+/** A torus (hoop) centred at `center`, hole aligned to `axis` — the
+ * actual geometry of a brace clamped AROUND a limb: the limb passes
+ * through the hole, the band wraps the full 360° around it. This is
+ * the 90°-rotated sweep from a plain tube: instead of translating a
+ * ring along the axis (a solid capped puck sitting beside the limb),
+ * the small cross-section revolves around a big circle perpendicular
+ * to the axis, so the surface genuinely encircles the shaft. */
+function torus(mb, center, axis, majorR, minorR, col, gloss = 0.4, emis = 0, nMaj = 14, nMin = 8) {
+  const a = V.norm(axis);
+  let n = Math.abs(a[1]) < 0.9 ? V.norm(V.cross([0, 1, 0], a)) : V.norm(V.cross([1, 0, 0], a));
+  const b = V.cross(a, n);
+  const rows = [];
+  for (let i = 0; i <= nMaj; i++) {
+    const th = (i / nMaj) * Math.PI * 2;
+    const radial = V.add(V.scale(n, Math.cos(th)), V.scale(b, Math.sin(th)));
+    const ringC = V.add(center, V.scale(radial, majorR));
+    const row = [];
+    for (let j = 0; j <= nMin; j++) {
+      const ph = (j / nMin) * Math.PI * 2;
+      const dir = V.add(V.scale(radial, Math.cos(ph)), V.scale(a, Math.sin(ph)));
+      row.push(mb.vert(V.add(ringC, V.scale(dir, minorR)), dir, col, gloss, emis));
+    }
+    rows.push(row);
+  }
+  for (let i = 0; i < nMaj; i++)
+    for (let j = 0; j < nMin; j++)
+      mb.quad(rows[i][j], rows[i][j+1], rows[i+1][j+1], rows[i+1][j]);
+}
+
 /** Mad-science joint hardware. The linkage, body outward:
  *  1. an IRON BALL seated in the body at the mount point,
  *  2. a rod running out along the limb's own axis,
- *  3. a BRASS COLLAR clamped around the limb — slightly bigger than the
- *     limb, at the limb's angle, studded with six radial iron bolts.
+ *  3. a BRASS BRACE — a true hoop wrapped around the limb's shaft,
+ *     the limb passing through its hole — at the limb's angle, studded
+ *     with six radial iron bolts.
  * `limbR` is the limb's actual radius at the joint, so the hardware
  * scales with the limb it holds. */
 function limbJoint(mb, ballAt, dir, limbR) {
@@ -220,20 +250,20 @@ function limbJoint(mb, ballAt, dir, limbR) {
   const R = Math.max(0.14, limbR);
   // small ball at the mount — bigger than the rod, nothing more
   ellipsoid(mb, ballAt, [R*0.26, R*0.26, R*0.26], IRON, 0.85, 0, 8);
-  // stub of a rod, narrow, just bridging ball to collar
+  // stub of a rod, narrow, just bridging ball to the brace
   tube(mb, [ballAt, V.add(ballAt, V.scale(d, R * 0.6))], [R*0.11, R*0.11], IRON, 0.85, 0, 7);
-  // brass collar clamped right below the joint, matching the limb's angle
-  const c0 = V.add(ballAt, V.scale(d, R * 0.3));
-  const c1 = V.add(ballAt, V.scale(d, R * 1.0));
-  tube(mb, [c0, c1], [R * 1.28, R * 1.28], BRASS, 0.85, 0, 12);
-  // radial bolts on the collar's midline
-  const mid = V.add(ballAt, V.scale(d, R * 0.65));
+  // brass brace: a hoop wrapped around the limb, right below the joint
+  const braceC = V.add(ballAt, V.scale(d, R * 0.65));
+  const majorR = R * 1.0, minorR = R * 0.38;
+  torus(mb, braceC, d, majorR, minorR, BRASS, 0.85, 0, 14, 8);
+  // radial bolts studding the band's outer rim
   let n = Math.abs(d[1]) < 0.9 ? V.norm(V.cross([0, 1, 0], d)) : V.norm(V.cross([1, 0, 0], d));
   const b = V.cross(d, n);
   for (let i = 0; i < 6; i++) {
     const th = (i / 6) * Math.PI * 2;
-    const dirR = V.add(V.scale(n, Math.cos(th)), V.scale(b, Math.sin(th)));
-    ellipsoid(mb, V.add(mid, V.scale(dirR, R * 1.30)), [R*0.18, R*0.18, R*0.18], IRON, 0.8, 0, 5);
+    const radial = V.add(V.scale(n, Math.cos(th)), V.scale(b, Math.sin(th)));
+    ellipsoid(mb, V.add(braceC, V.scale(radial, majorR + minorR * 0.6)),
+      [minorR*0.55, minorR*0.55, minorR*0.55], IRON, 0.8, 0, 5);
   }
 }
 
