@@ -91,9 +91,9 @@ async function sync() {
     }));
 
   tray = (trayRes.items ?? []).map(inv => ({
-    itemId: inv.id,
+    itemId: inv.itemId,
     item: inv.item,
-    from: local.trayFrom[inv.id] ?? "tray",
+    from: local.trayFrom[inv.itemId] ?? "tray",
   }));
 
   // drop selectedId if that genome no longer exists
@@ -247,8 +247,9 @@ function showBusy(on) {
 // ── render ────────────────────────────────────────────────────────────────────
 function render() {
   document.getElementById("wallet").textContent = `🩸 ${blood}`;
-  renderRoster(); renderActions(); renderScreen(); renderTray(); renderLog();
-  renderPortrait();
+  for (const fn of [renderRoster, renderActions, renderScreen, renderTray, renderLog, renderPortrait]) {
+    try { fn(); } catch (err) { console.error(`${fn.name} crashed:`, err); }
+  }
 }
 
 function renderRoster() {
@@ -298,6 +299,15 @@ function renderActions() {
 
 function renderScreen() {
   const el = document.getElementById("screen");
+  try {
+    _renderScreenInner(el);
+  } catch (err) {
+    console.error("renderScreen error:", err);
+    el.innerHTML = `<div class="empty" style="color:var(--blood);text-align:left;white-space:pre-wrap">⚠️ Render error — open browser console for details.\n\n${esc(String(err))}</div>`;
+  }
+}
+
+function _renderScreenInner(el) {
   const c = selected();
   if (!c) { el.innerHTML = `<div class="empty">Spawn a specimen, then select it.</div>`; return; }
   const g = c.genome;
@@ -396,7 +406,7 @@ function renderPortrait() {
     <div class="pl-name">${c.alive ? "" : "💀 "}${esc(c.name)}</div>
     <div class="pl-plan">${esc(g.body.plan)} · ${esc(g.brain.tier)} brain · ${esc(g.heart.tier)} heart</div>
     <div class="pl-stat ${vClass}">${c.alive ? v.state.toUpperCase() : "DEAD ON THE TABLE"}</div>
-    <div class="pl-stat">load <span>${circulatoryLoad(g).toFixed(1)}</span> / cap <span>${heartCapacity(g).toFixed(1)}</span></div>
+    <div class="pl-stat">load <span>${circulatoryLoad(g).toFixed(1)}</span> / cap <span>${heartCapacity(g.heart).toFixed(1)}</span></div>
     <div class="pl-stat" style="max-width:200px;line-height:1.5">${esc(parts)}</div>`;
   if (c.id !== _lastPortraitId) { initRenderer(canvas, g); _lastPortraitId = c.id; }
   else updateGenome(g);
