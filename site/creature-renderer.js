@@ -245,15 +245,19 @@ function torus(mb, center, axis, majorR, minorR, col, gloss = 0.4, emis = 0, nMa
  *     with six radial iron bolts.
  * `limbR` is the limb's actual radius at the joint, so the hardware
  * scales with the limb it holds. */
-function limbJoint(mb, ballAt, dir, limbR) {
+function limbJoint(mb, rootAt, dir, limbR) {
+  // `rootAt` is the limb's exact first path point and `dir` its exact
+  // first-segment direction — callers pass the real skeleton values, so
+  // the hoop's angle always matches the limb and sits right at its end.
   const d = V.norm(dir);
   const R = Math.max(0.14, limbR);
-  // small ball at the mount — bigger than the rod, nothing more
+  const braceC = V.add(rootAt, V.scale(d, R * 0.45));
+  const ballAt = V.sub(rootAt, V.scale(d, R * 0.18));
+  // small ball just inside the mount — bigger than the rod, nothing more
   ellipsoid(mb, ballAt, [R*0.26, R*0.26, R*0.26], IRON, 0.85, 0, 8);
-  // stub of a rod, narrow, just bridging ball to the brace
-  tube(mb, [ballAt, V.add(ballAt, V.scale(d, R * 0.6))], [R*0.11, R*0.11], IRON, 0.85, 0, 7);
-  // brass brace: a hoop wrapped around the limb, right below the joint
-  const braceC = V.add(ballAt, V.scale(d, R * 0.65));
+  // stub of a rod, narrow, bridging ball through the brace
+  tube(mb, [ballAt, V.add(rootAt, V.scale(d, R * 0.95))], [R*0.11, R*0.11], IRON, 0.85, 0, 7);
+  // brass brace: a hoop wrapped around the limb, hole on the limb's axis
   const majorR = R * 1.0, minorR = R * 0.38;
   torus(mb, braceC, d, majorR, minorR, BRASS, 0.85, 0, 14, 8);
   // radial bolts studding the band's outer rim
@@ -517,16 +521,21 @@ function planWinged(mb, o) {
   const wingCol = sh(lp(o.skin, spineOf(o.skin), 0.25), 0.95);
   for (const s of [-1, 1]) {
     const wingAnim = (t) => [0, 0.55 * t * t + 0.04, 0.05 * t, t * 2.2 + (s > 0 ? 0 : 0.4)];
-    // ball in the shoulder blade, rod out, brass collar around the wing bone
-    limbJoint(mb, [s * 0.5, shY - 0.2, rootZ + 0.2], [s * 0.8, 0.6, -0.25], 0.34);
     const nU = 9, nV = 3, grid = [];
     const lead = [];
     for (let iu = 0; iu <= nU; iu++) {
       const u = iu / nU;
-      const lx = s * (0.9 + u * span);
-      const ly = shY + Math.sin(u * Math.PI * 0.85) * 2.5 - u * u * 1.6;
-      const lz = rootZ - u * 0.85;
-      lead.push([lx, ly, lz]);
+      lead.push([
+        s * (0.9 + u * span),
+        shY + Math.sin(u * Math.PI * 0.85) * 2.5 - u * u * 1.6,
+        rootZ - u * 0.85,
+      ]);
+    }
+    // hoop around the wing bone right at its root, angled with the bone
+    limbJoint(mb, lead[0], V.sub(lead[1], lead[0]), 0.34);
+    for (let iu = 0; iu <= nU; iu++) {
+      const u = iu / nU;
+      const [lx, ly, lz] = lead[iu];
       const chord = (2.5 * (1 - 0.5 * u) + 0.5) * (1 + 0.10 * Math.sin(u * Math.PI * 3));
       const row = [];
       for (let iv = 0; iv <= nV; iv++) {
@@ -605,7 +614,6 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     case 'tentacle': {
       const baseR = (0.5 + 0.42*girth) * scale;
       const L = (2.6 + 2.6*len) * scale;
-      limbJoint(mb, S, [side * 0.2, -1, 0.15], baseR);
       const path = [];
       for (let i = 0; i <= 10; i++) {
         const t = i / 10;
@@ -615,6 +623,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
           S[2] + 0.4*t + Math.sin(t * Math.PI * (1 + curl*1.6)) * curl * 1.1,
         ]);
       }
+      limbJoint(mb, path[0], V.sub(path[1], path[0]), baseR);
       tube(mb, path, path.map((_, i) =>
         baseR * (1 - (i/10) * clamp(0.35 + 0.6*taper, 0.35, 0.92))), o.skin, 0.3, 0, 9, 3,
         null, (t) => [0, 0, 0.1 + 0.45*t*t, side*2 + t*3.2]);   // wave travels to the tip
@@ -663,12 +672,12 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     case 'antenna': {
       const L = (1.5 + 1.7*len);
       const aR = 0.11 + 0.09*girth;
-      limbJoint(mb, S, [side * 0.5, 1, 0.05], aR);
       const path = [];
       for (let i = 0; i <= 6; i++) {
         const t = i / 6;
         path.push([S[0] + side*(t*1.5), S[1] + t*L, S[2] + Math.sin(t*2.2)*0.25]);
       }
+      limbJoint(mb, path[0], V.sub(path[1], path[0]), aR);
       tube(mb, path, path.map(() => aR), BONE, 0.35, 0, 6);
       if (girth > 0.3)
         ellipsoid(mb, path[6], [0.3, 0.3, 0.3], BONDK, 0.5, 0, 6);
@@ -683,7 +692,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     }
     case 'sensor_mast': {
       const L = 1.5 + 1.0*len;
-      limbJoint(mb, S, [side * 0.13, 1, 0], 0.2);
+      limbJoint(mb, S, [side * 0.2, L, 0], 0.2);   // the mast tube's own vector
       tube(mb, [S, [S[0]+side*0.2, S[1]+L, S[2]]], [0.22, 0.16], METAL, 0.8, 0, 8);
       ellipsoid(mb, [S[0]+side*0.2, S[1]+L, S[2]+0.15], [0.68, 0.68, 0.18], METDK, 0.7, 0, 10);
       ellipsoid(mb, [S[0]+side*0.2, S[1]+L, S[2]+0.34], [0.16,0.16,0.16], GLOW, 0.5, 1, 6);
@@ -758,14 +767,16 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     // ---- legs (paired) ----
     case 'hoofed_leg': {
       const R = (0.5 + 0.35*girth);
-      limbJoint(mb, [S[0], sock.len + 0.45, S[2]], [0, -1, 0], R * 1.05);
+      limbJoint(mb, [S[0], sock.len + 0.6, S[2]], [0, -1, 0], R * 1.05);
       tube(mb, [[S[0], sock.len + 0.6, S[2]], [S[0], 0.7, S[2]]], [R*1.15, R], o.skin, 0.28, 0, 9);
       tube(mb, [[S[0], 0.75, S[2]], [S[0], 0.0, S[2] + 0.1]], [R*1.02, R*1.15], HOOF, 0.5, 0, 9, 2);
       break;
     }
     case 'talon_leg': {
       const R = 0.24 + 0.12*girth;
-      limbJoint(mb, [S[0], sock.len + 0.55, S[2]], [side * 0.1, -1, -0.35], R * 1.2);
+      // direction = the shin's actual first segment
+      limbJoint(mb, [S[0], sock.len + 0.6, S[2]],
+        [side * 0.15, sock.len * 0.55 - (sock.len + 0.6), -0.55], R * 1.2);
       tube(mb, [
         [S[0], sock.len + 0.6, S[2]],
         [S[0] + side*0.15, sock.len*0.55, S[2] - 0.55],
@@ -781,7 +792,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     }
     case 'insect_leg': {
       const R = 0.2 + 0.1*girth;
-      limbJoint(mb, [S[0], sock.len + 0.5, S[2]], [side * 1.3, 0.6, -0.2], R * 1.15);
+      limbJoint(mb, [S[0], sock.len + 0.5, S[2]], [side * 1.3, 0.6 + curl * 0.8, -0.2], R * 1.15);
       tube(mb, [
         [S[0], sock.len + 0.5, S[2]],
         [S[0] + side*1.3, sock.len + 1.1 + curl*0.8, S[2] - 0.2],
@@ -791,7 +802,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       break;
     }
     case 'piston_leg': {
-      limbJoint(mb, [S[0], sock.len + 0.65, S[2]], [0, -1, 0], 0.52);
+      limbJoint(mb, [S[0], sock.len + 0.7, S[2]], [0, -1, 0], 0.52);
       tube(mb, [[S[0], sock.len + 0.7, S[2]], [S[0], 0.85, S[2]]], [0.5, 0.5], METAL, 0.8, 0, 10);
       tube(mb, [[S[0], 0.9, S[2]], [S[0], 0.25, S[2]]], [0.26, 0.26], sh(METAL, 1.25), 0.9, 0, 8);
       tube(mb, [[S[0], 0.3, S[2]], [S[0], 0.0, S[2]]], [0.72, 0.78], METDK, 0.6, 0, 10, 2);
