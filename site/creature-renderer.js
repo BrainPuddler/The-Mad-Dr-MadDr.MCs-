@@ -546,6 +546,12 @@ export function assembleCreature(genome) {
     const sock = sockets[slotName];
     if (!sock) continue;
 
+    // dormant organic sensors: a low ornament gene means the antenna/horn
+    // genes never erupt — plenty of monsters are simply bald-headed. Tech
+    // masts are installed hardware and always show.
+    if (slotName === 'sensor' && (family === 'antenna' || family === 'horn') &&
+        (params[5] ?? 0.5) < 0.35) continue;
+
     const [sx, sy, sz] = sock;
     const partVoxels = buildPart(slotName, family, params, fleshCol);
     for (const pv of partVoxels)
