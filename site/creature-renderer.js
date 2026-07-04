@@ -3,7 +3,14 @@
  * No deps. Pure Canvas 2D.
  *
  * Native canvas: 320 × 200 px (classic Amiga lo-res), displayed 2× by CSS
- * (image-rendering: pixelated). Each voxel = 6 × 6 native pixels.
+ * (image-rendering: pixelated).
+ *
+ * Creatures are authored on a coarse voxel grid, then refined 2× at load:
+ * every coarse voxel splits into 2×2×2 fine voxels (3 native px each),
+ * exposed corners of bulky masses are shaved for rounded forms, and the
+ * shading is BAKED into the fine voxels' colours — neighbourhood ambient
+ * occlusion, vertical light falloff, two octaves of mottled-hide noise,
+ * pale belly / dusky spine. Runtime lighting rides on top of the bake.
  *
  * Art direction: Jim Sachs / Defender-of-the-Crown-era Amiga box art —
  *  - hand-dithered sky gradients (4×4 ordered Bayer),
@@ -20,7 +27,7 @@
 const NW = 320, NH = 200;
 const CX = 160;            // creature centre X
 const GY = 178;            // ground line (platform surface) in screen px
-const SC = 6;              // native pixels per voxel unit
+const SC = 3;              // native pixels per FINE voxel (coarse voxel = 2 fine)
 const HORIZON = 150;
 
 // ── colours [r,g,b] ─────────────────────────────────────────────────────────
@@ -382,6 +389,13 @@ function buildTetrapod(g, fleshCol) {
   if (g.brain.tier === 'mastermind')
     v.push(...box(hx+1, headY + hh, -Math.floor(hw/2)+1, hw-2, 1, hw-2, sh(fleshCol, 1.05)));
 
+  // b-movie face: a dark mouth gash with an underbite tusk at each corner
+  const faceZ = hw - Math.floor(hw / 2) - 1;
+  for (let x = hx + 1; x <= hx + hw - 2; x++)
+    v.push([x, headY, faceZ, 26, 14, 20]);
+  v.push([hx + 1, headY, faceZ + 1, ...CLAW]);
+  v.push([hx + hw - 2, headY, faceZ + 1, ...CLAW]);
+
   // Sachs monster trademark: suture seam zig-zagging across the chest.
   // Same coordinates as torso-front voxels — dedupe pass makes them decals.
   const seamY = ty + Math.round(th * 0.5);
@@ -435,10 +449,13 @@ function buildSerpentine(g, fleshCol) {
     v.push(...sph(x, y, 0, segR, fleshCol));
   }
 
-  // head
+  // head, with a dark mouth line and a fang pair
   const headX = Math.round(Math.sin(1.5 * Math.PI * 0.9) * 3);
   const headY  = 1 + segs * 1.2;
   v.push(...box(headX - 2, headY, -1, 4, 3, 3, fleshCol));
+  for (let x = headX - 1; x <= headX + 1; x++) v.push([x, headY, 1, 26, 14, 20]);
+  v.push([headX - 1, headY, 2, ...CLAW]);
+  v.push([headX + 1, headY, 2, ...CLAW]);
 
   const sockets = {
     hand:   [headX + 2, headY + 1, 0],
@@ -557,25 +574,104 @@ function buildPart(slotName, family, params, fc, right = false) {
   }
 }
 
-// ── model preparation: dedupe, cull interiors, bake normals ─────────────────
-// Turns raw voxels into a lit-model: only surface voxels survive, each with
-// an outward pseudo-normal (sum of empty-neighbour directions) that the
-// per-frame lighting rotates along with the position.
+// ── model preparation: subdivide 2×, sculpt, bake shading ───────────────────
+// The coarse authored model is refined into a fine grid (8 fine voxels per
+// coarse), exposed corners of bulky masses are chamfered away for rounded
+// forms (thin features — stalks, claws, membranes, bolts — are protected),
+// interiors are culled, and shading is baked into each surviving voxel's
+// colour. Normals are baked too; per-frame lighting rotates them.
 
 const DIRS = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+
+function hash3(x, y, z) {
+  let h = (x * 374761393 + y * 668265263 + z * 1274126177) | 0;
+  h = ((h ^ (h >> 13)) * 1103515245) | 0;
+  return h >>> 16;
+}
 
 function prepareModel(genome) {
   const raw = assembleCreature(genome);
 
-  // dedupe by coordinate — later voxels win, so decals (stitches) overwrite
-  const cells = new Map();
-  for (const v of raw) cells.set(`${v[0]},${v[1]},${v[2]}`, v);
+  // dedupe coarse by coordinate — later voxels win, so decals (stitches,
+  // mouths) overwrite the surface they sit on. Coordinates are snapped to
+  // integers: some builders emit fractional lattices (serpentine coils),
+  // and unsnapped they never see each other as neighbours.
+  const coarse = new Map();
+  for (const v of raw) {
+    const x = Math.round(v[0]), y = Math.round(v[1]), z = Math.round(v[2]);
+    coarse.set(`${x},${y},${z}`, [x, y, z, v[3], v[4], v[5]]);
+  }
 
-  const occ = new Set(cells.keys());
+  // thin coarse features keep their full form through the chamfer
+  const cOcc = new Set(coarse.keys());
+  const thinKeys = new Set();
+  for (const [k, [x, y, z]] of coarse) {
+    let n = 0;
+    for (const [dx, dy, dz] of DIRS) if (cOcc.has(`${x+dx},${y+dy},${z+dz}`)) n++;
+    if (n <= 2) thinKeys.add(k);
+  }
+
+  // subdivide: each coarse voxel → 2×2×2 fine voxels
+  const fine = new Map();
+  for (const [k, [x, y, z, r, g, b]] of coarse) {
+    const thin = thinKeys.has(k);
+    for (let i = 0; i < 2; i++)
+      for (let j = 0; j < 2; j++)
+        for (let l = 0; l < 2; l++) {
+          const fx = 2 * x + i, fy = 2 * y + j, fz = 2 * z + l;
+          fine.set(`${fx},${fy},${fz}`, { x: fx, y: fy, z: fz, col: [r, g, b], thin });
+        }
+  }
+
+  // wedge fill: fillet concave steps with averaged-colour fine voxels, so
+  // stepped curves (blocky spheres, coils) smooth into 45° slopes instead
+  // of reading as a pile of separate cubes
+  {
+    const cands = new Map();   // empty coarse cells adjacent to filled ones
+    for (const [, [x, y, z]] of coarse)
+      for (const [dx, dy, dz] of DIRS) {
+        const k = `${x+dx},${y+dy},${z+dz}`;
+        if (!coarse.has(k)) cands.set(k, [x+dx, y+dy, z+dz]);
+      }
+    for (const [, [x, y, z]] of cands) {
+      for (let i = 0; i < 2; i++)
+        for (let j = 0; j < 2; j++)
+          for (let l = 0; l < 2; l++) {
+            const nbs = [
+              coarse.get(`${x + (i ? 1 : -1)},${y},${z}`),
+              coarse.get(`${x},${y + (j ? 1 : -1)},${z}`),
+              coarse.get(`${x},${y},${z + (l ? 1 : -1)}`),
+            ].filter(Boolean);
+            if (nbs.length < 2) continue;
+            const fk = `${2*x+i},${2*y+j},${2*z+l}`;
+            if (fine.has(fk)) continue;
+            const col = [3, 4, 5].map(ci =>
+              Math.round(nbs.reduce((s, n) => s + n[ci], 0) / nbs.length));
+            fine.set(fk, { x: 2*x+i, y: 2*y+j, z: 2*z+l, col, thin: true });
+          }
+    }
+  }
+
+  // chamfer: shave exposed fine corners of bulky masses → rounded silhouettes
+  {
+    const occ = new Set(fine.keys());
+    const doomed = [];
+    for (const [k, f] of fine) {
+      if (f.thin) continue;
+      let n = 0;
+      for (const [dx, dy, dz] of DIRS) if (occ.has(`${f.x+dx},${f.y+dy},${f.z+dz}`)) n++;
+      if (n <= 3) doomed.push(k);
+    }
+    for (const k of doomed) fine.delete(k);
+  }
+
+  const occ = new Set(fine.keys());
   const voxels = [];
   let maxR = 1, maxY = 1;
+  for (const f of fine.values()) maxY = Math.max(maxY, f.y + 1);
 
-  for (const [x, y, z, r, g, b] of cells.values()) {
+  for (const f of fine.values()) {
+    const { x, y, z } = f;
     let nx = 0, ny = 0, nz = 0, exposed = false;
     for (const [dx, dy, dz] of DIRS) {
       if (!occ.has(`${x+dx},${y+dy},${z+dz}`)) {
@@ -584,20 +680,43 @@ function prepareModel(genome) {
     }
     if (!exposed) continue;                    // fully enclosed: never visible
     const nl = Math.hypot(nx, ny, nz) || 1;
-    const topExposed = !occ.has(`${x},${y+1},${z}`);
-    const glow = GLOW_KEYS.has(`${r},${g},${b}`);
-    // deterministic per-voxel tone jitter — skin/hide texture
-    let h = (x * 374761393 + y * 668265263 + z * 1274126177) | 0;
-    h = ((h ^ (h >> 13)) * 1103515245) | 0;
-    const jitter = glow ? 0 : (((h >>> 16) % 5) - 2) * 0.02;
+    nx /= nl; ny /= nl; nz /= nl;
+
+    const glow = GLOW_KEYS.has(f.col.join(','));
+
+    // ---- baked colour shading ----
+    let col = f.col;
+    if (!glow) {
+      // ambient occlusion from the 26-neighbourhood:
+      // crevices sink into shadow, edges and bumps catch the light
+      let n26 = 0;
+      for (let dx = -1; dx <= 1; dx++)
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dz = -1; dz <= 1; dz++)
+            if ((dx || dy || dz) && occ.has(`${x+dx},${y+dy},${z+dz}`)) n26++;
+      const ao = Math.min(1.12, Math.max(0.76, 1 + (12 - n26) * 0.022));
+      // vertical light falloff + two octaves of mottled-hide noise
+      const vert = 0.90 + 0.20 * (y / maxY);
+      const blotch = 1 + ((hash3(x >> 2, y >> 2, z >> 2) % 7) - 3) * 0.017;
+      const fleck  = 1 + ((hash3(x, y, z) % 5) - 2) * 0.012;
+      col = sh(col, ao * vert * blotch * fleck);
+      // pale belly, dusky spine — baked in, so it spins with the model
+      if (nz > 0.3)       col = lp(col, [232, 208, 178], 0.16 * nz);
+      else if (nz < -0.3) col = lp(col, [ 58,  42,  84], 0.14 * -nz);
+      // quantize so the ramp cache stays small
+      col = col.map(c => Math.min(250, Math.round(c / 10) * 10));
+    }
+
     voxels.push({
       x, y, z,
-      ramp: rampFor([r, g, b]),
-      nx: nx / nl, ny: ny / nl, nz: nz / nl,
-      topExposed, glow, glowCol: [r, g, b], jitter,
+      ramp: rampFor(col),
+      nx, ny, nz,
+      topExposed: !occ.has(`${x},${y+1},${z}`),
+      glow, glowCol: f.col,
+      // one halo per coarse glow cell, not eight
+      glowRep: glow && (x & 1) === 0 && (y & 1) === 0 && (z & 1) === 0,
     });
     maxR = Math.max(maxR, Math.abs(x) + 1, Math.abs(z) + 1);
-    maxY = Math.max(maxY, y + 1);
   }
   return { voxels, maxR, maxY };
 }
@@ -872,9 +991,9 @@ function _drawFrame() {
     const sy = Math.round(GY - (v.y + 1) * SC + rz * SC * 0.20);
     if (sx < -SC || sx >= NW || sy < -SC || sy >= NH) continue;
 
-    // diffuse key + ambient (+lightning), depth cue, skin jitter
+    // diffuse key + ambient (+lightning), depth cue — the rest is baked in
     const diff = Math.max(0, nrx * KEY[0] + v.ny * KEY[1] + nrz * KEY[2]);
-    let b = 0.30 + flash + 0.62 * diff - 0.05 * (rz / 10) + v.jitter;
+    let b = 0.34 + flash + 0.55 * diff - 0.05 * (rz / 20);
     if (v.glow) b = Math.max(b, 0.92);
     b = Math.min(1, Math.max(0, b));
 
@@ -882,45 +1001,26 @@ function _drawFrame() {
     const rimDot = Math.max(0, nrx * RIM[0] + v.ny * RIM[1] + nrz * RIM[2]);
     const rim = rimDot * rimDot * (0.45 + flash);
 
-    // ramp lookup with Bayer dithering between adjacent steps
-    const rv = b * 10;
-    const idx = Math.min(10, rv | 0);
-    const frac = rv - idx;
-    const c0 = v.ramp[idx], c1 = v.ramp[Math.min(idx + 1, 11)];
-    const f0 = `rgb(${Math.min(255, c0[0] + rim * RIM_COL[0]) | 0},${Math.min(255, c0[1] + rim * RIM_COL[1]) | 0},${Math.min(255, c0[2] + rim * RIM_COL[2]) | 0})`;
-    const f1 = `rgb(${Math.min(255, c1[0] + rim * RIM_COL[0]) | 0},${Math.min(255, c1[1] + rim * RIM_COL[1]) | 0},${Math.min(255, c1[2] + rim * RIM_COL[2]) | 0})`;
-
-    ctx.fillStyle = f0;
+    const idx = Math.min(11, Math.round(b * 10));
+    const c0 = v.ramp[idx];
+    ctx.fillStyle = `rgb(${Math.min(255, c0[0] + rim * RIM_COL[0]) | 0},${Math.min(255, c0[1] + rim * RIM_COL[1]) | 0},${Math.min(255, c0[2] + rim * RIM_COL[2]) | 0})`;
     ctx.fillRect(sx, sy, SC, SC);
-    if (frac > 0.06) {
-      ctx.fillStyle = f1;
-      for (let j = 0; j < 3; j++) {
-        for (let i = 0; i < 3; i++) {
-          const bx = sx + i * 2, by = sy + j * 2;
-          if (frac > (B4[(by >> 1) & 3][(bx >> 1) & 3] + 0.5) / 16)
-            ctx.fillRect(bx, by, 2, 2);
-        }
-      }
-    }
 
-    // crisp cube read: lit top face, shaded bottom-right edges
-    if (v.topExposed && v.ny > -0.1) {
+    // lit top faces only — at 3px, per-voxel edge lines read as corduroy
+    if (v.topExposed && v.ny > 0.25) {
       const ct = v.ramp[Math.min(idx + 2 + (flash > 0 ? 1 : 0), 12)];
       ctx.fillStyle = `rgb(${ct[0]},${ct[1]},${ct[2]})`;
-      ctx.fillRect(sx, sy, SC, 2);
+      ctx.fillRect(sx, sy, SC, 1);
     }
-    ctx.fillStyle = 'rgba(10,6,30,0.28)';
-    ctx.fillRect(sx, sy + SC - 1, SC, 1);
-    ctx.fillRect(sx + SC - 1, sy, 1, SC);
 
-    if (v.glow) glows.push({ sx, sy, col: v.glowCol });
+    if (v.glowRep) glows.push({ sx, sy, col: v.glowCol });
   }
 
   // halo pass for glowing materials
   if (glows.length) {
     ctx.globalCompositeOperation = 'lighter';
     for (const { sx, sy, col } of glows) {
-      const gx = sx + SC / 2, gy = sy + SC / 2, gr = SC * 2.4;
+      const gx = sx + SC, gy = sy + SC, gr = SC * 4.5;   // halo spans the coarse cell
       const grad = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr);
       grad.addColorStop(0, `rgba(${col[0]},${col[1]},${col[2]},${(0.5 * pulse).toFixed(3)})`);
       grad.addColorStop(1, 'rgba(0,0,0,0)');
