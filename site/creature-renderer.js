@@ -306,6 +306,7 @@ function buildCreature(genome) {
   const hue   = P(g.body?.params, 0, 0.5);
   const bulk  = P(g.body?.params, 1, 0.5);
   const limb  = P(g.body?.params, 2, 0.5);
+  const tail  = P(g.body?.params, 3, 0.5);
   const skin  = lp(PALLOR, skinTone(hue), 0.40 + 0.60 * vigor);
   const belly = lp(skin, [236, 214, 184], 0.55);
   const spine = lp(skin, [52, 40, 80], 0.45);
@@ -324,7 +325,8 @@ function buildCreature(genome) {
 
   const builders = { tetrapod: planTetrapod, blob: planBlob, serpentine: planSerpentine, winged: planWinged };
   const sockets = (builders[plan] ?? planTetrapod)(mb, {
-    bulk, limb, skin, skinFn, headScale, heartLevel, legLen,
+    bulk, limb, tail, skin, skinFn, headScale, heartLevel, legLen,
+    brainTier: g.brain?.tier ?? 'average',
   });
 
   for (const slot of SLOT_NAMES) {
@@ -370,47 +372,173 @@ function frankenDetails(mb, headC, headR, heartLevel, skin) {
   }
 }
 
-function stitchSeam(mb, cx, y0, rx, rz, torsoC, torsoR) {
+function stitchSeam(mb, y0, rx, rz, zc) {
   // zigzag suture across the chest front
   const pts = [];
   for (let i = 0; i <= 8; i++) {
     const t = i / 8;
-    const x = cx + (t - 0.5) * rx * 1.5;
+    const x = (t - 0.5) * rx * 1.4;
     const y = y0 + ((i % 2) ? 0.32 : -0.32);
-    const dx = (x - torsoC[0]) / torsoR[0], dy = (y - torsoC[1]) / torsoR[1];
-    const zz = 1 - dx*dx - dy*dy;
-    if (zz <= 0.02) continue;
-    pts.push([x, y, torsoC[2] + torsoR[2] * Math.sqrt(zz) + 0.04]);
+    const q = 1 - (x / rx) ** 2;
+    if (q <= 0.05) continue;
+    pts.push([x, y, zc + rz * Math.sqrt(q) + 0.04]);
   }
   if (pts.length > 2) tube(mb, pts, pts.map(() => 0.09), STITCH, 0.1, 0, 5, 0);
 }
 
-function planTetrapod(mb, o) {
-  const tR = [2.5 + 1.2*o.bulk, 2.3 + 0.6*o.bulk, 2.1 + 0.8*o.bulk];
-  const tC = [0, o.legLen + tR[1] * 0.82, 0];
-  const hR = [2.0 + 0.5*o.headScale, 1.85 + 0.6*o.headScale, 1.95 + 0.4*o.headScale];
-  const hC = [0, tC[1] + tR[1] - 0.35 + hR[1] * 0.72, 0.25];
+/** Surface of revolution with elliptical cross-sections — the generic
+ * body builder. `levels` run bottom→top: {y, x, z, rx, rz}. Normals lean
+ * with the profile slope, ends are capped. This is what buys silhouette
+ * variety: pear, barrel, and triangular gorilla builds are just
+ * different radius profiles through the same machine. */
+function lathe(mb, levels, col, gloss = 0.28, emis = 0, seg = 16, colorFn = null) {
+  const L = levels.length;
+  const y0 = levels[0].y, y1 = levels[L-1].y;
+  const rows = [];
+  for (let i = 0; i < L; i++) {
+    const lv = levels[i];
+    const lo = levels[Math.max(0, i-1)], hi = levels[Math.min(L-1, i+1)];
+    const slope = ((lo.rx + lo.rz) - (hi.rx + hi.rz)) / (2 * Math.max(0.2, hi.y - lo.y));
+    const yn = 2 * (lv.y - y0) / Math.max(0.2, y1 - y0) - 1;
+    const row = [];
+    for (let j = 0; j <= seg; j++) {
+      const ph = (j / seg) * Math.PI * 2;
+      const cx = Math.cos(ph), sz = Math.sin(ph);
+      const u = [cx * 0.92, yn, sz * 0.92];
+      const n = V.norm([cx, slope * 0.6, sz]);
+      row.push(mb.vert([lv.x + cx * lv.rx, lv.y, lv.z + sz * lv.rz], n,
+        colorFn ? colorFn(u) : col, gloss, emis));
+    }
+    rows.push(row);
+  }
+  // rows run bottom→top (the reverse of ellipsoid's top→bottom), so the
+  // quads are emitted in reverse order to keep outward faces front-facing —
+  // otherwise the two-sided shader flips the torso's normals and the whole
+  // front renders back-lit (slate-blue in the moon rim)
+  for (let i = 0; i < L - 1; i++)
+    for (let j = 0; j < seg; j++)
+      mb.quad(rows[i+1][j], rows[i+1][j+1], rows[i][j+1], rows[i][j]);
+  for (const [k, sgn] of [[0, -1], [L - 1, 1]]) {
+    const lv = levels[k];
+    const cv = mb.vert([lv.x, lv.y, lv.z], [0, sgn, 0],
+      colorFn ? colorFn([0, sgn, 0]) : col, gloss, emis);
+    for (let j = 0; j < seg; j++)
+      sgn > 0 ? mb.tri(cv, rows[k][j+1], rows[k][j]) : mb.tri(cv, rows[k][j], rows[k][j+1]);
+  }
+}
 
-  const BREATH_T = [0.09, 0, 0, 0], BREATH_H = [0.04, 0, 0, 0];
-  mb.setAnim(BREATH_T);
-  ellipsoid(mb, tC, tR, o.skin, 0.28, 0, 16, o.skinFn);
-  stitchSeam(mb, 0, tC[1] + 0.4, tR[0], tR[2], tC, tR);
-  mb.setAnim(BREATH_H);
+/** Torso profiles: build 0 = pear (bottom-heavy egg), 1 = gorilla
+ * (triangular — huge chest and shoulders over narrow hips, hunched
+ * forward). Everything between breeds smoothly. */
+const PROFILE_PEAR = [1.02, 1.22, 0.90, 0.62, 0.38];
+const PROFILE_GOR  = [0.60, 0.80, 1.24, 1.40, 0.58];
+const PROFILE_T    = [0, 0.30, 0.60, 0.86, 1];
+
+function torsoLevels(build, W, h, y0, lean) {
+  return PROFILE_T.map((t, i) => {
+    const rx = W * (PROFILE_PEAR[i] + (PROFILE_GOR[i] - PROFILE_PEAR[i]) * build);
+    return {
+      y: y0 + t * h, x: 0,
+      z: t > 0.45 ? lean * build * (t - 0.45) / 0.55 : 0,
+      rx, rz: rx * (i === 2 ? 0.82 + 0.30 * build : 0.80),   // deep gorilla chest
+    };
+  });
+}
+
+const BRAINC = [214, 150, 160];
+
+/** The head ladder: dim = pinhead sunk in the shoulders, average =
+ * standard, gifted = tall egghead dome, mastermind = exposed pulsing
+ * brain with two lobes. Returns geometry the face and sockets hang on. */
+function buildHead(mb, o, neckY, zOff) {
+  const t = o.brainTier;
+  let hR, sunk = 0.72;
+  if (t === 'dim')             { hR = [1.45, 1.28, 1.40]; sunk = 0.50; }
+  else if (t === 'gifted')     { hR = [1.90, 2.30, 1.85]; }
+  else if (t === 'mastermind') { hR = [2.05, 2.00, 2.00]; }
+  else                         { hR = [1.95, 1.80, 1.90]; }
+  const hC = [0, neckY + hR[1] * sunk, zOff + 0.15];
   ellipsoid(mb, hC, hR, o.skin, 0.3, 0, 16, o.skinFn);
-  frankenDetails(mb, hC, hR, o.heartLevel, o.skin);
+  let topY = hC[1] + hR[1];
+  if (t === 'gifted') {
+    // egghead crown
+    ellipsoid(mb, [hC[0], hC[1] + hR[1]*0.52, hC[2] - 0.1],
+      [hR[0]*0.72, hR[1]*0.52, hR[2]*0.70], o.skin, 0.3, 0, 12, o.skinFn);
+    topY = hC[1] + hR[1] * 1.04;
+  } else if (t === 'mastermind') {
+    // the brain, proudly exposed
+    const bc = [hC[0], hC[1] + hR[1]*0.62, hC[2] - 0.15];
+    ellipsoid(mb, bc, [hR[0]*0.92, hR[1]*0.66, hR[2]*0.88], BRAINC, 0.55, 0, 14);
+    for (const s of [-1, 1])
+      ellipsoid(mb, [bc[0] + s*hR[0]*0.40, bc[1] + hR[1]*0.34, bc[2]],
+        [hR[0]*0.44, hR[1]*0.30, hR[2]*0.55], sh(BRAINC, 0.92), 0.55, 0, 8);
+    topY = bc[1] + hR[1] * 0.88;
+  }
+  return { hC, hR, topY };
+}
+
+/** Tail from the tail gene (below 0.35 there is none): a swaying tapered
+ * whip out the lower back, curling up. Winged plans cap it with a devil
+ * spade. */
+function addTail(mb, o, baseY, baseZ, spade) {
+  if (o.tail < 0.35) return;
+  const k = (o.tail - 0.35) / 0.65;
+  const L = 2.4 + 3.4 * k;
+  const path = [];
+  for (let i = 0; i <= 8; i++) {
+    const t = i / 8;
+    path.push([
+      Math.sin(t * 2.6) * 0.5 * k,
+      baseY - Math.sin(t * Math.PI) * 0.6 + t * t * (1.6 + 2.2 * k),
+      baseZ - t * L,
+    ]);
+  }
+  const r0 = 0.5 + 0.25 * o.bulk;
+  tube(mb, path, path.map((_, i) => r0 * (1 - (i / 8) * 0.85)), o.skin, 0.3, 0, 8, 3,
+    null, (t) => [0, 0, 0.18 * t * t, 4 + t * 3.4]);
+  if (spade)
+    curvedCone(mb, path[8], [0, 0.4, -1], 0.9, 0.3, [0, 0.2, 0], sh(o.skin, 0.7), 0.4);
+}
+
+function planTetrapod(mb, o) {
+  const BREATH_T = [0.09, 0, 0, 0], BREATH_H = [0.04, 0, 0, 0];
+  const b = o.limb;                       // the limb axis IS the build axis here
+  const W = 2.4 + 1.2 * o.bulk;
+  const h = 4.0 + 1.0 * o.bulk;
+  const y0 = Math.max(0.3, o.legLen - 0.2);
+  const levels = torsoLevels(b, W, h, y0, 0.55);
+
+  mb.setAnim(BREATH_T);
+  lathe(mb, levels, o.skin, 0.28, 0, 18, o.skinFn);
+  const shl = levels[3];
+  if (b > 0.5)                            // gorilla deltoid caps
+    for (const s of [-1, 1])
+      ellipsoid(mb, [s * shl.rx * 0.85, shl.y + 0.15, shl.z],
+        [W*0.52*b, W*0.44*b, W*0.48*b], o.skin, 0.28, 0, 10, o.skinFn);
+  const ch = levels[2];
+  stitchSeam(mb, ch.y - h * 0.12, ch.rx, ch.rz, ch.z);
+
+  mb.setAnim(BREATH_H);
+  const head = buildHead(mb, o, y0 + h - 0.25 - 0.45 * b, levels[4].z);
+  frankenDetails(mb, head.hC, head.hR, o.heartLevel, o.skin);
   mb.setAnim(ANIM0);
 
+  addTail(mb, o, y0 + h * 0.18, -levels[1].rz * 0.9, false);
+
   return {
-    hand:   { p: [tR[0]*0.88, tC[1] + tR[1]*0.42, 0.2], mirror: true },
-    leg:    { p: [tR[0]*0.42, o.legLen, 0], mirror: true, len: o.legLen },
-    sensor: { p: [hR[0]*0.52, hC[1] + hR[1]*0.82, 0], mirror: true, out: 1, anim: BREATH_H },
-    eye:    { p: [0, hC[1] + hR[1]*0.18, hC[2] + hR[2]*0.92], mirror: false, faceR: hR[0], anim: BREATH_H },
+    hand:   { p: [shl.rx * 0.92 + (b > 0.5 ? W * 0.30 * b : 0), shl.y, shl.z + 0.15], mirror: true },
+    leg:    { p: [Math.max(0.9, levels[0].rx * 0.55), o.legLen, 0], mirror: true, len: o.legLen },
+    sensor: { p: [head.hR[0]*0.52, head.topY, head.hC[2] - 0.1], mirror: true, out: 1, anim: BREATH_H },
+    eye:    { p: [0, head.hC[1] + head.hR[1]*0.18, head.hC[2] + head.hR[2]*0.92],
+              mirror: false, faceR: head.hR[0], anim: BREATH_H },
   };
 }
 
 function planBlob(mb, o) {
-  const dr = 3.0 + 1.3*o.bulk;
-  const dR = [dr, 2.5 + 1.0*o.bulk, dr];
+  // limb gene sets the pour: 0 = wide flat puddle, 1 = tall gelatin tower
+  const tall = o.limb;
+  const dr = (3.0 + 1.3*o.bulk) * (1.15 - 0.40*tall);
+  const dR = [dr, (2.5 + 1.0*o.bulk) * (0.62 + 1.05*tall), dr];
   const dC = [0, dR[1]*0.9, 0];
   const JELLY = [0.13, 0, 0.10, 0.7];
   mb.setAnim(JELLY);
@@ -499,25 +627,29 @@ function planSerpentine(mb, o) {
 }
 
 function planWinged(mb, o) {
-  const bR = [1.7, 2.2, 1.5];
-  const bC = [0, o.legLen + bR[1]*0.85, 0];
-  const hR = [2.05 + 0.4*o.headScale, 1.9 + 0.5*o.headScale, 1.95];
-  const hC = [0, bC[1] + bR[1] - 0.3 + hR[1]*0.7, 0.2];
   const BREATH_B = [0.07, 0, 0, 0], BREATH_H = [0.035, 0, 0, 0];
+  const b = o.bulk * 0.85;               // bulk sets the build: imp vs gargoyle
+  const W = 1.55 + 0.75 * o.bulk;
+  const h = 3.4 + 0.7 * o.bulk;
+  const y0 = Math.max(0.3, o.legLen - 0.1);
+  const levels = torsoLevels(b, W, h, y0, 0.4);
+
   mb.setAnim(BREATH_B);
-  ellipsoid(mb, bC, bR, o.skin, 0.28, 0, 14, o.skinFn);
+  lathe(mb, levels, o.skin, 0.28, 0, 14, o.skinFn);
   mb.setAnim(BREATH_H);
-  ellipsoid(mb, hC, hR, o.skin, 0.3, 0, 16, o.skinFn);
-  frankenDetails(mb, hC, hR, o.heartLevel, o.skin);
+  const head = buildHead(mb, o, y0 + h - 0.2 - 0.3 * b, levels[4].z);
+  frankenDetails(mb, head.hC, head.hR, o.heartLevel, o.skin);
   mb.setAnim(ANIM0);
+
+  addTail(mb, o, y0 + h * 0.2, -levels[1].rz * 0.9, true);   // devil spade
 
   // bat wings, rooted at the BACK shoulders (grafted on, not grown from the
   // sides) and sweeping out and behind. The flap is a traveling sine: phase
   // advances along the span, so the wing rolls in a wave — shoulder barely
   // stirs, tips ride the crest.
   const span = 4.6 + 3.6 * o.limb;
-  const shY = bC[1] + bR[1] * 0.62;
-  const rootZ = -bR[2] * 0.72;
+  const shY = levels[3].y;
+  const rootZ = levels[3].z - levels[3].rz * 0.8;
   const wingCol = sh(lp(o.skin, spineOf(o.skin), 0.25), 0.95);
   for (const s of [-1, 1]) {
     const wingAnim = (t) => [0, 0.55 * t * t + 0.04, 0.05 * t, t * 2.2 + (s > 0 ? 0 : 0.4)];
@@ -564,10 +696,11 @@ function planWinged(mb, o) {
   }
 
   return {
-    hand:   { p: [bR[0]*0.95, bC[1] + 0.3, 0.35], mirror: true, tiny: true },
-    leg:    { p: [0.85, o.legLen, 0], mirror: true, len: o.legLen },
-    sensor: { p: [hR[0]*0.5, hC[1] + hR[1]*0.8, 0], mirror: true, out: 1, anim: BREATH_H },
-    eye:    { p: [0, hC[1] + hR[1]*0.2, hC[2] + hR[2]*0.9], mirror: false, faceR: hR[0], anim: BREATH_H },
+    hand:   { p: [levels[2].rx * 0.95, levels[2].y + 0.2, levels[2].z + 0.3], mirror: true, tiny: true },
+    leg:    { p: [Math.max(0.8, levels[0].rx * 0.5), o.legLen, 0], mirror: true, len: o.legLen },
+    sensor: { p: [head.hR[0]*0.5, head.topY, head.hC[2] - 0.1], mirror: true, out: 1, anim: BREATH_H },
+    eye:    { p: [0, head.hC[1] + head.hR[1]*0.2, head.hC[2] + head.hR[2]*0.9],
+              mirror: false, faceR: head.hR[0], anim: BREATH_H },
   };
 }
 
@@ -591,7 +724,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     // ---- hands ----
     case 'claw_hand': {
       const armR = (0.42 + 0.4*girth) * scale;
-      const wrist = armDrop(mb, S, side, armR, scale, o);
+      const wrist = armDrop(mb, S, side, armR, scale, o, [len, girth, taper, curl]);
       ellipsoid(mb, wrist, [armR*1.35, armR*1.15, armR*1.35], o.skin, 0.3, 0, 8, o.skinFn);
       const n = clamp(2 + Math.round(count * 3), 2, 5);
       for (let i = 0; i < n; i++) {
@@ -605,7 +738,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     }
     case 'pincer': {
       const armR = (0.5 + 0.4*girth) * scale;
-      const wrist = armDrop(mb, S, side, armR, scale, o);
+      const wrist = armDrop(mb, S, side, armR, scale, o, [len, girth, taper, curl]);
       const jl = (1.1 + 1.5*len) * scale;
       curvedCone(mb, wrist, [side*0.15, -0.25, 0.9], jl, armR*0.75, [0, -(0.4+curl*0.8), 0.3], CLAW, 0.5);
       curvedCone(mb, wrist, [side*0.15, -0.9, 0.35], jl*0.9, armR*0.65, [0, 0.45+curl*0.6, 0.45], CLAW, 0.5);
@@ -630,7 +763,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       break;
     }
     case 'rifle_arm': {
-      const wrist = armDrop(mb, S, side, 0.42*scale, scale, o);
+      const wrist = armDrop(mb, S, side, 0.42*scale, scale, o, [len, girth, taper, curl]);
       // rounded receiver, no boxes — a toy gun, not a brick
       ellipsoid(mb, [wrist[0], wrist[1]+0.05, wrist[2]+0.3], [0.5, 0.42, 1.0], METAL, 0.7, 0, 10);
       // barrel with a chunky muzzle brake and a little front sight
@@ -653,7 +786,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       break;
     }
     case 'plasma_lance': {
-      const wrist = armDrop(mb, S, side, 0.5*scale, scale, { skin: CHITIN, skinFn: null });
+      const wrist = armDrop(mb, S, side, 0.5*scale, scale, { skin: CHITIN, skinFn: null }, [len, girth, taper, curl]);
       const L = (1.6 + 1.6*len) * scale;
       ellipsoid(mb, wrist, [0.55, 0.5, 0.55], CHITIN, 0.4, 0, 8);
       tube(mb, [wrist, [wrist[0], wrist[1]+L*0.9, wrist[2]+0.5]],
@@ -820,14 +953,28 @@ function buildPart(mb, slot, family, params, side, sock, o) {
  * The arm dangles with a slight pendulum sway that grows toward the hand;
  * the builder's anim state is left at the wrist value so whatever the
  * caller attaches next (claws, gun, lance) swings along with it. */
-function armDrop(mb, S, side, armR, scale, o) {
-  const elbow = [S[0] + side*0.9*scale, S[1] - 1.1*scale, S[2] + 0.15];
-  const wrist = [S[0] + side*1.15*scale, S[1] - 2.3*scale, S[2] + 0.45];
+function armDrop(mb, S, side, armR, scale, o, pg = []) {
+  // The arm is shaped by the hand part's own genes, not a fixed tube:
+  //   length → arm length (high + short legs = knuckle-dragger),
+  //   curl   → elbow bend, taper → forearm mass (low = popeye forearms),
+  //   girth  → bicep bulge.
+  const len = pg[0] ?? 0.5, girth = pg[1] ?? 0.5, taper = pg[2] ?? 0.5, curl = pg[3] ?? 0.5;
+  const armLen = (1.9 + 1.8 * len) * scale;
+  const bend = 0.35 + curl * 0.75;
+  const elbow = [S[0] + side * (0.6 + bend * 0.5) * scale, S[1] - armLen * 0.48, S[2] + 0.1];
+  const wrist = [S[0] + side * (0.85 + bend * 0.3) * scale, S[1] - armLen, S[2] + 0.3 + bend * 0.45];
+  const foreR = Math.max(armR * 0.55, armR * (1.2 - 0.8 * taper + 0.3 * girth));
   const phase = side * 1.3 + 2.0;
   const swing = (t) => [0, 0, 0.04 + 0.11 * t, phase];
   limbJoint(mb, S, V.sub(elbow, S), armR * 1.15);   // ball-rod-collar, sized to this arm
-  tube(mb, [S, elbow, wrist], [armR*1.2, armR, armR*0.85],
+  tube(mb, [S, elbow, wrist], [armR*1.2, Math.max(armR*0.8, foreR*0.9), foreR],
     o.skinFn ? o.skin : CHITIN, 0.3, 0, 9, 1, null, swing);
+  if (girth > 0.45) {                                // bicep bulge
+    mb.setAnim(swing(0.35));
+    const bi = [S[0] + (elbow[0]-S[0])*0.45, S[1] + (elbow[1]-S[1])*0.45, S[2] + (elbow[2]-S[2])*0.45];
+    ellipsoid(mb, bi, [armR*(0.9+0.55*girth), armR*(1.0+0.5*girth), armR*(0.9+0.55*girth)],
+      o.skinFn ? o.skin : CHITIN, 0.3, 0, 8, o.skinFn);
+  }
   mb.setAnim(swing(1));
   return wrist;
 }
