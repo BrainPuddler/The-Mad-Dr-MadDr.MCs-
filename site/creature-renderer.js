@@ -190,23 +190,6 @@ function curvedCone(mb, base, dir, length, baseR, bend, col, gloss = 0.3, emis =
   tube(mb, path, [baseR, baseR*0.82, baseR*0.6, baseR*0.34, 0.04], col, gloss, emis, 8, 3);
 }
 
-/** Axis-aligned box (crisp tech parts). */
-function boxMesh(mb, c, h, col, gloss = 0.5, emis = 0) {
-  const F = [
-    [[ 1,0,0], [[1,-1,-1],[1,1,-1],[1,1,1],[1,-1,1]]],
-    [[-1,0,0], [[-1,-1,1],[-1,1,1],[-1,1,-1],[-1,-1,-1]]],
-    [[0, 1,0], [[-1,1,-1],[-1,1,1],[1,1,1],[1,1,-1]]],
-    [[0,-1,0], [[-1,-1,1],[-1,-1,-1],[1,-1,-1],[1,-1,1]]],
-    [[0,0, 1], [[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]]],
-    [[0,0,-1], [[1,-1,-1],[-1,-1,-1],[-1,1,-1],[1,1,-1]]],
-  ];
-  for (const [n, corners] of F) {
-    const ids = corners.map(k =>
-      mb.vert([c[0]+k[0]*h[0], c[1]+k[1]*h[1], c[2]+k[2]*h[2]], n, col, gloss, emis));
-    mb.quad(ids[0], ids[1], ids[2], ids[3]);
-  }
-}
-
 // ── creature assembly ───────────────────────────────────────────────────────
 // Units: world; feet on y=0; camera frames roughly 0..13 units of height.
 
@@ -503,12 +486,25 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     }
     case 'rifle_arm': {
       const wrist = armDrop(mb, S, side, 0.42*scale, scale, o);
-      boxMesh(mb, [wrist[0], wrist[1], wrist[2]+0.3], [0.55, 0.34, 0.8], METAL, 0.7);
-      tube(mb, [[wrist[0], wrist[1]+0.08, wrist[2]+0.7], [wrist[0], wrist[1]+0.08, wrist[2]+3.1]],
-        [0.15, 0.15], METDK, 0.8, 0, 8);
-      boxMesh(mb, [wrist[0], wrist[1]-0.15, wrist[2]-0.85], [0.3, 0.45, 0.42], METDK, 0.6);
-      mb.glow([wrist[0], wrist[1]+0.08, wrist[2]+3.2], GLOW, 18);
-      ellipsoid(mb, [wrist[0], wrist[1]+0.08, wrist[2]+3.15], [0.12,0.12,0.12], GLOW, 0.5, 0.9, 6);
+      // rounded receiver, no boxes — a toy gun, not a brick
+      ellipsoid(mb, [wrist[0], wrist[1]+0.05, wrist[2]+0.3], [0.5, 0.42, 1.0], METAL, 0.7, 0, 10);
+      // barrel with a chunky muzzle brake and a little front sight
+      tube(mb, [[wrist[0], wrist[1]+0.12, wrist[2]+1.0], [wrist[0], wrist[1]+0.12, wrist[2]+3.05]],
+        [0.17, 0.15], METDK, 0.85, 0, 10);
+      tube(mb, [[wrist[0], wrist[1]+0.12, wrist[2]+3.0], [wrist[0], wrist[1]+0.12, wrist[2]+3.4]],
+        [0.28, 0.28], METDK, 0.85, 0, 10, 2);
+      ellipsoid(mb, [wrist[0], wrist[1]+0.4, wrist[2]+2.55], [0.07, 0.15, 0.07], METDK, 0.6, 0, 6);
+      // grip under the receiver, curved stock with a butt pad behind
+      tube(mb, [[wrist[0], wrist[1]-0.3, wrist[2]+0.5], [wrist[0], wrist[1]-0.88, wrist[2]+0.32]],
+        [0.17, 0.14], METDK, 0.5, 0, 8, 2);
+      tube(mb, [
+        [wrist[0], wrist[1], wrist[2]-0.6],
+        [wrist[0], wrist[1]-0.25, wrist[2]-1.25],
+        [wrist[0], wrist[1]-0.45, wrist[2]-1.6],
+      ], [0.3, 0.26, 0.34], METDK, 0.6, 0, 8);
+      ellipsoid(mb, [wrist[0], wrist[1]-0.5, wrist[2]-1.72], [0.3, 0.44, 0.16], sh(METDK, 0.8), 0.4, 0, 8);
+      ellipsoid(mb, [wrist[0], wrist[1]+0.12, wrist[2]+3.42], [0.13,0.13,0.13], GLOW, 0.5, 0.9, 6);
+      mb.glow([wrist[0], wrist[1]+0.12, wrist[2]+3.45], GLOW, 18);
       break;
     }
     case 'plasma_lance': {
@@ -566,12 +562,25 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       for (let i = 0; i < n; i++) {
         const [ex, ey] = spots[i];
         eyeball(mb, [S[0] + ex*sock.faceR, S[1] + ey*1.4, S[2] - Math.abs(ex)*0.35],
-          R * (i === 0 ? 1.15 : 0.9), false);
+          R * (i === 0 ? 1.15 : 0.9), o.skin, i === 0 ? 0.55 : 0.3);
       }
+      // angry V-brows over the cluster
+      for (const s of [-1, 1])
+        tube(mb, [
+          [S[0] + s*sock.faceR*0.62, S[1] + 1.05, S[2] - 0.05],
+          [S[0] + s*0.12,            S[1] + 0.58, S[2] + 0.14],
+        ], [0.17, 0.13], sh(o.skin, 0.55), 0.25, 0, 6);
       break;
     }
     case 'cyclops_eye': {
-      eyeball(mb, S, 0.85 + 0.55*girth, true);
+      const R = 0.85 + 0.55*girth;
+      eyeball(mb, S, R, o.skin, 0.7);
+      // one heavy scowling unibrow
+      tube(mb, [
+        [S[0] - R*1.05, S[1] + R*0.72, S[2] - 0.15],
+        [S[0],          S[1] + R*0.98, S[2] + 0.05],
+        [S[0] + R*1.05, S[1] + R*0.72, S[2] - 0.15],
+      ], [0.2, 0.26, 0.2], sh(o.skin, 0.5), 0.25, 0, 7);
       break;
     }
     case 'stalk_eyes': {
@@ -580,12 +589,12 @@ function buildPart(mb, slot, family, params, side, sock, o) {
         const top = [S[0] + s*0.75, S[1] + L, S[2] + 0.25];
         tube(mb, [[S[0] + s*0.45, S[1] - 0.3, S[2] - 0.3], [S[0]+s*0.7, S[1]+L*0.6, S[2]], top],
           [0.16, 0.13, 0.11], BONDK, 0.3, 0, 6);
-        eyeball(mb, top, 0.4 + 0.2*girth, false);
+        eyeball(mb, top, 0.4 + 0.2*girth, o.skin, 0.25);
       }
       break;
     }
     case 'optic_visor': {
-      boxMesh(mb, [S[0], S[1], S[2] - 0.15], [sock.faceR*0.78, 0.42, 0.3], METDK, 0.75);
+      ellipsoid(mb, [S[0], S[1], S[2] - 0.2], [sock.faceR*0.84, 0.5, 0.36], METDK, 0.75, 0, 12);
       const n = clamp(1 + Math.round(count * 2), 1, 3);
       for (let i = 0; i < n; i++) {
         const ex = (i - (n-1)/2) * sock.faceR * 0.55;
@@ -654,12 +663,14 @@ function armDrop(mb, S, side, armR, scale, o) {
   return wrist;
 }
 
-function eyeball(mb, c, r, lidded) {
+/** Glossy toy eye with a hooded, skin-coloured upper lid. `hood` 0..1 sets
+ * how heavily the lid droops — the b-movie menace dial. */
+function eyeball(mb, c, r, skin, hood = 0.4) {
   ellipsoid(mb, c, [r, r, r], EYEWH, 0.85, 0, 10);
   ellipsoid(mb, [c[0], c[1], c[2] + r*0.72], [r*0.42, r*0.42, r*0.3], PUPIL, 0.95, 0, 8);
-  if (lidded)
-    ellipsoid(mb, [c[0], c[1] + r*0.42, c[2] - r*0.12], [r*1.06, r*0.72, r*1.02],
-      sh(EYEWH, 0.4), 0.3, 0, 10);
+  if (hood > 0)
+    ellipsoid(mb, [c[0], c[1] + r*(0.62 - 0.28*hood), c[2] - r*0.10],
+      [r*1.07, r*(0.42 + 0.34*hood), r*1.03], skin, 0.3, 0, 8);
 }
 
 function ringStitch(mb, c, r) {
