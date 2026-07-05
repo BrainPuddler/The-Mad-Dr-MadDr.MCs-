@@ -106,10 +106,19 @@ async function sync() {
 
 // ── operations ────────────────────────────────────────────────────────────────
 
+// Spawns lean biped: b-movie monsters walk upright far more often than
+// they slither or ooze. (The server's /spawn honors an explicit plan.)
+const PLAN_WEIGHTS = [["tetrapod", 0.55], ["winged", 0.2], ["serpentine", 0.15], ["blob", 0.10]];
+function pickPlan() {
+  let r = crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
+  for (const [p, w] of PLAN_WEIGHTS) { r -= w; if (r < 0) return p; }
+  return "tetrapod";
+}
+
 async function doSpawn() {
   showBusy(true);
   try {
-    const rec = await api("POST", "/spawn", { idempotencyKey: ikey() });
+    const rec = await api("POST", "/spawn", { idempotencyKey: ikey(), plan: pickPlan() });
     if (rec.status === "failed_experiment") {
       logEntry("⚡ The tissue rejected animation. (failed experiment)");
     } else {
