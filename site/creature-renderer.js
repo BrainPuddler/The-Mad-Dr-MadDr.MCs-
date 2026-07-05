@@ -320,7 +320,9 @@ function buildCreature(genome) {
   // leg genes set stance height (stumps slump low)
   const legAl = slots.leg;
   const legLen = legAl && !plan.match(/blob|serpentine/)
-    ? (legAl.family === 'leg_stump' ? 0.45 : clamp(0.9 + 1.1 * P(legAl.params, 0, 0.5), 0.9, 2.0))
+    ? (legAl.family === 'leg_stump' ? 0.45
+      : legAl.family === 'insect_leg' ? clamp(1.25 + 1.0 * P(legAl.params, 0, 0.5), 1.25, 2.25)
+      : clamp(0.9 + 1.1 * P(legAl.params, 0, 0.5), 0.9, 2.0))
     : 0;
 
   const builders = { tetrapod: planTetrapod, blob: planBlob, serpentine: planSerpentine, winged: planWinged };
@@ -924,14 +926,23 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       break;
     }
     case 'insect_leg': {
+      // insects need numbers: the count gene sets 2-3 pairs per side
+      // (4-6 legs total) staggered along the belly, front pairs reaching
+      // forward and rear pairs raking back — enough struts for the weight
       const R = 0.2 + 0.1*girth;
-      limbJoint(mb, [S[0], sock.len + 0.5, S[2]], [side * 1.3, 0.6 + curl * 0.8, -0.2], R * 1.15);
-      tube(mb, [
-        [S[0], sock.len + 0.5, S[2]],
-        [S[0] + side*1.3, sock.len + 1.1 + curl*0.8, S[2] - 0.2],
-        [S[0] + side*1.7, 0.6, S[2] + 0.1],
-        [S[0] + side*1.2, 0.0, S[2] + 0.3],
-      ], [R*1.2, R, R*0.85, 0.05], lp(CHITIN, o.skin, 0.35), 0.4, 0, 7);
+      const chit = lp(CHITIN, o.skin, 0.35);
+      const nP = 2 + Math.round(clamp(count, 0, 1));
+      for (let p = 0; p < nP; p++) {
+        const f = p / (nP - 1) - 0.5;                 // -0.5 front … +0.5 rear
+        const z0 = S[2] + f * 2.6;
+        const rake = f * 1.6;
+        const hip  = [S[0], sock.len + 0.5, z0];
+        const knee = [S[0] + side*1.5, sock.len + 1.15 + curl*0.8, z0 + rake*0.4];
+        const shin = [S[0] + side*1.95, 0.6, z0 + rake*0.8];
+        const foot = [S[0] + side*1.5, 0.0, z0 + rake];
+        limbJoint(mb, hip, V.sub(knee, hip), R * 1.15);
+        tube(mb, [hip, knee, shin, foot], [R*1.2, R, R*0.85, 0.05], chit, 0.4, 0, 7);
+      }
       break;
     }
     case 'piston_leg': {
