@@ -1148,7 +1148,9 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       const ankle = [S[0] + N[0]*0.2, 0.6, S[2] - 0.08];
       const hPh = side > 0 ? 0 : Math.PI;
       const legGait = (t) => [0.85 * t, 0.5 * t, hPh, 0];
+      mb.setGait(legGait(0.12));         // brace clamps the thigh — move WITH it
       limbJoint(mb, hip, V.sub(knee, hip), R * 1.1);
+      mb.setGait([0, 0, 0, 0.08]);       // hip ball is body-side: bobs with pelvis
       ellipsoid(mb, [hip[0], hip[1] + 0.15, hip[2]], [R*1.35, R*1.25, R*1.3],
         o.skin, 0.28, 0, 8, o.skinFn);   // hip joint mass
       tube(mb, [hip, knee, ankle], [R*1.18, R*0.9, R*0.68], o.skin, 0.28, 0, 9, 3, null, null, legGait);
@@ -1160,13 +1162,15 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     }
     case 'talon_leg': {
       const R = 0.24 + 0.12*girth;
+      const tPh = side > 0 ? 0 : Math.PI;
+      const talGait = (t) => [0.9 * t, 0.55 * t, tPh, 0];
+      mb.setGait(talGait(0.12));         // brace clamps the shin — move WITH it
       // direction = the shin's actual first segment
       limbJoint(mb, [S[0], sock.len + 0.6, S[2]],
         [side * 0.15, sock.len * 0.55 - (sock.len + 0.6), -0.55], R * 1.2);
+      mb.setGait([0, 0, 0, 0.08]);       // hip ball is body-side
       ellipsoid(mb, [S[0], sock.len + 0.65, S[2]], [R*1.7, R*1.55, R*1.65],
         o.skin, 0.28, 0, 8, o.skinFn);   // hip joint mass
-      const tPh = side > 0 ? 0 : Math.PI;
-      const talGait = (t) => [0.9 * t, 0.55 * t, tPh, 0];
       tube(mb, [
         [S[0], sock.len + 0.6, S[2]],
         [S[0] + side*0.15, sock.len*0.55, S[2] - 0.55],
@@ -1198,6 +1202,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
         const shin = [S[0] + side*1.95, 0.6, z0 + rake*0.8];
         const foot = [S[0] + side*1.5, 0.0, z0 + rake];
         const iPh = ((p + (side > 0 ? 0 : 1)) % 2) * Math.PI;   // tripod gait
+        mb.setGait([0.6 * 0.12, 0.45 * 0.12, iPh, 0]);           // brace rides its own leg
         limbJoint(mb, hip, V.sub(knee, hip), R * 1.15);
         tube(mb, [hip, knee, shin, foot], [R*1.2, R, R*0.85, 0.05], chit, 0.4, 0, 7, 3,
           null, null, (t) => [0.6 * t, 0.45 * t, iPh, 0]);
@@ -1227,6 +1232,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
           const shin = [S[0] + side * 2.35, 0.5, z0 + f * 1.5];
           const foot = [S[0] + side * 2.6, 0.0, z0 + f * 1.8];
           const sPh = (((f > 0 ? 1 : 0) + (side > 0 ? 0 : 1)) % 2) * Math.PI;
+          mb.setGait([0.55 * 0.12, 0.4 * 0.12, sPh, 0]);         // brace rides its own leg
           limbJoint(mb, hip, V.sub(knee, hip), 0.34);
           tube(mb, [hip, knee, shin, foot], [0.34, 0.26, 0.2, 0.05], METAL, 0.8, 0, 8, 3,
             null, null, (t) => [0.55 * t, 0.4 * t, sPh, 0]);
@@ -1752,6 +1758,34 @@ function blinkLevel() {
   return 0;
 }
 
+// ── personality: second-order dynamics ──────────────────────────────────────
+// After "Giving Personality to Procedural Animations using Math"
+// (SalvatoreScalia / t3ssel8r): drive TRANSITIONS through a spring-damper
+// y + k1·y' + k2·y'' = x + k3·x', tuned per creature from its BRAIN genes.
+// The gait waveform itself is untouched — only how motion arrives:
+//   fury        → low damping  (twitchy, overshooting starts and stops)
+//   will        → damping      (composed, settles without wobble)
+//   temperament → frequency    (how fast it responds at all)
+//   guile       → negative response (winds up before moving — sneaky)
+
+class SOD {
+  constructor(f, z, r, x0 = 0) {
+    const w = 2 * Math.PI * f;
+    this.k1 = z / (Math.PI * f);
+    this.k2 = 1 / (w * w);
+    this.k3 = r * z / w;
+    this.xp = x0; this.y = x0; this.yd = 0;
+  }
+  update(dt, x) {
+    const xd = (x - this.xp) / dt;
+    this.xp = x;
+    const k2s = Math.max(this.k2, dt * dt / 2 + dt * this.k1 / 2, dt * this.k1);
+    this.y += dt * this.yd;
+    this.yd += dt * (x + this.k3 * xd - this.y - this.k1 * this.yd) / k2s;
+    return this.y;
+  }
+}
+
 // Locomotion preview: cycle idle → walk → run on the dais treadmill.
 // Cadence comes from the creature's locomotion profile, so heavy or
 // weak-hearted specimens visibly lumber while sprinters blur.
@@ -1768,8 +1802,15 @@ function gaitStep() {
   if (!loco) return [0, 0];
   const m = GAIT_MODES[G.mode];
   if (++G.t > m.dur) { G.mode = (G.mode + 1) % GAIT_MODES.length; G.t = 0; }
-  G.amp += (GAIT_MODES[G.mode].amp - G.amp) * 0.04;           // eased transitions
-  G.phase += (2 * Math.PI * loco[GAIT_MODES[G.mode].hzKey]) / 60;
+  const mode = GAIT_MODES[G.mode];
+  // transitions carry the creature's temperament: a furious brute lunges
+  // into its run with overshoot, a strong-willed one glides, a guileful
+  // one visibly winds up first. The stride waveform itself is unchanged.
+  G.amp = Math.max(0, R.sodAmp ? R.sodAmp.update(1 / 60, mode.amp)
+                               : (G.amp + (mode.amp - G.amp) * 0.04));
+  const hz = R.sodHz ? Math.max(0.15, R.sodHz.update(1 / 60, loco[mode.hzKey]))
+                     : loco[mode.hzKey];
+  G.phase += (2 * Math.PI * hz) / 60;
   return [G.phase, G.amp];
 }
 
@@ -1785,7 +1826,9 @@ function gazeLevel() {
     G.t = 0;
     G.next = 70 + Math.floor(blinkRnd() * 160);
   }
-  if (G.t < 7) {
+  if (R?.sodGX) {
+    G.cur = [R.sodGX.update(1 / 60, G.to[0]), R.sodGY.update(1 / 60, G.to[1])];
+  } else if (G.t < 7) {
     const x = ++G.t / 7;
     const s = x * x * (3 - 2 * x);
     G.cur = [G.from[0] + (G.to[0] - G.from[0]) * s, G.from[1] + (G.to[1] - G.from[1]) * s];
@@ -1910,6 +1953,16 @@ function uploadCreature(genome) {
   R.glowCount = mb.glows.length;
 
   R.loco = locomotionProfile(genome);
+  // brain genes tune the springs: [command, will, temperament, guile, fury]
+  const bp = genome?.brain?.params ?? [];
+  const will = bp[1] ?? 0.5, temper = bp[2] ?? 0.5, guile = bp[3] ?? 0.5, fury = bp[4] ?? 0.5;
+  const pf = 1.1 + temper * 2.6;
+  const pz = clamp(1.15 - fury * 0.85 + will * 0.35, 0.28, 1.6);
+  const pr = 0.6 - guile * 2.2;
+  R.sodAmp = new SOD(pf, pz, pr, 0);
+  R.sodHz  = new SOD(pf * 0.8, pz, pr * 0.5, R.loco.walkHz);
+  R.sodGX  = new SOD(pf * 1.6, pz * 0.85, pr, 0);
+  R.sodGY  = new SOD(pf * 1.6, pz * 0.85, pr, 0);
   _gait.mode = 0; _gait.t = 0; _gait.amp = 0;
   let mr = 2.5;
   for (let i = 0; i < mb.v.length; i += 24)
