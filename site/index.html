@@ -8,9 +8,14 @@
 </head>
 <body>
 <header>
-  <h1>⚗️ THE LAB</h1>
-  <div class="sub">MadDr.MCs test bench — mutator &amp; chop shop · runs entirely in your browser</div>
+  <h1 id="lab-title">⚗️ THE LAB</h1>
+  <div class="sub" id="lab-sub">MadDr.MCs test bench — mutator &amp; chop shop</div>
   <div class="header-right">
+    <select id="sel-faction" title="Choose your faction">
+      <option value="maddr">🧟 Mad Doctors</option>
+      <option value="human">🪖 Human Army</option>
+      <option value="alien">🛸 Alien Hive</option>
+    </select>
     <span id="wallet" class="wallet">🩸 500</span>
     <button id="btn-reset" class="danger small" title="Wipe the lab and start over">Reset lab</button>
   </div>

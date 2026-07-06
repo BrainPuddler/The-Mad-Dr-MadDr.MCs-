@@ -1444,17 +1444,149 @@ function buildSkinAtlas() {
   return img;
 }
 
-// ── the painted backdrop (Canvas 2D, built once, uploaded as texture) ───────
+// ── the painted backdrop: one scene per faction ─────────────────────────────
+// Built once per init. Each faction's lab has its own night: the Mad
+// Doctors' castle moor, the Human Army's cold-war airbase, the Alien
+// hive's crystal fields under twin moons.
 
-function skyCol(t) {
-  if (t < 0.45) return lp([8, 6, 26], [24, 14, 52], t / 0.45);
-  if (t < 0.75) return lp([24, 14, 52], [56, 28, 74], (t - 0.45) / 0.3);
-  return lp([56, 28, 74], [116, 58, 96], (t - 0.75) / 0.25);
+let _faction = 'maddr';
+
+/** Select the lab faction skin. Takes effect on the next initRenderer. */
+export function setLabFaction(f) { _faction = SCENES[f] ? f : 'maddr'; }
+
+const SCENES = {
+  maddr: {
+    sky: [[8, 6, 26], [24, 14, 52], [56, 28, 74], [116, 58, 96]],
+    moon: [232, 230, 208], moonEdge: [172, 170, 160], halo: [150, 140, 200],
+    ground0: [38, 30, 58], ground1: [70, 56, 88], sheen: [130, 105, 130],
+    mist: '96,86,130', cloud: '22,16,44', cloudEdge: '170,160,215',
+    dais: ['#221839', '#241a3a', '#463862', '#544472', '#5e4c82'], daisRing: '#2c2148',
+  },
+  human: {
+    sky: [[5, 9, 18], [14, 24, 40], [28, 46, 62], [66, 92, 106]],
+    moon: [238, 238, 228], moonEdge: [180, 184, 184], halo: [150, 170, 205],
+    ground0: [28, 34, 42], ground1: [50, 60, 70], sheen: [105, 125, 138],
+    mist: '90,110,130', cloud: '16,24,36', cloudEdge: '150,170,200',
+    dais: ['#1e242c', '#20262f', '#39434e', '#454f5b', '#4f5a66'], daisRing: '#2a323c',
+  },
+  alien: {
+    sky: [[10, 4, 24], [30, 10, 54], [62, 22, 88], [124, 52, 132]],
+    moon: [205, 235, 218], moonEdge: [150, 185, 165], halo: [140, 200, 175],
+    ground0: [40, 24, 62], ground1: [72, 46, 98], sheen: [150, 110, 180],
+    mist: '140,100,180', cloud: '30,14,52', cloudEdge: '200,150,255',
+    dais: ['#2a1848', '#2d1a4e', '#472c74', '#54357e', '#63408e'], daisRing: '#3a2560',
+  },
+};
+
+function skyCol(cfg, t) {
+  const s = cfg.sky;
+  if (t < 0.45) return lp(s[0], s[1], t / 0.45);
+  if (t < 0.75) return lp(s[1], s[2], (t - 0.45) / 0.3);
+  return lp(s[2], s[3], (t - 0.75) / 0.25);
 }
 
 const B4 = [[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]];
 
+// faction skyline silhouettes -------------------------------------------------
+
+function silhouetteMaddr(ctx) {
+  ctx.fillStyle = '#100a24';
+  for (let x = 0; x < 150; x++) {
+    const h = Math.round(30 * Math.exp(-((x - 70) ** 2) / 2800));
+    ctx.fillRect(x, HORIZON - h, 1, h);
+  }
+  ctx.fillStyle = '#0e0922';
+  ctx.fillRect(52, 96, 24, 30);
+  ctx.fillRect(46, 88, 9, 38);
+  ctx.fillRect(74, 92, 9, 34);
+  ctx.fillRect(44, 84, 13, 4);
+  ctx.fillRect(72, 88, 13, 4);
+  for (let i = 0; i < 6; i++) ctx.fillRect(52 + i * 4, 93, 2, 3);
+  ctx.fillStyle = 'rgb(255,190,90)';
+  ctx.fillRect(60, 106, 2, 3);
+  ctx.fillRect(67, 112, 2, 3);
+  ctx.fillRect(49, 97, 2, 2);
+  ctx.fillStyle = 'rgb(140,220,140)';
+  ctx.fillRect(78, 101, 2, 3);
+  // dead tree, right foreground
+  ctx.strokeStyle = '#0c0820';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(297, 200); ctx.quadraticCurveTo(292, 150, 288, 118); ctx.stroke();
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(290, 132); ctx.quadraticCurveTo(276, 116, 268, 108); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(289, 124); ctx.quadraticCurveTo(302, 106, 310, 100); ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(288, 118); ctx.quadraticCurveTo(284, 100, 286, 92); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(272, 112); ctx.quadraticCurveTo(266, 104, 264, 98); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(306, 103); ctx.quadraticCurveTo(314, 96, 318, 94); ctx.stroke();
+}
+
+function silhouetteHuman(ctx) {
+  // quonset hangar with a lit door slit
+  ctx.fillStyle = '#0c1420';
+  ctx.beginPath(); ctx.arc(66, HORIZON, 36, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = 'rgb(255,196,90)';
+  ctx.fillRect(62, HORIZON - 16, 8, 16);
+  ctx.fillStyle = '#0c1420';
+  ctx.fillRect(62, HORIZON - 16, 8, 3);
+  // rocket on a gantry, far left
+  ctx.fillStyle = '#0b121d';
+  ctx.fillRect(14, 104, 6, 46);
+  ctx.beginPath(); ctx.moveTo(14, 104); ctx.lineTo(17, 92); ctx.lineTo(20, 104); ctx.fill();
+  ctx.fillRect(24, 100, 3, 50);
+  for (let y = 104; y < 150; y += 9) ctx.fillRect(20, y, 5, 2);
+  // radar dish on a lattice mast, right side
+  ctx.strokeStyle = '#0b121d'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(276, HORIZON); ctx.lineTo(284, 96); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(292, HORIZON); ctx.lineTo(285, 96); ctx.stroke();
+  for (let y = 108; y < 148; y += 10) {
+    ctx.beginPath(); ctx.moveTo(277 + (148 - y) * 0.1, y); ctx.lineTo(291 - (148 - y) * 0.1, y); ctx.stroke();
+  }
+  ctx.fillStyle = '#0b121d';
+  ctx.beginPath(); ctx.ellipse(284, 88, 14, 7, -0.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgb(255,70,70)';
+  ctx.fillRect(283, 78, 3, 3);                       // beacon
+  // power poles marching along the horizon
+  ctx.strokeStyle = '#0b121d'; ctx.lineWidth = 1;
+  for (const px of [150, 190, 230]) {
+    ctx.strokeRect(px, 126, 1, HORIZON - 126);
+    ctx.beginPath(); ctx.moveTo(px - 6, 130); ctx.lineTo(px + 7, 130); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px - 5, 135); ctx.lineTo(px + 6, 135); ctx.stroke();
+  }
+}
+
+function silhouetteAlien(ctx) {
+  // a second, smaller moon
+  ctx.fillStyle = 'rgba(190,225,205,0.85)';
+  ctx.beginPath(); ctx.arc(56, 44, 9, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(150,200,175,0.25)';
+  ctx.beginPath(); ctx.arc(56, 44, 14, 0, Math.PI * 2); ctx.fill();
+  // crystal spires, glowing at the heart
+  const spire = (cx, w, top) => {
+    ctx.fillStyle = '#170c2e';
+    ctx.beginPath();
+    ctx.moveTo(cx - w, HORIZON);
+    ctx.lineTo(cx - w * 0.25, top);
+    ctx.lineTo(cx + w * 0.35, top + 8);
+    ctx.lineTo(cx + w, HORIZON);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(190,130,255,0.4)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx - w * 0.25, top); ctx.lineTo(cx - w * 0.1, HORIZON); ctx.stroke();
+    ctx.fillStyle = 'rgba(210,150,255,0.8)';
+    ctx.fillRect(cx - 1, top + (HORIZON - top) * 0.55, 2, 3);
+  };
+  spire(38, 10, 96); spire(58, 14, 78); spire(80, 9, 104); spire(97, 6, 118);
+  spire(286, 12, 86); spire(304, 8, 106);
+  // floating shard with a faint glow
+  ctx.fillStyle = '#1c1038';
+  ctx.beginPath();
+  ctx.moveTo(258, 96); ctx.lineTo(266, 104); ctx.lineTo(258, 114); ctx.lineTo(251, 104); ctx.fill();
+  ctx.fillStyle = 'rgba(190,130,255,0.3)';
+  ctx.beginPath(); ctx.arc(258, 105, 13, 0, Math.PI * 2); ctx.fill();
+}
+
 function buildBackground() {
+  const cfg = SCENES[_faction] ?? SCENES.maddr;
   const c = document.createElement('canvas');
   c.width = BW; c.height = BH;
   const ctx = c.getContext('2d');
@@ -1481,26 +1613,26 @@ function buildBackground() {
       if (y < HORIZON) {
         let t = y / HORIZON + (bay - 0.5) / SKY_STEPS;
         t = clamp(t, 0, 1);
-        col = skyCol(Math.floor(t * SKY_STEPS) / SKY_STEPS);
+        col = skyCol(cfg, Math.floor(t * SKY_STEPS) / SKY_STEPS);
         const d = Math.hypot(x - MX, y - MY);
         if (d <= MR) {
           const f = d / MR;
-          col = lp([232, 230, 208], [172, 170, 160], f * f);
-          for (const [cx, cy, cr] of CRATERS)
-            if (Math.hypot(x - MX - cx, y - MY - cy) < cr) col = [203, 199, 178];
+          col = lp(cfg.moon, cfg.moonEdge, f * f);
+          for (const [cx2, cy2, cr] of CRATERS)
+            if (Math.hypot(x - MX - cx2, y - MY - cy2) < cr) col = sh(cfg.moonEdge, 1.12);
         } else if (d < MR + 34) {
           const gg = (1 - (d - MR) / 34) ** 2;
-          if (gg * 0.55 > bay * 0.35) col = lp(col, [150, 140, 200], gg * 0.55);
+          if (gg * 0.55 > bay * 0.35) col = lp(col, cfg.halo, gg * 0.55);
         }
       } else {
         let t = (y - HORIZON) / (BH - HORIZON) + (bay - 0.5) / GND_STEPS;
         t = clamp(t, 0, 1);
-        col = lp([38, 30, 58], [70, 56, 88], Math.floor(t * GND_STEPS) / GND_STEPS);
+        col = lp(cfg.ground0, cfg.ground1, Math.floor(t * GND_STEPS) / GND_STEPS);
         const w = 8 + (y - HORIZON) * 1.1;
         const dx = Math.abs(x - MX);
         if (dx < w) {
           const s = (1 - dx / w) * 0.5;
-          if (s > bay * 0.6) col = lp(col, [130, 105, 130], s);
+          if (s > bay * 0.6) col = lp(col, cfg.sheen, s);
         }
       }
       const vx = (x - 160) / 160, vy = (y - 100) / 100;
@@ -1523,46 +1655,23 @@ function buildBackground() {
   }
   ctx.putImageData(img, 0, 0);
 
-  ctx.fillStyle = '#100a24';
-  for (let x = 0; x < 150; x++) {
-    const h = Math.round(30 * Math.exp(-((x - 70) ** 2) / 2800));
-    ctx.fillRect(x, HORIZON - h, 1, h);
-  }
-  ctx.fillStyle = '#0e0922';
-  ctx.fillRect(52, 96, 24, 30);
-  ctx.fillRect(46, 88, 9, 38);
-  ctx.fillRect(74, 92, 9, 34);
-  ctx.fillRect(44, 84, 13, 4);
-  ctx.fillRect(72, 88, 13, 4);
-  for (let i = 0; i < 6; i++) ctx.fillRect(52 + i * 4, 93, 2, 3);
-  ctx.fillStyle = 'rgb(255,190,90)';
-  ctx.fillRect(60, 106, 2, 3);
-  ctx.fillRect(67, 112, 2, 3);
-  ctx.fillRect(49, 97, 2, 2);
-  ctx.fillStyle = 'rgb(140,220,140)';
-  ctx.fillRect(78, 101, 2, 3);
+  // skyline
+  if (_faction === 'human') silhouetteHuman(ctx);
+  else if (_faction === 'alien') silhouetteAlien(ctx);
+  else silhouetteMaddr(ctx);
 
-  ctx.strokeStyle = '#0c0820';
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(297, 200); ctx.quadraticCurveTo(292, 150, 288, 118); ctx.stroke();
-  ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(290, 132); ctx.quadraticCurveTo(276, 116, 268, 108); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(289, 124); ctx.quadraticCurveTo(302, 106, 310, 100); ctx.stroke();
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(288, 118); ctx.quadraticCurveTo(284, 100, 286, 92); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(272, 112); ctx.quadraticCurveTo(266, 104, 264, 98); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(306, 103); ctx.quadraticCurveTo(314, 96, 318, 94); ctx.stroke();
-
+  // cloud bands
   const cloud = (cx, cy, rx, ry, aBody, aEdge) => {
-    ctx.fillStyle = `rgba(22,16,44,${aBody})`;
+    ctx.fillStyle = `rgba(${cfg.cloud},${aBody})`;
     ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = `rgba(170,160,215,${aEdge})`;
+    ctx.fillStyle = `rgba(${cfg.cloudEdge},${aEdge})`;
     ctx.beginPath(); ctx.ellipse(cx, cy - ry + 1, rx * 0.9, 1.5, 0, 0, Math.PI * 2); ctx.fill();
   };
   cloud(130, 66, 62, 6, 0.65, 0.10);
   cloud(250, 58, 48, 5, 0.85, 0.30);
   cloud(60, 40, 44, 5, 0.55, 0.08);
 
+  // floor lines
   ctx.strokeStyle = 'rgba(14,9,28,0.4)';
   ctx.lineWidth = 1;
   for (let k = -5; k <= 5; k++) {
@@ -1575,27 +1684,29 @@ function buildBackground() {
     ctx.beginPath(); ctx.moveTo(0, HORIZON + dy); ctx.lineTo(BW, HORIZON + dy); ctx.stroke();
   }
   const mist = ctx.createLinearGradient(0, HORIZON - 8, 0, HORIZON + 8);
-  mist.addColorStop(0, 'rgba(96,86,130,0)');
-  mist.addColorStop(0.5, 'rgba(96,86,130,0.28)');
-  mist.addColorStop(1, 'rgba(96,86,130,0)');
+  mist.addColorStop(0, `rgba(${cfg.mist},0)`);
+  mist.addColorStop(0.5, `rgba(${cfg.mist},0.28)`);
+  mist.addColorStop(1, `rgba(${cfg.mist},0)`);
   ctx.fillStyle = mist;
   ctx.fillRect(0, HORIZON - 8, BW, 16);
 
-  ctx.fillStyle = '#221839';
+  // the dais
+  const D = cfg.dais;
+  ctx.fillStyle = D[0];
   ctx.beginPath(); ctx.ellipse(DAIS.x, DAIS.y + 5, 90, 24, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#241a3a';
+  ctx.fillStyle = D[1];
   ctx.beginPath(); ctx.ellipse(DAIS.x, DAIS.y + 3, 88, 24, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#463862';
+  ctx.fillStyle = D[2];
   ctx.beginPath(); ctx.ellipse(DAIS.x, DAIS.y - 2, 86, 22, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#544472';
+  ctx.fillStyle = D[3];
   ctx.beginPath(); ctx.ellipse(DAIS.x + 6, DAIS.y - 3, 64, 15, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#5e4c82';
+  ctx.fillStyle = D[4];
   ctx.beginPath(); ctx.ellipse(DAIS.x + 8, DAIS.y - 4, 42, 9, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = '#2c2148';
+  ctx.strokeStyle = cfg.daisRing;
   ctx.beginPath(); ctx.ellipse(DAIS.x, DAIS.y - 2, 74, 18, 0, 0, Math.PI * 2); ctx.stroke();
   for (let a = 0; a < 12; a++) {
     const th = (a / 12) * Math.PI * 2;
-    ctx.fillStyle = '#2c2148';
+    ctx.fillStyle = cfg.daisRing;
     ctx.fillRect(Math.round(DAIS.x + Math.cos(th) * 80) - 1, Math.round(DAIS.y - 2 + Math.sin(th) * 20) - 1, 2, 2);
   }
   return c;

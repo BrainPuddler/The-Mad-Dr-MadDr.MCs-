@@ -123,3 +123,33 @@ td, th { padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line); }
 
 footer { padding: 10px 18px 20px; color: var(--dim); font-size: 11px; border-top: 1px solid var(--line); }
 code { color: var(--acid); }
+
+
+/* ── faction skins ─────────────────────────────────────────────────────── */
+/* Human Army: cold-war steel and amber CRT phosphor */
+body[data-faction="human"] {
+  --bg: #0e1114; --panel: #151a20; --panel2: #1c232c;
+  --ink: #e8dcae; --dim: #93998a; --acid: #ffb52e;
+  --blood: #ff6a5a; --fuel: #ffc14d; --ichor: #b07aff;
+  --dead: #6b7268; --line: #2b333e;
+}
+body[data-faction="human"] header {
+  background: linear-gradient(180deg, #1a222c, var(--bg));
+}
+body[data-faction="human"] h1 { letter-spacing: 5px; }
+
+/* Alien Hive: ichor violet, grown not built */
+body[data-faction="alien"] {
+  --bg: #0f0918; --panel: #170e26; --panel2: #211534;
+  --ink: #ddccf4; --dim: #9c87c0; --acid: #c08bff;
+  --blood: #ff5a9e; --fuel: #ffc14d; --ichor: #b07aff;
+  --dead: #6f6486; --line: #35244f;
+}
+body[data-faction="alien"] header {
+  background: linear-gradient(180deg, #221338, var(--bg));
+}
+body[data-faction="alien"] .panel {
+  box-shadow: inset 0 0 22px rgba(120, 60, 200, 0.10);
+  border-radius: 14px;
+}
+body[data-faction="alien"] button { border-radius: 12px; }

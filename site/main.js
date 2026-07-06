@@ -15,7 +15,7 @@ import {
   originOf, isVestigial, homologOf, brainSize, bodyAxis, brainAxis, heartVigor,
   capacity as controlCapacity, controlCost, controlRadius, berserkThreshold,
 } from "./lib/index.js";
-import { initRenderer, updateGenome, destroyRenderer, locomotionProfile } from "./creature-renderer.js";
+import { initRenderer, updateGenome, destroyRenderer, locomotionProfile, setLabFaction } from "./creature-renderer.js";
 
 const MUTATOR_URL = "https://maddr-mutator.onrender.com";
 const LOCAL_KEY   = "maddr-lab-v2";
@@ -34,7 +34,7 @@ let local = (() => {
 })() ?? newLocal();
 
 function newLocal() {
-  return { accountId: crypto.randomUUID(), nameMap: {}, deadSet: [], trayFrom: {}, log: [], seq: 0, selectedId: null };
+  return { accountId: crypto.randomUUID(), nameMap: {}, deadSet: [], trayFrom: {}, log: [], seq: 0, selectedId: null, faction: "maddr" };
 }
 function saveLocal() { localStorage.setItem(LOCAL_KEY, JSON.stringify(local)); }
 
@@ -247,6 +247,26 @@ async function doReset() {
   saveLocal(); await sync();
 }
 
+// ── factions ──────────────────────────────────────────────────────────────────
+// Same Mutator service, three houses. Each gets its own lab skin so you
+// always know whose bench you're standing at (docs/17 origins).
+const FACTION_META = {
+  maddr: { title: "⚗️ THE LAB",     sub: "MadDr.MCs test bench — mutator & chop shop" },
+  human: { title: "📡 THE HANGAR",  sub: "Army R&D proving ground — requisition & retrofit" },
+  alien: { title: "🛸 THE SANCTUM", sub: "Hive biotech vault — growth & communion" },
+};
+
+function applyFaction(f) {
+  const meta = FACTION_META[f] ?? FACTION_META.maddr;
+  document.body.dataset.faction = f;
+  document.getElementById("lab-title").textContent = meta.title;
+  document.getElementById("lab-sub").textContent = meta.sub;
+  document.getElementById("sel-faction").value = f;
+  setLabFaction(f);
+  destroyRenderer();            // force the portrait to rebuild its scene
+  _lastPortraitId = null;
+}
+
 // ── busy indicator ────────────────────────────────────────────────────────────
 function showBusy(on) {
   document.getElementById("btn-spawn").disabled = on;
@@ -426,6 +446,15 @@ function renderPortrait() {
 // ── boot ───────────────────────────────────────────────────────────────────────
 document.getElementById("btn-spawn").addEventListener("click", doSpawn);
 document.getElementById("btn-reset").addEventListener("click", doReset);
+local.faction ??= "maddr";
+applyFaction(local.faction);
+document.getElementById("sel-faction").addEventListener("change", (e) => {
+  local.faction = e.target.value;
+  saveLocal();
+  applyFaction(local.faction);
+  logEntry(`🚪 Crossed over to ${e.target.selectedOptions[0].textContent.trim()}.`);
+  render();
+});
 
 // Show connecting state, then sync
 document.getElementById("roster").innerHTML = `<div class="empty">Connecting to Mutator…</div>`;
