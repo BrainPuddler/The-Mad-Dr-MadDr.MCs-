@@ -347,8 +347,10 @@ function buildCreature(genome) {
   const legLen = legAl && !plan.match(/blob|serpentine/)
     ? (legAl.family === 'leg_stump' ? 0.6
       : legAl.family === 'insect_leg' ? clamp(1.25 + 1.0 * P(legAl.params, 0, 0.5), 1.25, 2.25)
+      : legAl.family === 'piston_leg' ? clamp(1.8 + 1.0 * P(legAl.params, 0, 0.5), 1.8, 2.8)
       : clamp(2.4 + 1.2 * P(legAl.params, 0, 0.5), 2.4, 3.6))
     : 0;
+  const legFam = legAl?.family ?? null;
 
   const builders = { tetrapod: planTetrapod, blob: planBlob, serpentine: planSerpentine, winged: planWinged };
   // hide grain: an unused heart axis picks how fine or coarse the skin
@@ -356,7 +358,7 @@ function buildCreature(genome) {
   const grain = P(g.heart?.params, 3, 0.5);
 
   const sockets = (builders[plan] ?? planTetrapod)(mb, {
-    bulk, limb, tail, skin, skinFn, headScale, heartLevel, legLen,
+    bulk, limb, tail, skin, skinFn, headScale, heartLevel, legLen, legFam,
     brainTier: g.brain?.tier ?? 'average',
     texScale: 0.35 + 0.5 * grain,
   });
@@ -495,6 +497,46 @@ function torsoLevels(build, W, h, y0, lean) {
 
 const BRAINC = [214, 150, 160];
 
+/** The modular LOWER TORSO. Material follows the leg family — flesh
+ * pelvis for organic legs, chitin pod for insect, and a machined metal
+ * chassis when the legs are tech (the whole lower body pops off and a
+ * mechanical unit bolts on). The waist junction is a brass collar worn
+ * as a bolted belt. */
+function buildPelvis(mb, o, waistR, waistY) {
+  const mech = o.legFam === 'piston_leg';
+  const chit = o.legFam === 'insect_leg';
+  const col = mech ? METAL : chit ? lp(CHITIN, o.skin, 0.35) : o.skin;
+  const fn = (mech || chit) ? null : o.skinFn;
+  const prevTex = mb.tex, prevAnim = mb.anim;
+  mb.setAnim(ANIM0);
+  mb.setTex(mech ? TEX_NONE : chit ? [...TILE.chitin, o.texScale, 0.6]
+                                   : [...TILE.warts, o.texScale, 0.5]);
+  const hipY = waistY - 1.15;
+  lathe(mb, [
+    { y: hipY - 0.45, x: 0, z: 0, rx: waistR*0.72, rz: waistR*0.60 },
+    { y: hipY + 0.30, x: 0, z: 0, rx: waistR*1.04, rz: waistR*0.86 },
+    { y: waistY + 0.12, x: 0, z: 0, rx: waistR*0.94, rz: waistR*0.78 },
+  ], col, mech ? 0.7 : 0.28, 0, 14, fn);
+  if (mech) {
+    for (let i = 0; i < 8; i++) {          // chassis rivets
+      const a = (i / 8) * Math.PI * 2;
+      ellipsoid(mb, [Math.cos(a)*waistR, hipY + 0.3, Math.sin(a)*waistR*0.83],
+        [0.09, 0.09, 0.09], IRON, 0.8, 0, 4);
+    }
+    ellipsoid(mb, [0, hipY + 0.25, waistR*0.82], [0.16, 0.16, 0.1], GLOW, 0.5, 1, 6);
+    mb.glow([0, hipY + 0.25, waistR*0.88], GLOW, 18);
+  }
+  // THE BELT: brass collar around the waist junction, iron-bolted
+  torus(mb, [0, waistY + 0.05, 0], [0, 1, 0], waistR*0.98, 0.24, BRASS, 0.85, 0, 18, 8);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + 0.39;
+    ellipsoid(mb, [Math.cos(a)*(waistR*0.98 + 0.16), waistY + 0.05, Math.sin(a)*(waistR*0.98 + 0.16)],
+      [0.13, 0.13, 0.13], IRON, 0.8, 0, 4);
+  }
+  mb.setTex(prevTex);
+  mb.setAnim(prevAnim);
+}
+
 /** The head ladder: dim = pinhead sunk in the shoulders, average =
  * standard, gifted = tall egghead dome, mastermind = exposed pulsing
  * brain with two lobes. Returns geometry the face and sockets hang on. */
@@ -555,8 +597,9 @@ function planTetrapod(mb, o) {
   const BREATH_T = [0.09, 0, 0, 0], BREATH_H = [0.04, 0, 0, 0];
   const b = o.limb;                       // the limb axis IS the build axis here
   const W = 1.9 + 1.0 * o.bulk;           // human-ish width, not beach-ball
-  const h = 3.6 + 0.8 * o.bulk;
-  const y0 = Math.max(0.4, o.legLen - 0.35);
+  const h = 3.1 + 0.7 * o.bulk;
+  const waistY = o.legLen + 1.15;         // lower torso lives below the belt
+  const y0 = waistY - 0.15;
   const levels = torsoLevels(b, W, h, y0, 0.5);
 
   mb.setAnim(BREATH_T);
@@ -569,6 +612,7 @@ function planTetrapod(mb, o) {
         [W*0.48*b, W*0.42*b, W*0.44*b], o.skin, 0.28, 0, 10, o.skinFn);
   const ch = levels[2];
   stitchSeam(mb, ch.y - h * 0.12, ch.rx, ch.rz, ch.z);
+  buildPelvis(mb, o, levels[0].rx, waistY);
 
   // an actual neck between the shoulders and the skull
   const neckTop = y0 + h + 0.55;
@@ -580,7 +624,7 @@ function planTetrapod(mb, o) {
   frankenDetails(mb, head.hC, head.hR, o.heartLevel, o);
   mb.setAnim(ANIM0);
 
-  addTail(mb, o, y0 + h * 0.18, -levels[1].rz * 0.9, false);
+  addTail(mb, o, o.legLen + 0.55, -levels[0].rx * 0.75, false);
 
   // socket frames: position + the body's outward surface normal there
   const slope = (levels[2].rx - levels[4].rx) / Math.max(0.4, levels[4].y - levels[2].y);
@@ -589,7 +633,7 @@ function planTetrapod(mb, o) {
   return {
     hand:   { p: [shl.rx * 0.92 + (b > 0.5 ? W * 0.28 * b : 0), shl.y, shl.z + 0.15],
               nrm: V.norm([1, slope * 0.5, 0.15]), mirror: true },
-    leg:    { p: [Math.max(0.7, levels[0].rx * 0.6), o.legLen, 0],
+    leg:    { p: [Math.max(0.7, levels[0].rx * 0.58), o.legLen, 0],
               nrm: V.norm([0.3, -1, 0]), mirror: true, len: o.legLen },
     sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H },
     eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR),
@@ -702,13 +746,15 @@ function planWinged(mb, o) {
   const BREATH_B = [0.07, 0, 0, 0], BREATH_H = [0.035, 0, 0, 0];
   const b = o.bulk * 0.85;               // bulk sets the build: imp vs gargoyle
   const W = 1.5 + 0.8 * o.bulk;
-  const h = 3.2 + 0.7 * o.bulk;
-  const y0 = Math.max(0.4, o.legLen - 0.25);
+  const h = 2.8 + 0.6 * o.bulk;
+  const waistY = o.legLen + 0.95;
+  const y0 = waistY - 0.12;
   const levels = torsoLevels(b, W, h, y0, 0.4);
 
   mb.setAnim(BREATH_B);
   mb.setTex([...TILE.feathers, o.texScale, 0.5]);
   lathe(mb, levels, o.skin, 0.28, 0, 14, o.skinFn);
+  buildPelvis(mb, o, levels[0].rx, waistY);
   const neckTop = y0 + h + 0.45;
   tube(mb, [[0, y0 + h - 0.25, levels[4].z * 0.7], [0, neckTop, levels[4].z * 0.8]],
     [W*0.33, W*0.28], sh(o.skin, 0.95), 0.28, 0, 9);
@@ -717,7 +763,7 @@ function planWinged(mb, o) {
   frankenDetails(mb, head.hC, head.hR, o.heartLevel, o);
   mb.setAnim(ANIM0);
 
-  addTail(mb, o, y0 + h * 0.2, -levels[1].rz * 0.9, true);   // devil spade
+  addTail(mb, o, o.legLen + 0.5, -levels[0].rx * 0.75, true);   // devil spade
 
   // bat wings, rooted at the BACK shoulders (grafted on, not grown from the
   // sides) and sweeping out and behind. The flap is a traveling sine: phase
@@ -1066,12 +1112,31 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       break;
     }
     case 'piston_leg': {
-      limbJoint(mb, [S[0], sock.len + 0.7, S[2]], [0, -1, 0], 0.52);
-      ellipsoid(mb, [S[0], sock.len + 0.78, S[2]], [0.68, 0.6, 0.65],
-        o.skin, 0.28, 0, 8, o.skinFn);   // flesh hip the machine bolts into
-      tube(mb, [[S[0], sock.len + 0.7, S[2]], [S[0], 0.85, S[2]]], [0.5, 0.5], METAL, 0.8, 0, 10);
-      tube(mb, [[S[0], 0.9, S[2]], [S[0], 0.25, S[2]]], [0.26, 0.26], sh(METAL, 1.25), 0.9, 0, 8);
-      tube(mb, [[S[0], 0.3, S[2]], [S[0], 0.0, S[2]]], [0.72, 0.78], METDK, 0.6, 0, 10, 2);
+      // the mechanical lower body: the chassis pelvis is built by
+      // buildPelvis; the count gene picks the drive unit —
+      // low = TANK TREADS, high = ROBOT SPIDER LEGS
+      if (count < 0.45) {
+        const cy = sock.len * 0.42, hh = sock.len * 0.4;
+        const TREAD = [40, 42, 48];
+        ellipsoid(mb, [S[0], cy, 0.15], [0.72, hh, 2.4], TREAD, 0.35, 0, 12);
+        for (let wI = -1; wI <= 1; wI++)               // road wheels
+          tube(mb, [[S[0], cy * 0.6, 0.15 + wI * 1.3], [S[0] + side * 0.8, cy * 0.6, 0.15 + wI * 1.3]],
+            [0.4, 0.4], METDK, 0.7, 0, 10, 2);
+        ellipsoid(mb, [S[0], cy + hh * 0.8, 0.15], [0.8, 0.26, 2.55], METAL, 0.7, 0, 10);  // fender
+        ellipsoid(mb, [S[0], cy, 2.5], [0.16, 0.16, 0.16], GLOW, 0.5, 1, 6);
+        mb.glow([S[0], cy, 2.55], GLOW, 16);
+      } else {
+        for (const f of [-0.45, 0.45]) {               // two struts per side = 4 legs
+          const z0 = S[2] + f * 2.2;
+          const hip  = [S[0], sock.len + 0.25, z0];
+          const knee = [S[0] + side * 1.9, sock.len + 0.95, z0 + f * 0.9];
+          const shin = [S[0] + side * 2.35, 0.5, z0 + f * 1.5];
+          const foot = [S[0] + side * 2.6, 0.0, z0 + f * 1.8];
+          limbJoint(mb, hip, V.sub(knee, hip), 0.34);
+          tube(mb, [hip, knee, shin, foot], [0.34, 0.26, 0.2, 0.05], METAL, 0.8, 0, 8);
+          ellipsoid(mb, knee, [0.3, 0.3, 0.3], METDK, 0.7, 0, 6);   // knee actuator
+        }
+      }
       break;
     }
     case 'leg_stump': {
