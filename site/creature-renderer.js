@@ -119,15 +119,36 @@ function mat4mul(a, b) {
 
 const ANIM0 = [0, 0, 0, 0];
 
+// skin-atlas tile origins (1024² atlas, 4×4 grid of 256px tiles) and the
+// per-material gloss boost stored in the tile's alpha channel
+const TILE = {
+  warts:    [0.00, 0.00],
+  scales:   [0.25, 0.00],
+  slick:    [0.50, 0.00],
+  feathers: [0.75, 0.00],
+  chitin:   [0.00, 0.25],
+  ridge:    [0.25, 0.25],
+  none:     [0.50, 0.25],
+};
+const TILE_SPEC = { warts: 28, scales: 90, slick: 215, feathers: 18, chitin: 110, ridge: 50, none: 0 };
+const TEX_NONE = [TILE.none[0], TILE.none[1], 1, 0];
+
 class MeshB {
-  constructor() { this.v = []; this.idx = []; this.glows = []; this.anim = ANIM0; this.fx = 0; }
+  constructor() {
+    this.v = []; this.idx = []; this.glows = [];
+    this.anim = ANIM0; this.fx = 0; this.tex = TEX_NONE;
+  }
   setAnim(a) { this.anim = a; }
   setFx(f) { this.fx = f; }
+  /** [tileU, tileV, tilingScale, amplitude] — which skin material, how
+   * dense its grain, and how strongly it shows. */
+  setTex(t) { this.tex = t; }
   vert(p, n, c, g, e) {
-    const a = this.anim;
+    const a = this.anim, t = this.tex;
     this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], c[0]/255, c[1]/255, c[2]/255, g, e, this.fx,
+      t[0], t[1], t[2], t[3],
       a[0], a[1], a[2], a[3]);
-    return this.v.length / 16 - 1;
+    return this.v.length / 20 - 1;
   }
   tri(a, b, c) { this.idx.push(a, b, c); }
   quad(a, b, c, d) { this.idx.push(a, b, c, a, c, d); }
@@ -249,6 +270,8 @@ function limbJoint(mb, rootAt, dir, limbR) {
   // `rootAt` is the limb's exact first path point and `dir` its exact
   // first-segment direction — callers pass the real skeleton values, so
   // the hoop's angle always matches the limb and sits right at its end.
+  const prevTex = mb.tex;
+  mb.setTex(TEX_NONE);
   const d = V.norm(dir);
   const R = Math.max(0.14, limbR);
   const braceC = V.add(rootAt, V.scale(d, R * 0.45));
@@ -269,6 +292,7 @@ function limbJoint(mb, rootAt, dir, limbR) {
     ellipsoid(mb, V.add(braceC, V.scale(radial, majorR + minorR * 0.6)),
       [minorR*0.55, minorR*0.55, minorR*0.55], IRON, 0.8, 0, 5);
   }
+  mb.setTex(prevTex);
 }
 
 /** Curved horn/claw: cone bending toward `bend` (a world-space offset). */
@@ -327,9 +351,14 @@ function buildCreature(genome) {
     : 0;
 
   const builders = { tetrapod: planTetrapod, blob: planBlob, serpentine: planSerpentine, winged: planWinged };
+  // hide grain: an unused heart axis picks how fine or coarse the skin
+  // texture runs — a heritable detail-density gene
+  const grain = P(g.heart?.params, 3, 0.5);
+
   const sockets = (builders[plan] ?? planTetrapod)(mb, {
     bulk, limb, tail, skin, skinFn, headScale, heartLevel, legLen,
     brainTier: g.brain?.tier ?? 'average',
+    texScale: 0.35 + 0.5 * grain,
   });
 
   for (const slot of SLOT_NAMES) {
@@ -367,6 +396,8 @@ function frankenDetails(mb, headC, headR, heartLevel, o) {
   const jC = [headC[0], headC[1] - headR[1]*0.68, headC[2] + headR[2]*0.30];
   const jR = [headR[0]*0.80, headR[1]*0.40, headR[2]*0.82];
   ellipsoid(mb, jC, jR, o.skin, 0.28, 0, 10, o.skinFn);
+  const fdTex = mb.tex;
+  mb.setTex(TEX_NONE);
   ellipsoid(mb, [jC[0], jC[1] + jR[1]*0.55, jC[2] + jR[2]*0.45],
     [jR[0]*0.82, 0.13, jR[2]*0.5], MOUTHC, 0.15, 0, 8);
   for (const s of [-1, 1])
@@ -386,6 +417,7 @@ function frankenDetails(mb, headC, headR, heartLevel, o) {
         if (glow) mb.glow([bx + s * 0.9, byy, 0], BLTGLO, 24);
       }
   }
+  mb.setTex(fdTex);
 }
 
 function stitchSeam(mb, y0, rx, rz, zc) {
@@ -484,10 +516,13 @@ function buildHead(mb, o, neckY, zOff) {
   } else if (t === 'mastermind') {
     // the brain, proudly exposed
     const bc = [hC[0], hC[1] + hR[1]*0.62, hC[2] - 0.15];
+    const bTex = mb.tex;
+    mb.setTex([...TILE.slick, 0.9, 0.55]);
     ellipsoid(mb, bc, [hR[0]*0.92, hR[1]*0.66, hR[2]*0.88], BRAINC, 0.55, 0, 14);
     for (const s of [-1, 1])
       ellipsoid(mb, [bc[0] + s*hR[0]*0.40, bc[1] + hR[1]*0.34, bc[2]],
         [hR[0]*0.44, hR[1]*0.30, hR[2]*0.55], sh(BRAINC, 0.92), 0.55, 0, 8);
+    mb.setTex(bTex);
     topY = bc[1] + hR[1] * 0.88;
   }
   return { hC, hR, topY };
@@ -525,6 +560,7 @@ function planTetrapod(mb, o) {
   const levels = torsoLevels(b, W, h, y0, 0.5);
 
   mb.setAnim(BREATH_T);
+  mb.setTex([...TILE.warts, o.texScale, 0.55]);
   lathe(mb, levels, o.skin, 0.28, 0, 18, o.skinFn);
   const shl = levels[3];
   if (b > 0.5)                            // brute deltoid caps
@@ -563,6 +599,7 @@ function planBlob(mb, o) {
   const dC = [0, dR[1]*0.9, 0];
   const JELLY = [0.13, 0, 0.10, 0.7];
   mb.setAnim(JELLY);
+  mb.setTex([...TILE.slick, o.texScale, 0.85]);
   // squash-and-stretch: the crown bobs on the flap channel, the base stays
   ellipsoid(mb, dC, dR, o.skin, 0.34, 0, 18, o.skinFn,
     (u) => [0.13, 0.30 * Math.max(0, u[1]), 0.10, 0.7]);
@@ -610,6 +647,7 @@ function planSerpentine(mb, o) {
   // sway travels up the coil and grows toward the raised neck
   const swayFn = (t) => [0.02 + 0.02*t, 0, 0.5*t*t, t*5.2];
   const SWAY_H = [0.03, 0, 0.5, 5.2];   // the head rides the neck tip
+  mb.setTex([...TILE.scales, o.texScale, 0.8]);
   tube(mb, path, radii, o.skin, 0.3, 0, 12, 3,
     (t) => sh(o.skin, 0.84 + 0.16 * Math.sin(t * 40) * 0.5 + 0.16),   // belly-band shimmer
     swayFn);
@@ -623,6 +661,7 @@ function planSerpentine(mb, o) {
       sh(o.skin, 0.9), 0.28, 0, 12, o.skinFn);
   // fangs point DOWN on a serpent
   const mz = hC[2] + hR[2] * 0.8;
+  mb.setTex(TEX_NONE);
   ellipsoid(mb, [hC[0], hC[1] - hR[1]*0.4, mz], [hR[0]*0.4, 0.16, 0.2], MOUTHC, 0.15, 0, 8);
   for (const s of [-1, 1])
     curvedCone(mb, [hC[0] + s*hR[0]*0.3, hC[1] - hR[1]*0.42, mz], [0, -1, 0.1],
@@ -656,6 +695,7 @@ function planWinged(mb, o) {
   const levels = torsoLevels(b, W, h, y0, 0.4);
 
   mb.setAnim(BREATH_B);
+  mb.setTex([...TILE.feathers, o.texScale, 0.5]);
   lathe(mb, levels, o.skin, 0.28, 0, 14, o.skinFn);
   const neckTop = y0 + h + 0.45;
   tube(mb, [[0, y0 + h - 0.25, levels[4].z * 0.7], [0, neckTop, levels[4].z * 0.8]],
@@ -689,6 +729,7 @@ function planWinged(mb, o) {
     }
     // hoop around the wing bone right at its root, angled with the bone
     limbJoint(mb, lead[0], V.sub(lead[1], lead[0]), 0.34);
+    mb.setTex(TEX_NONE);
     for (let iu = 0; iu <= nU; iu++) {
       const u = iu / nU;
       const [lx, ly, lz] = lead[iu];
@@ -743,6 +784,21 @@ function buildPart(mb, slot, family, params, side, sock, o) {
   mb.setAnim(sock.anim ?? ANIM0);   // parts ride whatever their mount does
   // joint hardware (limbJoint) is placed per family below, sized from the
   // same girth genes as the limb it clamps — collar always fits the limb
+
+  // biological surface per family: tentacles read wet, bird legs feathered,
+  // insect parts chitinous. The part's ornament gene sets detail density.
+  const TEX_FAM = {
+    claw_hand: ['warts', 0.45], pincer: ['chitin', 0.5], tentacle: ['slick', 0.8],
+    rifle_arm: ['none', 0], plasma_lance: ['chitin', 0.6], hand_stump: ['warts', 0.3],
+    antenna: ['ridge', 0.35], horn: ['ridge', 0.55], sensor_mast: ['none', 0],
+    sensor_stub: ['warts', 0.3],
+    bug_eyes: ['none', 0], cyclops_eye: ['none', 0], stalk_eyes: ['none', 0],
+    optic_visor: ['none', 0], eye_socket: ['warts', 0.3],
+    hoofed_leg: ['warts', 0.5], talon_leg: ['feathers', 0.55], insect_leg: ['chitin', 0.65],
+    piston_leg: ['none', 0], leg_stump: ['warts', 0.3],
+  };
+  const tf = TEX_FAM[family] ?? ['none', 0];
+  mb.setTex([...TILE[tf[0]], 0.45 + 0.75 * orn, tf[1]]);
 
   switch (family) {
     // ---- hands ----
@@ -1015,6 +1071,8 @@ function armDrop(mb, S, side, armR, scale, o, pg = []) {
  * blink weight: the shader slides it down over the eyeball on uBlink. */
 function eyeball(mb, c, r, skin, hood = 0.4) {
   const base = mb.anim;
+  const prevTex = mb.tex;
+  mb.setTex(TEX_NONE);
   ellipsoid(mb, c, [r, r, r], EYEWH, 0.85, 0, 10);
   mb.setFx(r * 0.35);   // pupils drift with the gaze saccades
   ellipsoid(mb, [c[0], c[1], c[2] + r*0.72], [r*0.42, r*0.42, r*0.3], PUPIL, 0.95, 0, 8);
@@ -1025,15 +1083,140 @@ function eyeball(mb, c, r, skin, hood = 0.4) {
       [r*1.07, r*(0.42 + 0.34*hood), r*1.03], skin, 0.3, 0, 8);
     mb.setAnim(base);
   }
+  mb.setTex(prevTex);
 }
 
 function ringStitch(mb, c, r) {
+  const prevTex = mb.tex;
+  mb.setTex(TEX_NONE);
   const pts = [];
   for (let i = 0; i <= 12; i++) {
     const a = (i / 12) * Math.PI * 2;
     pts.push([c[0] + Math.cos(a)*r, c[1], c[2] + Math.sin(a)*r]);
   }
   tube(mb, pts, pts.map(() => 0.07), STITCH, 0.1, 0, 4, 0);
+  mb.setTex(prevTex);
+}
+
+// ── the skin atlas (painted once; detail costs 3 texture fetches) ───────────
+// Seven tileable biological materials with shading BAKED into the tile:
+// applying them as an albedo multiply gives relief without normal maps.
+// Alpha carries the material's gloss boost (wet things shine).
+
+function buildSkinAtlas() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 1024;
+  const x = c.getContext('2d');
+  let seed = 424242;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const gr = (v) => `rgb(${v},${v},${v})`;
+  // draw wrapped 9× so random features tile seamlessly at 256
+  const wrap = (fn) => { for (const dx of [-256, 0, 256]) for (const dy of [-256, 0, 256]) fn(dx, dy); };
+
+  const tile = (name, paint) => {
+    const [u, v] = TILE[name];
+    const ox = u * 1024, oy = v * 1024;
+    x.save();
+    x.beginPath(); x.rect(ox, oy, 256, 256); x.clip();
+    x.fillStyle = gr(135); x.fillRect(ox, oy, 256, 256);
+    paint(ox, oy);
+    x.restore();
+  };
+
+  tile('warts', (ox, oy) => {
+    for (let i = 0; i < 70; i++) {
+      const px = rnd() * 256, py = rnd() * 256, r = 5 + rnd() * 15;
+      wrap((dx, dy) => {
+        const g2 = x.createRadialGradient(ox+px+dx - r*0.3, oy+py+dy - r*0.3, r*0.15, ox+px+dx, oy+py+dy, r);
+        g2.addColorStop(0, gr(178)); g2.addColorStop(0.7, gr(128)); g2.addColorStop(1, gr(97));
+        x.fillStyle = g2;
+        x.beginPath(); x.arc(ox+px+dx, oy+py+dy, r, 0, 7); x.fill();
+      });
+    }
+    x.fillStyle = gr(106);
+    for (let i = 0; i < 220; i++) x.fillRect(ox + rnd()*256, oy + rnd()*256, 2, 2);
+  });
+
+  tile('scales', (ox, oy) => {
+    // overlapping rows drawn top-down so each row overlaps the one above
+    for (let row = -1; row <= 8; row++)
+      for (let col = -1; col <= 8; col++) {
+        const px = ox + col*32 + (row & 1 ? 16 : 0), py = oy + row*32;
+        const g2 = x.createLinearGradient(0, py - 21, 0, py + 21);
+        g2.addColorStop(0, gr(172)); g2.addColorStop(0.6, gr(122)); g2.addColorStop(1, gr(76));
+        x.fillStyle = g2;
+        x.beginPath(); x.arc(px, py, 21, 0, 7); x.fill();
+        x.strokeStyle = gr(66); x.lineWidth = 1.5;
+        x.beginPath(); x.arc(px, py, 21, 0.15*Math.PI, 0.85*Math.PI); x.stroke();
+      }
+  });
+
+  tile('slick', (ox, oy) => {
+    x.fillStyle = gr(142); x.fillRect(ox, oy, 256, 256);
+    for (let i = 0; i < 14; i++) {
+      const px = rnd()*256, py = rnd()*256, r = 30 + rnd()*55, lite = rnd() > 0.5;
+      wrap((dx, dy) => {
+        const g2 = x.createRadialGradient(ox+px+dx, oy+py+dy, r*0.1, ox+px+dx, oy+py+dy, r);
+        g2.addColorStop(0, `rgba(${lite ? 185 : 98},${lite ? 185 : 98},${lite ? 185 : 98},0.32)`);
+        g2.addColorStop(1, 'rgba(0,0,0,0)');
+        x.fillStyle = g2;
+        x.beginPath(); x.arc(ox+px+dx, oy+py+dy, r, 0, 7); x.fill();
+      });
+    }
+  });
+
+  tile('feathers', (ox, oy) => {
+    x.lineCap = 'round';
+    for (let row = -1; row <= 16; row++)
+      for (let col = -1; col <= 16; col++) {
+        const px = ox + col*16 + (row & 1 ? 8 : 0), py = oy + row*16;
+        const tilt = ((col & 3) - 1.5) * 2.2;             // periodic, so it tiles
+        x.strokeStyle = gr(((row + col) & 1) ? 158 : 96);
+        x.lineWidth = 5;
+        x.beginPath();
+        x.moveTo(px, py);
+        x.quadraticCurveTo(px + tilt, py + 10, px + tilt*1.6, py + 18);
+        x.stroke();
+      }
+  });
+
+  tile('chitin', (ox, oy) => {
+    for (let row = -1; row <= 4; row++)
+      for (let col = -1; col <= 4; col++) {
+        const px = ox + col*64 + (row & 1 ? 32 : 0), py = oy + row*64;
+        const g2 = x.createLinearGradient(0, py, 0, py + 60);
+        g2.addColorStop(0, gr(158)); g2.addColorStop(1, gr(96));
+        x.fillStyle = g2;
+        x.beginPath();
+        x.roundRect(px + 3, py + 3, 58, 58, 12);
+        x.fill();
+        x.strokeStyle = gr(58); x.lineWidth = 3; x.stroke();
+      }
+  });
+
+  tile('ridge', (ox, oy) => {
+    for (let yy = 0; yy < 256; yy += 16) {
+      x.fillStyle = gr(154); x.fillRect(ox, oy + yy, 256, 7);
+      x.fillStyle = gr(112); x.fillRect(ox, oy + yy + 7, 256, 7);
+      x.fillStyle = gr(86);  x.fillRect(ox, oy + yy + 14, 256, 2);
+    }
+  });
+
+  // 'none' stays neutral grey (amp 0 makes it moot anyway)
+  tile('none', () => {});
+
+  // bake each material's gloss boost into the alpha channel; return raw
+  // ImageData so the canvas's premultiplied alpha never touches the rgb
+  const img = x.getImageData(0, 0, 1024, 1024);
+  const d = img.data;
+  for (const [k, [u, v]] of Object.entries(TILE)) {
+    const a = TILE_SPEC[k];
+    for (let py = v * 1024; py < v * 1024 + 256; py++) {
+      let o4 = (py * 1024 + u * 1024) * 4 + 3;
+      for (let px = 0; px < 256; px++, o4 += 4) d[o4] = a;
+    }
+  }
+  return img;
 }
 
 // ── the painted backdrop (Canvas 2D, built once, uploaded as texture) ───────
@@ -1197,13 +1380,15 @@ function buildBackground() {
 
 const VS_CREATURE = `
 attribute vec3 aPos, aNor, aCol, aMat;
-attribute vec4 aAnim;
+attribute vec4 aTex, aAnim;
 uniform mat4 uPV;
 uniform float uCos, uSin;
 uniform float uTime, uBreath, uBlink, uTongue;
 uniform vec2 uGaze;
-varying vec3 vNor, vCol, vPos, vMat;
+varying vec3 vNor, vCol, vPos, vMat, vLoc, vLNor;
+varying vec4 vTex;
 void main() {
+  vLoc = aPos; vLNor = aNor; vTex = aTex;
   vec3 lp = aPos;
   lp += aNor * (aAnim.x * uBreath);                          // breathing
   lp.y += max(aAnim.y, 0.0) * sin(uTime * 2.6 + aAnim.w);    // traveling sinusoidal flap
@@ -1223,12 +1408,27 @@ void main() {
 
 const FS_CREATURE = `
 precision mediump float;
-varying vec3 vNor, vCol, vPos, vMat;
+varying vec3 vNor, vCol, vPos, vMat, vLoc, vLNor;
+varying vec4 vTex;
 uniform vec3 uEye;
 uniform float uFlash, uPulse;
+uniform sampler2D uSkin;
 void main() {
   vec3 n = normalize(vNor);
   if (!gl_FrontFacing) n = -n;                      // two-sided: nothing inverts
+
+  // triplanar skin sample in LOCAL space — the detail sticks to the body
+  // as it turns. Tile shading is pre-baked, so this is pure albedo cost.
+  vec3 w = abs(vLNor) + 1e-3;
+  w /= (w.x + w.y + w.z);
+  vec2 t0 = vTex.xy + 0.004;
+  float s = vTex.z;
+  vec4 tx = texture2D(uSkin, t0 + fract(vLoc.zy * s) * 0.242) * w.x
+          + texture2D(uSkin, t0 + fract(vLoc.xz * s) * 0.242) * w.y
+          + texture2D(uSkin, t0 + fract(vLoc.xy * s) * 0.242) * w.z;
+  vec3 col = vCol * mix(1.0, tx.r * 1.9, vTex.w);
+  float gls = clamp(vMat.x + tx.a * vTex.w, 0.0, 1.0);
+
   vec3 view = normalize(uEye - vPos);
   vec3 key  = normalize(vec3(-0.5, 0.75, 0.65));
   vec3 moon = normalize(vec3(0.65, 0.30, -0.55));
@@ -1237,10 +1437,10 @@ void main() {
              + smoothstep(0.30, 0.42, d) * 0.36
              + smoothstep(0.62, 0.74, d) * 0.22;    // 3-step toon ramp
   vec3 hemi = mix(vec3(0.17, 0.13, 0.25), vec3(0.34, 0.30, 0.44), n.y * 0.5 + 0.5);
-  vec3 lit = vCol * (hemi + vec3(1.0, 0.93, 0.80) * (band * 1.15 + uFlash));
-  vec3 h = normalize(view + key);                   // vinyl sheen
-  lit += vec3(1.0, 0.97, 0.9) * pow(max(dot(n, h), 0.0), mix(14.0, 90.0, vMat.x))
-       * (0.18 + 0.5 * vMat.x);
+  vec3 lit = col * (hemi + vec3(1.0, 0.93, 0.80) * (band * 1.15 + uFlash));
+  vec3 h = normalize(view + key);                   // sheen (wet skin shines)
+  lit += vec3(1.0, 0.97, 0.9) * pow(max(dot(n, h), 0.0), mix(14.0, 90.0, gls))
+       * (0.18 + 0.5 * gls);
   float rim = pow(1.0 - max(dot(n, view), 0.0), 2.4) * max(dot(n, moon), 0.0);
   lit += vec3(0.45, 0.55, 0.95) * rim * (0.55 + uFlash);
   lit = mix(lit, vCol * (1.15 + 0.25 * uPulse), vMat.y);   // emissive
@@ -1400,6 +1600,15 @@ function setupGL(canvas) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
+  // skin atlas (unit 1): tileable biological materials, LINEAR, no mips
+  const skinTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, skinTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, buildSkinAtlas());
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
   // soft radial texture for the contact shadow
   const sc = document.createElement('canvas');
   sc.width = sc.height = 64;
@@ -1427,7 +1636,7 @@ function setupGL(canvas) {
   const pv = mat4mul(proj, view);
 
   return {
-    gl, progC, progQ, progG, bgTex, shTex, quadBuf,
+    gl, progC, progQ, progG, bgTex, shTex, skinTex, quadBuf,
     pv: new Float32Array(pv), eye,
     meshBuf: gl.createBuffer(), idxBuf: gl.createBuffer(), glowBuf: gl.createBuffer(),
     idxCount: 0, glowCount: 0, maxR: 3,
@@ -1454,7 +1663,7 @@ function uploadCreature(genome) {
   R.glowCount = mb.glows.length;
 
   let mr = 2.5;
-  for (let i = 0; i < mb.v.length; i += 16)
+  for (let i = 0; i < mb.v.length; i += 20)
     mr = Math.max(mr, Math.hypot(mb.v[i], mb.v[i + 2]));
   R.maxR = Math.min(mr, 13);
 
@@ -1520,13 +1729,18 @@ function drawFrame() {
   const p = R.progC;
   gl.useProgram(p);
   gl.bindBuffer(gl.ARRAY_BUFFER, R.meshBuf);
-  const stride = 64;
+  const stride = 80;
   const attr = (name, size, off) => {
     const a = gl.getAttribLocation(p, name);
     gl.enableVertexAttribArray(a);
     gl.vertexAttribPointer(a, size, gl.FLOAT, false, stride, off);
   };
-  attr('aPos', 3, 0); attr('aNor', 3, 12); attr('aCol', 3, 24); attr('aMat', 3, 36); attr('aAnim', 4, 48);
+  attr('aPos', 3, 0); attr('aNor', 3, 12); attr('aCol', 3, 24); attr('aMat', 3, 36);
+  attr('aTex', 4, 48); attr('aAnim', 4, 64);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, R.skinTex);
+  gl.uniform1i(gl.getUniformLocation(p, 'uSkin'), 1);
+  gl.activeTexture(gl.TEXTURE0);
   const t = _frame / 60;
   const breathRaw = (Math.sin(t * 1.65) + 1) / 2;
   const breath = breathRaw * breathRaw * (3 - 2 * breathRaw);   // eased in-out
