@@ -15,7 +15,7 @@ import {
   originOf, isVestigial, homologOf, brainSize, bodyAxis, brainAxis, heartVigor,
   capacity as controlCapacity, controlCost, controlRadius, berserkThreshold,
 } from "./lib/index.js";
-import { initRenderer, updateGenome, destroyRenderer } from "./creature-renderer.js";
+import { initRenderer, updateGenome, destroyRenderer, locomotionProfile } from "./creature-renderer.js";
 
 const MUTATOR_URL = "https://maddr-mutator.onrender.com";
 const LOCAL_KEY   = "maddr-lab-v2";
@@ -411,12 +411,14 @@ function renderPortrait() {
   const vClass = !c.alive ? "bad" : v.state === "viable" ? "ok" : v.state === "strained" ? "warn" : "bad";
   const parts = SLOT_NAMES.filter(s => !isVestigial(g.slots[s].family))
     .map(s => g.slots[s].family.replace(/_/g, " ")).join(" · ") || "—";
+  const loco = locomotionProfile(g);
   label.innerHTML = `
     <div class="pl-name">${c.alive ? "" : "💀 "}${esc(c.name)}</div>
     <div class="pl-plan">${esc(g.body.plan)} · ${esc(g.brain.tier)} brain · ${esc(g.heart.tier)} heart</div>
     <div class="pl-stat ${vClass}">${c.alive ? v.state.toUpperCase() : "DEAD ON THE TABLE"}</div>
     <div class="pl-stat">load <span>${circulatoryLoad(g).toFixed(1)}</span> / cap <span>${heartCapacity(g.heart).toFixed(1)}</span></div>
-    <div class="pl-stat" style="line-height:1.5">${esc(parts)}</div>`;
+    <div class="pl-stat" style="line-height:1.5">${esc(parts)}</div>
+    <div class="pl-stat">🏃 walk <span>${loco.walkSpeed}</span> · run <span>${loco.runSpeed}</span> hex/min · sprint <span>${loco.sprint}</span></div>`;
   if (c.id !== _lastPortraitId) { initRenderer(canvas, g); _lastPortraitId = c.id; }
   else updateGenome(g);
 }
