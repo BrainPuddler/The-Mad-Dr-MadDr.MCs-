@@ -582,11 +582,17 @@ function planTetrapod(mb, o) {
 
   addTail(mb, o, y0 + h * 0.18, -levels[1].rz * 0.9, false);
 
+  // socket frames: position + the body's outward surface normal there
+  const slope = (levels[2].rx - levels[4].rx) / Math.max(0.4, levels[4].y - levels[2].y);
+  const sensP = [head.hR[0]*0.52, head.topY, head.hC[2] - 0.1];
+  const eyeP  = [0, head.hC[1] + head.hR[1]*0.20, head.hC[2] + head.hR[2]*0.62];
   return {
-    hand:   { p: [shl.rx * 0.92 + (b > 0.5 ? W * 0.28 * b : 0), shl.y, shl.z + 0.15], mirror: true },
-    leg:    { p: [Math.max(0.7, levels[0].rx * 0.6), o.legLen, 0], mirror: true, len: o.legLen },
-    sensor: { p: [head.hR[0]*0.52, head.topY, head.hC[2] - 0.1], mirror: true, out: 1, anim: BREATH_H },
-    eye:    { p: [0, head.hC[1] + head.hR[1]*0.20, head.hC[2] + head.hR[2]*0.62],
+    hand:   { p: [shl.rx * 0.92 + (b > 0.5 ? W * 0.28 * b : 0), shl.y, shl.z + 0.15],
+              nrm: V.norm([1, slope * 0.5, 0.15]), mirror: true },
+    leg:    { p: [Math.max(0.7, levels[0].rx * 0.6), o.legLen, 0],
+              nrm: V.norm([0.3, -1, 0]), mirror: true, len: o.legLen },
+    sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H },
+    eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR),
               mirror: false, faceR: head.hR[0], anim: BREATH_H },
   };
 }
@@ -614,10 +620,13 @@ function planBlob(mb, o) {
       [0.5, 0.42, 0.5], sh(o.skin, 0.88), 0.4, 0, 6);
   }
   mb.setAnim(ANIM0);
+  const bHandP = [dr*0.92, dC[1] + 0.4, 0];
+  const bSensP = [dr*0.5, dC[1] + dR[1]*0.85, 0];
+  const bEyeP  = [0, dC[1] + dR[1]*0.35, dR[2]*0.9];
   return {
-    hand:   { p: [dr*0.92, dC[1] + 0.4, 0], mirror: true, anim: JELLY },
-    sensor: { p: [dr*0.5, dC[1] + dR[1]*0.85, 0], mirror: true, out: 1, anim: JELLY },
-    eye:    { p: [0, dC[1] + dR[1]*0.35, dR[2]*0.9], mirror: false, faceR: dr*0.8, anim: JELLY },
+    hand:   { p: bHandP, nrm: ellipN(bHandP, dC, dR), mirror: true, anim: JELLY },
+    sensor: { p: bSensP, nrm: ellipN(bSensP, dC, dR), mirror: true, out: 1, anim: JELLY },
+    eye:    { p: bEyeP, nrm: ellipN(bEyeP, dC, dR), mirror: false, faceR: dr*0.8, anim: JELLY },
   };
 }
 
@@ -679,10 +688,13 @@ function planSerpentine(mb, o) {
   mb.setFx(0);
   mb.setAnim(ANIM0);
 
+  const sSensP = [hC[0] + 0.5, hC[1] + hR[1]*0.8, hC[2] - 0.3];
+  const sEyeP  = [hC[0], hC[1] + hR[1]*0.25, hC[2] + hR[2]*0.85];
   return {
-    hand:   { p: [hC[0] + 1.0, headY - 1.3, 0.9], mirror: true, tiny: true, anim: SWAY_H },
-    sensor: { p: [hC[0] + 0.5, hC[1] + hR[1]*0.8, hC[2] - 0.3], mirror: false, out: 1, anim: SWAY_H },
-    eye:    { p: [hC[0], hC[1] + hR[1]*0.25, hC[2] + hR[2]*0.85], mirror: false, faceR: hR[0], anim: SWAY_H },
+    hand:   { p: [hC[0] + 1.0, headY - 1.3, 0.9], nrm: V.norm([1, 0.1, 0.35]),
+              mirror: true, tiny: true, anim: SWAY_H },
+    sensor: { p: sSensP, nrm: ellipN(sSensP, hC, hR), mirror: false, out: 1, anim: SWAY_H },
+    eye:    { p: sEyeP, nrm: ellipN(sEyeP, hC, hR), mirror: false, faceR: hR[0], anim: SWAY_H },
   };
 }
 
@@ -760,16 +772,30 @@ function planWinged(mb, o) {
     mb.setAnim(ANIM0);
   }
 
+  const wSensP = [head.hR[0]*0.5, head.topY, head.hC[2] - 0.1];
+  const wEyeP  = [0, head.hC[1] + head.hR[1]*0.2, head.hC[2] + head.hR[2]*0.62];
   return {
-    hand:   { p: [levels[2].rx * 0.95, levels[2].y + 0.2, levels[2].z + 0.3], mirror: true, tiny: true },
-    leg:    { p: [Math.max(0.8, levels[0].rx * 0.5), o.legLen, 0], mirror: true, len: o.legLen },
-    sensor: { p: [head.hR[0]*0.5, head.topY, head.hC[2] - 0.1], mirror: true, out: 1, anim: BREATH_H },
-    eye:    { p: [0, head.hC[1] + head.hR[1]*0.2, head.hC[2] + head.hR[2]*0.62],
+    hand:   { p: [levels[2].rx * 0.95, levels[2].y + 0.2, levels[2].z + 0.3],
+              nrm: V.norm([1, 0.1, 0.3]), mirror: true, tiny: true },
+    leg:    { p: [Math.max(0.8, levels[0].rx * 0.5), o.legLen, 0],
+              nrm: V.norm([0.28, -1, 0]), mirror: true, len: o.legLen },
+    sensor: { p: wSensP, nrm: ellipN(wSensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H },
+    eye:    { p: wEyeP, nrm: ellipN(wEyeP, head.hC, head.hR),
               mirror: false, faceR: head.hR[0], anim: BREATH_H },
   };
 }
 
 function spineOf(skin) { return lp(skin, [52, 40, 80], 0.45); }
+
+/** Outward surface normal of an ellipsoid at point q — the analytic
+ * gradient. Socket frames use this so parts grow along the skin. */
+function ellipN(q, c, r) {
+  return V.norm([
+    (q[0] - c[0]) / (r[0] * r[0]),
+    (q[1] - c[1]) / (r[1] * r[1]),
+    (q[2] - c[2]) / (r[2] * r[2]),
+  ]);
+}
 
 // ---- parts ------------------------------------------------------------------
 // Each part reads its 6 genes [length,girth,taper,curl,count,ornament],
@@ -781,6 +807,9 @@ function buildPart(mb, slot, family, params, side, sock, o) {
   const [len=0.5, girth=0.5, taper=0.5, curl=0.5, count=0.5, orn=0.5] = params;
   const S = [side * sock.p[0], sock.p[1], sock.p[2]];
   const scale = sock.tiny ? 0.62 : 1;
+  // the rig: parts leave the body along the surface normal at the socket,
+  // so nothing buries into a chest or skewers a dome on extreme morphs
+  const N = sock.nrm ? V.norm([side * sock.nrm[0], sock.nrm[1], sock.nrm[2]]) : [side, 0, 0];
   mb.setAnim(sock.anim ?? ANIM0);   // parts ride whatever their mount does
   // joint hardware (limbJoint) is placed per family below, sized from the
   // same girth genes as the limb it clamps — collar always fits the limb
@@ -804,7 +833,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     // ---- hands ----
     case 'claw_hand': {
       const armR = (0.42 + 0.4*girth) * scale;
-      const wrist = armDrop(mb, S, side, armR, scale, o, [len, girth, taper, curl]);
+      const wrist = armDrop(mb, S, side, armR, scale, o, [len, girth, taper, curl], N);
       ellipsoid(mb, wrist, [armR*1.35, armR*1.15, armR*1.35], o.skin, 0.3, 0, 8, o.skinFn);
       const n = clamp(2 + Math.round(count * 3), 2, 5);
       for (let i = 0; i < n; i++) {
@@ -818,7 +847,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     }
     case 'pincer': {
       const armR = (0.5 + 0.4*girth) * scale;
-      const wrist = armDrop(mb, S, side, armR, scale, o, [len, girth, taper, curl]);
+      const wrist = armDrop(mb, S, side, armR, scale, o, [len, girth, taper, curl], N);
       const jl = (1.1 + 1.5*len) * scale;
       curvedCone(mb, wrist, [side*0.15, -0.25, 0.9], jl, armR*0.75, [0, -(0.4+curl*0.8), 0.3], CLAW, 0.5);
       curvedCone(mb, wrist, [side*0.15, -0.9, 0.35], jl*0.9, armR*0.65, [0, 0.45+curl*0.6, 0.45], CLAW, 0.5);
@@ -830,20 +859,23 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       const path = [];
       for (let i = 0; i <= 10; i++) {
         const t = i / 10;
+        const exit = baseR * 1.6 * Math.pow(1 - t, 1.5);   // leave along the normal first
         path.push([
-          S[0] + side * (0.5*t + Math.sin(t*Math.PI*1.2) * 0.4) ,
-          S[1] - t*L + Math.sin(t*Math.PI) * 0.2,
-          S[2] + 0.4*t + Math.sin(t * Math.PI * (1 + curl*1.6)) * curl * 1.1,
+          S[0] + N[0]*exit + side * (0.5*t + Math.sin(t*Math.PI*1.2) * 0.4),
+          S[1] + N[1]*exit - t*L + Math.sin(t*Math.PI) * 0.2,
+          S[2] + N[2]*exit + 0.4*t + Math.sin(t * Math.PI * (1 + curl*1.6)) * curl * 1.1,
         ]);
       }
       limbJoint(mb, path[0], V.sub(path[1], path[0]), baseR);
+      ellipsoid(mb, V.add(S, V.scale(N, baseR*0.5)), [baseR*1.25, baseR*1.15, baseR*1.2],
+        o.skin, 0.3, 0, 8, o.skinFn);   // shoulder mass at the root
       tube(mb, path, path.map((_, i) =>
         baseR * (1 - (i/10) * clamp(0.35 + 0.6*taper, 0.35, 0.92))), o.skin, 0.3, 0, 9, 3,
         null, (t) => [0, 0, 0.1 + 0.45*t*t, side*2 + t*3.2]);   // wave travels to the tip
       break;
     }
     case 'rifle_arm': {
-      const wrist = armDrop(mb, S, side, 0.42*scale, scale, o, [len, girth, taper, curl]);
+      const wrist = armDrop(mb, S, side, 0.42*scale, scale, o, [len, girth, taper, curl], N);
       // rounded receiver, no boxes — a toy gun, not a brick
       ellipsoid(mb, [wrist[0], wrist[1]+0.05, wrist[2]+0.3], [0.5, 0.42, 1.0], METAL, 0.7, 0, 10);
       // barrel with a chunky muzzle brake and a little front sight
@@ -866,7 +898,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       break;
     }
     case 'plasma_lance': {
-      const wrist = armDrop(mb, S, side, 0.5*scale, scale, { skin: CHITIN, skinFn: null }, [len, girth, taper, curl]);
+      const wrist = armDrop(mb, S, side, 0.5*scale, scale, { skin: CHITIN, skinFn: null }, [len, girth, taper, curl], N);
       const L = (1.6 + 1.6*len) * scale;
       ellipsoid(mb, wrist, [0.55, 0.5, 0.55], CHITIN, 0.4, 0, 8);
       tube(mb, [wrist, [wrist[0], wrist[1]+L*0.9, wrist[2]+0.5]],
@@ -885,10 +917,15 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     case 'antenna': {
       const L = (1.5 + 1.7*len);
       const aR = 0.11 + 0.09*girth;
+      const gDir = V.norm(V.add(N, [0, 0.55, 0]));
       const path = [];
       for (let i = 0; i <= 6; i++) {
         const t = i / 6;
-        path.push([S[0] + side*(t*1.5), S[1] + t*L, S[2] + Math.sin(t*2.2)*0.25]);
+        path.push([
+          S[0] + gDir[0]*t*L + side*t*t*0.5,
+          S[1] + gDir[1]*t*L,
+          S[2] + gDir[2]*t*L + Math.sin(t*2.2)*0.25,
+        ]);
       }
       limbJoint(mb, path[0], V.sub(path[1], path[0]), aR);
       tube(mb, path, path.map(() => aR), BONE, 0.35, 0, 6);
@@ -898,18 +935,21 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     }
     case 'horn': {
       const hornR = 0.3 + 0.4*girth;
-      limbJoint(mb, S, [side*0.45, 1, -0.1], hornR * 0.85);
-      curvedCone(mb, S, [side*0.45, 1, -0.1], 1.2 + 1.5*girth, hornR,
+      const hDir = V.norm(V.add(N, [0, 0.55, 0]));
+      limbJoint(mb, S, hDir, hornR * 0.85);
+      curvedCone(mb, S, hDir, 1.2 + 1.5*girth, hornR,
         [side*(0.3 + curl*0.9), curl*0.4, -0.2], lp(BONE, o.skin, 0.25), 0.4);
       break;
     }
     case 'sensor_mast': {
       const L = 1.5 + 1.0*len;
-      limbJoint(mb, S, [side * 0.2, L, 0], 0.2);   // the mast tube's own vector
-      tube(mb, [S, [S[0]+side*0.2, S[1]+L, S[2]]], [0.22, 0.16], METAL, 0.8, 0, 8);
-      ellipsoid(mb, [S[0]+side*0.2, S[1]+L, S[2]+0.15], [0.68, 0.68, 0.18], METDK, 0.7, 0, 10);
-      ellipsoid(mb, [S[0]+side*0.2, S[1]+L, S[2]+0.34], [0.16,0.16,0.16], GLOW, 0.5, 1, 6);
-      mb.glow([S[0]+side*0.2, S[1]+L, S[2]+0.36], GLOW, 20);
+      const mDir = V.norm(V.add(N, [0, 1.1, 0]));
+      const mTop = V.add(S, V.scale(mDir, L));
+      limbJoint(mb, S, mDir, 0.2);
+      tube(mb, [S, mTop], [0.22, 0.16], METAL, 0.8, 0, 8);
+      ellipsoid(mb, [mTop[0], mTop[1], mTop[2]+0.15], [0.68, 0.68, 0.18], METDK, 0.7, 0, 10);
+      ellipsoid(mb, [mTop[0], mTop[1], mTop[2]+0.34], [0.16,0.16,0.16], GLOW, 0.5, 1, 6);
+      mb.glow([mTop[0], mTop[1], mTop[2]+0.36], GLOW, 20);
       break;
     }
     case 'sensor_stub': {
@@ -927,13 +967,13 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       for (let i = 0; i < n; i++) {
         const [ex, ey, sc] = spots[i];
         eyeball(mb, [S[0] + ex*sock.faceR, S[1] + ey*1.1, S[2] - Math.abs(ex)*0.2],
-          R * sc, o.skin, 0.5);
+          R * sc, o.skin, 0.5, N);
       }
       break;
     }
     case 'cyclops_eye': {
       const R = 0.55 + 0.4*girth;
-      eyeball(mb, S, R, o.skin, 0.7);
+      eyeball(mb, S, R, o.skin, 0.7, N);
       // one heavy scowling unibrow; knits down on each blink
       const uBase = mb.anim;
       mb.setAnim([uBase[0], -R * 0.3, uBase[2], uBase[3]]);
@@ -951,7 +991,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
         const top = [S[0] + s*0.75, S[1] + L, S[2] + 0.25];
         tube(mb, [[S[0] + s*0.45, S[1] - 0.3, S[2] - 0.3], [S[0]+s*0.7, S[1]+L*0.6, S[2]], top],
           [0.16, 0.13, 0.11], BONDK, 0.3, 0, 6);
-        eyeball(mb, top, 0.4 + 0.2*girth, o.skin, 0.25);
+        eyeball(mb, top, 0.4 + 0.2*girth, o.skin, 0.25, V.norm(V.add(N, [0, 0, 0.8])));
       }
       break;
     }
@@ -975,9 +1015,11 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       // biped leg: thigh, knee, calf, and a hoofed foot stepping forward
       const R = (0.42 + 0.3*girth);
       const hip   = [S[0], sock.len + 0.5, S[2]];
-      const knee  = [S[0], sock.len * 0.52, S[2] + 0.24];
-      const ankle = [S[0], 0.6, S[2] - 0.08];
+      const knee  = [S[0] + N[0]*0.45, sock.len * 0.52, S[2] + 0.24 + N[2]*0.2];
+      const ankle = [S[0] + N[0]*0.2, 0.6, S[2] - 0.08];
       limbJoint(mb, hip, V.sub(knee, hip), R * 1.1);
+      ellipsoid(mb, [hip[0], hip[1] + 0.15, hip[2]], [R*1.35, R*1.25, R*1.3],
+        o.skin, 0.28, 0, 8, o.skinFn);   // hip joint mass
       tube(mb, [hip, knee, ankle], [R*1.18, R*0.9, R*0.68], o.skin, 0.28, 0, 9);
       ellipsoid(mb, [S[0], 0.4, S[2] + 0.35], [R*0.8, 0.34, R*1.2], o.skin, 0.28, 0, 8, o.skinFn);
       tube(mb, [[S[0], 0.5, S[2] + 0.8], [S[0], 0.0, S[2] + 0.9]], [R*0.62, R*0.75], HOOF, 0.5, 0, 9, 2);
@@ -988,6 +1030,8 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       // direction = the shin's actual first segment
       limbJoint(mb, [S[0], sock.len + 0.6, S[2]],
         [side * 0.15, sock.len * 0.55 - (sock.len + 0.6), -0.55], R * 1.2);
+      ellipsoid(mb, [S[0], sock.len + 0.65, S[2]], [R*1.7, R*1.55, R*1.65],
+        o.skin, 0.28, 0, 8, o.skinFn);   // hip joint mass
       tube(mb, [
         [S[0], sock.len + 0.6, S[2]],
         [S[0] + side*0.15, sock.len*0.55, S[2] - 0.55],
@@ -1023,6 +1067,8 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     }
     case 'piston_leg': {
       limbJoint(mb, [S[0], sock.len + 0.7, S[2]], [0, -1, 0], 0.52);
+      ellipsoid(mb, [S[0], sock.len + 0.78, S[2]], [0.68, 0.6, 0.65],
+        o.skin, 0.28, 0, 8, o.skinFn);   // flesh hip the machine bolts into
       tube(mb, [[S[0], sock.len + 0.7, S[2]], [S[0], 0.85, S[2]]], [0.5, 0.5], METAL, 0.8, 0, 10);
       tube(mb, [[S[0], 0.9, S[2]], [S[0], 0.25, S[2]]], [0.26, 0.26], sh(METAL, 1.25), 0.9, 0, 8);
       tube(mb, [[S[0], 0.3, S[2]], [S[0], 0.0, S[2]]], [0.72, 0.78], METDK, 0.6, 0, 10, 2);
@@ -1040,25 +1086,32 @@ function buildPart(mb, slot, family, params, side, sock, o) {
  * The arm dangles with a slight pendulum sway that grows toward the hand;
  * the builder's anim state is left at the wrist value so whatever the
  * caller attaches next (claws, gun, lance) swings along with it. */
-function armDrop(mb, S, side, armR, scale, o, pg = []) {
+function armDrop(mb, S, side, armR, scale, o, pg = [], N = null) {
   // The arm is shaped by the hand part's own genes, not a fixed tube:
-  //   length → arm length (high + short legs = knuckle-dragger),
-  //   curl   → elbow bend, taper → forearm mass (low = popeye forearms),
-  //   girth  → bicep bulge.
+  //   length -> arm length (high + short legs = knuckle-dragger),
+  //   curl   -> elbow bend, taper -> forearm mass (low = popeye forearms),
+  //   girth  -> bicep bulge.
+  // The upper arm EXITS ALONG THE SOCKET NORMAL: a true shoulder joint, so
+  // the limb clears the torso before gravity takes it.
   const len = pg[0] ?? 0.5, girth = pg[1] ?? 0.5, taper = pg[2] ?? 0.5, curl = pg[3] ?? 0.5;
+  const n = N ?? [side, 0, 0];
   const armLen = (2.5 + 2.0 * len) * scale;
   const bend = 0.35 + curl * 0.75;
-  const elbow = [S[0] + side * (0.6 + bend * 0.5) * scale, S[1] - armLen * 0.48, S[2] + 0.1];
-  const wrist = [S[0] + side * (0.85 + bend * 0.3) * scale, S[1] - armLen, S[2] + 0.3 + bend * 0.45];
+  const ex = V.add(S, V.scale(n, (armR * 1.6 + 0.25) * scale));
+  const elbow = [ex[0] + side * 0.2 * scale, ex[1] - armLen * 0.44, ex[2] + 0.08];
+  const wrist = [elbow[0] + side * 0.2 * scale, elbow[1] - armLen * 0.52, elbow[2] + 0.25 + bend * 0.4];
   const foreR = Math.max(armR * 0.55, armR * (1.2 - 0.8 * taper + 0.3 * girth));
   const phase = side * 1.3 + 2.0;
   const swing = (t) => [0, 0, 0.04 + 0.11 * t, phase];
-  limbJoint(mb, S, V.sub(elbow, S), armR * 1.15);   // ball-rod-collar, sized to this arm
-  tube(mb, [S, elbow, wrist], [armR*1.2, Math.max(armR*0.8, foreR*0.9), foreR],
+  limbJoint(mb, S, n, armR * 1.15);   // brass retaining ring, on the normal
+  // the shoulder ball itself — flesh, seated in the ring
+  ellipsoid(mb, V.add(S, V.scale(n, armR * 0.55 * scale)),
+    [armR*1.3, armR*1.2, armR*1.25], o.skinFn ? o.skin : CHITIN, 0.3, 0, 8, o.skinFn);
+  tube(mb, [S, ex, elbow, wrist], [armR*1.25, armR*1.05, Math.max(armR*0.8, foreR*0.9), foreR],
     o.skinFn ? o.skin : CHITIN, 0.3, 0, 9, 1, null, swing);
   if (girth > 0.45) {                                // bicep bulge
     mb.setAnim(swing(0.35));
-    const bi = [S[0] + (elbow[0]-S[0])*0.45, S[1] + (elbow[1]-S[1])*0.45, S[2] + (elbow[2]-S[2])*0.45];
+    const bi = [ex[0] + (elbow[0]-ex[0])*0.45, ex[1] + (elbow[1]-ex[1])*0.45, ex[2] + (elbow[2]-ex[2])*0.45];
     ellipsoid(mb, bi, [armR*(0.9+0.55*girth), armR*(1.0+0.5*girth), armR*(0.9+0.55*girth)],
       o.skinFn ? o.skin : CHITIN, 0.3, 0, 8, o.skinFn);
   }
@@ -1069,13 +1122,14 @@ function armDrop(mb, S, side, armR, scale, o, pg = []) {
 /** Glossy toy eye with a hooded, skin-coloured upper lid. `hood` 0..1 sets
  * how heavily the lid droops — the b-movie menace dial. The lid carries a
  * blink weight: the shader slides it down over the eyeball on uBlink. */
-function eyeball(mb, c, r, skin, hood = 0.4) {
+function eyeball(mb, c, r, skin, hood = 0.4, N = [0, 0, 1]) {
   const base = mb.anim;
   const prevTex = mb.tex;
   mb.setTex(TEX_NONE);
   ellipsoid(mb, c, [r, r, r], EYEWH, 0.85, 0, 10);
   mb.setFx(r * 0.35);   // pupils drift with the gaze saccades
-  ellipsoid(mb, [c[0], c[1], c[2] + r*0.72], [r*0.42, r*0.42, r*0.3], PUPIL, 0.95, 0, 8);
+  ellipsoid(mb, [c[0] + N[0]*r*0.72, c[1] + N[1]*r*0.72, c[2] + N[2]*r*0.72],
+    [r*0.38, r*0.38, r*0.38], PUPIL, 0.95, 0, 8);
   mb.setFx(0);
   if (hood > 0) {
     mb.setAnim([base[0], -r * 1.05, base[2], base[3]]);
