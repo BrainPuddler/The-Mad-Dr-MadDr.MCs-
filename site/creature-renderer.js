@@ -1284,9 +1284,12 @@ function planCrab(mb, o) {
   const sensP = [head.hR[0]*0.5, head.topY, head.hC[2] - 0.1];
   const eyeP  = [0, head.hC[1] + head.hR[1]*0.25, head.hC[2] + head.hR[2]*0.7];
   return {
-    hand:   { p: [shl.rx * 0.98, y0 + h*0.5, shl.rz*0.55],
-              nrm: V.norm([1, 0.15, 0.6]), mirror: true },
-    leg:    { p: [shl.rx * 0.85, o.legLen, -shl.rz*0.1],
+    // chelipeds: real crabs carry their claws out in FRONT of the
+    // carapace, by the mouth, not off its sides -- small lateral spread,
+    // parked at the shell's leading edge, normal pointed forward.
+    hand:   { p: [shl.rx * 0.30, y0 + h*0.42, head.hC[2] + head.hR[2]*0.55],
+              nrm: V.norm([0.4, -0.15, 1]), mirror: true },
+    leg:    { p: [shl.rx * 0.85, o.legLen, -shl.rz*0.15],
               nrm: V.norm([1, -0.7, 0]), mirror: true, len: o.legLen },
     sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1,
               anim: BREATH_H, gait: HEADBOB },
@@ -1344,7 +1347,9 @@ function planArachnid(mb, o) {
   const sensP = [head.hR[0]*0.5, head.topY, head.hC[2]-0.1];
   const eyeP  = [0, head.hC[1]+head.hR[1]*0.2, head.hC[2]+head.hR[2]*0.65];
   return {
-    hand:   { p: [cr*0.95, cC[1]+0.2, cC[2]+cr*0.3], nrm: V.norm([1, 0.2, 0.6]), mirror: true, tiny: true },
+    // pedipalps: short front appendages flanking the mouth, close to the
+    // midline and out ahead of the cephalothorax -- not stuck out the side.
+    hand:   { p: [cr*0.35, cC[1]+0.15, cC[2]+cr*0.75], nrm: V.norm([0.45, -0.1, 1]), mirror: true, tiny: true },
     leg:    { p: [cr*0.9, o.legLen, cC[2]*0.3], nrm: V.norm([0.6, -1, 0.1]), mirror: true, len: o.legLen },
     sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H, gait: HEADBOB },
     eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
