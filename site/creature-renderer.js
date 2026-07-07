@@ -362,9 +362,12 @@ export function locomotionProfile(genome) {
   const power = (HEART_OUT[g.heart?.tier] ?? 26) * (0.7 + 0.6 * vigor);
 
   // mass: plan volume, bulk, build, and metal lower bodies weigh in
-  const planMass = { tetrapod: 1.0, winged: 0.8, serpentine: 1.15, blob: 1.55 }[plan] ?? 1;
+  const planMass = {
+    tetrapod: 1.0, winged: 0.8, serpentine: 1.15, blob: 1.55,
+    crab: 1.3, arachnid: 1.1, avian: 0.85, treant: 1.7, floater: 0.7,
+  }[plan] ?? 1;
   const mass = (1.5 + bulk * 2.4) * planMass * (1 + build * 0.35)
-    + (legFam === 'piston_leg' ? 0.9 : 0);
+    + (legFam === 'piston_leg' || legFam === 'jet_leg' ? 0.9 : 0);
 
   // approximate upkeep load (display-side twin of energy.ts)
   const load = 6 + bulk * 8 + brainSize * 1.5 + 10;
@@ -374,9 +377,14 @@ export function locomotionProfile(genome) {
   const legBase =
     plan === 'serpentine' ? 1.8 :
     plan === 'blob' ? 0.9 :
+    plan === 'treant' ? 0.5 :          // rooted; barely shuffles
+    plan === 'floater' ? 1.6 :         // hovers, no gait friction
+    plan === 'avian' ? 2.9 :           // built to run
     legFam === 'talon_leg' ? 2.6 :
     legFam === 'insect_leg' ? 2.0 :
     legFam === 'piston_leg' ? (legCount < 0.45 ? 2.8 : 2.3) :
+    legFam === 'jet_leg' ? 2.7 :
+    legFam === 'tendril_leg' ? 1.6 :
     legFam === 'leg_stump' ? 0.6 : 2.2;
 
   const walkSpeed = legBase * clamp(0.55 + p2w * 0.85, 0.5, 1.8);
@@ -463,15 +471,20 @@ function buildCreatureAtDetail(genome) {
   // leg genes set stance height (stumps slump low)
   // real leg length: bipeds stand on legs, not casters
   const legAl = slots.leg;
-  const legLen = legAl && !plan.match(/blob|serpentine/)
+  const legLen = legAl && !plan.match(/blob|serpentine|treant|floater/)
     ? (legAl.family === 'leg_stump' ? 0.6
       : legAl.family === 'insect_leg' ? clamp(1.25 + 1.0 * P(legAl.params, 0, 0.5), 1.25, 2.25)
       : legAl.family === 'piston_leg' ? clamp(1.8 + 1.0 * P(legAl.params, 0, 0.5), 1.8, 2.8)
+      : legAl.family === 'jet_leg' ? clamp(1.6 + 1.1 * P(legAl.params, 0, 0.5), 1.6, 2.7)
+      : legAl.family === 'tendril_leg' ? clamp(1.1 + 0.9 * P(legAl.params, 0, 0.5), 1.1, 2.0)
       : clamp(2.4 + 1.2 * P(legAl.params, 0, 0.5), 2.4, 3.6))
     : 0;
   const legFam = legAl?.family ?? null;
 
-  const builders = { tetrapod: planTetrapod, blob: planBlob, serpentine: planSerpentine, winged: planWinged };
+  const builders = {
+    tetrapod: planTetrapod, blob: planBlob, serpentine: planSerpentine, winged: planWinged,
+    crab: planCrab, arachnid: planArachnid, avian: planAvian, treant: planTreant, floater: planFloater,
+  };
   // hide grain: an unused heart axis picks how fine or coarse the skin
   // texture runs — a heritable detail-density gene
   const grain = P(g.heart?.params, 3, 0.5);
@@ -493,7 +506,8 @@ function buildCreatureAtDetail(genome) {
     const al = slots[slot];
     if (!al || !sockets[slot]) continue;
     // plans that ignore a slot render nothing there (silent genes)
-    if ((plan === 'blob' || plan === 'serpentine') && slot === 'leg') continue;
+    if ((plan === 'blob' || plan === 'serpentine' || plan === 'treant' || plan === 'floater')
+        && slot === 'leg') continue;
     // dormant organic head sensors: low ornament gene → bald head
     if (slot === 'sensor' && (al.family === 'antenna' || al.family === 'horn') &&
         P(al.params, 5, 0.5) < 0.35) continue;
@@ -754,9 +768,13 @@ function frankenDetails(mb, headC, headR, heartLevel, o) {
       for (const s of [-1, 1]) {
         const bx = headC[0] + s * headR[0] * 0.88;
         const byy = headC[1] + headR[1] * fy;
-        tube(mb, [[bx, byy, 0], [bx + s * 0.8, byy, 0]], [0.22, 0.28],
+        // Z relative to headC, not world-space 0 -- a hardcoded 0 happened
+        // to sit near tetrapod/winged's small forward lean but stranded
+        // the bolts far from the head on any plan with a bigger Z offset
+        // (avian's forward-leaning neck, most visibly)
+        tube(mb, [[bx, byy, headC[2]], [bx + s * 0.8, byy, headC[2]]], [0.22, 0.28],
           glow ? BLTGLO : BOLT, 0.7, glow ? 0.85 : 0, 8);
-        if (glow) mb.glow([bx + s * 0.9, byy, 0], BLTGLO, 24);
+        if (glow) mb.glow([bx + s * 0.9, byy, headC[2]], BLTGLO, 24);
       }
   }
   mb.setTex(fdTex);
@@ -1230,6 +1248,260 @@ function planWinged(mb, o) {
   };
 }
 
+// ---- five more body types ---------------------------------------------------
+
+function planCrab(mb, o) {
+  const BREATH_T = [0.08, 0, 0, 0], BREATH_H = [0.035, 0, 0, 0];
+  const W = 3.0 + 1.6 * o.bulk, D = 2.2 + 1.0 * o.bulk, h = 1.7 + 0.5 * o.bulk;
+  const y0 = Math.max(0.5, o.legLen * 0.7);
+  // wide, low, flat-topped shell -- a carapace, not a torso
+  const levels = [
+    { y: y0,          x: 0, z: 0,          rx: W*0.72, rz: D*0.72 },
+    { y: y0+h*0.35,   x: 0, z: 0.05*D,     rx: W*0.96, rz: D*0.96 },
+    { y: y0+h*0.62,   x: 0, z: 0.02*D,     rx: W*1.00, rz: D*1.00 },
+    { y: y0+h*0.88,   x: 0, z: -0.05*D,    rx: W*0.70, rz: D*0.72 },
+    { y: y0+h,        x: 0, z: -0.10*D,    rx: W*0.30, rz: D*0.42 },
+  ];
+  mb.setAnim(BREATH_T);
+  mb.setTex(o.bodyTex('chitin', o.texScale, 0.6));
+  mb.setGait([0, 0, 0, 0.1]);
+  lathe(mb, levels, o.skin, 0.3, 0, 20, o.skinFn);
+  if (o.chestDeco) o.chestDeco(mb, levels[2], h, o);
+  mb.setGait(GAIT0);
+
+  // no true neck: the head fuses low and forward onto the shell edge
+  mb.setAnim(BREATH_H);
+  const HEADBOB = [0, 0, 0, 0.06];
+  mb.setGait(HEADBOB);
+  const head = buildHead(mb, o, y0 + h*0.55, levels[1].rz*0.85);
+  o.details(mb, head.hC, head.hR, o.heartLevel, o);
+  mb.setAnim(ANIM0);
+  mb.setGait(GAIT0);
+
+  addTail(mb, o, y0 + h*0.3, -levels[0].rz*0.9, false);
+
+  const shl = levels[2];
+  const sensP = [head.hR[0]*0.5, head.topY, head.hC[2] - 0.1];
+  const eyeP  = [0, head.hC[1] + head.hR[1]*0.25, head.hC[2] + head.hR[2]*0.7];
+  return {
+    hand:   { p: [shl.rx * 0.98, y0 + h*0.5, shl.rz*0.55],
+              nrm: V.norm([1, 0.15, 0.6]), mirror: true },
+    leg:    { p: [shl.rx * 0.85, o.legLen, -shl.rz*0.1],
+              nrm: V.norm([1, -0.7, 0]), mirror: true, len: o.legLen },
+    sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1,
+              anim: BREATH_H, gait: HEADBOB },
+    eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR),
+              mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
+  };
+}
+
+function planArachnid(mb, o) {
+  const BREATH_T = [0.09, 0, 0, 0], BREATH_H = [0.035, 0, 0, 0];
+  // two-part body: a smaller cephalothorax forward, a bulbous abdomen behind
+  const ar = 1.5 + 0.9*o.bulk, cr = 0.9 + 0.4*o.bulk;
+  const y0 = Math.max(0.6, o.legLen*0.75);
+  const aC = [0, y0 + ar*0.7, -ar*0.5];
+  const cC = [0, y0 + cr*0.85, cr*0.9];
+  mb.setAnim(BREATH_T);
+  mb.setTex(o.bodyTex('chitin', o.texScale, 0.65));
+  mb.setGait([0, 0, 0, 0.09]);
+  ellipsoid(mb, aC, [ar, ar*0.82, ar*1.15], o.skin, 0.32, 0, 18, o.skinFn);
+  ellipsoid(mb, cC, [cr, cr*0.92, cr*1.05], o.skin, 0.32, 0, 16, o.skinFn);
+  ellipsoid(mb, [0, (aC[1]+cC[1])*0.5 - 0.1, (aC[2]+cC[2])*0.5], [cr*0.5, cr*0.4, cr*0.5],
+    sh(o.skin, 0.85), 0.3, 0, 10, o.skinFn);   // waist pinch between the segments
+  if (o.chestDeco) o.chestDeco(mb, { y: cC[1], x: 0, z: cC[2], rx: cr, rz: cr }, cr*2, o);
+  mb.setGait(GAIT0);
+
+  // extra baked leg-pairs down the sides, on top of the slot-driven pair --
+  // the many-legged read a single mirrored pair can't give on its own
+  const legR = 0.16 + 0.08*o.bulk;
+  const legCol = lp(CHITIN, o.skin, 0.4);
+  const nExtra = 3;
+  for (let i = 0; i < nExtra; i++) {
+    const t = i / (nExtra - 1);
+    const z0 = cC[2]*0.6 - t*(cC[2]-aC[2])*0.9;
+    for (const side of [-1, 1]) {
+      const hip = [side*cr*0.7, cC[1]-cr*0.1, z0];
+      const knee = [side*(cr+1.6), cC[1]+0.6+t*0.3, z0+0.3];
+      const foot = [side*(cr+1.9), 0, z0+0.7];
+      const ph = ((i + (side > 0 ? 0 : 1)) % 2) * Math.PI;
+      mb.setGait([0.5*0.12, 0.4*0.12, ph, 0]);
+      limbJoint(mb, hip, V.sub(knee, hip), legR*1.15);
+      tube(mb, [hip, knee, foot], [legR*1.2, legR*0.8, 0.04], legCol, 0.4, 0, 6, 3,
+        null, null, (u) => [0.5*u, 0.4*u, ph, 0]);
+    }
+  }
+  mb.setGait(GAIT0);
+
+  mb.setAnim(BREATH_H);
+  const HEADBOB = [0, 0, 0, 0.05];
+  mb.setGait(HEADBOB);
+  const head = buildHead(mb, o, cC[1] + cr*0.5, cC[2] + cr*0.6);
+  o.details(mb, head.hC, head.hR, o.heartLevel, o);
+  mb.setAnim(ANIM0);
+  mb.setGait(GAIT0);
+
+  const sensP = [head.hR[0]*0.5, head.topY, head.hC[2]-0.1];
+  const eyeP  = [0, head.hC[1]+head.hR[1]*0.2, head.hC[2]+head.hR[2]*0.65];
+  return {
+    hand:   { p: [cr*0.95, cC[1]+0.2, cC[2]+cr*0.3], nrm: V.norm([1, 0.2, 0.6]), mirror: true, tiny: true },
+    leg:    { p: [cr*0.9, o.legLen, cC[2]*0.3], nrm: V.norm([0.6, -1, 0.1]), mirror: true, len: o.legLen },
+    sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H, gait: HEADBOB },
+    eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
+  };
+}
+
+function planAvian(mb, o) {
+  const BREATH_T = [0.09, 0, 0, 0], BREATH_H = [0.04, 0, 0, 0];
+  const W = 1.4 + 0.7*o.bulk, h = 3.4 + 0.8*o.bulk;
+  const waistY = o.legLen + 0.9;
+  const y0 = waistY - 0.1;
+  // forward-leaning profile: narrow tail-end, deep chest, leans forward as
+  // it rises -- the raptor-runner silhouette, distinct from tetrapod's
+  // upright posture
+  const levels = [
+    { y: y0,          x: 0, z: -h*0.15, rx: W*0.55, rz: W*0.7 },
+    { y: y0+h*0.3,     x: 0, z: -h*0.05, rx: W*0.9,  rz: W*1.0 },
+    { y: y0+h*0.6,     x: 0, z: h*0.1,   rx: W*1.05, rz: W*1.1 },
+    { y: y0+h*0.85,    x: 0, z: h*0.28,  rx: W*0.65, rz: W*0.75 },
+    { y: y0+h,         x: 0, z: h*0.4,   rx: W*0.32, rz: W*0.42 },
+  ];
+  mb.setAnim(BREATH_T);
+  mb.setTex(o.bodyTex('feathers', o.texScale, 0.5));
+  mb.setGait([0, 0, 0, 0.1]);
+  lathe(mb, levels, o.skin, 0.28, 0, 16, o.skinFn);
+  const ch = levels[2];
+  if (o.chestDeco) o.chestDeco(mb, ch, h, o);
+  mb.setGait([0, 0, 0, 0.07]);
+  buildPelvis(mb, o, levels[0].rx, waistY);
+
+  const neckTop = y0 + h + 1.1;    // a long neck -- the archetype's signature
+  buildNeck(mb, 0, y0+h+0.1, neckTop, levels[4].z, levels[4].z+0.9, W*0.22, o);
+
+  mb.setAnim(BREATH_H);
+  const HEADBOB = [0, 0, 0, 0.06];
+  mb.setGait(HEADBOB);
+  const head = buildHead(mb, o, neckTop - 0.15, levels[4].z + 0.9);
+  o.details(mb, head.hC, head.hR, o.heartLevel, o);
+  mb.setAnim(ANIM0);
+  mb.setGait(GAIT0);
+
+  addTail(mb, o, y0 + h*0.15, -levels[0].rz*0.8, false);
+
+  const sensP = [head.hR[0]*0.52, head.topY, head.hC[2]-0.1];
+  const eyeP  = [0, head.hC[1]+head.hR[1]*0.2, head.hC[2]+head.hR[2]*0.62];
+  return {
+    hand:   { p: [ch.rx*0.85, ch.y+0.2, ch.z+0.2], nrm: V.norm([1, 0.1, 0.3]), mirror: true, tiny: true },
+    leg:    { p: [Math.max(0.6, levels[0].rx*0.55), o.legLen, levels[0].z*0.3],
+              nrm: V.norm([0.25, -1, 0]), mirror: true, len: o.legLen },
+    sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H, gait: HEADBOB },
+    eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
+  };
+}
+
+function planTreant(mb, o) {
+  const BREATH_T = [0.05, 0, 0, 0], BREATH_H = [0.025, 0, 0, 0];   // slow, barely breathing
+  const W = 2.0 + 1.3*o.bulk, h = 4.2 + 1.0*o.bulk;
+  const y0 = 0.3;   // rooted low; no leg-driven stance (the plan ignores 'leg')
+  // a thick columnar trunk, widest at the base, tapering gently up
+  const levels = [
+    { y: y0,          x: 0, z: 0, rx: W*1.15, rz: W*1.15 },
+    { y: y0+h*0.15,    x: 0, z: 0, rx: W*0.85, rz: W*0.85 },
+    { y: y0+h*0.55,    x: 0, z: 0, rx: W*0.62, rz: W*0.62 },
+    { y: y0+h*0.85,    x: 0, z: 0, rx: W*0.5,  rz: W*0.5 },
+    { y: y0+h,         x: 0, z: 0, rx: W*0.36, rz: W*0.36 },
+  ];
+  mb.setAnim(BREATH_T);
+  mb.setTex(o.bodyTex('ridge', o.texScale, 0.7));   // growth-ring texture reads as bark
+  mb.setGait([0, 0, 0, 0.03]);
+  lathe(mb, levels, o.skin, 0.22, 0, 16, o.skinFn);
+  if (o.chestDeco) o.chestDeco(mb, levels[2], h, o);
+  mb.setGait(GAIT0);
+
+  // gnarled roots flaring from the base, standing in for legs/feet
+  mb.setTex(TEX_NONE);
+  const nRoots = 5;
+  for (let i = 0; i < nRoots; i++) {
+    const a = (i / nRoots) * Math.PI * 2;
+    const base = [Math.cos(a)*levels[0].rx*0.7, y0+0.5, Math.sin(a)*levels[0].rx*0.7];
+    const tip  = [Math.cos(a)*levels[0].rx*1.7, 0, Math.sin(a)*levels[0].rx*1.7];
+    tube(mb, [base, tip], [0.35+0.1*o.bulk, 0.08], sh(o.skin, 0.8), 0.2, 0, 6, 3);
+  }
+
+  mb.setAnim(BREATH_H);
+  const HEADBOB = [0, 0, 0, 0.03];
+  mb.setGait(HEADBOB);
+  const head = buildHead(mb, o, y0 + h - 0.3, 0);
+  o.details(mb, head.hC, head.hR, o.heartLevel, o);
+  mb.setAnim(ANIM0);
+  mb.setGait(GAIT0);
+
+  const sensP = [head.hR[0]*0.52, head.topY, head.hC[2]-0.1];
+  const eyeP  = [0, head.hC[1]+head.hR[1]*0.2, head.hC[2]+head.hR[2]*0.62];
+  return {
+    hand:   { p: [levels[3].rx*0.9, levels[3].y, levels[3].z+0.15], nrm: V.norm([1, 0.3, 0.15]), mirror: true },
+    sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H, gait: HEADBOB },
+    eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
+  };
+}
+
+function planFloater(mb, o) {
+  const BREATH_T = [0.06, 0, 0, 0], BREATH_H = [0.03, 0, 0, 0];
+  const W = 1.8 + 1.0*o.bulk, h = 3.2 + 0.8*o.bulk;
+  const y0 = 0.9;   // hovers -- feet never a factor (the plan ignores 'leg')
+  // a hooded cone: narrow peak, flares out to a wide robed hem
+  const levels = [
+    { y: y0,          x: 0, z: 0,       rx: W*0.15, rz: W*0.15 },
+    { y: y0+h*0.25,    x: 0, z: 0.02*W, rx: W*0.55, rz: W*0.55 },
+    { y: y0+h*0.55,    x: 0, z: 0.04*W, rx: W*0.85, rz: W*0.85 },
+    { y: y0+h*0.85,    x: 0, z: 0.02*W, rx: W*1.05, rz: W*1.05 },
+    { y: y0+h,         x: 0, z: 0,      rx: W*1.15, rz: W*1.15 },
+  ];
+  mb.setAnim(BREATH_T);
+  mb.setTex(o.bodyTex('slick', o.texScale, 0.75));
+  const HOVER = [0, 0, 0, 0.18];   // a strong idle bob reads as the hover itself
+  mb.setGait(HOVER);
+  lathe(mb, levels, o.skin, 0.35, 0, 18, o.skinFn);
+  if (o.chestDeco) o.chestDeco(mb, levels[2], h, o);
+
+  // tentacle-fringe at the hem, instead of feet
+  mb.setTex(TEX_NONE);
+  const nFringe = 7;
+  for (let i = 0; i < nFringe; i++) {
+    const a = (i / nFringe) * Math.PI * 2;
+    const hem = levels[4];
+    const base = [Math.cos(a)*hem.rx*0.92, hem.y, Math.sin(a)*hem.rx*0.92];
+    const path = [base];
+    for (let s = 1; s <= 4; s++) {
+      const t = s / 4;
+      path.push([base[0]*(1-t*0.3), hem.y - t*(1.6+0.4*o.bulk), base[2]*(1-t*0.3)]);
+    }
+    mb.setGait([0, 0, 0.4 + i*0.3, 0.15]);
+    tube(mb, path, path.map((_, k) => 0.16*(1-k*0.15)), sh(o.skin, 0.88), 0.3, 0, 5, 3);
+  }
+  mb.setGait(HOVER);
+
+  // the head pokes out through the peak -- a small skull (or, at mastermind,
+  // a brain in its glass dome) crowning the hood like a lollipop
+  mb.setAnim(BREATH_H);
+  const HEADBOB = [0, 0, 0, 0.1];
+  mb.setGait(HEADBOB);
+  const head = buildHead(mb, o, y0 + h - 0.2, 0);
+  o.details(mb, head.hC, head.hR, o.heartLevel, o);
+  mb.setAnim(ANIM0);
+  mb.setGait(GAIT0);
+
+  const sensP = [head.hR[0]*0.5, head.topY, head.hC[2]-0.1];
+  const eyeP  = [0, head.hC[1]+head.hR[1]*0.15, head.hC[2]+head.hR[2]*0.6];
+  return {
+    // short arms high on the hood -- a full-length armDrop would hang past
+    // the hem and read as legs, confusing itself with the tentacle-fringe
+    hand:   { p: [levels[3].rx*0.8, levels[3].y, levels[3].z+0.1], nrm: V.norm([1, 0, 0.3]), mirror: true, tiny: true },
+    sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H, gait: HEADBOB },
+    eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
+  };
+}
+
 function spineOf(skin) { return lp(skin, [52, 40, 80], 0.45); }
 
 /** Outward surface normal of an ellipsoid at point q — the analytic
@@ -1265,12 +1537,14 @@ function buildPart(mb, slot, family, params, side, sock, o) {
   const TEX_FAM = {
     claw_hand: ['warts', 0.45], pincer: ['chitin', 0.5], tentacle: ['slick', 0.8],
     rifle_arm: ['none', 0], plasma_lance: ['chitin', 0.6], hand_stump: ['warts', 0.3],
+    chain_blade: ['none', 0], spore_launcher: ['chitin', 0.55],
     antenna: ['ridge', 0.35], horn: ['ridge', 0.55], sensor_mast: ['none', 0],
     sensor_stub: ['warts', 0.3],
     bug_eyes: ['none', 0], cyclops_eye: ['none', 0], stalk_eyes: ['none', 0],
     optic_visor: ['none', 0], eye_socket: ['warts', 0.3],
     hoofed_leg: ['warts', 0.5], talon_leg: ['feathers', 0.55], insect_leg: ['chitin', 0.65],
     piston_leg: ['none', 0], leg_stump: ['warts', 0.3],
+    jet_leg: ['none', 0], tendril_leg: ['slick', 0.7],
   };
   const tf = TEX_FAM[family] ?? ['none', 0];
   mb.setTex([...TILE[tf[0]], 0.45 + 0.75 * orn, tf[1]]);
@@ -1356,6 +1630,45 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     case 'hand_stump': {
       ellipsoid(mb, [S[0], S[1], S[2]], [0.62, 0.5, 0.62], PALLOR, 0.25, 0, 8);
       ringStitch(mb, [S[0], S[1]-0.1, S[2]], 0.58);
+      break;
+    }
+    case 'chain_blade': {
+      // a motor housing at the wrist driving a guide bar with a looping
+      // chain of blade links -- a killer-robot arm, rounded like everything
+      // else here, not a brick
+      const wrist = armDrop(mb, S, side, 0.4*scale, scale, o, [len, girth, taper, curl], N);
+      ellipsoid(mb, wrist, [0.36, 0.4, 0.5], METAL, 0.7, 0, 8);
+      const barLen = (1.6 + 1.8*len) * scale;
+      const barTip = [wrist[0], wrist[1]+barLen*0.15, wrist[2]+barLen];
+      tube(mb, [wrist, barTip], [0.16, 0.1], METDK, 0.75, 0, 8);
+      const nLinks = clamp(6 + Math.round(count*6), 6, 12);
+      for (let i = 0; i < nLinks; i++) {
+        const t = i / nLinks;
+        ellipsoid(mb, [
+          wrist[0] + (barTip[0]-wrist[0])*t,
+          wrist[1] + (barTip[1]-wrist[1])*t + Math.sin(t*Math.PI)*0.22,
+          wrist[2] + (barTip[2]-wrist[2])*t,
+        ], [0.08, 0.08, 0.08], sh(METAL, 1.1), 0.8, 0, 5);
+      }
+      ellipsoid(mb, [wrist[0], wrist[1]-0.1, wrist[2]-0.3], [0.1, 0.1, 0.1], GLOW, 0.5, 0.8, 5);
+      mb.glow([wrist[0], wrist[1]-0.1, wrist[2]-0.35], GLOW, 12);
+      break;
+    }
+    case 'spore_launcher': {
+      // a fleshy arm ending in a bulbous veined pod that vents glowing
+      // spore motes -- the biotech counterpart to plasma_lance
+      const wrist = armDrop(mb, S, side, 0.46*scale, scale, { skin: CHITIN, skinFn: null }, [len, girth, taper, curl], N);
+      const podR = (0.5 + 0.5*girth) * scale;
+      ellipsoid(mb, wrist, [podR, podR*1.1, podR], lp(CHITIN, ICHOR, 0.3), 0.45, 0, 10);
+      const tipC = [wrist[0], wrist[1]+podR*1.3, wrist[2]+podR*0.6];
+      ellipsoid(mb, tipC, [podR*0.6, podR*0.5, podR*0.6], sh(CHITIN, 1.05), 0.5, 0, 8);
+      const nSpore = clamp(3 + Math.round(count*4), 3, 7);
+      for (let i = 0; i < nSpore; i++) {
+        const a = (i/nSpore) * Math.PI * 2, r = podR*0.5;
+        const mp = [tipC[0]+Math.cos(a)*r, tipC[1]+podR*0.4+Math.sin(a*1.7)*0.15, tipC[2]+Math.sin(a)*r];
+        ellipsoid(mb, mp, [0.09, 0.09, 0.09], ICHOR, 0.4, 0.7, 4);
+        mb.glow(mp, ICHOR, 10);
+      }
       break;
     }
 
@@ -1558,6 +1871,52 @@ function buildPart(mb, slot, family, params, side, sock, o) {
           ellipsoid(mb, knee, [0.3, 0.3, 0.3], METDK, 0.7, 0, 6);   // knee actuator
         }
       }
+      break;
+    }
+    case 'jet_leg': {
+      // a strut ending in a gimbaled thruster -- no foot ever touches down
+      const R = 0.18 + 0.1*girth;
+      const hip = [S[0], sock.len+0.5, S[2]];
+      const nozzle = [S[0]+N[0]*0.2, 0.35, S[2]+N[2]*0.2];
+      const hPh = side > 0 ? 0 : Math.PI;
+      const legGait = (t) => [0.7*t, 0.3*t, hPh, 0];
+      mb.setGait(legGait(0.1));
+      limbJoint(mb, hip, V.sub(nozzle, hip), R*1.15);
+      mb.setGait([0, 0, 0, 0.08]);
+      ellipsoid(mb, [hip[0], hip[1]+0.1, hip[2]], [R*1.2, R*1.1, R*1.2], METAL, 0.75, 0, 7);
+      tube(mb, [hip, nozzle], [R*0.9, R*1.3], METDK, 0.7, 0, 8, 1, null, null, legGait);
+      mb.setGait(legGait(1));
+      ellipsoid(mb, nozzle, [R*1.5, R*1.1, R*1.5], METAL, 0.75, 0, 8);
+      const exhaust = [nozzle[0], nozzle[1]-0.55, nozzle[2]];
+      tube(mb, [nozzle, exhaust], [R*1.0, R*0.3], sh(METDK, 0.7), 0.4, 0.5, 8, 2);
+      mb.glow(exhaust, GLOW, 16);
+      mb.setGait(GAIT0);
+      break;
+    }
+    case 'tendril_leg': {
+      // a boneless muscular pseudopod -- the biotech counterpart to
+      // tentacle, oriented hip-to-ground instead of shoulder-to-droop
+      const R = 0.22 + 0.12*girth;
+      const hPh = side > 0 ? 0 : Math.PI;
+      const hip = [S[0], sock.len+0.5, S[2]];
+      const path = [hip];
+      for (let i = 1; i <= 8; i++) {
+        const t = i / 8;
+        path.push([
+          hip[0] + N[0]*t*0.6 + Math.sin(t*Math.PI*(1+curl*1.4))*curl*0.6,
+          hip[1] - t*(sock.len+0.4),
+          hip[2] + N[2]*t*0.6 + 0.3*t,
+        ]);
+      }
+      const legGait = (t) => [0.6*t, 0.35*t, hPh, 0];
+      mb.setGait(legGait(0.1));
+      limbJoint(mb, hip, V.sub(path[1], hip), R*1.15);
+      mb.setGait([0, 0, 0, 0.08]);
+      ellipsoid(mb, [hip[0], hip[1]+0.15, hip[2]], [R*1.3, R*1.2, R*1.3],
+        o.skinFn ? o.skin : CHITIN, 0.3, 0, 8, o.skinFn);
+      tube(mb, path, path.map((_, i) => R*(1-(i/8)*0.75)),
+        o.skinFn ? o.skin : CHITIN, 0.32, 0, 8, 3, null, null, legGait);
+      mb.setGait(GAIT0);
       break;
     }
     case 'leg_stump': {

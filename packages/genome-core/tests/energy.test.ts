@@ -57,7 +57,10 @@ test("an alien drone drinks blood AND ichor (flesh plus grown machines)", () => 
 
 test("a single tech graft adds a fuel line to a monster's bill", () => {
   const rng = new Rng(34);
-  const monster = randomGenome(rng);
+  // Pin a leg-expressing plan: this test is about the graft's fuel line,
+  // not about random plan selection, and must stay correct regardless of
+  // which (leg-ignoring or not) plans exist in the catalog.
+  const monster = randomGenome(rng, { plan: "tetrapod" });
   assert.equal(upkeep(monster).fuel, 0);
   const grafted = withSlots(monster, { leg: { family: "piston_leg", params: P6(0.5) } });
   assert.ok(upkeep(grafted).fuel > 0);

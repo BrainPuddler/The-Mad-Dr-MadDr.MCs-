@@ -47,6 +47,16 @@ export const FAMILIES = {
         bounds: bounds({ taper: [0.5, 1.0] }),
         invariants: "a fleshy arm ending in a glowing lance emitter with a charge bulb",
     },
+    chain_blade: {
+        homolog: "hand", origin: "tech",
+        bounds: bounds({ curl: [0.0, 0.25] }),
+        invariants: "an arm ending in a motorized rotary chain-blade on a guide bar",
+    },
+    spore_launcher: {
+        homolog: "hand", origin: "biotech",
+        bounds: bounds({ girth: [0.35, 1.0] }),
+        invariants: "a fleshy arm ending in a bulbous veined pod that vents spore motes",
+    },
     // ---- sensor homologs ------------------------------------------------------
     antenna: {
         homolog: "sensor", origin: "organic",
@@ -105,6 +115,16 @@ export const FAMILIES = {
         bounds: bounds({ girth: [0.3, 0.9], curl: [0.0, 0.3] }),
         invariants: "a hydraulic strut: cylinder, piston rod, flat foot-plate",
     },
+    jet_leg: {
+        homolog: "leg", origin: "tech",
+        bounds: bounds({ girth: [0.2, 0.7] }),
+        invariants: "a strut ending in a gimbaled thruster nozzle; no foot ever touches down",
+    },
+    tendril_leg: {
+        homolog: "leg", origin: "biotech",
+        bounds: bounds({ girth: [0.0, 0.6], curl: [0.2, 1.0] }),
+        invariants: "a boneless muscular pseudopod, tapering and rippling",
+    },
     // ---- stumps: what a slot heals to after a part is harvested --------------
     hand_stump: {
         homolog: "hand", origin: "organic", vestigial: true,
@@ -150,6 +170,26 @@ export const BODY_PLANS = {
     winged: {
         invariants: "a small body slung between two membrane wings, standing on legs",
         ignoresSlots: [],
+    },
+    crab: {
+        invariants: "a wide low shell body on a sideways stance, claws held forward",
+        ignoresSlots: [],
+    },
+    arachnid: {
+        invariants: "a hunched two-part body low to the ground, crowded with legs",
+        ignoresSlots: [],
+    },
+    avian: {
+        invariants: "a forward-leaning two-legged runner: long neck, small head, tail counterbalance",
+        ignoresSlots: [],
+    },
+    treant: {
+        invariants: "a rooted trunk-like body with branch limbs; no true legs, it stands on roots",
+        ignoresSlots: ["leg"],
+    },
+    floater: {
+        invariants: "a hooded conical body that hovers; no legs, tentacle-fringed at the hem",
+        ignoresSlots: ["leg"],
     },
 };
 // ---- queries ---------------------------------------------------------------

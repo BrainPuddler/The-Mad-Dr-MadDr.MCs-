@@ -114,9 +114,24 @@ async function sync() {
 // slither or ooze — the tank comes from tech legs); the Alien Hive
 // skews crawling and amorphous with few flyers.
 const FACTION_PLANS = {
-  maddr: [["tetrapod", 0.55], ["winged", 0.2], ["serpentine", 0.15], ["blob", 0.1]],
-  human: [["tetrapod", 0.7], ["winged", 0.3]],
-  alien: [["tetrapod", 0.35], ["serpentine", 0.3], ["blob", 0.25], ["winged", 0.1]],
+  // Mad Doctors: the full monster mix, classic archetypes at even odds
+  maddr: [
+    ["tetrapod", 0.30], ["winged", 0.12], ["serpentine", 0.10], ["blob", 0.08],
+    ["crab", 0.12], ["arachnid", 0.10], ["avian", 0.10], ["treant", 0.05], ["floater", 0.03],
+  ],
+  // Human Army: only chassis that make sense as a machine -- runners,
+  // walkers, hover units. No slither/ooze/plant (still no treant), same
+  // restriction that already ruled out blob/serpentine.
+  human: [
+    ["tetrapod", 0.40], ["winged", 0.18], ["avian", 0.16],
+    ["crab", 0.14], ["arachnid", 0.08], ["floater", 0.04],
+  ],
+  // Alien Hive: skews crawling, amorphous, and grown -- arachnid and
+  // treant read strongest for a hive that grows its weapons.
+  alien: [
+    ["tetrapod", 0.18], ["serpentine", 0.18], ["blob", 0.14], ["winged", 0.08],
+    ["arachnid", 0.18], ["treant", 0.14], ["floater", 0.08], ["crab", 0.02],
+  ],
 };
 function pickPlan() {
   const table = FACTION_PLANS[local.faction] ?? FACTION_PLANS.maddr;
