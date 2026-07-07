@@ -129,8 +129,10 @@ const TILE = {
   chitin:   [0.00, 0.25],
   ridge:    [0.25, 0.25],
   none:     [0.50, 0.25],
+  panels:   [0.75, 0.25],   // riveted metal plate — the tin-toy robot hide
+  veins:    [0.00, 0.50],   // veined membrane — the 1950s brain-alien hide
 };
-const TILE_SPEC = { warts: 28, scales: 90, slick: 215, feathers: 18, chitin: 110, ridge: 50, none: 0 };
+const TILE_SPEC = { warts: 28, scales: 90, slick: 215, feathers: 18, chitin: 110, ridge: 50, none: 0, panels: 190, veins: 120 };
 const TEX_NONE = [TILE.none[0], TILE.none[1], 1, 0];
 
 const GAIT0 = [0, 0, 0, 0];
@@ -395,10 +397,15 @@ function buildCreature(genome) {
   const bulk  = P(g.body?.params, 1, 0.5);
   const limb  = P(g.body?.params, 2, 0.5);
   const tail  = P(g.body?.params, 3, 0.5);
-  const skin  = lp(PALLOR, skinTone(hue), 0.40 + 0.60 * vigor);
-  const belly = lp(skin, [236, 214, 184], 0.55);
-  const spine = lp(skin, [52, 40, 80], 0.45);
-  const skinFn = skinColorFn(skin, belly, spine);
+
+  // Faction is the whole visual language, not just a backdrop. The genome
+  // still drives silhouette (breeding matters); the faction re-skins the
+  // flesh: Mad Doctors keep the stitched b-movie look, Humans become
+  // 1950s tin-toy robots (Robby/Gort), Aliens become Metaluna-mutant
+  // brain-invaders. Palette, body material, and head/chest detailing all
+  // switch; MadDr's path is unchanged.
+  const fk = factionKit(_faction, hue, vigor);
+  const skin = fk.skin, skinFn = fk.skinFn;
   const headScale = { dim: 0, average: 0.15, gifted: 0.3, mastermind: 0.75 }[g.brain?.tier] ?? 0.15;
   const heartLevel = ['faint','steady','strong','titan'].indexOf(g.heart?.tier ?? 'steady');
 
@@ -425,6 +432,13 @@ function buildCreature(genome) {
     bulk, limb, tail, skin, skinFn, headScale, heartLevel, legLen, legFam,
     brainTier: g.brain?.tier ?? 'average',
     texScale: 0.35 + 0.5 * grain,
+    faction: _faction,
+    details: fk.details,          // head detailing: franken / robot / alien
+    chestDeco: fk.chestDeco,      // torso front: sutures / rivets / ichor nodes
+    // body material override: Humans force riveted panels, Aliens veined
+    // membrane; MadDr passes the plan's own organic material through
+    bodyTex: (mat, scale, amp) =>
+      fk.bodyMat ? [...TILE[fk.bodyMat], scale, fk.bodyAmp] : [...TILE[mat], scale, amp],
   });
 
   for (const slot of SLOT_NAMES) {
@@ -445,6 +459,185 @@ function buildCreature(genome) {
 }
 
 // ---- body plans -------------------------------------------------------------
+
+// ── faction visual kits ─────────────────────────────────────────────────────
+
+// 1950s tin-toy enamel over gunmetal (Robby/Gort palette)
+const ROBOT_ENAMEL = [
+  [200,  58,  50],   // fire-engine red
+  [224, 202, 154],   // cream
+  [ 66, 150, 158],   // teal
+  [ 60,  92, 168],   // cobalt
+  [206, 166,  58],   // mustard
+  [176, 182, 190],   // bare aluminium
+];
+const CHROME = [214, 222, 230];
+const ROBOT_LENS = [255, 150, 40];
+const RIVET = [150, 158, 170];
+// Metaluna-mutant invader palette: vivid bruised greens & violets, wet
+const ALIEN_HIDE = [
+  [ 82, 168,  86],   // metaluna green
+  [128, 176,  70],   // sickly lime
+  [148,  92, 186],   // mutant violet
+  [ 58, 158, 146],   // deep teal
+];
+const BRAINP = [214, 150, 160];
+const ICHOR_N = [150, 235, 190];   // bioluminescent node
+
+function metalColorFn(base) {
+  // brushed-metal: catches a hard chrome highlight up top, sinks dark below
+  return (u) => {
+    let c = base;
+    if (u[1] > 0.2) c = lp(c, CHROME, (u[1] - 0.2) * 0.5);
+    else if (u[1] < -0.2) c = sh(c, 0.7);
+    if (u[2] > 0.3) c = lp(c, CHROME, (u[2] - 0.3) * 0.25);   // frontal sheen
+    return c;
+  };
+}
+
+function factionKit(faction, hue, vigor) {
+  if (faction === 'human') {
+    const enamel = ROBOT_ENAMEL[Math.floor(clamp(hue, 0, 0.999) * ROBOT_ENAMEL.length)];
+    return {
+      skin: enamel, skinFn: metalColorFn(enamel),
+      details: robotDetails, chestDeco: robotChest,
+      bodyMat: 'panels', bodyAmp: 0.9,
+    };
+  }
+  if (faction === 'alien') {
+    const base = ALIEN_HIDE[Math.floor(clamp(hue, 0, 0.999) * ALIEN_HIDE.length)];
+    const skin = lp(base, skinTone(hue), 0.10);   // a touch of heritable drift
+    const belly = lp(skin, [170, 250, 200], 0.45); // bioluminescent underglow
+    const spine = lp(skin, [96, 40, 140], 0.55);   // violet iridescent flank
+    return {
+      skin, skinFn: skinColorFn(skin, belly, spine),
+      details: alienDetails, chestDeco: alienChest,
+      bodyMat: 'veins', bodyAmp: 0.9,
+    };
+  }
+  // Mad Doctors — unchanged
+  const skin = lp(PALLOR, skinTone(hue), 0.40 + 0.60 * vigor);
+  const belly = lp(skin, [236, 214, 184], 0.55);
+  const spine = lp(skin, [52, 40, 80], 0.45);
+  return {
+    skin, skinFn: skinColorFn(skin, belly, spine),
+    details: frankenDetails, chestDeco: null,   // null → stitchSeam (maddr default)
+    bodyMat: null, bodyAmp: 0,
+  };
+}
+
+// 1950s robot head: a recessed visor band with a glowing lens, a speaker
+// grille "voice box", a riveted collar, and a beacon finial.
+function robotDetails(mb, headC, headR, heartLevel, o) {
+  const prevTex = mb.tex;
+  // visor band across the brow (dark recess) with a hot scanning lens
+  const vy = headC[1] + headR[1] * 0.18, vz = headC[2] + headR[2] * 0.72;
+  mb.setTex(TEX_NONE);
+  tube(mb, [
+    [headC[0] - headR[0]*0.9, vy, vz - headR[2]*0.25],
+    [headC[0], vy, vz + headR[2]*0.05],
+    [headC[0] + headR[0]*0.9, vy, vz - headR[2]*0.25],
+  ], [0.16, 0.2, 0.16], sh(METAL, 0.6), 0.8, 0, 8);
+  ellipsoid(mb, [headC[0], vy, vz + 0.14], [headR[0]*0.28, 0.14, 0.12], ROBOT_LENS, 0.6, 0.9, 8);
+  mb.glow([headC[0], vy, vz + 0.2], ROBOT_LENS, 22);
+  // speaker-grille mouth: horizontal slats on the lower face
+  const my = headC[1] - headR[1] * 0.5, mz = headC[2] + headR[2] * 0.72;
+  ellipsoid(mb, [headC[0], my, mz], [headR[0]*0.5, headR[1]*0.24, 0.1], sh(METAL, 0.5), 0.7, 0, 10);
+  for (let i = -1; i <= 1; i++)
+    tube(mb, [[headC[0]-headR[0]*0.38, my + i*0.13, mz+0.08], [headC[0]+headR[0]*0.38, my + i*0.13, mz+0.08]],
+      [0.03, 0.03], [20, 22, 26], 0.5, 0, 5);
+  // beacon finial on the crown
+  tube(mb, [[headC[0], headC[1]+headR[1]*0.9, headC[2]], [headC[0], headC[1]+headR[1]*1.35, headC[2]]],
+    [0.07, 0.05], METAL, 0.8, 0, 6);
+  ellipsoid(mb, [headC[0], headC[1]+headR[1]*1.4, headC[2]], [0.12,0.12,0.12], ROBOT_LENS, 0.5, 1, 6);
+  mb.glow([headC[0], headC[1]+headR[1]*1.42, headC[2]], ROBOT_LENS, 16);
+  // riveted collar + heart-tier indicator lamps
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    ellipsoid(mb, [headC[0] + Math.cos(a)*headR[0]*0.9, headC[1]-headR[1]*0.9, headC[2] + Math.sin(a)*headR[2]*0.9],
+      [0.08,0.08,0.08], RIVET, 0.8, 0, 4);
+  }
+  if (heartLevel >= 1) {
+    const lamp = heartLevel >= 3 ? BLTGLO : ROBOT_LENS;
+    for (let i = 0; i < Math.min(heartLevel + 1, 4); i++) {
+      const lx = headC[0] + (i - (Math.min(heartLevel + 1, 4) - 1) / 2) * 0.34;
+      ellipsoid(mb, [lx, headC[1]-headR[1]*0.72, headC[2]+headR[2]*0.7], [0.07,0.07,0.07], lamp, 0.5, 1, 5);
+      mb.glow([lx, headC[1]-headR[1]*0.72, headC[2]+headR[2]*0.76], lamp, 12);
+    }
+  }
+  mb.setTex(prevTex);
+}
+
+// 1950s brain-alien head (This Island Earth's Metaluna Mutant): an
+// oversized exposed veined brain sits atop the skull, a heavy compound-eye
+// brow beneath, small mandible palps at the mouth, glowing cranial nodes.
+function alienDetails(mb, headC, headR, heartLevel, o) {
+  const prevTex = mb.tex;
+  // the exposed brain — two great veined lobes
+  mb.setTex([...TILE.veins, 0.8, 0.7]);
+  const bc = [headC[0], headC[1] + headR[1]*0.72, headC[2] - 0.1];
+  ellipsoid(mb, bc, [headR[0]*1.02, headR[1]*0.72, headR[2]*0.95], BRAINP, 0.55, 0, 16);
+  for (const s of [-1, 1])
+    ellipsoid(mb, [bc[0] + s*headR[0]*0.42, bc[1] + headR[1]*0.18, bc[2] + 0.1],
+      [headR[0]*0.5, headR[1]*0.5, headR[2]*0.6], sh(BRAINP, 0.94), 0.55, 0, 10);
+  // deep sulcus down the middle
+  mb.setTex(TEX_NONE);
+  tube(mb, [[bc[0], bc[1]+headR[1]*0.5, bc[2]-headR[2]*0.4], [bc[0], bc[1]-headR[1]*0.2, bc[2]+headR[2]*0.5]],
+    [0.08, 0.08], sh(BRAINP, 0.7), 0.4, 0, 6);
+  // heavy brow ridge over the compound eyes
+  const by = headC[1] + headR[1]*0.12, bz = headC[2] + headR[2]*0.74;
+  tube(mb, [
+    [headC[0]-headR[0]*0.9, by-0.1, bz-headR[2]*0.24],
+    [headC[0], by+0.14, bz+0.1],
+    [headC[0]+headR[0]*0.9, by-0.1, bz-headR[2]*0.24],
+  ], [0.16, 0.22, 0.16], sh(o.skin, 0.72), 0.3, 0, 8);
+  // mandible palps flanking the mouth
+  const my = headC[1] - headR[1]*0.55, mz = headC[2] + headR[2]*0.7;
+  ellipsoid(mb, [headC[0], my, mz], [headR[0]*0.34, 0.12, 0.14], MOUTHC, 0.2, 0, 8);
+  for (const s of [-1, 1])
+    curvedCone(mb, [headC[0]+s*headR[0]*0.34, my+0.05, mz], [s*0.4, -0.7, 0.5],
+      0.55, 0.11, [s*0.2, -0.1, 0.15], sh(o.skin, 0.8), 0.4);
+  // glowing cranial nodes (ichor sacs), doubling as the heart-tier tell
+  const nodes = Math.min(heartLevel + 1, 4);
+  for (let i = 0; i < nodes; i++) {
+    const a = Math.PI * (0.25 + 0.5 * (i / Math.max(1, nodes - 1)));
+    const nx = bc[0] + Math.cos(a) * headR[0] * 0.9, nz = bc[2] + 0.2;
+    ellipsoid(mb, [nx, bc[1] + Math.sin(a)*headR[1]*0.4, nz], [0.13,0.13,0.13], ICHOR_N, 0.5, 0.9, 6);
+    mb.glow([nx, bc[1] + Math.sin(a)*headR[1]*0.4, nz + 0.1], ICHOR_N, 16);
+  }
+  mb.setTex(prevTex);
+}
+
+// chest-front detailing by faction (torso already built)
+function robotChest(mb, ch, h, o) {
+  const prevTex = mb.tex, y = ch.y - h*0.10, z = ch.z + ch.rz + 0.02;
+  mb.setTex(TEX_NONE);
+  // a control panel: recessed plate, central dial, gauge, blinking lamps
+  ellipsoid(mb, [0, y, z], [ch.rx*0.5, ch.rx*0.42, 0.12], sh(METAL, 0.55), 0.7, 0, 12);
+  ellipsoid(mb, [0, y+ch.rx*0.12, z+0.12], [ch.rx*0.18, ch.rx*0.18, 0.08], [30,34,40], 0.6, 0, 10);
+  ellipsoid(mb, [0, y+ch.rx*0.12, z+0.16], [ch.rx*0.04, ch.rx*0.1, 0.04], ROBOT_LENS, 0.6, 0.9, 6);  // needle
+  for (let i = -1; i <= 1; i++)                                    // lamp row
+    ellipsoid(mb, [i*ch.rx*0.2, y-ch.rx*0.2, z+0.12], [0.06,0.06,0.05],
+      [ROBOT_LENS, [90,220,120], [90,150,255]][i+1], 0.5, 1, 5);
+  for (let i = 0; i < 10; i++) {                                   // panel rivets
+    const a = (i/10)*Math.PI*2;
+    ellipsoid(mb, [Math.cos(a)*ch.rx*0.52, y+Math.sin(a)*ch.rx*0.44, z+0.02], [0.05,0.05,0.05], RIVET, 0.8, 0, 4);
+  }
+  mb.setTex(prevTex);
+}
+
+function alienChest(mb, ch, h, o) {
+  const prevTex = mb.tex, y = ch.y - h*0.08, z = ch.z + ch.rz;
+  // a cluster of glowing ichor sacs beneath a translucent belly-plate
+  ellipsoid(mb, [0, y, z], [ch.rx*0.46, ch.rx*0.5, 0.14], sh(o.skin, 1.05), 0.5, 0, 12, o.skinFn);
+  mb.setTex(TEX_NONE);
+  const sacs = [[0,0.15],[ -0.24,-0.1],[0.24,-0.1],[0,-0.32]];
+  for (const [sx, sy] of sacs) {
+    ellipsoid(mb, [sx*ch.rx, y+sy*ch.rx, z+0.14], [0.12,0.15,0.09], ICHOR_N, 0.5, 0.85, 7);
+    mb.glow([sx*ch.rx, y+sy*ch.rx, z+0.2], ICHOR_N, 15);
+  }
+  mb.setTex(prevTex);
+}
 
 function frankenDetails(mb, headC, headR, heartLevel, o) {
   // heavy brow ridge — the shelf that turns glued-on balls into deep-set
@@ -573,8 +766,10 @@ function buildPelvis(mb, o, waistR, waistY) {
   const fn = (mech || chit) ? null : o.skinFn;
   const prevTex = mb.tex, prevAnim = mb.anim;
   mb.setAnim(ANIM0);
+  // the pelvis wears the faction's hide too (robots metal, aliens veined),
+  // unless the leg family already dictates a mechanical/chitin chassis
   mb.setTex(mech ? TEX_NONE : chit ? [...TILE.chitin, o.texScale, 0.6]
-                                   : [...TILE.warts, o.texScale, 0.5]);
+                                   : o.bodyTex('warts', o.texScale, 0.5));
   const hipY = waistY - 1.15;
   lathe(mb, [
     { y: hipY - 0.45, x: 0, z: 0, rx: waistR*0.72, rz: waistR*0.60 },
@@ -668,7 +863,7 @@ function planTetrapod(mb, o) {
   const levels = torsoLevels(b, W, h, y0, 0.5);
 
   mb.setAnim(BREATH_T);
-  mb.setTex([...TILE.warts, o.texScale, 0.55]);
+  mb.setTex(o.bodyTex('warts', o.texScale, 0.55));
   mb.setGait([0, 0, 0, 0.12]);
   lathe(mb, levels, o.skin, 0.28, 0, 18, o.skinFn);
   const shl = levels[3];
@@ -677,7 +872,8 @@ function planTetrapod(mb, o) {
       ellipsoid(mb, [s * shl.rx * 0.85, shl.y + 0.15, shl.z],
         [W*0.48*b, W*0.42*b, W*0.44*b], o.skin, 0.28, 0, 10, o.skinFn);
   const ch = levels[2];
-  stitchSeam(mb, ch.y - h * 0.12, ch.rx, ch.rz, ch.z);
+  if (o.chestDeco) o.chestDeco(mb, ch, h, o);
+  else stitchSeam(mb, ch.y - h * 0.12, ch.rx, ch.rz, ch.z);
   mb.setGait([0, 0, 0, 0.08]);
   buildPelvis(mb, o, levels[0].rx, waistY);
 
@@ -690,7 +886,7 @@ function planTetrapod(mb, o) {
   const HEADBOB = [0, 0, 0, 0.07];
   mb.setGait(HEADBOB);
   const head = buildHead(mb, o, neckTop - 0.2, levels[4].z);
-  frankenDetails(mb, head.hC, head.hR, o.heartLevel, o);
+  o.details(mb, head.hC, head.hR, o.heartLevel, o);
   mb.setAnim(ANIM0);
   mb.setGait(GAIT0);
 
@@ -722,7 +918,7 @@ function planBlob(mb, o) {
   const SQUELCH = [0, 0, 0, 0.16];
   mb.setAnim(JELLY);
   mb.setGait(SQUELCH);
-  mb.setTex([...TILE.slick, o.texScale, 0.85]);
+  mb.setTex(o.bodyTex('slick', o.texScale, 0.85));
   // squash-and-stretch: the crown bobs on the flap channel, the base stays
   ellipsoid(mb, dC, dR, o.skin, 0.34, 0, 18, o.skinFn,
     (u) => [0.13, 0.30 * Math.max(0, u[1]), 0.10, 0.7]);
@@ -773,7 +969,7 @@ function planSerpentine(mb, o) {
   // sway travels up the coil and grows toward the raised neck
   const swayFn = (t) => [0.02 + 0.02*t, 0, 0.5*t*t, t*5.2];
   const SWAY_H = [0.03, 0, 0.5, 5.2];   // the head rides the neck tip
-  mb.setTex([...TILE.scales, o.texScale, 0.8]);
+  mb.setTex(o.bodyTex('scales', o.texScale, 0.8));
   const SLITHER = (t) => [0, 0, t * 5.0, 0.30 * t * t];
   tube(mb, path, radii, o.skin, 0.3, 0, 12, 3,
     (t) => sh(o.skin, 0.84 + 0.16 * Math.sin(t * 40) * 0.5 + 0.16),   // belly-band shimmer
@@ -829,9 +1025,10 @@ function planWinged(mb, o) {
   const levels = torsoLevels(b, W, h, y0, 0.4);
 
   mb.setAnim(BREATH_B);
-  mb.setTex([...TILE.feathers, o.texScale, 0.5]);
+  mb.setTex(o.bodyTex('feathers', o.texScale, 0.5));
   mb.setGait([0, 0, 0, 0.1]);
   lathe(mb, levels, o.skin, 0.28, 0, 14, o.skinFn);
+  if (o.chestDeco) o.chestDeco(mb, levels[2], h, o);
   buildPelvis(mb, o, levels[0].rx, waistY);
   const neckTop = y0 + h + 0.45;
   tube(mb, [[0, y0 + h - 0.25, levels[4].z * 0.7], [0, neckTop, levels[4].z * 0.8]],
@@ -840,7 +1037,7 @@ function planWinged(mb, o) {
   const WHEADBOB = [0, 0, 0, 0.06];
   mb.setGait(WHEADBOB);
   const head = buildHead(mb, o, neckTop - 0.2, levels[4].z);
-  frankenDetails(mb, head.hC, head.hR, o.heartLevel, o);
+  o.details(mb, head.hC, head.hR, o.heartLevel, o);
   mb.setAnim(ANIM0);
   mb.setGait(GAIT0);
 
@@ -1428,6 +1625,59 @@ function buildSkinAtlas() {
   });
 
   // 'none' stays neutral grey (amp 0 makes it moot anyway)
+  // riveted enamel plate — Robby/Gort tin-toy hide: seams divide plates,
+  // rivets stud the corners, faint brushed-metal streaks
+  tile('panels', (ox, oy) => {
+    x.fillStyle = gr(150); x.fillRect(ox, oy, 256, 256);
+    for (let i = 0; i < 60; i++) {                       // brushed streaks
+      x.fillStyle = gr(140 + Math.floor(rnd() * 22));
+      x.fillRect(ox, oy + rnd() * 256, 256, 1);
+    }
+    x.strokeStyle = gr(96); x.lineWidth = 3;             // recessed plate seams
+    for (const gpos of [0, 128]) {
+      x.beginPath(); x.moveTo(ox, oy + gpos + 64); x.lineTo(ox + 256, oy + gpos + 64); x.stroke();
+      x.beginPath(); x.moveTo(ox + gpos + 64, oy); x.lineTo(ox + gpos + 64, oy + 256); x.stroke();
+    }
+    x.strokeStyle = gr(196); x.lineWidth = 1;            // seam highlight
+    for (const gpos of [0, 128]) {
+      x.beginPath(); x.moveTo(ox, oy + gpos + 62); x.lineTo(ox + 256, oy + gpos + 62); x.stroke();
+    }
+    for (let rx2 = 0; rx2 <= 256; rx2 += 64)             // rivets on the seam grid
+      for (let ry2 = 0; ry2 <= 256; ry2 += 64) {
+        const g2 = x.createRadialGradient(ox+rx2-2, oy+ry2-2, 1, ox+rx2, oy+ry2, 6);
+        g2.addColorStop(0, gr(210)); g2.addColorStop(1, gr(120));
+        x.fillStyle = g2;
+        x.beginPath(); x.arc(ox + rx2, oy + ry2, 5, 0, 7); x.fill();
+      }
+  });
+
+  // veined membrane — Metaluna-mutant brain hide: dark base, branching
+  // raised veins that read as bioluminescent under the wet shader
+  tile('veins', (ox, oy) => {
+    x.fillStyle = gr(120); x.fillRect(ox, oy, 256, 256);
+    x.lineCap = 'round';
+    // px,py are ABSOLUTE canvas coords (already offset by ox,oy); wrapping
+    // by ±256 lets a vein leaving one edge reappear so the tile is seamless
+    const vein = (px, py, ang, len, wsz) => {
+      if (len < 6 || wsz < 0.6) return;
+      const nx = px + Math.cos(ang) * len, ny = py + Math.sin(ang) * len;
+      wrap((dx, dy) => {
+        x.strokeStyle = gr(96); x.lineWidth = wsz + 1.5;
+        x.beginPath(); x.moveTo(px+dx, py+dy); x.lineTo(nx+dx, ny+dy); x.stroke();
+        x.strokeStyle = gr(172); x.lineWidth = wsz;       // raised highlight
+        x.beginPath(); x.moveTo(px+dx, py+dy); x.lineTo(nx+dx, ny+dy); x.stroke();
+      });
+      vein(nx, ny, ang + (rnd() - 0.5) * 1.1, len * 0.75, wsz * 0.7);
+      if (rnd() > 0.4) vein(nx, ny, ang + (rnd() - 0.5) * 1.6, len * 0.6, wsz * 0.6);
+    };
+    for (let i = 0; i < 5; i++)
+      vein(ox + rnd() * 256, oy + rnd() * 256, rnd() * 6.28, 26 + rnd() * 20, 3.5);
+    for (let i = 0; i < 90; i++) {                         // pores between veins
+      x.fillStyle = gr(104); x.beginPath();
+      x.arc(ox + rnd() * 256, oy + rnd() * 256, 1.5, 0, 7); x.fill();
+    }
+  });
+
   tile('none', () => {});
 
   // bake each material's gloss boost into the alpha channel; return raw
