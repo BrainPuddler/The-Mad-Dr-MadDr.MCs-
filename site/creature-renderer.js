@@ -1399,7 +1399,9 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       const nt = clamp(2 + Math.round(count*2), 2, 4);
       for (let i = 0; i < nt; i++) {
         const a = (i/(nt-1||1) - 0.5) * 1.6;
-        curvedCone(mb, [S[0], 0.18, S[2]], [Math.sin(a)*0.7, -0.18, Math.cos(a)*0.8],
+        // toe splay must mirror with the foot — without `side` here the
+        // claws on both feet fan the same absolute way instead of outward
+        curvedCone(mb, [S[0], 0.18, S[2]], [side*Math.sin(a)*0.7, -0.18, Math.cos(a)*0.8],
           0.8, 0.14, [0, -0.12, 0], CLAW, 0.5);
       }
       mb.setGait(GAIT0);
@@ -2311,6 +2313,10 @@ function makeProgram(gl, vsSrc, fsSrc) {
 function setupGL(canvas, opts = {}) {
   const gl = canvas.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: !!opts.preserve });
   if (!gl) throw new Error('WebGL unavailable');
+  // 32-bit element indices: near-universal on WebGL1 (desktop + mobile),
+  // needed so heavily-detailed creatures never silently lose geometry
+  // past the 65535-index Uint16 ceiling (see uploadCreature).
+  const uintIdx = !!gl.getExtension('OES_element_index_uint');
 
   const progC = makeProgram(gl, VS_CREATURE, FS_CREATURE);
   const progQ = makeProgram(gl, VS_QUAD, FS_QUAD);
@@ -2384,10 +2390,10 @@ function setupGL(canvas, opts = {}) {
 
   return {
     gl, progC, progQ, progG, progS, bgTex, shTex, skinTex, cloudTex, quadBuf,
-    starBuf, starCount: starData.length / 4,
+    starBuf, starCount: starData.length / 4, uintIdx,
     pv: new Float32Array(pv), eye, vw, vh,
     meshBuf: gl.createBuffer(), idxBuf: gl.createBuffer(), glowBuf: gl.createBuffer(),
-    idxCount: 0, glowCount: 0, maxR: 3,
+    idxCount: 0, idxType: gl.UNSIGNED_SHORT, glowCount: 0, maxR: 3,
   };
 }
 
@@ -2399,7 +2405,25 @@ function uploadCreature(genome, X = R) {
 
   gl.bindBuffer(gl.ARRAY_BUFFER, X.meshBuf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mb.v), gl.STATIC_DRAW);
-  const idx = mb.idx.length < 65000 ? new Uint16Array(mb.idx) : new Uint16Array(mb.idx.slice(0, 64998));
+
+  // Heavily-detailed creatures (multi-leg insect/spider stances × faction
+  // joint hardware × mastermind brains) routinely need MORE than 65535
+  // vertex indices — a Uint16Array silently wraps/truncates past that,
+  // which is exactly the "legs on one side only" bug: legs build last
+  // among the slots and the right side (side=1) builds before the left
+  // (side=-1), so a truncated buffer cuts off the tail — the left leg(s).
+  // Use 32-bit indices via the near-universal OES_element_index_uint
+  // extension whenever the mesh actually needs them; stay on 16-bit
+  // (smaller, faster) otherwise.
+  const need32 = mb.idx.length > 65000;
+  if (need32 && !X.uintIdx) {
+    console.warn(`creature mesh needs ${mb.idx.length} indices but this device lacks ` +
+      `OES_element_index_uint — truncating to 64998 (geometry will be cut off).`);
+  }
+  const idx = need32 && X.uintIdx ? new Uint32Array(mb.idx)
+    : mb.idx.length <= 65000 ? new Uint16Array(mb.idx)
+    : new Uint16Array(mb.idx.slice(0, 64998));
+  X.idxType = need32 && X.uintIdx ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, X.idxBuf);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
   X.idxCount = idx.length;
@@ -2552,7 +2576,7 @@ function drawFrame(X = R, still = false) {
   gl.uniform1f(gl.getUniformLocation(p, 'uGait'), gs[0]);
   gl.uniform1f(gl.getUniformLocation(p, 'uGaitAmp'), gs[1]);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, X.idxBuf);
-  gl.drawElements(gl.TRIANGLES, X.idxCount, gl.UNSIGNED_SHORT, 0);
+  gl.drawElements(gl.TRIANGLES, X.idxCount, X.idxType, 0);
 
   // glow sprites (additive, over everything but depth-tested)
   if (X.glowCount) {
