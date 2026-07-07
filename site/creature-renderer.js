@@ -1893,12 +1893,6 @@ function buildBackground() {
 
   const MX = 252, MY = 44, MR = 26;
   const CRATERS = [[-8,-6,5],[6,4,4],[-2,9,3],[10,-9,4],[-14,3,3],[3,-14,2]];
-  const STARS = [];
-  for (let i = 0; i < 110; i++) {
-    const x = Math.floor(rnd() * BW), y = Math.floor(rnd() * (HORIZON - 20));
-    if (Math.hypot(x - MX, y - MY) < MR + 12) continue;
-    STARS.push([x, y, rnd()]);
-  }
 
   const SKY_STEPS = 26, GND_STEPS = 12;
   for (let y = 0; y < BH; y++) {
@@ -1937,34 +1931,12 @@ function buildBackground() {
       px[o] = col[0] * f; px[o+1] = col[1] * f; px[o+2] = col[2] * f; px[o+3] = 255;
     }
   }
-  for (const [sx, sy, b] of STARS) {
-    const o = (sy * BW + sx) * 4;
-    const v = 120 + Math.floor(b * 135);
-    px[o] = v; px[o+1] = v; px[o+2] = Math.min(255, v + 25); px[o+3] = 255;
-    if (b > 0.88 && sx > 0 && sx < BW - 1 && sy > 0 && sy < HORIZON - 1) {
-      for (const [ox, oy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-        const oo = ((sy + oy) * BW + sx + ox) * 4;
-        px[oo] = 110; px[oo+1] = 110; px[oo+2] = 150; px[oo+3] = 255;
-      }
-    }
-  }
   ctx.putImageData(img, 0, 0);
 
   // skyline
   if (_faction === 'human') silhouetteHuman(ctx);
   else if (_faction === 'alien') silhouetteAlien(ctx);
   else silhouetteMaddr(ctx);
-
-  // cloud bands
-  const cloud = (cx, cy, rx, ry, aBody, aEdge) => {
-    ctx.fillStyle = `rgba(${cfg.cloud},${aBody})`;
-    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = `rgba(${cfg.cloudEdge},${aEdge})`;
-    ctx.beginPath(); ctx.ellipse(cx, cy - ry + 1, rx * 0.9, 1.5, 0, 0, Math.PI * 2); ctx.fill();
-  };
-  cloud(130, 66, 62, 6, 0.65, 0.10);
-  cloud(250, 58, 48, 5, 0.85, 0.30);
-  cloud(60, 40, 44, 5, 0.55, 0.08);
 
   // floor lines
   ctx.strokeStyle = 'rgba(14,9,28,0.4)';
@@ -2004,6 +1976,43 @@ function buildBackground() {
     ctx.fillStyle = cfg.daisRing;
     ctx.fillRect(Math.round(DAIS.x + Math.cos(th) * 80) - 1, Math.round(DAIS.y - 2 + Math.sin(th) * 20) - 1, 2, 2);
   }
+  return c;
+}
+
+// Twinkling stars: generated once as GL points [clipX, clipY, phase,
+// baseBright]; the star shader pulses each by its own phase over uTime.
+function buildStars() {
+  let seed = 987654321;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const MX = 252, MY = 44, MR = 26;
+  const out = [];
+  for (let i = 0; i < 130; i++) {
+    const sx = Math.floor(rnd() * BW), sy = Math.floor(rnd() * (HORIZON - 16));
+    const ph = rnd(), br = 0.4 + rnd() * 0.6;
+    if (Math.hypot(sx - MX, sy - MY) < MR + 12) continue;
+    out.push(sx / BW * 2 - 1, 1 - sy / BH * 2, ph, br);
+  }
+  return new Float32Array(out);
+}
+
+// Drifting clouds: their own transparent, horizontally-seamless texture
+// (clouds sit clear of the left/right edges, so REPEAT wrap has no seam).
+// Drawn as a scrolling quad in drawFrame.
+function buildClouds() {
+  const cfg = SCENES[_faction] ?? SCENES.maddr;
+  const c = document.createElement('canvas');
+  c.width = BW; c.height = BH;
+  const ctx = c.getContext('2d');
+  const cloud = (cx, cy, rx, ry, aBody, aEdge) => {
+    ctx.fillStyle = `rgba(${cfg.cloud},${aBody})`;
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(${cfg.cloudEdge},${aEdge})`;
+    ctx.beginPath(); ctx.ellipse(cx, cy - ry + 1, rx * 0.9, 1.5, 0, 0, Math.PI * 2); ctx.fill();
+  };
+  cloud(130, 66, 62, 6, 0.65, 0.10);
+  cloud(250, 58, 48, 5, 0.85, 0.30);
+  cloud(60, 40, 44, 5, 0.55, 0.08);
+  cloud(198, 92, 40, 5, 0.5, 0.08);
   return c;
 }
 
@@ -2095,10 +2104,31 @@ precision mediump float;
 varying vec2 vUV;
 uniform sampler2D uTex;
 uniform vec4 uColor;
-uniform float uUseTex;
+uniform float uUseTex, uUVX;
 void main() {
-  vec4 t = uUseTex > 0.5 ? texture2D(uTex, vUV) : vec4(1.0);
+  vec2 uv = vUV + vec2(uUVX, 0.0);
+  vec4 t = uUseTex > 0.5 ? texture2D(uTex, uv) : vec4(1.0);
   gl_FragColor = vec4(t.rgb * uColor.rgb, t.a * uColor.a);
+}`;
+
+const VS_STAR = `
+attribute vec4 aStar;               // xy = clip pos, z = phase, w = base brightness
+uniform float uTime, uStarSize;
+varying float vB;
+void main() {
+  gl_Position = vec4(aStar.xy, 0.0, 1.0);
+  gl_PointSize = uStarSize;
+  vB = aStar.w * (0.35 + 0.65 * (0.5 + 0.5 * sin(uTime * 2.3 + aStar.z * 6.2831)));
+}`;
+
+const FS_STAR = `
+precision mediump float;
+varying float vB;
+void main() {
+  float r = length(gl_PointCoord - 0.5) * 2.0;
+  float a = max(0.0, 1.0 - r);
+  a *= a;
+  gl_FragColor = vec4(vec3(0.82, 0.86, 1.0) * vB, a * vB);
 }`;
 
 const VS_GLOW = `
@@ -2285,6 +2315,7 @@ function setupGL(canvas, opts = {}) {
   const progC = makeProgram(gl, VS_CREATURE, FS_CREATURE);
   const progQ = makeProgram(gl, VS_QUAD, FS_QUAD);
   const progG = makeProgram(gl, VS_GLOW, FS_GLOW);
+  const progS = makeProgram(gl, VS_STAR, FS_STAR);
 
   // backdrop texture (nearest: keep the chunky pixels)
   const bgTex = gl.createTexture();
@@ -2304,6 +2335,24 @@ function setupGL(canvas, opts = {}) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  // drifting cloud layer. The texture is NPOT (320x200), so it MUST use
+  // CLAMP wrap (WebGL1 renders NPOT+REPEAT as opaque black); the seamless
+  // horizontal scroll is done by drawing two screen-shifted copies, and the
+  // cloud art is transparent at its left/right edges so they meet cleanly.
+  const cloudTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, cloudTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, buildClouds());
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  // twinkling star field
+  const starData = buildStars();
+  const starBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, starBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, starData, gl.STATIC_DRAW);
 
   // soft radial texture for the contact shadow
   const sc = document.createElement('canvas');
@@ -2334,7 +2383,8 @@ function setupGL(canvas, opts = {}) {
   const pv = mat4mul(proj, view);
 
   return {
-    gl, progC, progQ, progG, bgTex, shTex, skinTex, quadBuf,
+    gl, progC, progQ, progG, progS, bgTex, shTex, skinTex, cloudTex, quadBuf,
+    starBuf, starCount: starData.length / 4,
     pv: new Float32Array(pv), eye, vw, vh,
     meshBuf: gl.createBuffer(), idxBuf: gl.createBuffer(), glowBuf: gl.createBuffer(),
     idxCount: 0, glowCount: 0, maxR: 3,
@@ -2389,7 +2439,7 @@ function uploadCreature(genome, X = R) {
   }
 }
 
-function drawQuad(X, x0, y0, x1, y1, u0, v0, u1, v1, tex, color, useTex) {
+function drawQuad(X, x0, y0, x1, y1, u0, v0, u1, v1, tex, color, useTex, uvx = 0) {
   const { gl, progQ, quadBuf } = X;
   gl.useProgram(progQ);
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
@@ -2403,6 +2453,7 @@ function drawQuad(X, x0, y0, x1, y1, u0, v0, u1, v1, tex, color, useTex) {
   gl.enableVertexAttribArray(aU); gl.vertexAttribPointer(aU, 2, gl.FLOAT, false, 16, 8);
   gl.uniform4fv(gl.getUniformLocation(progQ, 'uColor'), color);
   gl.uniform1f(gl.getUniformLocation(progQ, 'uUseTex'), useTex ? 1 : 0);
+  gl.uniform1f(gl.getUniformLocation(progQ, 'uUVX'), uvx);
   if (tex) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -2417,14 +2468,42 @@ function drawFrame(X = R, still = false) {
   const flash = still ? 0 : (fc < 3 ? 0.30 : (fc >= 8 && fc < 11) ? 0.17 : 0);
   const pulse = still ? 0.4 : Math.sin(_frame * 0.05);
   const theta = still ? 0.62 : _theta;    // fixed three-quarter view for stills
+  const time = still ? 0 : _frame / 60;
 
   gl.viewport(0, 0, X.vw, X.vh);
   gl.disable(gl.DEPTH_TEST);
   gl.disable(gl.BLEND);
   gl.disable(gl.CULL_FACE);
 
-  // backdrop
+  // backdrop (static: sky, moon, castle, dais)
   drawQuad(X, -1, -1, 1, 1, 0, 0, 1, 1, X.bgTex, [1 + flash, 1 + flash, 1 + flash * 1.2, 1], true);
+
+  // twinkling stars (each pulses on its own phase), additive over the sky
+  if (X.starCount) {
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    const s = X.progS;
+    gl.useProgram(s);
+    gl.bindBuffer(gl.ARRAY_BUFFER, X.starBuf);
+    const sa = gl.getAttribLocation(s, 'aStar');
+    gl.enableVertexAttribArray(sa);
+    gl.vertexAttribPointer(sa, 4, gl.FLOAT, false, 16, 0);
+    gl.uniform1f(gl.getUniformLocation(s, 'uTime'), time);
+    gl.uniform1f(gl.getUniformLocation(s, 'uStarSize'), Math.max(2, X.vh / 150));
+    gl.drawArrays(gl.POINTS, 0, X.starCount);
+    gl.disable(gl.BLEND);
+  }
+
+  // clouds drifting slowly across the sky: two screen-shifted copies wrap
+  // seamlessly (the cloud art is clear at its horizontal edges)
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  const shift = (time * 0.035) % 2;
+  for (const k of [-1, 0]) {
+    const x0 = shift + 2 * k - 1;
+    drawQuad(X, x0, -1, x0 + 2, 1, 0, 0, 1, 1, X.cloudTex, [1, 1, 1, 1], true);
+  }
+  gl.disable(gl.BLEND);
 
   // contact shadow on the dais (screen-space, scaled by creature radius)
   gl.enable(gl.BLEND);
