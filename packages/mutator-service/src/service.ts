@@ -29,6 +29,7 @@ import {
   type Genome,
   type HeartItem,
   type MutateOptions,
+  type Origin,
   type Params6,
   type PartItem,
   type SlotName,
@@ -175,14 +176,26 @@ export class MutatorService {
 
   // ---- onboarding ----------------------------------------------------------
 
-  /** Mint a primordial creature (no parents). Onboarding / dev seeding. */
+  /** Mint a primordial creature (no parents). Onboarding / dev seeding.
+   * `origins` widens the part-family pool per faction (docs/17): the
+   * Human Army spawns with tech in the mix, the Hive with biotech.
+   * Unknown origin strings are dropped, and "organic" is always kept in
+   * the pool — some homolog classes have no families in a lone non-organic
+   * origin, and flesh is the substrate every faction builds on anyway. */
   spawn(
     accountId: string,
     idempotencyKey: string,
-    opts: { plan?: string; origins?: Genome["body"]["plan"][] } = {},
+    opts: { plan?: string; origins?: readonly string[] } = {},
   ): OperationRecord {
+    const KNOWN: readonly Origin[] = ["organic", "tech", "biotech"];
+    const origins = Array.isArray(opts.origins)
+      ? KNOWN.filter((o) => o === "organic" || opts.origins!.includes(o))
+      : undefined;
     return this.perform(accountId, idempotencyKey, "spawn", { blood: 0 }, (seed) => {
-      const g = randomGenome(new Rng(seed), { plan: opts.plan });
+      const g = randomGenome(new Rng(seed), {
+        plan: opts.plan,
+        ...(origins && origins.length > 1 ? { origins } : {}),
+      });
       return { status: "completed", mint: g };
     });
   }

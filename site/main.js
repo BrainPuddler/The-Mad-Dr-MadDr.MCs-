@@ -115,10 +115,23 @@ function pickPlan() {
   return "tetrapod";
 }
 
+// Faction spawn pools (docs/17): the Mad Doctors breed pure flesh and
+// graft tech later; the Army issues hardware from birth; the Hive grows
+// its weapons. The service keeps organic in every pool.
+const FACTION_ORIGINS = {
+  maddr: ["organic"],
+  human: ["organic", "tech"],
+  alien: ["organic", "biotech"],
+};
+
 async function doSpawn() {
   showBusy(true);
   try {
-    const rec = await api("POST", "/spawn", { idempotencyKey: ikey(), plan: pickPlan() });
+    const rec = await api("POST", "/spawn", {
+      idempotencyKey: ikey(),
+      plan: pickPlan(),
+      origins: FACTION_ORIGINS[local.faction] ?? ["organic"],
+    });
     if (rec.status === "failed_experiment") {
       logEntry("⚡ The tissue rejected animation. (failed experiment)");
     } else {
