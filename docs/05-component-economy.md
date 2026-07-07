@@ -13,6 +13,19 @@ Components are the *material* currency (mana is the *energy* currency — the du
 | **Body Parts** | Capability. Each genome part slot carries a part cost by family/size; the *same items* are Mutator feedstock ([06-mutator-design.md](06-mutator-design.md)) — spend an arm building, or spend it mutating. | Reanimation bills; Mutate bias; Graft |
 | **Brains** | Rare prestige resource, one per monster. Quality (Dim/Average/Gifted/Mastermind) gates the genome's stat budget — see the **brain budget** ([06](06-mutator-design.md)). | Reanimation (consumed; recoverable on salvage at 50%) |
 
+## Faction equivalence (the class × flavor matrix)
+
+The four components above are the **MadDr flavor column** of a three-class
+system shared by all factions — Structure (Bone/Steel/Chitin), Motive
+(Muscle/Motors/Sinew), Control (Brain/Tubes/Ganglion), with Energy
+(Blood/Fuel/Ichor) already adopted. "Body Parts" remain concrete cross-faction
+items; **Muscle** is the fungible motive-class material that prices limb mass
+in reanimation bills. The full matrix, bill-of-materials formulas, salvage
+flavor rules, and the Earth world-source node table live in
+[17-factions.md](17-factions.md#materials-the-class--flavor-matrix).
+Service note: today's wallet holds `{blood, bones}`; the widened per-flavor
+wallet ships with the Postgres store (Phase 2).
+
 ## Sources (in match)
 
 **Your army is your economy.** There are no worker units — monsters themselves harvest (a 3-second channel per haul). A deliberate mobile-first simplification: every unit you build can fight *and* gather, so there's no worker-micro tax, and committing your army to a harvest is itself a positional decision.
@@ -22,7 +35,8 @@ Components are the *material* currency (mana is the *energy* currency — the du
 | **Graveyards** | Body Parts, Brains (slow) | Contestable nodes between the Vats ([02-gameplay-overview.md](02-gameplay-overview.md)); deplete and slowly regrow |
 | **Bone pits** | Bones | As above |
 | **Territory trickle** | Blood | Each controlled hex ticks +0.1 blood/min — territory *is* the blood supply |
-| **Corpse salvage** | 40–60% of the dead monster's bill | From [04-combat-model.md](04-combat-model.md); works on enemy corpses too |
+| **Corpse salvage** | 40–60% of the dead monster's bill | From [04-combat-model.md](04-combat-model.md); works on enemy corpses too — paid in the **corpse's own material flavors** ([17](17-factions.md)) |
+| **Earth world-sources** | Faction-flavored materials (hospitals, junkyards, farms…) | Node table + asymmetric valuation in [17](17-factions.md#world-sources-on-earth) |
 
 ## Reanimation
 

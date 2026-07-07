@@ -64,6 +64,86 @@ Demand rules (v0.1, implemented and tested):
 
 Supply is each faction's strategic texture, and deliberately asymmetric: monsters get the **territory blood trickle** and corpse salvage ([05](05-component-economy.md)); humans get **fuel depots and convoys** — point-supply that makes their logistics *attackable* (cut the convoy and the platoon's machines wind down); the hive gets **digestion pits** that convert biomass (corpses included) into ichor — the swarm eats the battlefield. Supply-side numbers are Phase-2 sandbox work.
 
+## Materials: the class × flavor matrix
+
+Adopted 2026-07 (decision log, [12](12-open-questions.md)). The material economy
+generalizes exactly like energy did: **three material classes, one flavor per
+faction**. The arithmetic is shared; only the nouns and the map change. All
+action takes place **on Earth** — every faction mines the same planet, each
+seeing different wealth in it.
+
+| Class | What it prices | MadDr (organic) | Human Army (tech) | Alien Hive (biotech) |
+| --- | --- | --- | --- | --- |
+| **Structure** | frame: bulk, plan, chassis | **Bone** | **Steel** | **Chitin** |
+| **Motive** | actuation: limb mass | **Muscle** | **Motors** (servos, engines) | **Sinew** |
+| **Control** | the mind; gates tier | **Brain** | **Tubes** (vacuum-tube racks — it's the '50s–'70s) | **Ganglion** |
+| **Energy** | upkeep (already adopted) | **Blood** | **Fuel** | **Ichor** |
+
+Concrete **Part items** (the surgical tray / harvested limbs) remain
+cross-faction as-is — a harvested rifle arm is a rifle arm in anyone's tray.
+
+### The bill of materials IS the genome
+
+A unit's build cost derives from the same genes that build its body — no
+separate stat sheet (the pillar-1 promise: what you bred is what you pay for).
+v0.1 formulas, Phase-2 sandbox tunes:
+
+```
+structure = 2 + 8·bulk (+4 mech chassis, +2 per heavy leg pair)   [Structure class]
+motive    = Σ over expressed hand/leg parts: 1 + 3·(length·girth) [Motive class]
+control   = brain tier: Dim 1 · Average 2 · Gifted 4 · Mastermind 7 [Control class]
+energy surge at deploy = reanimationSurge(genome)                  [Energy class]
+```
+
+**Each line item is paid in the flavor of the part's origin.** A pure monster
+bills Bone + Muscle + Brain. Graft a rifle arm onto it and the bill grows a
+Steel + Motors line — the Doctors must salvage Human wrecks or raid junkyards
+to field it. Mixed bodies pay mixed bills, in materials as in energy.
+
+### Harvesting the vanquished
+
+Corpse salvage (40–60% of the bill, [05](05-component-economy.md)) pays out in
+the **corpse's own flavors** — kill a tank-monster, harvest Steel. Foreign
+materials then have three uses:
+
+1. **Spend directly** on grafted parts of that origin (the good use).
+2. **Render** at the lab: 2:1 conversion **within a class** (Steel↔Bone↔Chitin,
+   Motors↔Muscle↔Sinew). Rendering is lossy on purpose — raiding for the real
+   thing beats boiling down scrap.
+3. **Control materials never convert.** Brains, Tubes, and Ganglia are each
+   faction's identity; an enemy Tube rack is only good for driving a grafted
+   tech part's fire-control. This keeps control the rare, faction-defining
+   bottleneck.
+
+### World sources on Earth
+
+Map nodes trickle materials on a channel-harvest, like graveyards in
+[05](05-component-economy.md). **Factions value the same Earth differently** —
+node contention is asymmetric by design:
+
+| Earth node | MadDr | Human Army | Alien Hive |
+| --- | --- | --- | --- |
+| Hospital / blood bank | **Blood+++, Brains+** | – | biomass++ |
+| Graveyard / crypt | **Bone++, Parts+** | – | biomass+ |
+| Stockyard / butcher row | **Muscle++** | – | biomass++ |
+| Junkyard / scrapyard | Steel+ (graft feedstock) | **Steel+++** | – |
+| Refinery / gas station | – | **Fuel+++** | – |
+| Factory / motor pool | – | **Motors++** | – |
+| Radio station / electronics plant | – | **Tubes++** | – |
+| Farm / feedlot / silo | Muscle+ | – | **biomass+++** |
+| Sewage works / landfill | – | – | **biomass++** |
+| Forest / park | – | – | biomass+ (slow, vast) |
+
+**The Hive mines one thing: biomass.** Digestion pits ([above](#energy-blood-fuel-and-ichor))
+refine it into everything, at Protoss-grade cost — few sources, expensive
+units, quality output (v0.1 rates): `1 biomass → 1 Ichor · 2 → 1 Chitin ·
+2 → 1 Sinew · 6 → 1 Ganglion`.
+
+The asymmetry writes the map strategy by itself: Doctors and Hive both covet
+the hospital (blood vs. biomass); Doctors contest the Human junkyard the
+moment they start grafting; nobody but the Hive wants the sewage works — so
+the swarm quietly out-economies anyone who lets it eat in peace.
+
 ## Strategic asymmetry (intent)
 
 - **vs Humans**: kill officers to shatter squads — but expect rallies; humans must be *broken repeatedly* or routed off objectives. Their tech is reliable and un-counterable by breeding tricks.
