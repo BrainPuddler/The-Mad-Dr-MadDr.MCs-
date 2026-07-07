@@ -33,8 +33,52 @@ The Mutator service and the match servers ([09-multiplayer-architecture.md](09-m
 | `Account` | id, auth identity, devices | Shared with match side |
 | `CreatureGenome` | id, accountId, **genome blob (schema per 06)**, `parentIds[]`, genomeVersion, createdAt, **signature** | **Immutable rows** — every operation creates a *new* genome; nothing is ever edited |
 | `Menagerie` | accountId, orderedCreatureIds (≤12), updatedAt | The active loadout ([02-gameplay-overview.md](02-gameplay-overview.md)) |
-| `ComponentWallet` | accountId, blood, bones, parts (by familyId), brains (by quality) | Meta currency ([05-component-economy.md](05-component-economy.md)) |
+| `ComponentWallet` | accountId, faction, **materials** (sparse map, per-flavor), parts (by familyId) | Meta currency, widened for the faction matrix — schema below ([05](05-component-economy.md), [17](17-factions.md)) |
 | `OperationLog` | id, accountId, op type, inputs, idempotencyKey, result genomeId, serverSeed, status | Append-only; the audit trail |
+
+### Faction wallet schema (Phase 2)
+
+Today's `Wallet` in `packages/mutator-service/src/store.ts` is the v0.1 stand-in
+`{ accountId, blood, bones }`. The faction matrix ([17](17-factions.md)) widens it
+to a **sparse per-material map** — the same shape for all three factions, only
+the balances differ. Nine meta materials (3 classes × 3 flavors) plus the
+hive's raw `biomass`; **energy (Blood/Fuel/Ichor) is not stored here** — it is
+the in-match tempo currency ([03](03-mana-system.md)), spent per-battle, not banked.
+
+```ts
+// origin flavor == genome part origin (organic | tech | biotech)
+type Flavor = "organic" | "tech" | "biotech";
+type MaterialClass = "structure" | "motive" | "control";
+
+type MaterialType =
+  | "bone"   | "steel"  | "chitin"     // structure: MadDr | Human | Hive
+  | "muscle" | "motors" | "sinew"      // motive
+  | "brain"  | "tubes"  | "ganglion"   // control (never renders — the bottleneck)
+  | "biomass";                         // hive raw feedstock only
+
+interface Wallet {
+  accountId: string;
+  faction:   Flavor;                          // the flavor this player produces natively
+  materials: Partial<Record<MaterialType, number>>;  // sparse; absent == 0
+  updatedAt: string;
+}
+
+// class × flavor → material name (drives billing, salvage, and rendering)
+const MATERIAL_OF: Record<MaterialClass, Record<Flavor, MaterialType>> = {
+  structure: { organic: "bone",   tech: "steel",  biotech: "chitin"   },
+  motive:    { organic: "muscle", tech: "motors", biotech: "sinew"    },
+  control:   { organic: "brain",  tech: "tubes",  biotech: "ganglion" },
+};
+```
+
+The wallet holds **foreign** flavors freely — that is what makes cross-race
+harvest work: a Human who salvages a monster banks `bone`/`muscle`/`brain`
+until they `render` structure/motive 2:1 into `steel`/`motors` (control never
+converts). Rendering, billing, and salvage all read `MATERIAL_OF`, so adding a
+future faction is a column, not a rewrite. **Migration**: existing `bones` →
+`materials.bone`; the current `blood`-as-Mutator-fee is a v0.1 shortcut that
+becomes a material-priced bill in Phase 2 (Postgres store). Sparse map ⇒ a
+`jsonb` column or a thin `wallet_materials(accountId, type, amount)` table.
 
 **Why immutable genomes + `parentIds` lineage**: family trees and pedigree UI for free ([06](06-mutator-design.md) bench mode), rollback/restore is a pointer change, future genome *sharing/trading* ([12-open-questions.md](12-open-questions.md)) needs no schema change, and signed immutable rows are what match servers can trust. Genomes are tiny, so keeping every ancestor forever is cheap (arithmetic below).
 

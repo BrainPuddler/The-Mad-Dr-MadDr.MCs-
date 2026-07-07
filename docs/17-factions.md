@@ -29,6 +29,38 @@ Human units express through the same genome — body plan locked to upright tetr
 
 Behaviorally, humans are the **morale** faction: drilled (low will — cheap to command, so officers hold real squads), nearly fury-less, with a cohesion bonus for holding formation. When loyalty breaks they **rout** — flee the fray, *keeping* their commander link — and the routed **rally** back once stress lifts and an officer still stands. Humans bend and recover; their armies degrade gracefully and reform. Their structural weakness: officers are load-bearing (decap −0.50) and their gear can't evolve — what they bring to the field is what they have.
 
+### Building more: requisition, not reanimation
+
+The Doctors breed and reanimate; the Hive grows from biomass. **Humans do
+neither — they requisition.** A Human "design" is a blueprint (a locked
+tetrapod loadout, changed only by the quartermaster Graft above), and fielding
+one *fabricates* it from **Steel + Motors + Tubes** (upkeep in **Fuel**). No
+vat, no genome drift — a rifleman rolls off the line identical every time.
+That is the faction's whole character: reliable, un-bred, un-counterable by
+genetic tricks, but incapable of surprising itself.
+
+**Humans are the battlefield's great scavengers, and they harvest every race.**
+A field of dead monsters and dead drones is a *scrapyard* to a Human commander.
+Salvage ([05](05-component-economy.md)) pays in the corpse's own flavors, and
+Humans put foreign loot to work exactly as the matrix allows:
+
+- **Structure & Motive render cleanly.** Harvested `bone`/`chitin` → `steel`,
+  `muscle`/`sinew` → `motors`, at the 2:1 in-class rate. Monster and alien
+  wrecks literally rebuild into Human hardware — the more the enemy dies near
+  them, the faster the assembly lines run.
+- **Control does not.** A monster `brain` or a hive `ganglion` is inert scrap to
+  the quartermaster — Humans drive their machines on `tubes`, which come only
+  from Earth's **radio stations and electronics plants**. This is their
+  designed weakness: a Human army can scavenge steel and motors forever off the
+  dead, but its *minds* depend on holding fragile infrastructure. Cut them off
+  from electronics and they can field bodies but not commanders.
+
+So the Human harvest equivalent is the mirror of the Hive's: the swarm eats
+biomass and refines everything cheaply; the Army eats *scrap* and refines
+structure/motive freely — but is throttled at Control, where the Hive is not.
+Doctors sit between, harvesting their own dead for Bone/Muscle/Brain and raiding
+both neighbors the moment they graft foreign parts.
+
 ## Aliens: the hive, flesh fused with grown technology
 
 The alien hive is the inverted command experiment. The **Queen** is a mastermind brain with command ≈ 1 — capacity ≈ 4.8 — while **drones** have almost no will (cost ≈ 0.3 each), so one Queen holds a dozen-strong swarm: the capacity formula from [16](16-brains-behavior-command.md) produces hive scale *with no new rules*. Pheromone cohesion (+0.30) pins drone loyalty at its ceiling; the prototype shows a barrage that routs human squads leaving the hive merely *twitchy* — drones waver and snap back, every tick, because their equilibrium sits at 1.0. (A nice emergent inversion: high `temperament` — volatility — is the hive's *strength*, since volatile integration means snapping back to devotion as fast as being shaken.)
