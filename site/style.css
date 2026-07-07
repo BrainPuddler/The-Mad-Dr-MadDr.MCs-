@@ -153,3 +153,54 @@ body[data-faction="alien"] .panel {
   border-radius: 14px;
 }
 body[data-faction="alien"] button { border-radius: 12px; }
+
+/* ── lab / stable navigation ───────────────────────────────────────────── */
+.lab-nav { display: flex; gap: 4px; }
+.lab-nav button {
+  font-size: 12px; letter-spacing: 1px; text-transform: uppercase;
+  padding: 5px 14px; border-radius: 6px 6px 0 0; color: var(--dim);
+}
+.lab-nav button.active { color: var(--acid); border-color: var(--acid); background: var(--panel); }
+
+/* ── the Stable screen ─────────────────────────────────────────────────── */
+#view-stable {
+  display: flex; gap: 12px; padding: 12px;
+  min-height: calc(100vh - 130px); align-items: flex-start;
+}
+.stable-grid {
+  flex: 1; display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  align-content: start;
+}
+.stable-card {
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  background: var(--panel); cursor: pointer; transition: border-color .1s;
+}
+.stable-card:hover { border-color: var(--dim); }
+.stable-card.selected { border-color: var(--acid); box-shadow: 0 0 0 1px var(--acid); }
+.sc-thumb { position: relative; aspect-ratio: 1; background: #05070c; }
+.sc-thumb img { width: 100%; height: 100%; display: block; }
+.sc-fac { position: absolute; top: 4px; right: 6px; font-size: 15px; }
+.sc-name { padding: 6px 8px 2px; font-weight: bold; font-size: 13px; }
+.sc-meta { padding: 0 8px 8px; font-size: 11px; color: var(--dim); text-transform: capitalize; }
+
+.stable-detail {
+  width: 360px; flex-shrink: 0; position: sticky; top: 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  overflow: hidden;
+}
+.stable-detail:empty { display: none; }
+#stable-portrait {
+  width: 100%; aspect-ratio: 320 / 200; height: auto; display: block;
+  border-bottom: 1px solid var(--line); background: #05070c;
+}
+.sd-info { padding: 12px 14px; }
+.sd-info h3 { margin: 0 0 2px; font-size: 16px; color: var(--ink); letter-spacing: 1px; }
+.sd-fac { font-size: 11px; color: var(--acid); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 10px; }
+.sd-info .kv { grid-template-columns: 80px 1fr; font-size: 12px; }
+.sd-info .kv > div { text-transform: capitalize; }
+.sd-actions { display: flex; gap: 8px; margin-top: 12px; }
+@media (max-width: 720px) {
+  #view-stable { flex-direction: column; }
+  .stable-detail { width: 100%; position: static; }
+}

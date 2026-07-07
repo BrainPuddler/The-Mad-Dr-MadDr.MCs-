@@ -10,6 +10,10 @@
 <header>
   <h1 id="lab-title">⚗️ THE LAB</h1>
   <div class="sub" id="lab-sub">MadDr.MCs test bench — mutator &amp; chop shop</div>
+  <nav class="lab-nav">
+    <button id="nav-lab" class="active">Lab</button>
+    <button id="nav-stable">Stable</button>
+  </nav>
   <div class="header-right">
     <select id="sel-faction" title="Choose your faction">
       <option value="maddr">🧟 Mad Doctors</option>
@@ -21,7 +25,7 @@
   </div>
 </header>
 
-<main>
+<main id="view-lab">
   <section id="roster-panel" class="panel">
     <div class="panel-head">
       <h2>Specimens</h2>
@@ -48,6 +52,11 @@
     </section>
   </aside>
 </main>
+
+<section id="view-stable" style="display:none">
+  <div id="stable-grid" class="stable-grid"></div>
+  <div id="stable-detail" class="stable-detail"></div>
+</section>
 
 <footer>
   Display math (stats, viability) runs client-side via <code>@maddr/genome-core</code>.
