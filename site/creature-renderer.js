@@ -166,7 +166,20 @@ class MeshB {
 
 /** Ellipsoid at c with radii r. colorFn(unitPos) may vary the colour;
  * animFn(unitPos) may vary the anim channel across the surface. */
+// ── level of detail ──────────────────────────────────────────────────────────
+// A single tessellation dial, read by every geometry primitive below.
+// buildCreature() measures the mesh it produces at full detail and, if a
+// busy build (many legs, faction hardware, a mastermind brain) pushes past
+// the triangle budget, lowers this and rebuilds — the docs/08 mobile
+// perf budget (~8k tris) applies to the Lab too, not just the match sim,
+// and it structurally prevents ever needing more than a 16-bit index
+// buffer (the root cause of the "legs on one side" bug) instead of just
+// tolerating an oversized mesh.
+let _detail = 1;
+function segFor(n, floor) { return Math.max(floor, Math.round(n * _detail)); }
+
 function ellipsoid(mb, c, r, col, gloss = 0.25, emis = 0, seg = 14, colorFn = null, animFn = null) {
+  seg = segFor(seg, 3);
   const prevAnim = mb.anim;
   const la = seg, lo = Math.round(seg * 1.6);
   const rows = [];
@@ -193,6 +206,7 @@ function ellipsoid(mb, c, r, col, gloss = 0.25, emis = 0, seg = 14, colorFn = nu
 /** Swept tube along path with per-point radii; parallel-transport frames.
  * animFn(t) may vary the anim channel along the path (traveling sway). */
 function tube(mb, path, radii, col, gloss = 0.25, emis = 0, sides = 10, caps = 3, colorFn = null, animFn = null, gaitFn = null) {
+  sides = segFor(sides, 4);
   const prevAnim = mb.anim, prevGait = mb.gait;
   // sanitize path: drop zero-length steps, floor radii
   const P = [path[0]];
@@ -238,6 +252,7 @@ function tube(mb, path, radii, col, gloss = 0.25, emis = 0, sides = 10, caps = 3
       dirSign > 0 ? mb.tri(cv, rows[k][j], rows[k][j+1]) : mb.tri(cv, rows[k][j+1], rows[k][j]);
   }
   mb.setAnim(prevAnim);
+  mb.setGait(prevGait);   // was previously left dangling on the last gaitFn sample
 }
 
 /** A torus (hoop) centred at `center`, hole aligned to `axis` — the
@@ -248,6 +263,7 @@ function tube(mb, path, radii, col, gloss = 0.25, emis = 0, sides = 10, caps = 3
  * the small cross-section revolves around a big circle perpendicular
  * to the axis, so the surface genuinely encircles the shaft. */
 function torus(mb, center, axis, majorR, minorR, col, gloss = 0.4, emis = 0, nMaj = 14, nMin = 8) {
+  nMaj = segFor(nMaj, 6); nMin = segFor(nMin, 3);
   const a = V.norm(axis);
   let n = Math.abs(a[1]) < 0.9 ? V.norm(V.cross([0, 1, 0], a)) : V.norm(V.cross([1, 0, 0], a));
   const b = V.cross(a, n);
@@ -387,7 +403,33 @@ function skinColorFn(skin, belly, spine) {
   };
 }
 
+// LOD0 triangle budget for a single creature — the docs/08 mobile perf
+// target (~8k tris), with a little headroom for the Lab's hero framing.
+const TRI_BUDGET = 9000;
+
+/** Build at full detail; if the busy build (many legs, faction hardware,
+ * a mastermind's two-lobe brain) blows the triangle budget, estimate a
+ * reduced tessellation scale and rebuild. Triangle count is roughly
+ * linear in tube `sides` and quadratic in ellipsoid/torus segment count,
+ * so sqrt(budget/actual) is a reasonable single-shot estimate; a short
+ * bounded retry loop cleans up any remaining overshoot. This is the
+ * primary defense against oversized meshes — uploadCreature's 32-bit
+ * index fallback stays in place as a last-resort safety net only. */
 function buildCreature(genome) {
+  _detail = 1;
+  let mb = buildCreatureAtDetail(genome);
+  let tris = mb.idx.length / 3;
+  let guard = 0;
+  while (tris > TRI_BUDGET && guard++ < 3) {
+    _detail *= Math.sqrt(TRI_BUDGET / tris) * 0.92;   // slight extra margin per pass
+    mb = buildCreatureAtDetail(genome);
+    tris = mb.idx.length / 3;
+  }
+  _detail = 1;   // never leak a reduced dial into anything built outside this pass
+  return mb;
+}
+
+function buildCreatureAtDetail(genome) {
   const mb = new MeshB();
   const g = genome ?? {};
   const P = (arr, i, d) => (arr && typeof arr[i] === 'number' ? arr[i] : d);
