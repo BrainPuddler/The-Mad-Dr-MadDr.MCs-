@@ -453,7 +453,7 @@ function buildCreature(genome) {
     const sock = sockets[slot];
     const sides = sock.mirror ? [1, -1] : [1];
     for (const side of sides)
-      buildPart(mb, slot, al.family, al.params ?? [], side, sock, { skin, skinFn });
+      buildPart(mb, slot, al.family, al.params ?? [], side, sock, { skin, skinFn, faction: _faction });
   }
   return mb;
 }
@@ -461,6 +461,30 @@ function buildCreature(genome) {
 // ---- body plans -------------------------------------------------------------
 
 // ── faction visual kits ─────────────────────────────────────────────────────
+
+// Necks: Mad Doctors get a fleshy column, robots a stacked-ring piston
+// (Robby's segmented neck), aliens a ribbed biotech stalk.
+function buildNeck(mb, x, y0, y1, z0, z1, r, o) {
+  if (o.faction === 'human') {
+    const prevTex = mb.tex; mb.setTex(TEX_NONE);
+    const n = 4;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n, y = y0 + (y1 - y0) * t, z = z0 + (z1 - z0) * t;
+      const rr = r * (i % 2 ? 0.82 : 1.02);              // alternating discs
+      tube(mb, [[x, y - 0.04, z], [x, y + 0.04, z]], [rr, rr],
+        i % 2 ? sh(METAL, 1.15) : METAL, 0.85, 0, 10);
+    }
+    tube(mb, [[x, y0, z0], [x, y1, z1]], [r*0.5, r*0.5], METDK, 0.8, 0, 8);  // central rod
+    mb.setTex(prevTex);
+    return;
+  }
+  if (o.faction === 'alien') {
+    tube(mb, [[x, y0, z0], [x, (y0+y1)/2, z0 - 0.15], [x, y1, z1]],
+      [r*1.05, r*0.82, r*0.72], sh(o.skin, 0.92), 0.3, 0, 10, 3, null, null);
+    return;
+  }
+  tube(mb, [[x, y0, z0], [x, y1, z1]], [r, r*0.86], sh(o.skin, 0.95), 0.28, 0, 10);
+}
 
 // 1950s tin-toy enamel over gunmetal (Robby/Gort palette)
 const ROBOT_ENAMEL = [
@@ -879,8 +903,7 @@ function planTetrapod(mb, o) {
 
   // an actual neck between the shoulders and the skull
   const neckTop = y0 + h + 0.55;
-  tube(mb, [[0, y0 + h - 0.3, levels[4].z * 0.7], [0, neckTop, levels[4].z * 0.8]],
-    [W*0.34, W*0.29], sh(o.skin, 0.95), 0.28, 0, 10);
+  buildNeck(mb, 0, y0 + h - 0.3, neckTop, levels[4].z * 0.7, levels[4].z * 0.8, W*0.32, o);
 
   mb.setAnim(BREATH_H);
   const HEADBOB = [0, 0, 0, 0.07];
@@ -1031,8 +1054,7 @@ function planWinged(mb, o) {
   if (o.chestDeco) o.chestDeco(mb, levels[2], h, o);
   buildPelvis(mb, o, levels[0].rx, waistY);
   const neckTop = y0 + h + 0.45;
-  tube(mb, [[0, y0 + h - 0.25, levels[4].z * 0.7], [0, neckTop, levels[4].z * 0.8]],
-    [W*0.33, W*0.28], sh(o.skin, 0.95), 0.28, 0, 9);
+  buildNeck(mb, 0, y0 + h - 0.25, neckTop, levels[4].z * 0.7, levels[4].z * 0.8, W*0.3, o);
   mb.setAnim(BREATH_H);
   const WHEADBOB = [0, 0, 0, 0.06];
   mb.setGait(WHEADBOB);
@@ -1471,11 +1493,34 @@ function armDrop(mb, S, side, armR, scale, o, pg = [], N = null) {
   const armGait = (t) => [0.5 * t, 0, gPh, 0.05];
   mb.setGait(armGait(0));
   limbJoint(mb, S, n, armR * 1.15);   // brass retaining ring, on the normal
+  const armCol = o.skinFn ? o.skin : CHITIN;
+  if (o.faction === 'human') {
+    // Robby-the-Robot accordion arm: a ball shoulder, a rubber-hose ladder
+    // of alternating discs, and a metal fist stub. Segments carry the same
+    // traveling gait so the concertina swings as one.
+    const prevTex = mb.tex; mb.setTex(TEX_NONE);
+    ellipsoid(mb, V.add(S, V.scale(n, armR*0.5*scale)), [armR*1.25, armR*1.2, armR*1.25], METAL, 0.85, 0, 10);
+    const pts = [S, ex, elbow, wrist];
+    const SEG = 9;
+    for (let i = 0; i <= SEG; i++) {
+      const u = i / SEG;
+      // sample the polyline S→ex→elbow→wrist at parameter u
+      const seg = u < 0.34 ? [pts[0], pts[1], u/0.34] : u < 0.67 ? [pts[1], pts[2], (u-0.34)/0.33] : [pts[2], pts[3], (u-0.67)/0.33];
+      const q = [seg[0][0]+(seg[1][0]-seg[0][0])*seg[2], seg[0][1]+(seg[1][1]-seg[0][1])*seg[2], seg[0][2]+(seg[1][2]-seg[0][2])*seg[2]];
+      const rr = (armR*1.05) * (1 - u*0.35) * (i % 2 ? 1.18 : 0.82);   // ribs
+      mb.setGait(armGait(u));
+      ellipsoid(mb, q, [rr, armR*0.45*(1-u*0.3), rr], i % 2 ? sh(METAL, 1.12) : METAL, 0.85, 0, 8);
+    }
+    mb.setGait(armGait(1));
+    ellipsoid(mb, wrist, [foreR*1.1, foreR*1.1, foreR*1.1], METDK, 0.8, 0, 8);   // wrist coupling
+    mb.setTex(prevTex);
+    return wrist;
+  }
   // the shoulder ball itself — flesh, seated in the ring
   ellipsoid(mb, V.add(S, V.scale(n, armR * 0.55 * scale)),
-    [armR*1.3, armR*1.2, armR*1.25], o.skinFn ? o.skin : CHITIN, 0.3, 0, 8, o.skinFn);
+    [armR*1.3, armR*1.2, armR*1.25], armCol, 0.3, 0, 8, o.skinFn);
   tube(mb, [S, ex, elbow, wrist], [armR*1.25, armR*1.05, Math.max(armR*0.8, foreR*0.9), foreR],
-    o.skinFn ? o.skin : CHITIN, 0.3, 0, 9, 1, null, swing, armGait);
+    armCol, 0.3, 0, 9, 1, null, swing, armGait);
   mb.setGait(armGait(1));             // hands and weapons swing with the wrist
   if (girth > 0.45) {                                // bicep bulge
     mb.setAnim(swing(0.35));
@@ -2233,8 +2278,8 @@ function makeProgram(gl, vsSrc, fsSrc) {
   return p;
 }
 
-function setupGL(canvas) {
-  const gl = canvas.getContext('webgl', { antialias: true, alpha: false });
+function setupGL(canvas, opts = {}) {
+  const gl = canvas.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: !!opts.preserve });
   if (!gl) throw new Error('WebGL unavailable');
 
   const progC = makeProgram(gl, VS_CREATURE, FS_CREATURE);
@@ -2281,67 +2326,71 @@ function setupGL(canvas) {
   const quadBuf = gl.createBuffer();
 
   // camera: frames feet-on-dais against the painted backdrop
-  const proj = perspective(28 * Math.PI / 180, CW / CH, 1, 120);
-  const eye = [0, 7.4, 30];
-  const view = lookAt(eye, [0, 5.7, 0], [0, 1, 0]);
+  const vw = opts.vw ?? CW, vh = opts.vh ?? CH;
+  const eye = opts.eye ?? [0, 7.4, 30];
+  const target = opts.target ?? [0, 5.7, 0];
+  const proj = perspective(28 * Math.PI / 180, vw / vh, 1, 120);
+  const view = lookAt(eye, target, [0, 1, 0]);
   const pv = mat4mul(proj, view);
 
   return {
     gl, progC, progQ, progG, bgTex, shTex, skinTex, quadBuf,
-    pv: new Float32Array(pv), eye,
+    pv: new Float32Array(pv), eye, vw, vh,
     meshBuf: gl.createBuffer(), idxBuf: gl.createBuffer(), glowBuf: gl.createBuffer(),
     idxCount: 0, glowCount: 0, maxR: 3,
   };
 }
 
-function uploadCreature(genome) {
-  const { gl } = R;
+function uploadCreature(genome, X = R) {
+  const { gl } = X;
   let mb;
   try { mb = buildCreature(genome); }
   catch (e) { console.error('creature build failed:', e); mb = new MeshB(); }
 
-  gl.bindBuffer(gl.ARRAY_BUFFER, R.meshBuf);
+  gl.bindBuffer(gl.ARRAY_BUFFER, X.meshBuf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mb.v), gl.STATIC_DRAW);
   const idx = mb.idx.length < 65000 ? new Uint16Array(mb.idx) : new Uint16Array(mb.idx.slice(0, 64998));
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, R.idxBuf);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, X.idxBuf);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
-  R.idxCount = idx.length;
+  X.idxCount = idx.length;
 
   const gf = [];
   for (const g of mb.glows) gf.push(...g);
-  gl.bindBuffer(gl.ARRAY_BUFFER, R.glowBuf);
+  gl.bindBuffer(gl.ARRAY_BUFFER, X.glowBuf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(gf), gl.STATIC_DRAW);
-  R.glowCount = mb.glows.length;
+  X.glowCount = mb.glows.length;
 
-  R.loco = locomotionProfile(genome);
+  X.loco = locomotionProfile(genome);
   // brain genes tune the springs: [command, will, temperament, guile, fury]
   const bp = genome?.brain?.params ?? [];
   const will = bp[1] ?? 0.5, temper = bp[2] ?? 0.5, guile = bp[3] ?? 0.5, fury = bp[4] ?? 0.5;
   const pf = 1.1 + temper * 2.6;
   const pz = clamp(1.15 - fury * 0.85 + will * 0.35, 0.28, 1.6);
   const pr = 0.6 - guile * 2.2;
-  R.sodAmp = new SOD(pf, pz, pr, 0);
-  R.sodHz  = new SOD(pf * 0.8, pz, pr * 0.5, R.loco.walkHz);
-  R.sodGX  = new SOD(pf * 1.6, pz * 0.85, pr, 0);
-  R.sodGY  = new SOD(pf * 1.6, pz * 0.85, pr, 0);
-  _gait.mode = 0; _gait.t = 0; _gait.amp = 0;
+  X.sodAmp = new SOD(pf, pz, pr, 0);
+  X.sodHz  = new SOD(pf * 0.8, pz, pr * 0.5, X.loco.walkHz);
+  X.sodGX  = new SOD(pf * 1.6, pz * 0.85, pr, 0);
+  X.sodGY  = new SOD(pf * 1.6, pz * 0.85, pr, 0);
+  if (X === R) { _gait.mode = 0; _gait.t = 0; _gait.amp = 0; }
   let mr = 2.5;
   for (let i = 0; i < mb.v.length; i += 24)
     mr = Math.max(mr, Math.hypot(mb.v[i], mb.v[i + 2]));
-  R.maxR = Math.min(mr, 13);
+  X.maxR = Math.min(mr, 13);
 
-  // per-creature rhythms
-  _blink.seed = (mb.v.length * 2654435761) >>> 0 || 1;
-  _blink.next = 60 + Math.floor(blinkRnd() * 180);
-  _blink.phase = -1;
-  _gaze.cur = [0, 0]; _gaze.t = 99;
-  _gaze.next = 50 + Math.floor(blinkRnd() * 120);
-  _tongue.t = 99;
-  _tongue.next = 200 + Math.floor(blinkRnd() * 200);
+  // per-creature rhythms (live renderer only)
+  if (X === R) {
+    _blink.seed = (mb.v.length * 2654435761) >>> 0 || 1;
+    _blink.next = 60 + Math.floor(blinkRnd() * 180);
+    _blink.phase = -1;
+    _gaze.cur = [0, 0]; _gaze.t = 99;
+    _gaze.next = 50 + Math.floor(blinkRnd() * 120);
+    _tongue.t = 99;
+    _tongue.next = 200 + Math.floor(blinkRnd() * 200);
+  }
 }
 
-function drawQuad(x0, y0, x1, y1, u0, v0, u1, v1, tex, color, useTex) {
-  const { gl, progQ, quadBuf } = R;
+function drawQuad(X, x0, y0, x1, y1, u0, v0, u1, v1, tex, color, useTex) {
+  const { gl, progQ, quadBuf } = X;
   gl.useProgram(progQ);
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
@@ -2362,36 +2411,37 @@ function drawQuad(x0, y0, x1, y1, u0, v0, u1, v1, tex, color, useTex) {
   gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
-function drawFrame() {
-  const { gl } = R;
+function drawFrame(X = R, still = false) {
+  const { gl } = X;
   const fc = _frame % FLASH_CYCLE;
-  const flash = fc < 3 ? 0.30 : (fc >= 8 && fc < 11) ? 0.17 : 0;
-  const pulse = Math.sin(_frame * 0.05);
+  const flash = still ? 0 : (fc < 3 ? 0.30 : (fc >= 8 && fc < 11) ? 0.17 : 0);
+  const pulse = still ? 0.4 : Math.sin(_frame * 0.05);
+  const theta = still ? 0.62 : _theta;    // fixed three-quarter view for stills
 
-  gl.viewport(0, 0, CW, CH);
+  gl.viewport(0, 0, X.vw, X.vh);
   gl.disable(gl.DEPTH_TEST);
   gl.disable(gl.BLEND);
   gl.disable(gl.CULL_FACE);
 
   // backdrop
-  drawQuad(-1, -1, 1, 1, 0, 0, 1, 1, R.bgTex, [1 + flash, 1 + flash, 1 + flash * 1.2, 1], true);
+  drawQuad(X, -1, -1, 1, 1, 0, 0, 1, 1, X.bgTex, [1 + flash, 1 + flash, 1 + flash * 1.2, 1], true);
 
   // contact shadow on the dais (screen-space, scaled by creature radius)
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   const pxPerUnit = 15.4;                      // matches the camera framing
-  const sw = (R.maxR * pxPerUnit + 14) / BW * 2;
+  const sw = (X.maxR * pxPerUnit + 14) / BW * 2;
   const shx = (DAIS.x / BW) * 2 - 1, shy = 1 - (DAIS.y / BH) * 2;
-  drawQuad(shx - sw, shy - sw * 0.26, shx + sw, shy + sw * 0.26, 0, 0, 1, 1,
-    R.shTex, [0.02, 0.01, 0.06, 0.55], true);
+  drawQuad(X, shx - sw, shy - sw * 0.26, shx + sw, shy + sw * 0.26, 0, 0, 1, 1,
+    X.shTex, [0.02, 0.01, 0.06, 0.55], true);
   gl.disable(gl.BLEND);
 
   // creature
   gl.enable(gl.DEPTH_TEST);
   gl.clear(gl.DEPTH_BUFFER_BIT);
-  const p = R.progC;
+  const p = X.progC;
   gl.useProgram(p);
-  gl.bindBuffer(gl.ARRAY_BUFFER, R.meshBuf);
+  gl.bindBuffer(gl.ARRAY_BUFFER, X.meshBuf);
   const stride = 96;
   const attr = (name, size, off) => {
     const a = gl.getAttribLocation(p, name);
@@ -2401,49 +2451,49 @@ function drawFrame() {
   attr('aPos', 3, 0); attr('aNor', 3, 12); attr('aCol', 3, 24); attr('aMat', 3, 36);
   attr('aTex', 4, 48); attr('aAnim', 4, 64); attr('aGait', 4, 80);
   gl.activeTexture(gl.TEXTURE1);
-  gl.bindTexture(gl.TEXTURE_2D, R.skinTex);
+  gl.bindTexture(gl.TEXTURE_2D, X.skinTex);
   gl.uniform1i(gl.getUniformLocation(p, 'uSkin'), 1);
   gl.activeTexture(gl.TEXTURE0);
-  const t = _frame / 60;
+  const t = still ? 0 : _frame / 60;
   const breathRaw = (Math.sin(t * 1.65) + 1) / 2;
-  const breath = breathRaw * breathRaw * (3 - 2 * breathRaw);   // eased in-out
-  gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uPV'), false, R.pv);
-  gl.uniform1f(gl.getUniformLocation(p, 'uCos'), Math.cos(_theta));
-  gl.uniform1f(gl.getUniformLocation(p, 'uSin'), Math.sin(_theta));
-  gl.uniform3fv(gl.getUniformLocation(p, 'uEye'), R.eye);
+  const breath = still ? 0 : breathRaw * breathRaw * (3 - 2 * breathRaw);   // eased in-out
+  gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uPV'), false, X.pv);
+  gl.uniform1f(gl.getUniformLocation(p, 'uCos'), Math.cos(theta));
+  gl.uniform1f(gl.getUniformLocation(p, 'uSin'), Math.sin(theta));
+  gl.uniform3fv(gl.getUniformLocation(p, 'uEye'), X.eye);
   gl.uniform1f(gl.getUniformLocation(p, 'uFlash'), flash);
   gl.uniform1f(gl.getUniformLocation(p, 'uPulse'), pulse);
   gl.uniform1f(gl.getUniformLocation(p, 'uTime'), t);
   gl.uniform1f(gl.getUniformLocation(p, 'uBreath'), breath);
-  gl.uniform1f(gl.getUniformLocation(p, 'uBlink'), blinkLevel());
-  const gz = gazeLevel();
+  gl.uniform1f(gl.getUniformLocation(p, 'uBlink'), still ? 0 : blinkLevel());
+  const gz = still ? [0, 0] : gazeLevel();
   gl.uniform2f(gl.getUniformLocation(p, 'uGaze'), gz[0], gz[1]);
-  gl.uniform1f(gl.getUniformLocation(p, 'uTongue'), tongueLevel());
-  const gs = gaitStep();
+  gl.uniform1f(gl.getUniformLocation(p, 'uTongue'), still ? 0 : tongueLevel());
+  const gs = still ? [0, 0] : gaitStep();
   gl.uniform1f(gl.getUniformLocation(p, 'uGait'), gs[0]);
   gl.uniform1f(gl.getUniformLocation(p, 'uGaitAmp'), gs[1]);
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, R.idxBuf);
-  gl.drawElements(gl.TRIANGLES, R.idxCount, gl.UNSIGNED_SHORT, 0);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, X.idxBuf);
+  gl.drawElements(gl.TRIANGLES, X.idxCount, gl.UNSIGNED_SHORT, 0);
 
   // glow sprites (additive, over everything but depth-tested)
-  if (R.glowCount) {
+  if (X.glowCount) {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
     gl.depthMask(false);
-    const q = R.progG;
+    const q = X.progG;
     gl.useProgram(q);
-    gl.bindBuffer(gl.ARRAY_BUFFER, R.glowBuf);
+    gl.bindBuffer(gl.ARRAY_BUFFER, X.glowBuf);
     const ga = (name, size, off) => {
       const a = gl.getAttribLocation(q, name);
       gl.enableVertexAttribArray(a);
       gl.vertexAttribPointer(a, size, gl.FLOAT, false, 28, off);
     };
     ga('aPos', 3, 0); ga('aCol', 3, 12); ga('aSize', 1, 24);
-    gl.uniformMatrix4fv(gl.getUniformLocation(q, 'uPV'), false, R.pv);
-    gl.uniform1f(gl.getUniformLocation(q, 'uCos'), Math.cos(_theta));
-    gl.uniform1f(gl.getUniformLocation(q, 'uSin'), Math.sin(_theta));
+    gl.uniformMatrix4fv(gl.getUniformLocation(q, 'uPV'), false, X.pv);
+    gl.uniform1f(gl.getUniformLocation(q, 'uCos'), Math.cos(theta));
+    gl.uniform1f(gl.getUniformLocation(q, 'uSin'), Math.sin(theta));
     gl.uniform1f(gl.getUniformLocation(q, 'uPulse'), pulse);
-    gl.drawArrays(gl.POINTS, 0, R.glowCount);
+    gl.drawArrays(gl.POINTS, 0, X.glowCount);
     gl.depthMask(true);
     gl.disable(gl.BLEND);
   }
@@ -2453,9 +2503,34 @@ function drawFrame() {
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    drawQuad(-1, -1, 1, 1, 0, 0, 1, 1, null, [0.88, 0.9, 1, flash], false);
+    drawQuad(X, -1, -1, 1, 1, 0, 0, 1, 1, null, [0.88, 0.9, 1, flash], false);
     gl.disable(gl.BLEND);
   }
+}
+
+/** One-shot square still of a creature in a faction's lab, as a PNG data
+ * URL — the Stable's thumbnails. Uses its own throwaway GL context so the
+ * live portrait is never disturbed. */
+export function renderThumbnail(genome, faction, size = 168) {
+  const prevFac = _faction;
+  _faction = SCENES[faction] ? faction : 'maddr';
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  let url = '';
+  try {
+    const X = setupGL(canvas, {
+      preserve: true, vw: size, vh: size,
+      eye: [0, 6.6, 24], target: [0, 6.0, 0],
+    });
+    uploadCreature(genome, X);
+    drawFrame(X, true);
+    url = canvas.toDataURL('image/png');
+    X.gl.getExtension('WEBGL_lose_context')?.loseContext();
+  } catch (e) {
+    console.error('thumbnail failed:', e);
+  }
+  _faction = prevFac;
+  return url;
 }
 
 // ── public API ──────────────────────────────────────────────────────────────
