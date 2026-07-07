@@ -355,6 +355,7 @@ export function locomotionProfile(genome) {
   const build = P(g.body?.params, 2, 0.5);
   const legFam = g.slots?.leg?.family ?? 'hoofed_leg';
   const legCount = P(g.slots?.leg?.params, 4, 0.5);
+  const handFam = g.slots?.hand?.family ?? null;
   const brainSize = { dim: 1, average: 2, gifted: 3, mastermind: 4 }[g.brain?.tier] ?? 2;
 
   // energy output: the heart's pumping capacity
@@ -387,7 +388,14 @@ export function locomotionProfile(genome) {
     legFam === 'tendril_leg' ? 1.6 :
     legFam === 'leg_stump' ? 0.6 : 2.2;
 
-  const walkSpeed = legBase * clamp(0.55 + p2w * 0.85, 0.5, 1.8);
+  // crab/arachnid forelimbs brace and shove during the low scuttle -- a
+  // working hand (not a healed-over stump) braces against the ground for
+  // balance and adds a bit of push, the way a real crab's front legs do
+  const armAssist = (plan === 'crab' || plan === 'arachnid') && handFam && handFam !== 'hand_stump'
+    ? 1.1 : 1;
+  const legBaseA = legBase * armAssist;
+
+  const walkSpeed = legBaseA * clamp(0.55 + p2w * 0.85, 0.5, 1.8);
   // sprint gate: headroom decides whether "run" means anything
   const sprint = margin > power * 0.25 ? 'strong' : margin > 0 ? 'limited' : 'none';
   const sprintMult = sprint === 'strong' ? 1.9 + Math.min(margin / power, 0.6) * 0.5
@@ -1286,9 +1294,12 @@ function planCrab(mb, o) {
   return {
     // chelipeds: real crabs carry their claws out in FRONT of the
     // carapace, by the mouth, not off its sides -- small lateral spread,
-    // parked at the shell's leading edge, normal pointed forward.
+    // parked at the shell's leading edge, normal pointed forward. Short
+    // and slender (tiny scale) with a hard cap on reach so the arm can
+    // never out-length the legs or dip the claw into the ground.
     hand:   { p: [shl.rx * 0.30, y0 + h*0.42, head.hC[2] + head.hR[2]*0.55],
-              nrm: V.norm([0.4, -0.15, 1]), mirror: true },
+              nrm: V.norm([0.4, -0.15, 1]), mirror: true, tiny: true,
+              armCapLen: Math.max(0.9, o.legLen * 0.82) },
     leg:    { p: [shl.rx * 0.85, o.legLen, -shl.rz*0.15],
               nrm: V.norm([1, -0.7, 0]), mirror: true, len: o.legLen },
     sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1,
@@ -1349,7 +1360,10 @@ function planArachnid(mb, o) {
   return {
     // pedipalps: short front appendages flanking the mouth, close to the
     // midline and out ahead of the cephalothorax -- not stuck out the side.
-    hand:   { p: [cr*0.35, cC[1]+0.15, cC[2]+cr*0.75], nrm: V.norm([0.45, -0.1, 1]), mirror: true, tiny: true },
+    // Real pedipalps are stubby, shorter even than a crab's claws, and
+    // never reach past the legs.
+    hand:   { p: [cr*0.35, cC[1]+0.15, cC[2]+cr*0.75], nrm: V.norm([0.45, -0.1, 1]), mirror: true, tiny: true,
+              armCapLen: Math.max(0.8, o.legLen * 0.65) },
     leg:    { p: [cr*0.9, o.legLen, cC[2]*0.3], nrm: V.norm([0.6, -1, 0.1]), mirror: true, len: o.legLen },
     sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H, gait: HEADBOB },
     eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
@@ -1529,6 +1543,10 @@ function buildPart(mb, slot, family, params, side, sock, o) {
   const [len=0.5, girth=0.5, taper=0.5, curl=0.5, count=0.5, orn=0.5] = params;
   const S = [side * sock.p[0], sock.p[1], sock.p[2]];
   const scale = sock.tiny ? 0.62 : 1;
+  // low, hunched plans (crab, arachnid) cap how far an arm can reach off
+  // the body: real chelipeds/pedipalps are short and held up in front,
+  // never longer than the legs and never long enough to drag the ground
+  const armCapLen = sock.armCapLen ?? Infinity;
   // the rig: parts leave the body along the surface normal at the socket,
   // so nothing buries into a chest or skewers a dome on extreme morphs
   const N = sock.nrm ? V.norm([side * sock.nrm[0], sock.nrm[1], sock.nrm[2]]) : [side, 0, 0];
@@ -1558,7 +1576,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     // ---- hands ----
     case 'claw_hand': {
       const armR = (0.42 + 0.4*girth) * scale;
-      const wrist = armDrop(mb, S, side, armR, scale, o, [len, girth, taper, curl], N);
+      const wrist = armDrop(mb, S, side, armR, scale, o, [len, girth, taper, curl], N, armCapLen);
       ellipsoid(mb, wrist, [armR*1.35, armR*1.15, armR*1.35], o.skin, 0.3, 0, 8, o.skinFn);
       const n = clamp(2 + Math.round(count * 3), 2, 5);
       for (let i = 0; i < n; i++) {
@@ -1572,7 +1590,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     }
     case 'pincer': {
       const armR = (0.5 + 0.4*girth) * scale;
-      const wrist = armDrop(mb, S, side, armR, scale, o, [len, girth, taper, curl], N);
+      const wrist = armDrop(mb, S, side, armR, scale, o, [len, girth, taper, curl], N, armCapLen);
       const jl = (1.1 + 1.5*len) * scale;
       curvedCone(mb, wrist, [side*0.15, -0.25, 0.9], jl, armR*0.75, [0, -(0.4+curl*0.8), 0.3], CLAW, 0.5);
       curvedCone(mb, wrist, [side*0.15, -0.9, 0.35], jl*0.9, armR*0.65, [0, 0.45+curl*0.6, 0.45], CLAW, 0.5);
@@ -1600,7 +1618,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       break;
     }
     case 'rifle_arm': {
-      const wrist = armDrop(mb, S, side, 0.42*scale, scale, o, [len, girth, taper, curl], N);
+      const wrist = armDrop(mb, S, side, 0.42*scale, scale, o, [len, girth, taper, curl], N, armCapLen);
       // rounded receiver, no boxes — a toy gun, not a brick
       ellipsoid(mb, [wrist[0], wrist[1]+0.05, wrist[2]+0.3], [0.5, 0.42, 1.0], METAL, 0.7, 0, 10);
       // barrel with a chunky muzzle brake and a little front sight
@@ -1623,7 +1641,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       break;
     }
     case 'plasma_lance': {
-      const wrist = armDrop(mb, S, side, 0.5*scale, scale, { skin: CHITIN, skinFn: null }, [len, girth, taper, curl], N);
+      const wrist = armDrop(mb, S, side, 0.5*scale, scale, { skin: CHITIN, skinFn: null }, [len, girth, taper, curl], N, armCapLen);
       const L = (1.6 + 1.6*len) * scale;
       ellipsoid(mb, wrist, [0.55, 0.5, 0.55], CHITIN, 0.4, 0, 8);
       tube(mb, [wrist, [wrist[0], wrist[1]+L*0.9, wrist[2]+0.5]],
@@ -1641,7 +1659,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       // a motor housing at the wrist driving a guide bar with a looping
       // chain of blade links -- a killer-robot arm, rounded like everything
       // else here, not a brick
-      const wrist = armDrop(mb, S, side, 0.4*scale, scale, o, [len, girth, taper, curl], N);
+      const wrist = armDrop(mb, S, side, 0.4*scale, scale, o, [len, girth, taper, curl], N, armCapLen);
       ellipsoid(mb, wrist, [0.36, 0.4, 0.5], METAL, 0.7, 0, 8);
       const barLen = (1.6 + 1.8*len) * scale;
       const barTip = [wrist[0], wrist[1]+barLen*0.15, wrist[2]+barLen];
@@ -1662,7 +1680,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     case 'spore_launcher': {
       // a fleshy arm ending in a bulbous veined pod that vents glowing
       // spore motes -- the biotech counterpart to plasma_lance
-      const wrist = armDrop(mb, S, side, 0.46*scale, scale, { skin: CHITIN, skinFn: null }, [len, girth, taper, curl], N);
+      const wrist = armDrop(mb, S, side, 0.46*scale, scale, { skin: CHITIN, skinFn: null }, [len, girth, taper, curl], N, armCapLen);
       const podR = (0.5 + 0.5*girth) * scale;
       ellipsoid(mb, wrist, [podR, podR*1.1, podR], lp(CHITIN, ICHOR, 0.3), 0.45, 0, 10);
       const tipC = [wrist[0], wrist[1]+podR*1.3, wrist[2]+podR*0.6];
@@ -1936,16 +1954,18 @@ function buildPart(mb, slot, family, params, side, sock, o) {
  * The arm dangles with a slight pendulum sway that grows toward the hand;
  * the builder's anim state is left at the wrist value so whatever the
  * caller attaches next (claws, gun, lance) swings along with it. */
-function armDrop(mb, S, side, armR, scale, o, pg = [], N = null) {
+function armDrop(mb, S, side, armR, scale, o, pg = [], N = null, capLen = Infinity) {
   // The arm is shaped by the hand part's own genes, not a fixed tube:
   //   length -> arm length (high + short legs = knuckle-dragger),
   //   curl   -> elbow bend, taper -> forearm mass (low = popeye forearms),
   //   girth  -> bicep bulge.
   // The upper arm EXITS ALONG THE SOCKET NORMAL: a true shoulder joint, so
   // the limb clears the torso before gravity takes it.
+  // capLen bounds the reach for plans where a long arm would be wrong
+  // (a crab dragging its claws) even at a high length gene.
   const len = pg[0] ?? 0.5, girth = pg[1] ?? 0.5, taper = pg[2] ?? 0.5, curl = pg[3] ?? 0.5;
   const n = N ?? [side, 0, 0];
-  const armLen = (2.5 + 2.0 * len) * scale;
+  const armLen = Math.min((2.5 + 2.0 * len) * scale, capLen);
   const bend = 0.35 + curl * 0.75;
   const ex = V.add(S, V.scale(n, (armR * 1.6 + 0.25) * scale));
   const elbow = [ex[0] + side * 0.2 * scale, ex[1] - armLen * 0.44, ex[2] + 0.08];
