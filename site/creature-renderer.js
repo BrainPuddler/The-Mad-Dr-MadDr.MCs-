@@ -1326,26 +1326,12 @@ function planArachnid(mb, o) {
   if (o.chestDeco) o.chestDeco(mb, { y: cC[1], x: 0, z: cC[2], rx: cr, rz: cr }, cr*2, o);
   mb.setGait(GAIT0);
 
-  // extra baked leg-pairs down the sides, on top of the slot-driven pair --
-  // the many-legged read a single mirrored pair can't give on its own
-  const legR = 0.16 + 0.08*o.bulk;
-  const legCol = lp(CHITIN, o.skin, 0.4);
-  const nExtra = 3;
-  for (let i = 0; i < nExtra; i++) {
-    const t = i / (nExtra - 1);
-    const z0 = cC[2]*0.6 - t*(cC[2]-aC[2])*0.9;
-    for (const side of [-1, 1]) {
-      const hip = [side*cr*0.7, cC[1]-cr*0.1, z0];
-      const knee = [side*(cr+1.6), cC[1]+0.6+t*0.3, z0+0.3];
-      const foot = [side*(cr+1.9), 0, z0+0.7];
-      const ph = ((i + (side > 0 ? 0 : 1)) % 2) * Math.PI;
-      mb.setGait([0.5*0.12, 0.4*0.12, ph, 0]);
-      limbJoint(mb, hip, V.sub(knee, hip), legR*1.15);
-      tube(mb, [hip, knee, foot], [legR*1.2, legR*0.8, 0.04], legCol, 0.4, 0, 6, 3,
-        null, null, (u) => [0.5*u, 0.4*u, ph, 0]);
-    }
-  }
-  mb.setGait(GAIT0);
+  // Leg count and style both come from the slot-driven family alone --
+  // no hardcoded extra pairs. A monster never wears two different kinds
+  // of leg (e.g. insect struts bolted onto hoofed legs); insect_leg and
+  // piston_leg's spider mode already render several matching legs on
+  // their own, so the "crowded with legs" read still happens when the
+  // genome actually picks one of those families.
 
   mb.setAnim(BREATH_H);
   const HEADBOB = [0, 0, 0, 0.05];
