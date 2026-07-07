@@ -140,7 +140,7 @@ const GAIT0 = [0, 0, 0, 0];
 class MeshB {
   constructor() {
     this.v = []; this.idx = []; this.glows = [];
-    this.anim = ANIM0; this.fx = 0; this.tex = TEX_NONE; this.gait = GAIT0;
+    this.anim = ANIM0; this.fx = 0; this.tex = TEX_NONE; this.gait = GAIT0; this.alpha = 1;
   }
   setAnim(a) { this.anim = a; }
   setFx(f) { this.fx = f; }
@@ -151,13 +151,19 @@ class MeshB {
    * and lift on alternating phases; bodies bob and roll; serpents put a
    * traveling phase here to slither harder when moving. */
   setGait(gt) { this.gait = gt; }
+  /** Opacity, 1 = opaque (default). Below 1 the surface blends with
+   * whatever was drawn before it at that pixel — glass jars, force
+   * fields. Order matters: draw what should show THROUGH the glass
+   * first, then the glass. */
+  setAlpha(a) { this.alpha = a; }
   vert(p, n, c, g, e) {
     const a = this.anim, t = this.tex, gt = this.gait;
     this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], c[0]/255, c[1]/255, c[2]/255, g, e, this.fx,
       t[0], t[1], t[2], t[3],
       a[0], a[1], a[2], a[3],
-      gt[0], gt[1], gt[2], gt[3]);
-    return this.v.length / 24 - 1;
+      gt[0], gt[1], gt[2], gt[3],
+      this.alpha);
+    return this.v.length / 25 - 1;
   }
   tri(a, b, c) { this.idx.push(a, b, c); }
   quad(a, b, c, d) { this.idx.push(a, b, c, a, c, d); }
@@ -612,11 +618,17 @@ function robotDetails(mb, headC, headR, heartLevel, o) {
   for (let i = -1; i <= 1; i++)
     tube(mb, [[headC[0]-headR[0]*0.38, my + i*0.13, mz+0.08], [headC[0]+headR[0]*0.38, my + i*0.13, mz+0.08]],
       [0.03, 0.03], [20, 22, 26], 0.5, 0, 5);
-  // beacon finial on the crown
-  tube(mb, [[headC[0], headC[1]+headR[1]*0.9, headC[2]], [headC[0], headC[1]+headR[1]*1.35, headC[2]]],
-    [0.07, 0.05], METAL, 0.8, 0, 6);
-  ellipsoid(mb, [headC[0], headC[1]+headR[1]*1.4, headC[2]], [0.12,0.12,0.12], ROBOT_LENS, 0.5, 1, 6);
-  mb.glow([headC[0], headC[1]+headR[1]*1.42, headC[2]], ROBOT_LENS, 16);
+  // beacon finial on the crown -- mastermind tier skips this: buildHead
+  // already put a glass brain-dome up there (a robot smart enough to
+  // need one got its cortex transplanted straight into the chassis),
+  // and the finial's rod would sit inside the dome's silhouette and
+  // get depth-occluded by its own near surface
+  if (o.brainTier !== 'mastermind') {
+    tube(mb, [[headC[0], headC[1]+headR[1]*0.9, headC[2]], [headC[0], headC[1]+headR[1]*1.35, headC[2]]],
+      [0.07, 0.05], METAL, 0.8, 0, 6);
+    ellipsoid(mb, [headC[0], headC[1]+headR[1]*1.4, headC[2]], [0.12,0.12,0.12], ROBOT_LENS, 0.5, 1, 6);
+    mb.glow([headC[0], headC[1]+headR[1]*1.42, headC[2]], ROBOT_LENS, 16);
+  }
   // riveted collar + heart-tier indicator lamps
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2;
@@ -671,6 +683,11 @@ function alienDetails(mb, headC, headR, heartLevel, o) {
     ellipsoid(mb, [nx, bc[1] + Math.sin(a)*headR[1]*0.4, nz], [0.13,0.13,0.13], ICHOR_N, 0.5, 0.9, 6);
     mb.glow([nx, bc[1] + Math.sin(a)*headR[1]*0.4, nz + 0.1], ICHOR_N, 16);
   }
+  // the glass dome goes LAST: everything it should show through (brain,
+  // sulcus, ichor nodes) must already be in the mesh before it, since the
+  // see-through blend depends on draw order, not just alpha
+  buildGlassDome(mb, [bc[0], bc[1] + headR[1]*0.12, bc[2] + 0.05],
+    [headR[0]*1.05, headR[1]*0.85, headR[2]*1.0], o);
   mb.setTex(prevTex);
 }
 
@@ -819,6 +836,44 @@ function torsoLevels(build, W, h, y0, lean) {
 }
 
 const BRAINC = [214, 150, 160];
+const GLASS  = [200, 228, 224];   // pale cyan-tinted glass
+
+/** A riveted glass dome sealed over an exposed brain — pale, glossy,
+ * translucent (mad-science specimen-jar reading, matching the game's
+ * brass-and-iron joint language). The brain geometry MUST already be
+ * in the mesh before this call: draw order is what makes the see-
+ * through effect work (the dome blends with whatever is already in the
+ * frame at that pixel, so the brain has to be there first). A brass
+ * collar and three support ribs are fully opaque, so the dome reads as
+ * a distinct structure at a glance even before the transparency
+ * registers. */
+function buildGlassDome(mb, center, radii, o) {
+  const prevTex = mb.tex;
+  const R = [radii[0] * 1.3, radii[1] * 1.3, radii[2] * 1.3];
+  mb.setTex(TEX_NONE);
+  mb.setAlpha(0.24);   // the ellipsoid draws both near and far shell, so
+  ellipsoid(mb, center, R, GLASS, 0.92, 0, 14);   // the effective blend reads stronger than this alone
+  mb.setAlpha(1);
+
+  const collarY = center[1] - R[1] * 0.32;
+  const collarR = (R[0] + R[2]) * 0.5 * 0.94;
+  torus(mb, [center[0], collarY, center[2]], [0, 1, 0], collarR, 0.12, BRASS, 0.85, 0, 16, 6);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    ellipsoid(mb, [center[0] + Math.cos(a)*collarR, collarY, center[2] + Math.sin(a)*collarR],
+      [0.09, 0.09, 0.09], IRON, 0.8, 0, 4);
+  }
+  // three thin ribs arching from the collar to the crown — guaranteed
+  // visible (fully opaque) regardless of how the glass blend renders
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + 0.4;
+    const base = [center[0] + Math.cos(a)*collarR, collarY, center[2] + Math.sin(a)*collarR];
+    const top  = [center[0], center[1] + R[1] * 0.98, center[2]];
+    const mid  = [(base[0]+top[0])*0.5 + Math.cos(a)*0.3, (base[1]+top[1])*0.5, (base[2]+top[2])*0.5 + Math.sin(a)*0.3];
+    tube(mb, [base, mid, top], [0.05, 0.045, 0.03], sh(BRASS, 0.85), 0.7, 0, 5, 1);
+  }
+  mb.setTex(prevTex);
+}
 
 /** The modular LOWER TORSO. Material follows the leg family — flesh
  * pelvis for organic legs, chitin pod for insect, and a machined metal
@@ -881,7 +936,7 @@ function buildHead(mb, o, neckY, zOff) {
       [hR[0]*0.72, hR[1]*0.52, hR[2]*0.70], o.skin, 0.3, 0, 12, o.skinFn);
     topY = hC[1] + hR[1] * 1.04;
   } else if (t === 'mastermind') {
-    // the brain, proudly exposed
+    // the brain, sealed under glass
     const bc = [hC[0], hC[1] + hR[1]*0.62, hC[2] - 0.15];
     const bTex = mb.tex;
     mb.setTex([...TILE.slick, 0.9, 0.55]);
@@ -890,7 +945,8 @@ function buildHead(mb, o, neckY, zOff) {
       ellipsoid(mb, [bc[0] + s*hR[0]*0.40, bc[1] + hR[1]*0.34, bc[2]],
         [hR[0]*0.44, hR[1]*0.30, hR[2]*0.55], sh(BRAINC, 0.92), 0.55, 0, 8);
     mb.setTex(bTex);
-    topY = bc[1] + hR[1] * 0.88;
+    buildGlassDome(mb, [bc[0], bc[1] + hR[1]*0.1, bc[2]], [hR[0]*0.95, hR[1]*0.72, hR[2]*0.92], o);
+    topY = bc[1] + hR[1] * 1.05;
   }
   return { hC, hR, topY };
 }
@@ -2065,6 +2121,7 @@ function buildClouds() {
 const VS_CREATURE = `
 attribute vec3 aPos, aNor, aCol, aMat;
 attribute vec4 aTex, aAnim, aGait;
+attribute float aAlpha;
 uniform mat4 uPV;
 uniform float uCos, uSin;
 uniform float uTime, uBreath, uBlink, uTongue;
@@ -2072,8 +2129,9 @@ uniform float uGait, uGaitAmp;
 uniform vec2 uGaze;
 varying vec3 vNor, vCol, vPos, vMat, vLoc, vLNor;
 varying vec4 vTex;
+varying float vAlpha;
 void main() {
-  vLoc = aPos; vLNor = aNor; vTex = aTex;
+  vLoc = aPos; vLNor = aNor; vTex = aTex; vAlpha = aAlpha;
   vec3 lp = aPos;
   lp += aNor * (aAnim.x * uBreath);                          // breathing
   lp.y += max(aAnim.y, 0.0) * sin(uTime * 2.6 + aAnim.w);    // traveling sinusoidal flap
@@ -2101,6 +2159,7 @@ const FS_CREATURE = `
 precision mediump float;
 varying vec3 vNor, vCol, vPos, vMat, vLoc, vLNor;
 varying vec4 vTex;
+varying float vAlpha;
 uniform vec3 uEye;
 uniform float uFlash, uPulse;
 uniform sampler2D uSkin;
@@ -2135,7 +2194,7 @@ void main() {
   float rim = pow(1.0 - max(dot(n, view), 0.0), 2.4) * max(dot(n, moon), 0.0);
   lit += vec3(0.45, 0.55, 0.95) * rim * (0.55 + uFlash);
   lit = mix(lit, vCol * (1.15 + 0.25 * uPulse), vMat.y);   // emissive
-  gl_FragColor = vec4(lit, 1.0);
+  gl_FragColor = vec4(lit, vAlpha);
 }`;
 
 const VS_QUAD = `
@@ -2489,7 +2548,7 @@ function uploadCreature(genome, X = R) {
   X.sodGY  = new SOD(pf * 1.6, pz * 0.85, pr, 0);
   if (X === R) { _gait.mode = 0; _gait.t = 0; _gait.amp = 0; }
   let mr = 2.5;
-  for (let i = 0; i < mb.v.length; i += 24)
+  for (let i = 0; i < mb.v.length; i += 25)
     mr = Math.max(mr, Math.hypot(mb.v[i], mb.v[i + 2]));
   X.maxR = Math.min(mr, 13);
 
@@ -2581,20 +2640,28 @@ function drawFrame(X = R, still = false) {
     X.shTex, [0.02, 0.01, 0.06, 0.55], true);
   gl.disable(gl.BLEND);
 
-  // creature
+  // creature. Blending stays on for the whole draw -- opaque geometry
+  // (alpha=1, the overwhelming majority) blends as a no-op, so this only
+  // costs anything where a part actually sets alpha<1 (glass domes).
+  // Depth WRITES stay on too: a glass dome sits further from camera than
+  // nothing, so it still needs to occlude whatever's behind it once drawn;
+  // what makes the glass-over-brain effect work is draw ORDER (the brain
+  // is built, and its triangles land in the index buffer, before the dome).
   gl.enable(gl.DEPTH_TEST);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.clear(gl.DEPTH_BUFFER_BIT);
   const p = X.progC;
   gl.useProgram(p);
   gl.bindBuffer(gl.ARRAY_BUFFER, X.meshBuf);
-  const stride = 96;
+  const stride = 100;
   const attr = (name, size, off) => {
     const a = gl.getAttribLocation(p, name);
     gl.enableVertexAttribArray(a);
     gl.vertexAttribPointer(a, size, gl.FLOAT, false, stride, off);
   };
   attr('aPos', 3, 0); attr('aNor', 3, 12); attr('aCol', 3, 24); attr('aMat', 3, 36);
-  attr('aTex', 4, 48); attr('aAnim', 4, 64); attr('aGait', 4, 80);
+  attr('aTex', 4, 48); attr('aAnim', 4, 64); attr('aGait', 4, 80); attr('aAlpha', 1, 96);
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_2D, X.skinTex);
   gl.uniform1i(gl.getUniformLocation(p, 'uSkin'), 1);
@@ -2619,6 +2686,7 @@ function drawFrame(X = R, still = false) {
   gl.uniform1f(gl.getUniformLocation(p, 'uGaitAmp'), gs[1]);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, X.idxBuf);
   gl.drawElements(gl.TRIANGLES, X.idxCount, X.idxType, 0);
+  gl.disable(gl.BLEND);
 
   // glow sprites (additive, over everything but depth-tested)
   if (X.glowCount) {
