@@ -188,7 +188,7 @@ export const BODY_PLANS = {
         ignoresSlots: ["leg"],
     },
     floater: {
-        invariants: "a hooded conical body that hovers; no legs, tentacle-fringed at the hem",
+        invariants: "a sleek hovering drone-pod: a tapered spindle hull on a thruster ring, fin-stabilized; no legs",
         ignoresSlots: ["leg"],
     },
 };

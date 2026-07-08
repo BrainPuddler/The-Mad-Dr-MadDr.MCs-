@@ -365,7 +365,7 @@ export function locomotionProfile(genome) {
   // mass: plan volume, bulk, build, and metal lower bodies weigh in
   const planMass = {
     tetrapod: 1.0, winged: 0.8, serpentine: 1.15, blob: 1.55,
-    crab: 1.3, arachnid: 1.1, avian: 0.85, treant: 1.7, floater: 0.7,
+    crab: 1.3, arachnid: 1.1, avian: 0.85, treant: 1.7, floater: 0.6,
   }[plan] ?? 1;
   const mass = (1.5 + bulk * 2.4) * planMass * (1 + build * 0.35)
     + (legFam === 'piston_leg' || legFam === 'jet_leg' ? 0.9 : 0);
@@ -379,7 +379,7 @@ export function locomotionProfile(genome) {
     plan === 'serpentine' ? 1.8 :
     plan === 'blob' ? 0.9 :
     plan === 'treant' ? 0.5 :          // rooted; barely shuffles
-    plan === 'floater' ? 1.6 :         // hovers, no gait friction
+    plan === 'floater' ? 2.8 :         // thruster-driven, no gait friction -- built for speed
     plan === 'avian' ? 2.9 :           // built to run
     legFam === 'talon_leg' ? 2.6 :
     legFam === 'insect_leg' ? 2.0 :
@@ -1451,43 +1451,48 @@ function planTreant(mb, o) {
 }
 
 function planFloater(mb, o) {
-  const BREATH_T = [0.06, 0, 0, 0], BREATH_H = [0.03, 0, 0, 0];
-  const W = 1.8 + 1.0*o.bulk, h = 3.2 + 0.8*o.bulk;
+  const BREATH_T = [0.04, 0, 0, 0], BREATH_H = [0.03, 0, 0, 0];
+  // a lean drone-pod hull, not a soft robed bell: narrower and taller than
+  // the old cone, spindled front-to-back for a fast, agile silhouette
+  const W = 1.4 + 0.7*o.bulk, h = 3.6 + 0.85*o.bulk;
   const y0 = 0.9;   // hovers -- feet never a factor (the plan ignores 'leg')
-  // a hooded cone: narrow peak, flares out to a wide robed hem
   const levels = [
-    { y: y0,          x: 0, z: 0,       rx: W*0.15, rz: W*0.15 },
-    { y: y0+h*0.25,    x: 0, z: 0.02*W, rx: W*0.55, rz: W*0.55 },
-    { y: y0+h*0.55,    x: 0, z: 0.04*W, rx: W*0.85, rz: W*0.85 },
-    { y: y0+h*0.85,    x: 0, z: 0.02*W, rx: W*1.05, rz: W*1.05 },
-    { y: y0+h,         x: 0, z: 0,      rx: W*1.15, rz: W*1.15 },
+    { y: y0,          x: 0, z: 0,       rx: W*0.20, rz: W*0.20 },   // tapered nose cone
+    { y: y0+h*0.16,   x: 0, z: 0.02*W,  rx: W*0.62, rz: W*0.62 },   // thruster collar
+    { y: y0+h*0.5,    x: 0, z: 0.05*W,  rx: W*0.80, rz: W*0.80 },   // fuselage waist
+    { y: y0+h*0.82,   x: 0, z: 0.02*W,  rx: W*0.42, rz: W*0.42 },   // tapers to the canopy neck
+    { y: y0+h,        x: 0, z: 0,       rx: W*0.18, rz: W*0.18 },
   ];
   mb.setAnim(BREATH_T);
-  mb.setTex(o.bodyTex('slick', o.texScale, 0.75));
-  const HOVER = [0, 0, 0, 0.18];   // a strong idle bob reads as the hover itself
+  mb.setTex(o.bodyTex('panels', o.texScale, 0.7));
+  const HOVER = [0, 0, 0, 0.14];   // a tight mechanical judder -- the engine, not a drift
   mb.setGait(HOVER);
-  lathe(mb, levels, o.skin, 0.35, 0, 18, o.skinFn);
+  // hull tints toward gunmetal instead of bare flesh-tone -- a chassis, not
+  // skin -- while still taking a cut of the creature's own pigment so it
+  // stays a genome trait, not a fixed paint job. No skinFn here: the
+  // organic belly/spine tint doesn't belong on a metal hull.
+  lathe(mb, levels, lp(METAL, o.skin, 0.4), 0.55, 0, 18);
   if (o.chestDeco) o.chestDeco(mb, levels[2], h, o);
 
-  // tentacle-fringe at the hem, instead of feet
+  // stabilizer fins ringing the thruster collar, and a glowing thruster
+  // ring underneath -- straight, sharp, mechanical, where the old
+  // tentacle-fringe used to hang
   mb.setTex(TEX_NONE);
-  const nFringe = 7;
-  for (let i = 0; i < nFringe; i++) {
-    const a = (i / nFringe) * Math.PI * 2;
-    const hem = levels[4];
-    const base = [Math.cos(a)*hem.rx*0.92, hem.y, Math.sin(a)*hem.rx*0.92];
-    const path = [base];
-    for (let s = 1; s <= 4; s++) {
-      const t = s / 4;
-      path.push([base[0]*(1-t*0.3), hem.y - t*(1.6+0.4*o.bulk), base[2]*(1-t*0.3)]);
-    }
-    mb.setGait([0, 0, 0.4 + i*0.3, 0.15]);
-    tube(mb, path, path.map((_, k) => 0.16*(1-k*0.15)), sh(o.skin, 0.88), 0.3, 0, 5, 3);
+  const collar = levels[1];
+  const nFin = 5;
+  for (let i = 0; i < nFin; i++) {
+    const a = (i / nFin) * Math.PI * 2;
+    const base = [Math.cos(a)*collar.rx*0.95, collar.y, Math.sin(a)*collar.rx*0.95];
+    const tip  = [Math.cos(a)*collar.rx*2.15, collar.y - 0.6 - 0.25*o.bulk, Math.sin(a)*collar.rx*2.15];
+    mb.setGait([0, 0, i*0.7, 0.04]);
+    tube(mb, [base, tip], [0.2, 0.05], METAL, 0.85, 0, 6, 1);
   }
+  ellipsoid(mb, [0, y0-0.1, 0], [W*0.42, 0.1, W*0.42], GLOW, 0.4, 0.9, 12);
+  mb.glow([0, y0-0.15, 0], GLOW, 24);
   mb.setGait(HOVER);
 
-  // the head pokes out through the peak -- a small skull (or, at mastermind,
-  // a brain in its glass dome) crowning the hood like a lollipop
+  // the head pokes out through the canopy neck -- a small skull (or, at
+  // mastermind, a brain in its glass dome) riding up top like a cockpit
   mb.setAnim(BREATH_H);
   const HEADBOB = [0, 0, 0, 0.1];
   mb.setGait(HEADBOB);
@@ -1499,8 +1504,8 @@ function planFloater(mb, o) {
   const sensP = [head.hR[0]*0.5, head.topY, head.hC[2]-0.1];
   const eyeP  = [0, head.hC[1]+head.hR[1]*0.15, head.hC[2]+head.hR[2]*0.6];
   return {
-    // short arms high on the hood -- a full-length armDrop would hang past
-    // the hem and read as legs, confusing itself with the tentacle-fringe
+    // short arms high on the hull -- a full-length armDrop would hang past
+    // the fins and read as legs, confusing itself with the stabilizers
     hand:   { p: [levels[3].rx*0.8, levels[3].y, levels[3].z+0.1], nrm: V.norm([1, 0, 0.3]), mirror: true, tiny: true },
     sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H, gait: HEADBOB },
     eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
