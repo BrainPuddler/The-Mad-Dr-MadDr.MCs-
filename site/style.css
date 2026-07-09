@@ -269,7 +269,12 @@ body[data-faction="alien"] button { border-radius: 12px; }
   width: 56px; height: 56px; object-fit: cover; border-radius: 4px;
   background: #05070c; display: block;
 }
-.tray-parts .part-thumb img { width: 72px; height: 72px; }
+/* the tray's live turntable canvas -- bigger than a freezer thumbnail,
+   since this is the "look closely at it" view */
+.part-canvas {
+  width: 108px; height: 108px; border-radius: 4px;
+  background: #05070c; display: block;
+}
 .part-name { font-size: 12px; text-transform: capitalize; }
 .part-from { font-size: 10px; color: var(--dim); }
 .part-stats { grid-template-columns: 62px 1fr; font-size: 10.5px; width: 100%; margin-top: 2px; }

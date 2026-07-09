@@ -15,7 +15,7 @@ import {
   originOf, isVestigial, homologOf, brainSize, bodyAxis, brainAxis, heartVigor,
   capacity as controlCapacity, controlCost, controlRadius, berserkThreshold,
 } from "./lib/index.js";
-import { initRenderer, updateGenome, destroyRenderer, locomotionProfile, setLabFaction, renderThumbnail, renderPartThumbnail } from "./creature-renderer.js";
+import { initRenderer, updateGenome, destroyRenderer, locomotionProfile, setLabFaction, renderThumbnail, renderPartThumbnail, initPartTurntable } from "./creature-renderer.js";
 
 const MUTATOR_URL = "https://maddr-mutator.onrender.com";
 const LOCAL_KEY   = "maddr-lab-v2";
@@ -124,6 +124,12 @@ function partThumbHtml(t) {
   const url = partThumbCache[t.itemId];
   return url ? `<img src="${url}" alt="${esc(partName(t.item))}">` : partIcon(t.item);
 }
+// The surgical tray shows a LIVE turntable per part instead of a static
+// thumbnail -- a real WebGL context + its own rAF loop per canvas
+// (initPartTurntable), so they must be stopped before the tray's DOM is
+// rebuilt out from under them, or the loops (and GL contexts) leak.
+let activeTurntables = [];
+function stopTurntables() { activeTurntables.forEach(h => h.stop()); activeTurntables = []; }
 const PART_AXES = ["length", "girth", "taper", "curl", "count", "ornament"];
 function partStatsHtml(item) {
   if (item.kind === "heart") {
@@ -651,6 +657,7 @@ function setView(v) {
   document.getElementById("nav-chop").classList.toggle("active", v === "chop");
   document.getElementById("nav-stable").classList.toggle("active", v === "stable");
   destroyRenderer(); _lastPortraitId = null;   // hand the single renderer over
+  stopTurntables();   // leaving the Chop Shop mid-tray shouldn't leave rAF loops spinning
   if (v === "stable") renderStable();
   else if (v === "chop") { applyFaction(local.faction); renderChop(); }
   else { applyFaction(local.faction); render(); }
@@ -894,6 +901,7 @@ function renderChopSlab() {
   const wrap = document.getElementById("chop-slab");
   const c = selected();
   destroyRenderer();
+  stopTurntables();
   if (!c) { wrap.innerHTML = `<div class="empty">Nothing on the slab. Send a specimen over from the Lab.</div>`; return; }
   const g = c.genome;
   const v = viability(g);
@@ -1028,7 +1036,7 @@ function partTileHtml(t, { canSend }) {
   const item = t.item;
   const originBadge = item.kind === "heart" ? "" : `<span class="badge ${originOf(item.family)}">${originOf(item.family)}</span>`;
   return `<div class="part-tile">
-    <div class="part-thumb">${partThumbHtml(t)}</div>
+    <div class="part-thumb"><canvas class="part-canvas" data-turntable="${esc(t.itemId)}"></canvas></div>
     <div class="part-body">
       <div class="part-name">${esc(partName(item))} ${originBadge}</div>
       <div class="part-stats kv">${partStatsHtml(item)}</div>
@@ -1045,6 +1053,7 @@ function partTileHtml(t, { canSend }) {
 function renderChopTray() {
   const wrap = document.getElementById("chop-slab");
   destroyRenderer();
+  stopTurntables();
   const items = local.openGroup ? groupItems(local.openGroup) : [];
   if (items.length === 0) {
     if (local.openGroup) { local.openGroup = null; saveLocal(); }   // that group emptied out from under us
@@ -1063,6 +1072,12 @@ function renderChopTray() {
       <div class="tray-parts">${items.map(t => partTileHtml(t, { canSend: !!c })).join("")}</div>
       <button id="btn-return-drawer">↩️ Return to drawer</button>
     </div>`;
+  // one live turntable canvas per part, matching each card up by itemId
+  const byId = Object.fromEntries(items.map(t => [t.itemId, t]));
+  wrap.querySelectorAll("canvas[data-turntable]").forEach(cv => {
+    const t = byId[cv.dataset.turntable]; if (!t) return;
+    activeTurntables.push(initPartTurntable(cv, t.item, partSlot(t.item), local.faction));
+  });
   wrap.querySelectorAll("button[data-item]").forEach(b =>
     b.addEventListener("click", () => doSew(b.dataset.item)));
   document.getElementById("btn-return-drawer")?.addEventListener("click", () => {

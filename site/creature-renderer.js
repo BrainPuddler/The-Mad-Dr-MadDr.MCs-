@@ -2584,6 +2584,58 @@ function buildBackground() {
   return c;
 }
 
+function roundedRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// A plain steel surgical tray -- no sky, moon, or castle skyline; those
+// only read right under a whole creature standing on the lab's dais. A
+// single harvested part (freezer thumbnails, the surgical tray view) gets
+// this instead: a squared, riveted tray plate lit from the upper-left,
+// matching the game's brass-and-iron joint language.
+function buildTrayBackground() {
+  const c = document.createElement('canvas');
+  c.width = c.height = BW;   // square, unlike the wide lab backdrop
+  const ctx = c.getContext('2d');
+  const cx = BW / 2, cy = BW / 2;
+  const bg = ctx.createRadialGradient(cx, cy * 0.8, 10, cx, cy, BW * 0.75);
+  bg.addColorStop(0, '#2a3038');
+  bg.addColorStop(1, '#0d1015');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, BW, BW);
+
+  const m = BW * 0.10, r = BW * 0.06;
+  ctx.fillStyle = '#31363d';
+  roundedRectPath(ctx, m, m, BW - m * 2, BW - m * 2, r);
+  ctx.fill();
+
+  const m2 = m + BW * 0.025;
+  const inner = ctx.createLinearGradient(m2, m2, BW - m2, BW - m2);
+  inner.addColorStop(0, '#565f69');
+  inner.addColorStop(0.5, '#3c434b');
+  inner.addColorStop(1, '#282d33');
+  ctx.fillStyle = inner;
+  roundedRectPath(ctx, m2, m2, BW - m2 * 2, BW - m2 * 2, r * 0.7);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+  ctx.lineWidth = 1.5;
+  roundedRectPath(ctx, m2, m2, BW - m2 * 2, BW - m2 * 2, r * 0.7);
+  ctx.stroke();
+
+  ctx.fillStyle = '#8a8f96';
+  for (const [rx, ry] of [[m * 1.6, m * 1.6], [BW - m * 1.6, m * 1.6],
+                           [m * 1.6, BW - m * 1.6], [BW - m * 1.6, BW - m * 1.6]]) {
+    ctx.beginPath(); ctx.arc(rx, ry, 2.4, 0, Math.PI * 2); ctx.fill();
+  }
+  return c;
+}
+
 // Twinkling stars: generated once as GL points [clipX, clipY, phase,
 // baseBright]; the star shader pulses each by its own phase over uTime.
 function buildStars() {
@@ -2980,7 +3032,8 @@ function setupGL(canvas, opts = {}) {
   const bgTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, bgTex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, buildBackground());
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE,
+    opts.background === 'tray' ? buildTrayBackground() : buildBackground());
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -3047,6 +3100,7 @@ function setupGL(canvas, opts = {}) {
     pv: new Float32Array(pv), eye, vw, vh,
     meshBuf: gl.createBuffer(), idxBuf: gl.createBuffer(), glowBuf: gl.createBuffer(),
     idxCount: 0, idxType: gl.UNSIGNED_SHORT, glowCount: 0, maxR: 3,
+    background: opts.background ?? 'sky',
   };
 }
 
@@ -3146,12 +3200,13 @@ function drawQuad(X, x0, y0, x1, y1, u0, v0, u1, v1, tex, color, useTex, uvx = 0
   gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
-function drawFrame(X = R, still = false) {
+function drawFrame(X = R, still = false, thetaOverride = null) {
   const { gl } = X;
+  const onTray = X.background === 'tray';
   const fc = _frame % FLASH_CYCLE;
   const flash = still ? 0 : (fc < 3 ? 0.30 : (fc >= 8 && fc < 11) ? 0.17 : 0);
   const pulse = still ? 0.4 : Math.sin(_frame * 0.05);
-  const theta = still ? 0.62 : _theta;    // fixed three-quarter view for stills
+  const theta = thetaOverride ?? (still ? 0.62 : _theta);    // fixed three-quarter view for stills
   const time = still ? 0 : _frame / 60;
 
   gl.viewport(0, 0, X.vw, X.vh);
@@ -3159,11 +3214,14 @@ function drawFrame(X = R, still = false) {
   gl.disable(gl.BLEND);
   gl.disable(gl.CULL_FACE);
 
-  // backdrop (static: sky, moon, castle, dais)
+  // backdrop: the lab's painted sky/moon/castle/dais for a whole creature,
+  // or a plain riveted steel tray for a lone harvested part -- stars,
+  // drifting clouds, and the dais contact shadow are all lab-scene
+  // dressing and skipped on a tray backdrop
   drawQuad(X, -1, -1, 1, 1, 0, 0, 1, 1, X.bgTex, [1 + flash, 1 + flash, 1 + flash * 1.2, 1], true);
 
   // twinkling stars (each pulses on its own phase), additive over the sky
-  if (X.starCount) {
+  if (!onTray && X.starCount) {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
     const s = X.progS;
@@ -3180,24 +3238,30 @@ function drawFrame(X = R, still = false) {
 
   // clouds drifting slowly across the sky: two screen-shifted copies wrap
   // seamlessly (the cloud art is clear at its horizontal edges)
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  const shift = (time * 0.035) % 2;
-  for (const k of [-1, 0]) {
-    const x0 = shift + 2 * k - 1;
-    drawQuad(X, x0, -1, x0 + 2, 1, 0, 0, 1, 1, X.cloudTex, [1, 1, 1, 1], true);
+  if (!onTray) {
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    const shift = (time * 0.035) % 2;
+    for (const k of [-1, 0]) {
+      const x0 = shift + 2 * k - 1;
+      drawQuad(X, x0, -1, x0 + 2, 1, 0, 0, 1, 1, X.cloudTex, [1, 1, 1, 1], true);
+    }
+    gl.disable(gl.BLEND);
   }
-  gl.disable(gl.BLEND);
 
-  // contact shadow on the dais (screen-space, scaled by creature radius)
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  const pxPerUnit = 15.4;                      // matches the camera framing
-  const sw = (X.maxR * pxPerUnit + 14) / BW * 2;
-  const shx = (DAIS.x / BW) * 2 - 1, shy = 1 - (DAIS.y / BH) * 2;
-  drawQuad(X, shx - sw, shy - sw * 0.26, shx + sw, shy + sw * 0.26, 0, 0, 1, 1,
-    X.shTex, [0.02, 0.01, 0.06, 0.55], true);
-  gl.disable(gl.BLEND);
+  // contact shadow on the dais (screen-space, scaled by creature radius) --
+  // its screen position is tuned to the lab's fixed wide framing, which a
+  // tray's tight part-camera doesn't share, so it's skipped there too
+  if (!onTray) {
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    const pxPerUnit = 15.4;                      // matches the camera framing
+    const sw = (X.maxR * pxPerUnit + 14) / BW * 2;
+    const shx = (DAIS.x / BW) * 2 - 1, shy = 1 - (DAIS.y / BH) * 2;
+    drawQuad(X, shx - sw, shy - sw * 0.26, shx + sw, shy + sw * 0.26, 0, 0, 1, 1,
+      X.shTex, [0.02, 0.01, 0.06, 0.55], true);
+    gl.disable(gl.BLEND);
+  }
 
   // creature. Blending stays on for the whole draw -- opaque geometry
   // (alpha=1, the overwhelming majority) blends as a no-op, so this only
@@ -3332,11 +3396,29 @@ const PART_CAMERA = {
   heart:  { eye: [0, 4.2, 6],   target: [0, 3.9, 0] },
 };
 
+// A mannequin genome wearing one harvested part (or heart), for the
+// freezer thumbnail and the surgical-tray turntable to share. `slot` is
+// 'hand' | 'sensor' | 'eye' | 'leg' | 'heart'. The part keeps its OWN hue
+// (surgery.ts) rather than the mannequin's, so the render matches exactly
+// the color it'll keep once actually grafted on.
+function buildMannequinGenome(item, slot) {
+  const isHeart = slot === 'heart';
+  const slotFor = (s) => (!isHeart && slot === s)
+    ? { family: item.family, params: item.params, hue: item.hue }
+    : MANNEQUIN_SLOTS[s];
+  return {
+    genomeVersion: 2, parentIds: [],
+    body: { plan: isHeart ? 'blob' : 'tetrapod', params: [0.5, 0.5, 0.5, 0.5] },
+    brain: { tier: 'average', params: [0.5, 0.5, 0.5, 0.5, 0.5] },
+    heart: isHeart ? { tier: item.tier, params: item.params } : { tier: 'steady', params: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] },
+    slots: { hand: slotFor('hand'), sensor: slotFor('sensor'), eye: slotFor('eye'), leg: slotFor('leg') },
+  };
+}
+
 /** One-shot square still of a single harvested part (or heart) worn by
- * the neutral mannequin above, zoomed to the body region it sockets
- * into -- the freezer's real per-part thumbnail. `slot` is 'hand' |
- * 'sensor' | 'eye' | 'leg' | 'heart' (the caller already knows this from
- * homologOf / item.kind, so it isn't re-derived here). */
+ * the neutral mannequin above, zoomed to the body region it sockets into
+ * and set on a plain steel tray (not the lab dais) -- the freezer's real
+ * per-part thumbnail. */
 export function renderPartThumbnail(item, slot, faction, size = 96) {
   const prevFac = _faction;
   _faction = SCENES[faction] ? faction : 'maddr';
@@ -3344,21 +3426,9 @@ export function renderPartThumbnail(item, slot, faction, size = 96) {
   canvas.width = canvas.height = size;
   let url = '';
   try {
-    const isHeart = slot === 'heart';
-    // the item's own hue (surgery.ts) -- so the freezer render matches
-    // exactly the color it'll keep once grafted on, not the mannequin's
-    const slotFor = (s) => (!isHeart && slot === s)
-      ? { family: item.family, params: item.params, hue: item.hue }
-      : MANNEQUIN_SLOTS[s];
-    const genome = {
-      genomeVersion: 2, parentIds: [],
-      body: { plan: isHeart ? 'blob' : 'tetrapod', params: [0.5, 0.5, 0.5, 0.5] },
-      brain: { tier: 'average', params: [0.5, 0.5, 0.5, 0.5, 0.5] },
-      heart: isHeart ? { tier: item.tier, params: item.params } : { tier: 'steady', params: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] },
-      slots: { hand: slotFor('hand'), sensor: slotFor('sensor'), eye: slotFor('eye'), leg: slotFor('leg') },
-    };
+    const genome = buildMannequinGenome(item, slot);
     const cam = PART_CAMERA[slot] ?? PART_CAMERA.hand;
-    const X = setupGL(canvas, { preserve: true, vw: size, vh: size, eye: cam.eye, target: cam.target });
+    const X = setupGL(canvas, { preserve: true, vw: size, vh: size, eye: cam.eye, target: cam.target, background: 'tray' });
     uploadCreature(genome, X);
     drawFrame(X, true);
     url = canvas.toDataURL('image/png');
@@ -3368,6 +3438,50 @@ export function renderPartThumbnail(item, slot, faction, size = 96) {
   }
   _faction = prevFac;
   return url;
+}
+
+/** A live, continuously-rotating turntable of a single harvested part (or
+ * heart) on its own canvas + WebGL context -- the surgical tray's real
+ * per-part view, "just like the slab" but for one loose piece on a tray
+ * instead of a whole creature on the dais. Deliberately simple: no
+ * breathing/blinking/gait -- those all read off the single shared "live"
+ * creature (R) and belong to a body that's still attached; a part sitting
+ * in a tray just turns slowly so you can see it from every side. Returns
+ * `{ stop }` -- call it when the tray card is torn down, or this canvas's
+ * rAF loop and GL context leak forever. */
+export function initPartTurntable(canvas, item, slot, faction, size = 160) {
+  canvas.width = canvas.height = size;
+  const prevFac = _faction;
+  _faction = SCENES[faction] ? faction : 'maddr';
+  let X;
+  try {
+    const genome = buildMannequinGenome(item, slot);
+    const cam = PART_CAMERA[slot] ?? PART_CAMERA.hand;
+    X = setupGL(canvas, { vw: size, vh: size, eye: cam.eye, target: cam.target, background: 'tray' });
+    uploadCreature(genome, X);
+  } catch (e) {
+    console.error('part turntable failed:', e);
+    _faction = prevFac;
+    return { stop() {} };
+  }
+  _faction = prevFac;
+
+  let theta = 0.2, raf = 0, stopped = false;
+  const step = () => {
+    if (stopped) return;
+    theta += 0.007;
+    try { drawFrame(X, true, theta); }
+    catch (e) { console.error('part turntable frame failed:', e); stopped = true; return; }
+    raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
+  return {
+    stop() {
+      stopped = true;
+      if (raf) cancelAnimationFrame(raf);
+      X.gl.getExtension('WEBGL_lose_context')?.loseContext();
+    },
+  };
 }
 
 // ── public API ──────────────────────────────────────────────────────────────
