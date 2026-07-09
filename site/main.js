@@ -378,7 +378,12 @@ async function doSew(itemId) {
         if (rec.explantedHeartItemId) registerFrom(rec.explantedHeartItemId, c.name);
         logEntry(`🫀 Transplanted a ${entry.item.tier} heart into ${c.name} (${vword(rec.viability)}). Old heart back in tray.`);
       } else {
-        logEntry(`🪡 Sewed the ${entry.item.family.replace(/_/g, " ")} onto ${c.name}'s ${homologOf(entry.item.family)} (${vword(rec.viability)}).`);
+        if (rec.explantedPartItemId) {
+          registerFrom(rec.explantedPartItemId, c.name);
+          logEntry(`🪡 Sewed the ${entry.item.family.replace(/_/g, " ")} onto ${c.name}'s ${homologOf(entry.item.family)}, swapping out what was there (${vword(rec.viability)}). Old part back in the freezer.`);
+        } else {
+          logEntry(`🪡 Sewed the ${entry.item.family.replace(/_/g, " ")} onto ${c.name}'s ${homologOf(entry.item.family)} (${vword(rec.viability)}).`);
+        }
       }
     } else if (rec.result === "limb_rejected") {
       logEntry(`🦠 ${c.name}'s heart can't feed the new ${(entry.item.family ?? "part").replace(/_/g, " ")} — rejected. The part is still usable.`);
@@ -497,6 +502,7 @@ async function doGraftGroup(groupKey) {
   try {
     let curId = c.id;
     const grafted = [];
+    let swapped = 0;
     for (const t of items) {
       if (t.item.kind === "heart") {
         const rec = await api("POST", "/sew/heart", { idempotencyKey: ikey(), creatureId: curId, itemId: t.itemId });
@@ -521,11 +527,13 @@ async function doGraftGroup(groupKey) {
           break;
         }
         registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); curId = rec.genomeId;
+        if (rec.explantedPartItemId) { registerFrom(rec.explantedPartItemId, c.name); swapped++; }
         grafted.push(t.item.family.replace(/_/g, " "));
       }
     }
     local.selectedId = curId;
-    if (grafted.length) logEntry(`🪡 Grafted the ${grafted.join(", ")} onto ${c.name} straight off the slab.`);
+    if (grafted.length) logEntry(`🪡 Grafted the ${grafted.join(", ")} onto ${c.name} straight off the slab.` +
+      (swapped ? ` Swapped out ${swapped} old part${swapped === 1 ? "" : "s"}, back in the freezer.` : ""));
   } catch (e) { logEntry(`⚠️ Graft failed: ${e.message}`); }
   saveLocal(); showBusy(false); await sync();
 }

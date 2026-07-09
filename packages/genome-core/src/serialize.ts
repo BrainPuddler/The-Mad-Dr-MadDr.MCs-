@@ -23,7 +23,7 @@ export function toJson(g: Genome): string {
   const slots: Record<string, unknown> = {};
   for (const s of SLOT_NAMES) {
     const a = g.slots[s];
-    slots[s] = { family: a.family, params: a.params };
+    slots[s] = { family: a.family, params: a.params, ...(a.hue !== undefined ? { hue: a.hue } : {}) };
   }
   return JSON.stringify({
     genomeVersion: g.genomeVersion,
@@ -67,7 +67,7 @@ export function fromJson(json: string): Genome {
   const body = o.body as { plan: string; params: number[] };
   const brain = o.brain as { tier: BrainTier; params: number[] };
   const heart = o.heart as { tier: HeartTier; params: number[] };
-  const slotsRaw = (o.slots ?? {}) as Record<string, { family: string; params: number[] }>;
+  const slotsRaw = (o.slots ?? {}) as Record<string, { family: string; params: number[]; hue?: number }>;
   const g: Genome = {
     genomeVersion: GENOME_VERSION,
     ...(typeof o.creatureId === "string" ? { creatureId: o.creatureId } : {}),
@@ -78,7 +78,11 @@ export function fromJson(json: string): Genome {
     slots: Object.fromEntries(
       Object.entries(slotsRaw).map(([k, v]) => [
         k,
-        { family: v?.family, params: (v?.params ?? []) as unknown as Params6 },
+        {
+          family: v?.family,
+          params: (v?.params ?? []) as unknown as Params6,
+          ...(typeof v?.hue === "number" ? { hue: v.hue } : {}),
+        },
       ]),
     ) as Genome["slots"],
   };

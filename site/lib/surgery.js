@@ -21,7 +21,7 @@
  * doctors' first principle, docs/01.)
  */
 import { clamp01, } from "./genome.js";
-import { STUMP_OF, homologOf, originOf } from "./catalog.js";
+import { STUMP_OF, homologOf, isVestigial, originOf } from "./catalog.js";
 import { viability } from "./energy.js";
 const ZERO6 = [0, 0, 0, 0, 0, 0];
 export function partItemHomolog(item) {
@@ -40,6 +40,7 @@ export function harvestPart(g, slot) {
         kind: "part",
         family: taken.family,
         params: taken.params,
+        hue: taken.hue ?? g.body.params[0],
         ...(g.creatureId ? { from: g.creatureId } : {}),
     };
     const donor = stumpSlot(g, slot);
@@ -65,22 +66,34 @@ export function harvestHeart(g) {
     return { donor, heart };
 }
 /** Sew a harvested part into a slot, then see whether the heart can run
- * the result. Throws only on a homolog-grammar violation (you cannot sew
- * an arm into an eye socket); energy failure is a returned outcome, not an
- * exception. */
+ * the result. A slot that already holds a real part is a SWAP: the prior
+ * occupant comes off and is handed back (explantedPart), not discarded --
+ * grafting over an existing head shouldn't just erase it. Throws only on
+ * a homolog-grammar violation (you cannot sew an arm into an eye socket);
+ * energy failure is a returned outcome, not an exception. */
 export function sewPart(patient, slot, part) {
     if (partItemHomolog(part) !== slot) {
         throw new Error(`${part.family} does not fit the ${slot} slot (homolog grammar)`);
     }
+    const prior = patient.slots[slot];
     const candidate = {
         ...patient,
         parentIds: patient.creatureId ? [patient.creatureId] : patient.parentIds,
         creatureId: undefined,
-        slots: { ...patient.slots, [slot]: { family: part.family, params: clampAll(part.params) } },
+        slots: { ...patient.slots, [slot]: { family: part.family, params: clampAll(part.params), hue: part.hue } },
     };
     const v = viability(candidate);
     if (v.state === "viable") {
-        return { result: "survived", patient: candidate, alive: true, viability: v };
+        const explantedPart = isVestigial(prior.family)
+            ? undefined
+            : {
+                kind: "part",
+                family: prior.family,
+                params: prior.params,
+                hue: prior.hue ?? patient.body.params[0],
+                ...(patient.creatureId ? { from: patient.creatureId } : {}),
+            };
+        return { result: "survived", patient: candidate, alive: true, viability: v, explantedPart };
     }
     if (v.state === "strained") {
         // the limb necrotizes; the slot returns to what it was before surgery

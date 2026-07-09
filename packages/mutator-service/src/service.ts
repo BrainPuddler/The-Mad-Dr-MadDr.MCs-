@@ -289,10 +289,16 @@ export class MutatorService {
       const r = sewPartOp(patient.genome, args.slot, part);
       if (r.result === "survived") {
         this.store.removeItem(accountId, args.itemId); // consumed into the body
+        let explantedId: string | undefined;
+        if (r.explantedPart) explantedId = this.stashItem(accountId, r.explantedPart);
         return {
           status: "completed",
           mint: r.patient,
-          extra: { result: r.result, viability: r.viability },
+          extra: {
+            result: r.result,
+            viability: r.viability,
+            ...(explantedId ? { explantedPartItemId: explantedId } : {}),
+          },
         };
       }
       // failure: the part is still in the tray; refund most of the fee

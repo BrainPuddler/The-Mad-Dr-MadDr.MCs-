@@ -71,6 +71,9 @@ export function validateGenome(g) {
         else if (!inUnit(allele.params)) {
             errors.push(`${s} params out of [0,1]`);
         }
+        if (allele.hue !== undefined && !inUnit([allele.hue])) {
+            errors.push(`${s} hue out of [0,1]`);
+        }
     }
     // lineage sanity
     if (!Array.isArray(g.parentIds) || g.parentIds.length > 2) {

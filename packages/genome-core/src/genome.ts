@@ -85,6 +85,12 @@ export type HeartParams = Params6;
 export interface PartAllele {
   readonly family: string;
   readonly params: Params6;
+  /** The skin hue [0,1] this specific part expresses, independent of the
+   * body's own hue gene. Absent = express the body's own hue, which is
+   * what every native (never-grafted) part does. Set by surgery.ts when a
+   * harvested part is sewn on, so a transplant keeps the donor's color
+   * instead of blending into the recipient (docs/06 grafting). */
+  readonly hue?: number;
 }
 
 export interface BodyGenes {

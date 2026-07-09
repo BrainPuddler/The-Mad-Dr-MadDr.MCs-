@@ -24,6 +24,7 @@ const HEAVY_CLAW: PartItem = {
   kind: "part",
   family: "claw_hand",
   params: [1, 1, 0.5, 0.5, 0.5, 0.5],
+  hue: 0.5,
 };
 
 const STUMPS = {
@@ -83,6 +84,46 @@ test("a part the heart can afford is sewn on and the creature lives", () => {
   assert.equal(viability(r.patient).state, "viable");
 });
 
+test("grafting onto a slot that already has a real part swaps it out instead of destroying it", () => {
+  const host = make({
+    heart: "titan", vigor: 1,
+    slots: { hand: { family: "pincer", params: [0.2, 0.2, 0.2, 0.2, 0.2, 0.2] } },
+  });
+  const r = sewPart(host, "hand", HEAVY_CLAW);
+  assert.equal(r.result, "survived");
+  assert.equal(r.patient.slots.hand.family, "claw_hand", "the new part takes the slot");
+  assert.ok(r.explantedPart, "the old part comes off instead of vanishing");
+  assert.equal(r.explantedPart!.family, "pincer");
+  assert.deepEqual(r.explantedPart!.params, [0.2, 0.2, 0.2, 0.2, 0.2, 0.2]);
+
+  // and the swapped-out part is still perfectly usable elsewhere
+  const host2 = make({ heart: "titan", vigor: 1 });
+  assert.equal(sewPart(host2, "hand", r.explantedPart!).result, "survived");
+});
+
+test("grafting onto a bare stump has nothing to explant", () => {
+  const host = make({ heart: "titan", vigor: 1 });   // hand is a stump by default
+  const r = sewPart(host, "hand", HEAVY_CLAW);
+  assert.equal(r.result, "survived");
+  assert.equal(r.explantedPart, undefined, "a stump had nothing worth saving");
+});
+
+test("a part keeps its own hue through harvest and graft instead of taking the recipient's", () => {
+  const donor = make({
+    heart: "titan", vigor: 1,
+    slots: { hand: { family: "claw_hand", params: HEAVY_CLAW.params } },
+  });
+  const donorHued: Genome = { ...donor, body: { ...donor.body, params: [0.85, 0, 0, 0] } };
+  const { part } = harvestPart(donorHued, "hand");
+  assert.equal(part.hue, 0.85, "harvest captures the donor's own hue");
+
+  const recipient = make({ heart: "titan", vigor: 1 });
+  const recipientHued: Genome = { ...recipient, body: { ...recipient.body, params: [0.1, 0, 0, 0] } };
+  const r = sewPart(recipientHued, "hand", part);
+  assert.equal(r.result, "survived");
+  assert.equal(r.patient.slots.hand.hue, 0.85, "the graft keeps the donor's color, not the recipient's");
+});
+
 test("a part the heart can't quite afford is rejected; the creature lives, the part survives", () => {
   const host = make({ heart: "faint", vigor: 0 }); // smallest possible heart
   assert.equal(viability(host).state, "viable");
@@ -105,7 +146,7 @@ test("sewing onto an already-strained body kills it on the table; the part survi
   const strained = make({ heart: "faint", vigor: 0, slots: { hand: { family: "claw_hand", params: HEAVY_CLAW.params } } });
   assert.equal(viability(strained).state, "strained");
 
-  const r = sewPart(strained, "leg", { kind: "part", family: "hoofed_leg", params: [1, 1, 0.5, 0.5, 0.5, 0.5] });
+  const r = sewPart(strained, "leg", { kind: "part", family: "hoofed_leg", params: [1, 1, 0.5, 0.5, 0.5, 0.5], hue: 0.5 });
   assert.equal(r.result, "patient_died");
   assert.equal(r.alive, false);
   assert.ok(r.returnedPart, "even from a corpse, the part is recovered");

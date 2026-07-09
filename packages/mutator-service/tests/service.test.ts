@@ -142,6 +142,21 @@ test("sewing a part the heart affords consumes the tray item and mints a creatur
   assert.equal(svc.listTray(ACC).length, 0, "consumed");
 });
 
+test("grafting onto a slot that already has a part swaps it into the tray instead of losing it", () => {
+  const { store, svc } = fresh();
+  const host = seedCreature(store, bigHeart(), { hand: { family: "pincer", params: [0.2, 0.2, 0.2, 0.2, 0.2, 0.2] } });
+  const itemId = seedPart(store, HEAVY_CLAW);
+
+  const r: any = svc.sewPart(ACC, key(), { creatureId: host, slot: "hand", itemId });
+  assert.equal(r.result.result, "survived");
+  assert.equal(svc.getCreature(ACC, r.result.genomeId).genome.slots.hand.family, "claw_hand");
+
+  const tray = svc.listTray(ACC);
+  assert.equal(tray.length, 1, "the old pincer lands back in the tray, not lost");
+  assert.equal((tray[0]!.item as PartItem).family, "pincer");
+  assert.equal(r.result.explantedPartItemId, tray[0]!.itemId);
+});
+
 test("a rejected graft keeps the part in the tray and refunds most of the fee", () => {
   const { store, svc } = fresh();
   const host = seedCreature(store, faintHeart()); // smallest heart
@@ -196,7 +211,7 @@ test("roster is internal-key gated and returns verifiable signatures", () => {
 
 // ---- helpers: seed the store with controlled creatures -----------------------
 
-const HEAVY_CLAW: PartItem = { kind: "part", family: "claw_hand", params: [1, 1, 0.5, 0.5, 0.5, 0.5] };
+const HEAVY_CLAW: PartItem = { kind: "part", family: "claw_hand", params: [1, 1, 0.5, 0.5, 0.5, 0.5], hue: 0.5 };
 
 const STUMPS = {
   hand: { family: "hand_stump", params: z() },

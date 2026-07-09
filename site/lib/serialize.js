@@ -13,7 +13,7 @@ export function toJson(g) {
     const slots = {};
     for (const s of SLOT_NAMES) {
         const a = g.slots[s];
-        slots[s] = { family: a.family, params: a.params };
+        slots[s] = { family: a.family, params: a.params, ...(a.hue !== undefined ? { hue: a.hue } : {}) };
     }
     return JSON.stringify({
         genomeVersion: g.genomeVersion,
@@ -62,7 +62,11 @@ export function fromJson(json) {
         heart: { tier: heart?.tier, params: (heart?.params ?? []) },
         slots: Object.fromEntries(Object.entries(slotsRaw).map(([k, v]) => [
             k,
-            { family: v?.family, params: (v?.params ?? []) },
+            {
+                family: v?.family,
+                params: (v?.params ?? []),
+                ...(typeof v?.hue === "number" ? { hue: v.hue } : {}),
+            },
         ])),
     };
     const r = validateGenome(g);

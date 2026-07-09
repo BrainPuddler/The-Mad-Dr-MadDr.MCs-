@@ -29,7 +29,7 @@ import {
   type SlotName,
   clamp01,
 } from "./genome.js";
-import { STUMP_OF, homologOf, originOf, type Origin } from "./catalog.js";
+import { STUMP_OF, homologOf, isVestigial, originOf, type Origin } from "./catalog.js";
 import { viability, type Viability } from "./energy.js";
 
 const ZERO6: Params6 = [0, 0, 0, 0, 0, 0];
@@ -42,6 +42,12 @@ export interface PartItem {
   readonly kind: "part";
   readonly family: string;
   readonly params: Params6;
+  /** The skin hue [0,1] this part was expressing at the moment it was cut
+   * loose -- its OWN body's hue if it was still native, or whatever hue it
+   * already carried if this is a part being re-harvested after a prior
+   * graft. Carried through sewPart so a transplant keeps its color instead
+   * of taking on the recipient's. */
+  readonly hue: number;
   /** Provenance: the creatureId it was cut from, if known. */
   readonly from?: string;
 }
@@ -72,6 +78,7 @@ export function harvestPart(g: Genome, slot: SlotName): { donor: Genome; part: P
     kind: "part",
     family: taken.family,
     params: taken.params,
+    hue: taken.hue ?? g.body.params[0],
     ...(g.creatureId ? { from: g.creatureId } : {}),
   };
   const donor = stumpSlot(g, slot);
@@ -113,26 +120,43 @@ export interface PartSurgery {
   /** Handed back whenever the part was NOT consumed -- i.e. on every
    * failure. Always still usable. */
   readonly returnedPart?: PartItem;
+  /** The patient's OLD part in that slot, explanted and handed back on a
+   * successful graft -- swapped out, not destroyed (docs/01 "nothing is
+   * wasted" applies here too, not just to failures). Absent if the slot
+   * was already a stump -- there was nothing there to save. */
+  readonly explantedPart?: PartItem;
 }
 
 /** Sew a harvested part into a slot, then see whether the heart can run
- * the result. Throws only on a homolog-grammar violation (you cannot sew
- * an arm into an eye socket); energy failure is a returned outcome, not an
- * exception. */
+ * the result. A slot that already holds a real part is a SWAP: the prior
+ * occupant comes off and is handed back (explantedPart), not discarded --
+ * grafting over an existing head shouldn't just erase it. Throws only on
+ * a homolog-grammar violation (you cannot sew an arm into an eye socket);
+ * energy failure is a returned outcome, not an exception. */
 export function sewPart(patient: Genome, slot: SlotName, part: PartItem): PartSurgery {
   if (partItemHomolog(part) !== slot) {
     throw new Error(`${part.family} does not fit the ${slot} slot (homolog grammar)`);
   }
+  const prior = patient.slots[slot];
   const candidate: Genome = {
     ...patient,
     parentIds: patient.creatureId ? [patient.creatureId] : patient.parentIds,
     creatureId: undefined,
-    slots: { ...patient.slots, [slot]: { family: part.family, params: clampAll(part.params) } },
+    slots: { ...patient.slots, [slot]: { family: part.family, params: clampAll(part.params), hue: part.hue } },
   };
   const v = viability(candidate);
 
   if (v.state === "viable") {
-    return { result: "survived", patient: candidate, alive: true, viability: v };
+    const explantedPart: PartItem | undefined = isVestigial(prior.family)
+      ? undefined
+      : {
+          kind: "part",
+          family: prior.family,
+          params: prior.params,
+          hue: prior.hue ?? patient.body.params[0],
+          ...(patient.creatureId ? { from: patient.creatureId } : {}),
+        };
+    return { result: "survived", patient: candidate, alive: true, viability: v, explantedPart };
   }
   if (v.state === "strained") {
     // the limb necrotizes; the slot returns to what it was before surgery

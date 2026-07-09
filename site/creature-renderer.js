@@ -543,10 +543,18 @@ function buildCreatureAtDetail(genome) {
     if (slot === 'sensor' && (al.family === 'antenna' || al.family === 'horn') &&
         P(al.params, 5, 0.5) < 0.35) continue;
 
+    // a grafted part remembers its OWN hue (surgery.ts, docs/06) instead
+    // of blending into this body's skin -- a transplanted limb should
+    // still look like it came from wherever it came from. Native
+    // (never-grafted) parts have no hue of their own and just express
+    // the body's, same as before.
+    const partKit = al.hue !== undefined ? factionKit(_faction, al.hue, vigor) : null;
+    const partSkin = partKit ? partKit.skin : skin, partSkinFn = partKit ? partKit.skinFn : skinFn;
+
     const sock = sockets[slot];
     const sides = sock.mirror ? [1, -1] : [1];
     for (const side of sides)
-      buildPart(mb, slot, al.family, al.params ?? [], side, sock, { skin, skinFn, faction: _faction });
+      buildPart(mb, slot, al.family, al.params ?? [], side, sock, { skin: partSkin, skinFn: partSkinFn, faction: _faction });
   }
   return mb;
 }
@@ -3337,7 +3345,11 @@ export function renderPartThumbnail(item, slot, faction, size = 96) {
   let url = '';
   try {
     const isHeart = slot === 'heart';
-    const slotFor = (s) => (!isHeart && slot === s) ? { family: item.family, params: item.params } : MANNEQUIN_SLOTS[s];
+    // the item's own hue (surgery.ts) -- so the freezer render matches
+    // exactly the color it'll keep once grafted on, not the mannequin's
+    const slotFor = (s) => (!isHeart && slot === s)
+      ? { family: item.family, params: item.params, hue: item.hue }
+      : MANNEQUIN_SLOTS[s];
     const genome = {
       genomeVersion: 2, parentIds: [],
       body: { plan: isHeart ? 'blob' : 'tetrapod', params: [0.5, 0.5, 0.5, 0.5] },
