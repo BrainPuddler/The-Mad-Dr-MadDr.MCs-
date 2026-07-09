@@ -1114,39 +1114,37 @@ function planBlob(mb, o) {
   const HEARTC_L = [205, 35, 50], HEARTC_R = [150, 45, 62];   // oxygenated left, darker deoxygenated right
   const STOMACHC = [214, 172, 92], GUTC = [188, 116, 132];
   // three trapezoidal chambers (low-segment lathes -- faceted, not
-  // smooth, to read as built rather than a round blob): one big chamber
-  // (the left ventricle, the real heart's main pumping chamber -- gets
-  // the biggest shape and the strongest beat) beside two small squat
-  // ones stacked directly on top of each other (right atrium over right
-  // ventricle, the way they actually sit). Each beats on setHeart()'s
-  // own clock (uHeartBeat, gaitStep() in the JS), which tracks the
-  // creature's current locomotion speed but never goes fully silent at
-  // rest the way the shared gait channel does.
+  // smooth, to read as built rather than a round blob): one large main
+  // chamber as the base, tapering to the anatomical apex point, with the
+  // left and right ventricles stacked directly on TOP of it -- same
+  // centerline, not offset to the side or set behind it -- left (bright,
+  // oxygenated) below right (darker, deoxygenated). Each beats on
+  // setHeart()'s own clock (uHeartBeat, gaitStep() in the JS), which
+  // tracks the creature's current locomotion speed but never goes fully
+  // silent at rest the way the shared gait channel does.
   const hs = Math.min(dR[0], dR[1], dR[2]) * 0.20;
-  const heartBase = [dR[0]*0.12, dC[1] + dR[1]*0.30, dR[2]*0.16];
+  const heartBase = [dR[0]*0.12, dC[1] + dR[1]*0.20, dR[2]*0.16];
 
-  // the one larger chamber -- tapers to the anatomical apex point
-  const lvC = [heartBase[0] - hs*0.30, heartBase[1] - hs*0.05, heartBase[2]];
-  mb.setHeart(0.34);
+  // the large main chamber -- the base everything else sits on
+  mb.setHeart(0.30);
   lathe(mb, [
-    { y: lvC[1] - hs*1.05, x: lvC[0], z: lvC[2], rx: hs*0.16, rz: hs*0.14 },
-    { y: lvC[1] - hs*0.05, x: lvC[0], z: lvC[2], rx: hs*0.68, rz: hs*0.60 },
-    { y: lvC[1] + hs*0.85, x: lvC[0], z: lvC[2], rx: hs*0.78, rz: hs*0.68 },
+    { y: heartBase[1] - hs*0.55, x: heartBase[0], z: heartBase[2], rx: hs*0.16, rz: hs*0.14 },
+    { y: heartBase[1] + hs*0.25, x: heartBase[0], z: heartBase[2], rx: hs*0.68, rz: hs*0.60 },
+    { y: heartBase[1] + hs*0.80, x: heartBase[0], z: heartBase[2], rx: hs*0.60, rz: hs*0.52 },
   ], HEARTC_L, 0.55, 0, 6);
 
-  // the two small squat chambers, stacked -- right ventricle below,
-  // right atrium directly above it, each short and wide rather than
-  // tapered-tall like the big one
-  const rBase = [heartBase[0] + hs*0.62, heartBase[1] - hs*0.35, heartBase[2] + hs*0.08];
-  mb.setHeart(0.26);
+  // left ventricle, directly on top of the main chamber
+  const topY = heartBase[1] + hs*0.80;
+  mb.setHeart(0.30);
   lathe(mb, [
-    { y: rBase[1] - hs*0.22, x: rBase[0], z: rBase[2], rx: hs*0.30, rz: hs*0.26 },
-    { y: rBase[1] + hs*0.22, x: rBase[0], z: rBase[2], rx: hs*0.48, rz: hs*0.42 },
-  ], HEARTC_R, 0.55, 0, 6);
-  mb.setHeart(0.16);
+    { y: topY + hs*0.02, x: heartBase[0], z: heartBase[2], rx: hs*0.32, rz: hs*0.28 },
+    { y: topY + hs*0.46, x: heartBase[0], z: heartBase[2], rx: hs*0.50, rz: hs*0.44 },
+  ], HEARTC_L, 0.55, 0, 6);
+  // right ventricle, stacked directly on top of the left
+  mb.setHeart(0.22);
   lathe(mb, [
-    { y: rBase[1] + hs*0.20, x: rBase[0], z: rBase[2], rx: hs*0.40, rz: hs*0.35 },
-    { y: rBase[1] + hs*0.62, x: rBase[0], z: rBase[2], rx: hs*0.32, rz: hs*0.28 },
+    { y: topY + hs*0.44, x: heartBase[0], z: heartBase[2], rx: hs*0.42, rz: hs*0.37 },
+    { y: topY + hs*0.86, x: heartBase[0], z: heartBase[2], rx: hs*0.34, rz: hs*0.30 },
   ], HEARTC_R, 0.55, 0, 5);
   mb.setHeart(0);
   // the stomach: a fleshy sac slung mid-body
