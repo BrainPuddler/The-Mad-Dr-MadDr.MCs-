@@ -119,6 +119,8 @@ td, th { padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line); }
 
 footer { padding: 10px 18px 20px; color: var(--dim); font-size: 11px; border-top: 1px solid var(--line); }
 code { color: var(--acid); }
+.build-info { margin-top: 6px; font-size: 10px; opacity: .85; }
+.build-info code { font-size: 10px; }
 
 
 /* ── faction skins ─────────────────────────────────────────────────────── */

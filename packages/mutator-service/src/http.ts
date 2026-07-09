@@ -46,6 +46,18 @@ interface Ctx {
 
 const MAX_BODY = 256 * 1024; // genomes are tiny; cap requests hard
 
+// Which commit this running instance was actually built from, and when
+// this process booted. Render sets RENDER_GIT_COMMIT at runtime for
+// every service; BUILD_COMMIT (baked in at image-build time, Dockerfile)
+// covers the case that isn't set. Public and unauthenticated, same as
+// /health -- it's build metadata, not user data, and the whole point is
+// that it's checkable without an account (a stale deploy is invisible
+// from the client otherwise: docs/12 decision log).
+const VERSION_INFO = {
+  commit: process.env.RENDER_GIT_COMMIT ?? process.env.BUILD_COMMIT ?? "unknown",
+  startedAt: new Date().toISOString(),
+};
+
 function compile(path: string): { pattern: RegExp; paramNames: string[] } {
   const names: string[] = [];
   const rx = path.replace(/:[A-Za-z0-9_]+/g, (m) => {
@@ -130,6 +142,7 @@ export function createApp(service: MutatorService): ReturnType<typeof createServ
     setCors(req, res);
     if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
     if (req.url === "/health") { send(res, 200, { ok: true }); return; }
+    if (req.url === "/version") { send(res, 200, VERSION_INFO); return; }
     void handle(req, res, routes, service);
   });
 }

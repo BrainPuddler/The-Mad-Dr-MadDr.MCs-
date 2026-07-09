@@ -1043,6 +1043,41 @@ function renderLog() {
     `<div class="empty">The notebook is blank.</div>`;
 }
 
+// ── build version indicator ──────────────────────────────────────────────────
+// Two independently-deployed halves: GitHub Pages autodeploys the
+// frontend on every push to main, but the mutator-service on Render does
+// NOT autodeploy just because this repo moves -- it needs its own
+// trigger and has, in practice, gone silently stale for weeks (docs/12
+// decision log). Showing both commits plus how long the backend process
+// has actually been running makes that drift visible without digging
+// through git log to notice a feature "never" works.
+function timeAgo(iso) {
+  const ms = Date.now() - new Date(iso ?? NaN).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "unknown";
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 48) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+async function loadBuildInfo() {
+  const el = document.getElementById("build-info");
+  if (!el) return;
+  const [fe, be] = await Promise.all([
+    fetch("./version.json").then(r => r.ok ? r.json() : null).catch(() => null),
+    fetch(`${MUTATOR_URL}/version`).then(r => r.ok ? r.json() : null).catch(() => null),
+  ]);
+  const feBit = `frontend <code>${esc(fe?.commit ?? "dev")}</code>`;
+  const beKnown = !!be?.commit && be.commit !== "unknown";
+  const beBit = !be
+    ? "backend unreachable"
+    : beKnown
+      ? `backend <code>${esc(be.commit)}</code> (up ${timeAgo(be.startedAt)})`
+      : `backend commit unknown (up ${timeAgo(be.startedAt)}) -- redeploy needed to bake one in`;
+  el.innerHTML = `Build: ${feBit} · <span class="${beKnown ? "" : "warn"}">${beBit}</span>`;
+}
+
 // ── portrait renderer ─────────────────────────────────────────────────────────
 let _lastPortraitId = null;
 
@@ -1169,3 +1204,4 @@ sync().catch(e => {
   logEntry(`⚠️ Could not reach the Mutator service: ${e.message}`);
   render();
 });
+loadBuildInfo();

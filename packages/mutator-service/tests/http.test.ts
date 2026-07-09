@@ -88,3 +88,23 @@ test("missing auth is 401; internal roster needs the internal key", async () => 
     await close();
   }
 });
+
+test("/health and /version are public -- no x-account-id needed", async () => {
+  const { base, close } = await startServer();
+  try {
+    const health = await fetch(`${base}/health`);
+    assert.equal(health.status, 200);
+    assert.deepEqual(await health.json(), { ok: true });
+
+    const version = await fetch(`${base}/version`);
+    assert.equal(version.status, 200);
+    const v = await version.json();
+    // no RENDER_GIT_COMMIT/BUILD_COMMIT in the test environment -- this
+    // is exactly the "deploy forgot to bake a commit in" case, so the
+    // field must still be present and honest about not knowing
+    assert.equal(v.commit, "unknown");
+    assert.ok(typeof v.startedAt === "string" && !Number.isNaN(Date.parse(v.startedAt)));
+  } finally {
+    await close();
+  }
+});

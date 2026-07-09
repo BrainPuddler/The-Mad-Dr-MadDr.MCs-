@@ -2,6 +2,13 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
+# Render auto-populates this build arg with the deployed commit's SHA for
+# any Docker service that declares it (no render.yaml wiring needed) --
+# baked in here so a stale deploy is visible from the outside via
+# /version instead of only discoverable by diffing git log against
+# observed behavior (see docs/12 decision log).
+ARG RENDER_GIT_COMMIT=unknown
+
 # genome-core: install deps + compile
 COPY packages/genome-core/package*.json ./packages/genome-core/
 RUN cd packages/genome-core && npm ci
@@ -21,6 +28,13 @@ RUN cd packages/mutator-service && npm run build
 # Runtime stage — only compiled output, no dev tools
 FROM node:22-alpine
 WORKDIR /app
+
+# ARGs don't cross the FROM boundary -- redeclare, then bake into an ENV
+# so the running process can read it (Render also sets RENDER_GIT_COMMIT
+# directly at runtime; BUILD_COMMIT is the fallback for that not being
+# present, and for plain `docker run` outside Render).
+ARG RENDER_GIT_COMMIT=unknown
+ENV BUILD_COMMIT=$RENDER_GIT_COMMIT
 
 # genome-core: package.json + compiled dist (no node_modules — zero runtime deps)
 COPY --from=build /app/packages/genome-core/package.json ./packages/genome-core/

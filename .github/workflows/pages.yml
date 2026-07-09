@@ -23,6 +23,16 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Stamp build version
+        # site/version.json lets the Lab show which commit is actually
+        # live, right next to the backend's own /version -- so a stale
+        # Render deploy (mutator-service isn't on GitHub Pages autodeploy)
+        # is visible in the UI instead of only discoverable by comparing
+        # observed behavior against git log (docs/12 decision log).
+        run: |
+          printf '{"commit":"%s","builtAt":"%s"}\n' \
+            "${GITHUB_SHA:0:7}" "$(date -u +%FT%TZ)" > site/version.json
+          cat site/version.json
       - uses: actions/configure-pages@v5
         with:
           enablement: true
