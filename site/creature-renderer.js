@@ -141,6 +141,7 @@ class MeshB {
   constructor() {
     this.v = []; this.idx = []; this.glows = [];
     this.anim = ANIM0; this.fx = 0; this.tex = TEX_NONE; this.gait = GAIT0; this.alpha = 1;
+    this.heart = 0;
   }
   setAnim(a) { this.anim = a; }
   setFx(f) { this.fx = f; }
@@ -156,14 +157,19 @@ class MeshB {
    * fields. Order matters: draw what should show THROUGH the glass
    * first, then the glass. */
   setAlpha(a) { this.alpha = a; }
+  /** Heartbeat pulse amplitude (scale along the normal), 0 = doesn't
+   * beat (default). Runs on its own speed-linked clock (uHeartBeat,
+   * driven by gaitStep()) rather than the shared breathing/gait channels,
+   * since a heart keeps beating at rest when neither of those animate. */
+  setHeart(h) { this.heart = h; }
   vert(p, n, c, g, e) {
     const a = this.anim, t = this.tex, gt = this.gait;
     this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], c[0]/255, c[1]/255, c[2]/255, g, e, this.fx,
       t[0], t[1], t[2], t[3],
       a[0], a[1], a[2], a[3],
       gt[0], gt[1], gt[2], gt[3],
-      this.alpha);
-    return this.v.length / 25 - 1;
+      this.alpha, this.heart);
+    return this.v.length / 26 - 1;
   }
   tri(a, b, c) { this.idx.push(a, b, c); }
   quad(a, b, c, d) { this.idx.push(a, b, c, a, c, d); }
@@ -1104,16 +1110,45 @@ function planBlob(mb, o) {
   const prevTex = mb.tex, prevAnim = mb.anim;
   mb.setTex(TEX_NONE);
   mb.setGait(GAIT0);   // organs don't ride the locomotion cycle; gait is reset to SQUELCH below, for the body
-  const HEARTC = [200, 40, 55], STOMACHC = [214, 172, 92], GUTC = [188, 116, 132];
-  // the beating heart: a strong pulse on the breathing channel (in sync
-  // with the body's own breath -- there's only one breath phase to hook
-  // into) plus a quicker flutter on the flap channel's faster sine, so
-  // it doesn't just read as "part of the body breathing"
-  mb.setAnim([0.4, 0.18, 0, 0.6]);
-  const heartC = [dR[0]*0.12, dC[1] + dR[1]*0.32, dR[2]*0.18];
-  ellipsoid(mb, heartC, [dR[0]*0.15, dR[1]*0.13, dR[2]*0.15], HEARTC, 0.55, 0, 10);
-  ellipsoid(mb, [heartC[0]-dR[0]*0.05, heartC[1]-dR[1]*0.04, heartC[2]],
-    [dR[0]*0.08, dR[1]*0.07, dR[2]*0.08], sh(HEARTC, 1.2), 0.55, 0, 8);
+  mb.setAnim(ANIM0);   // the heart's beat is its own channel (setHeart), not the shared breath/gait ones
+  const HEARTC_L = [205, 35, 50], HEARTC_R = [150, 45, 62];   // oxygenated left, darker deoxygenated right
+  const STOMACHC = [214, 172, 92], GUTC = [188, 116, 132];
+  // three trapezoidal chambers (low-segment lathes -- faceted, not
+  // smooth, to read as built rather than a round blob): one big chamber
+  // (the left ventricle, the real heart's main pumping chamber -- gets
+  // the biggest shape and the strongest beat) beside two small squat
+  // ones stacked directly on top of each other (right atrium over right
+  // ventricle, the way they actually sit). Each beats on setHeart()'s
+  // own clock (uHeartBeat, gaitStep() in the JS), which tracks the
+  // creature's current locomotion speed but never goes fully silent at
+  // rest the way the shared gait channel does.
+  const hs = Math.min(dR[0], dR[1], dR[2]) * 0.20;
+  const heartBase = [dR[0]*0.12, dC[1] + dR[1]*0.30, dR[2]*0.16];
+
+  // the one larger chamber -- tapers to the anatomical apex point
+  const lvC = [heartBase[0] - hs*0.30, heartBase[1] - hs*0.05, heartBase[2]];
+  mb.setHeart(0.34);
+  lathe(mb, [
+    { y: lvC[1] - hs*1.05, x: lvC[0], z: lvC[2], rx: hs*0.16, rz: hs*0.14 },
+    { y: lvC[1] - hs*0.05, x: lvC[0], z: lvC[2], rx: hs*0.68, rz: hs*0.60 },
+    { y: lvC[1] + hs*0.85, x: lvC[0], z: lvC[2], rx: hs*0.78, rz: hs*0.68 },
+  ], HEARTC_L, 0.55, 0, 6);
+
+  // the two small squat chambers, stacked -- right ventricle below,
+  // right atrium directly above it, each short and wide rather than
+  // tapered-tall like the big one
+  const rBase = [heartBase[0] + hs*0.62, heartBase[1] - hs*0.35, heartBase[2] + hs*0.08];
+  mb.setHeart(0.26);
+  lathe(mb, [
+    { y: rBase[1] - hs*0.22, x: rBase[0], z: rBase[2], rx: hs*0.30, rz: hs*0.26 },
+    { y: rBase[1] + hs*0.22, x: rBase[0], z: rBase[2], rx: hs*0.48, rz: hs*0.42 },
+  ], HEARTC_R, 0.55, 0, 6);
+  mb.setHeart(0.16);
+  lathe(mb, [
+    { y: rBase[1] + hs*0.20, x: rBase[0], z: rBase[2], rx: hs*0.40, rz: hs*0.35 },
+    { y: rBase[1] + hs*0.62, x: rBase[0], z: rBase[2], rx: hs*0.32, rz: hs*0.28 },
+  ], HEARTC_R, 0.55, 0, 5);
+  mb.setHeart(0);
   // the stomach: a fleshy sac slung mid-body
   mb.setAnim(ANIM0);
   ellipsoid(mb, [-dR[0]*0.10, dC[1] - dR[1]*0.05, dR[2]*0.08],
@@ -2576,11 +2611,11 @@ function buildClouds() {
 const VS_CREATURE = `
 attribute vec3 aPos, aNor, aCol, aMat;
 attribute vec4 aTex, aAnim, aGait;
-attribute float aAlpha;
+attribute float aAlpha, aHeart;
 uniform mat4 uPV;
 uniform float uCos, uSin;
 uniform float uTime, uBreath, uBlink, uTongue;
-uniform float uGait, uGaitAmp;
+uniform float uGait, uGaitAmp, uHeartBeat;
 uniform vec2 uGaze;
 varying vec3 vNor, vCol, vPos, vMat, vLoc, vLNor;
 varying vec4 vTex;
@@ -2589,6 +2624,13 @@ void main() {
   vLoc = aPos; vLNor = aNor; vTex = aTex; vAlpha = aAlpha;
   vec3 lp = aPos;
   lp += aNor * (aAnim.x * uBreath);                          // breathing
+  // heartbeat: an asymmetric "lub-DUB" (sharp systolic contraction, a
+  // smaller second bump, then a long relaxed rest) on its OWN clock --
+  // see gaitStep() -- so it keeps beating even when uGaitAmp is 0 (the
+  // creature standing still), just slower than when it's running
+  float lub = pow(max(sin(uHeartBeat), 0.0), 3.0);
+  float dub = pow(max(sin(uHeartBeat - 1.1), 0.0), 6.0) * 0.4;
+  lp += aNor * (aHeart * (lub + dub));
   lp.y += max(aAnim.y, 0.0) * sin(uTime * 2.6 + aAnim.w);    // traveling sinusoidal flap
   lp.y -= max(-aAnim.y, 0.0) * uBlink;                       // eyelid blink
   float sway = aAnim.z * sin(uTime * 1.4 + aAnim.w);         // pendulum sway
@@ -2783,7 +2825,7 @@ class SOD {
 // Locomotion preview: cycle idle → walk → run on the dais treadmill.
 // Cadence comes from the creature's locomotion profile, so heavy or
 // weak-hearted specimens visibly lumber while sprinters blur.
-const _gait = { phase: 0, amp: 0, mode: 0, t: 0 };
+const _gait = { phase: 0, amp: 0, mode: 0, t: 0, heartPhase: 0 };
 const GAIT_MODES = [
   { name: 'idle', dur: 210, amp: 0,   hzKey: 'walkHz' },
   { name: 'walk', dur: 360, amp: 1,   hzKey: 'walkHz' },
@@ -2793,7 +2835,7 @@ const GAIT_MODES = [
 function gaitStep() {
   const G = _gait;
   const loco = R?.loco;
-  if (!loco) return [0, 0];
+  if (!loco) return [0, 0, 0];
   const m = GAIT_MODES[G.mode];
   if (++G.t > m.dur) { G.mode = (G.mode + 1) % GAIT_MODES.length; G.t = 0; }
   const mode = GAIT_MODES[G.mode];
@@ -2805,7 +2847,14 @@ function gaitStep() {
   const hz = R.sodHz ? Math.max(0.15, R.sodHz.update(1 / 60, loco[mode.hzKey]))
                      : loco[mode.hzKey];
   G.phase += (2 * Math.PI * hz) / 60;
-  return [G.phase, G.amp];
+  // the heart runs on its own clock, driven by the SAME speed signal
+  // (hz) as the legs, but scaled well above stride rate -- and unlike
+  // aGait's motion (gated by uGaitAmp, which is 0 at idle), hz itself
+  // never drops to 0 at rest -- idle still tracks walkHz, just without
+  // visibly stepping -- so the beat never actually stops, only slows
+  const heartHz = 1.0 + hz * 1.3;
+  G.heartPhase += (2 * Math.PI * heartHz) / 60;
+  return [G.phase, G.amp, G.heartPhase];
 }
 
 // Gaze: pupils saccade — a quick eased hop to a new target, then a long
@@ -3109,7 +3158,7 @@ function drawFrame(X = R, still = false) {
   const p = X.progC;
   gl.useProgram(p);
   gl.bindBuffer(gl.ARRAY_BUFFER, X.meshBuf);
-  const stride = 100;
+  const stride = 104;
   const attr = (name, size, off) => {
     const a = gl.getAttribLocation(p, name);
     gl.enableVertexAttribArray(a);
@@ -3117,6 +3166,7 @@ function drawFrame(X = R, still = false) {
   };
   attr('aPos', 3, 0); attr('aNor', 3, 12); attr('aCol', 3, 24); attr('aMat', 3, 36);
   attr('aTex', 4, 48); attr('aAnim', 4, 64); attr('aGait', 4, 80); attr('aAlpha', 1, 96);
+  attr('aHeart', 1, 100);
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_2D, X.skinTex);
   gl.uniform1i(gl.getUniformLocation(p, 'uSkin'), 1);
@@ -3136,9 +3186,10 @@ function drawFrame(X = R, still = false) {
   const gz = still ? [0, 0] : gazeLevel();
   gl.uniform2f(gl.getUniformLocation(p, 'uGaze'), gz[0], gz[1]);
   gl.uniform1f(gl.getUniformLocation(p, 'uTongue'), still ? 0 : tongueLevel());
-  const gs = still ? [0, 0] : gaitStep();
+  const gs = still ? [0, 0, 0] : gaitStep();
   gl.uniform1f(gl.getUniformLocation(p, 'uGait'), gs[0]);
   gl.uniform1f(gl.getUniformLocation(p, 'uGaitAmp'), gs[1]);
+  gl.uniform1f(gl.getUniformLocation(p, 'uHeartBeat'), gs[2]);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, X.idxBuf);
   gl.drawElements(gl.TRIANGLES, X.idxCount, X.idxType, 0);
   gl.disable(gl.BLEND);
