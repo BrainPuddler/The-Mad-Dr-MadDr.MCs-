@@ -1942,25 +1942,11 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       if (count < 0.45) {
         const cy = sock.len * 0.42, hh = sock.len * 0.4;
         const TREAD = [40, 42, 48];
-        const treadLen = 2.4;   // the tread's long axis -- runs front-to-back,
-                                 // so a front-facing camera foreshortens it away;
-                                 // without a visible track pattern this just
-                                 // reads as a stubby rounded foot, not a tread
         mb.setGait([0, 0, side > 0 ? 0 : 1.6, 0.05]);   // tread rumble
-        ellipsoid(mb, [S[0], cy, 0.15], [0.72, hh, treadLen], TREAD, 0.35, 0, 12);
-        // tread lugs: a row of raised cleats down the outer flank, so the
-        // track silhouette reads as tracked from any angle, not just a
-        // dead-on side view where the length would actually show
-        const nLug = 7;
-        for (let i = 0; i < nLug; i++) {
-          const t = (i / (nLug - 1)) * 2 - 1;   // -1..1 along the tread's length
-          const lugZ = 0.15 + t * treadLen * 0.82;
-          ellipsoid(mb, [S[0] + side * 0.76, cy - hh * 0.5, lugZ],
-            [0.17, hh * 0.62, 0.26], sh(TREAD, 1.8), 0.5, 0, 6);
-        }
+        ellipsoid(mb, [S[0], cy, 0.15], [0.72, hh, 2.4], TREAD, 0.35, 0, 12);
         for (let wI = -1; wI <= 1; wI++)               // road wheels
-          tube(mb, [[S[0], cy * 0.6, 0.15 + wI * 1.3], [S[0] + side * 0.75, cy * 0.6, 0.15 + wI * 1.3]],
-            [0.4, 0.4], METDK, 0.7, 0, 12, 2);
+          tube(mb, [[S[0], cy * 0.6, 0.15 + wI * 1.3], [S[0] + side * 0.8, cy * 0.6, 0.15 + wI * 1.3]],
+            [0.4, 0.4], METDK, 0.7, 0, 10, 2);
         ellipsoid(mb, [S[0], cy + hh * 0.8, 0.15], [0.8, 0.26, 2.55], METAL, 0.7, 0, 10);  // fender
         ellipsoid(mb, [S[0], cy, 2.5], [0.16, 0.16, 0.16], GLOW, 0.5, 1, 6);
         mb.glow([S[0], cy, 2.55], GLOW, 16);
