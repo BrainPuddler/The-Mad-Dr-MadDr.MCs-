@@ -544,6 +544,13 @@ async function doReset() {
   local = newLocal();
   logEntry("🧹 New session started. Server genomes from prior sessions are still there under their old account ID.");
   saveLocal(); await sync();
+  // newLocal() already resets chop/stable state (nothing on the slab,
+  // freezer empty, tray closed) -- but if the Chop Shop or Stable screen
+  // was on screen when Reset was clicked, sync() has no way to know to
+  // repaint it: it dispatches by local.view, and only setView() actually
+  // flips which <section> is visible. Without this, a reset mid-Chop-Shop
+  // left that screen frozen on stale pre-reset content.
+  setView("lab");
 }
 
 // ── factions ──────────────────────────────────────────────────────────────────
