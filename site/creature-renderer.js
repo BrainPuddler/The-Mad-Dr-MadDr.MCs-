@@ -929,20 +929,31 @@ function buildPelvis(mb, o, waistR, waistY) {
   // unless the leg family already dictates a mechanical/chitin chassis
   mb.setTex(mech ? TEX_NONE : chit ? [...TILE.chitin, o.texScale, 0.6]
                                    : o.bodyTex('warts', o.texScale, 0.5));
+  // The pelvis must stay INSIDE where the legs actually attach (every
+  // plan that calls this sockets its leg at roughly 0.5-0.58 * waistR --
+  // see the `leg:` return in each), or a wide pelvis visually swallows
+  // the tops of the legs. The old radii (0.72/1.04/0.94) flared out
+  // *past* that leg-attach offset, which barely showed at low bulk but
+  // became a solid plate hiding the legs at high bulk (independent of
+  // heart tier -- it just takes a titan heart to carry that much bulk
+  // without going nonviable, which is why it reads as a "titan" bug).
+  // Only the two lower levels sit near leg height, so only those shrink;
+  // the top level keeps its width to blend into the torso above.
   const hipY = waistY - 1.15;
+  const midR = waistR * 0.42, midRz = waistR * 0.35;
   lathe(mb, [
-    { y: hipY - 0.45, x: 0, z: 0, rx: waistR*0.72, rz: waistR*0.60 },
-    { y: hipY + 0.30, x: 0, z: 0, rx: waistR*1.04, rz: waistR*0.86 },
-    { y: waistY + 0.12, x: 0, z: 0, rx: waistR*0.94, rz: waistR*0.78 },
+    { y: hipY - 0.45, x: 0, z: 0, rx: waistR*0.30, rz: waistR*0.25 },
+    { y: hipY + 0.30, x: 0, z: 0, rx: midR,         rz: midRz },
+    { y: waistY + 0.12, x: 0, z: 0, rx: waistR*0.85, rz: waistR*0.71 },
   ], col, mech ? 0.7 : 0.28, 0, 14, fn);
   if (mech) {
     for (let i = 0; i < 8; i++) {          // chassis rivets
       const a = (i / 8) * Math.PI * 2;
-      ellipsoid(mb, [Math.cos(a)*waistR, hipY + 0.3, Math.sin(a)*waistR*0.83],
+      ellipsoid(mb, [Math.cos(a)*midR, hipY + 0.3, Math.sin(a)*midRz],
         [0.09, 0.09, 0.09], IRON, 0.8, 0, 4);
     }
-    ellipsoid(mb, [0, hipY + 0.25, waistR*0.82], [0.16, 0.16, 0.1], GLOW, 0.5, 1, 6);
-    mb.glow([0, hipY + 0.25, waistR*0.88], GLOW, 18);
+    ellipsoid(mb, [0, hipY + 0.25, midRz], [0.16, 0.16, 0.1], GLOW, 0.5, 1, 6);
+    mb.glow([0, hipY + 0.25, midRz * 1.07], GLOW, 18);
   }
   // THE BELT: brass collar around the waist junction, iron-bolted
   torus(mb, [0, waistY + 0.05, 0], [0, 1, 0], waistR*0.98, 0.24, BRASS, 0.85, 0, 18, 8);
