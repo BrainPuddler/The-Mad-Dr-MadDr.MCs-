@@ -476,6 +476,14 @@ function buildCreatureAtDetail(genome) {
   const slots = g.slots ?? {};
   const plan = g.body?.plan ?? 'tetrapod';
 
+  // A decapitated creature: both head-mounted slots (sensor, eye) healed
+  // to their stumps -- there's no genome field for "no head" (the skull
+  // is pure renderer geometry, docs/08), so this is the derived signal.
+  // buildHead() reads it and builds nothing at all, not just an empty
+  // one; the sensor/eye slot loop below skips those sockets entirely so
+  // nothing floats where a head used to be.
+  const headless = slots.sensor?.family === 'sensor_stub' && slots.eye?.family === 'eye_socket';
+
   // leg genes set stance height (stumps slump low)
   // real leg length: bipeds stand on legs, not casters
   const legAl = slots.leg;
@@ -502,7 +510,8 @@ function buildCreatureAtDetail(genome) {
     brainTier: g.brain?.tier ?? 'average',
     texScale: 0.35 + 0.5 * grain,
     faction: _faction,
-    details: fk.details,          // head detailing: franken / robot / alien
+    headless,
+    details: headless ? () => {} : fk.details,   // no face to detail without a skull
     chestDeco: fk.chestDeco,      // torso front: sutures / rivets / ichor nodes
     // body material override: Humans force riveted panels, Aliens veined
     // membrane; MadDr passes the plan's own organic material through
@@ -516,6 +525,9 @@ function buildCreatureAtDetail(genome) {
     // plans that ignore a slot render nothing there (silent genes)
     if ((plan === 'blob' || plan === 'serpentine' || plan === 'treant' || plan === 'floater')
         && slot === 'leg') continue;
+    // no head, no head-mounted parts -- nothing should float where the
+    // skull used to be
+    if (headless && (slot === 'sensor' || slot === 'eye')) continue;
     // dormant organic head sensors: low ornament gene → bald head
     if (slot === 'sensor' && (al.family === 'antenna' || al.family === 'horn') &&
         P(al.params, 5, 0.5) < 0.35) continue;
@@ -947,6 +959,12 @@ function buildPelvis(mb, o, waistR, waistY) {
  * standard, gifted = tall egghead dome, mastermind = exposed pulsing
  * brain with two lobes. Returns geometry the face and sockets hang on. */
 function buildHead(mb, o, neckY, zOff) {
+  if (o.headless) {
+    // no skull at all -- the neck just ends. Callers that read hC/hR/topY
+    // for socket math (mostly moot now, since headless skips the sensor
+    // and eye slots entirely) get a nominal point instead of a crash.
+    return { hC: [0, neckY, zOff], hR: [0.01, 0.01, 0.01], topY: neckY };
+  }
   const t = o.brainTier;
   let hR, sunk = 0.72;
   if (t === 'dim')             { hR = [1.05, 0.98, 1.10]; sunk = 0.52; }

@@ -41,13 +41,14 @@ const LOCAL_KEY   = "maddr-lab-v2";
 //                 tell if that exact piece has since been used elsewhere
 //
 // The freezer is a hierarchy, not a flat list: items land in ONE of four
-// labeled drawers (derived from the part's own homolog, never stored) and,
-// within a drawer, group into the batch they were cut in -- "the whole
-// head" stays one whole thing until you actually open it up.
-// bundleOf      : { [itemId]: bundleId }  — which cut/batch an item is from
-// bundleMeta    : { [bundleId]: { label, from, ts } }  — that batch's info
+// labeled drawers (derived from the part's own homolog, never stored),
+// and within a drawer, a SIMPLE thumbnail per (drawer, source specimen)
+// pair -- "the head from Specimen-01" is one tile no matter how many
+// separate cuts it took to remove it all, or how many genomes ago that
+// was. Clicking it opens every piece that's ever landed in that group.
+// originSpecimen: { [itemId]: specimenId }  — which animal a part came from
 // chopMode      : "slab" | "tray"  — which the Chop Shop's center panel shows
-// openBundle    : bundleId | null  — the batch currently open in the tray
+// openGroup     : groupKey | null  — the "drawerKey|specimenId" open in the tray
 
 let local = (() => {
   try { return JSON.parse(localStorage.getItem(LOCAL_KEY)); } catch { return null; }
@@ -58,7 +59,7 @@ function newLocal() {
     accountId: crypto.randomUUID(), nameMap: {}, deadSet: [], trayFrom: {}, log: [], seq: 0,
     selectedId: null, faction: "maddr", stable: [], hidden: [], factionOf: {}, view: "lab",
     specimenOf: {}, currentGenomeOf: {}, locationOf: {}, originItem: {},
-    bundleOf: {}, bundleMeta: {}, chopMode: "slab", openBundle: null,
+    originSpecimen: {}, chopMode: "slab", openGroup: null,
   };
 }
 function saveLocal() { localStorage.setItem(LOCAL_KEY, JSON.stringify(local)); }
@@ -90,12 +91,7 @@ function setSpecimenGenome(sid, genomeId) {
   local.currentGenomeOf[sid] = genomeId;
 }
 
-// ── freezer part display (icons, batch grouping, gene-axis stats) ───────────
-// Legacy items harvested before batching existed have no bundleOf entry;
-// they just fall back to being their own one-item batch.
-function bundleIdOfItem(itemId) { return local.bundleOf?.[itemId] ?? itemId; }
-function bundleItems(bundleId)  { return tray.filter(t => bundleIdOfItem(t.itemId) === bundleId); }
-
+// ── freezer part display (icons, grouping, gene-axis stats) ─────────────────
 // Which of the freezer's four labeled drawers an item belongs in --
 // derived from its own homolog, never stored, so it can't drift out of
 // sync with the part catalog.
@@ -106,6 +102,11 @@ function drawerKeyForItem(item) {
   if (h === "leg") return "lower";
   return "arms";
 }
+// Group key: drawer + which specimen it came from. Legacy items harvested
+// before this existed have no recorded origin and just fall back to being
+// their own one-item group.
+function groupKeyOf(t) { return `${drawerKeyForItem(t.item)}|${local.originSpecimen?.[t.itemId] ?? t.itemId}`; }
+function groupItems(groupKey) { return tray.filter(t => groupKeyOf(t) === groupKey); }
 const PART_ICON = { hand: "✋", sensor: "📡", eye: "👁️", leg: "🦵" };
 function partIcon(item) { return item.kind === "heart" ? "🫀" : (PART_ICON[homologOf(item.family)] ?? "🦴"); }
 function partName(item) { return item.kind === "heart" ? `${item.tier} heart` : item.family.replace(/_/g, " "); }
@@ -290,9 +291,7 @@ async function doHarvestHeart() {
     setSpecimenGenome(sid, rec.genomeId);
     local.originItem[sid] = local.originItem[sid] ?? {};
     local.originItem[sid].heart = rec.itemId;
-    const bundleId = crypto.randomUUID();
-    local.bundleOf[rec.itemId] = bundleId;
-    local.bundleMeta[bundleId] = { label: "heart", from: c.name, ts: Date.now() };
+    local.originSpecimen[rec.itemId] = sid;
     local.locationOf[sid] = "chop";
     local.selectedId = rec.genomeId;
     const v = viability(rec.genome);
@@ -318,7 +317,6 @@ async function doHarvestRegion(slots, label) {
   try {
     let curId = c.id, curGenome = c.genome;
     const cut = [];
-    const bundleId = crypto.randomUUID();
     for (const slot of slots) {
       if (isVestigial(curGenome.slots[slot].family)) continue;
       const rec = await api("POST", "/harvest/part", { idempotencyKey: ikey(), creatureId: curId, slot });
@@ -327,11 +325,10 @@ async function doHarvestRegion(slots, label) {
       setSpecimenGenome(sid, rec.genomeId);
       local.originItem[sid] = local.originItem[sid] ?? {};
       local.originItem[sid][slot] = rec.itemId;
-      local.bundleOf[rec.itemId] = bundleId;   // stays one whole thing until opened
+      local.originSpecimen[rec.itemId] = sid;
       curId = rec.genomeId; curGenome = rec.genome;
       cut.push(rec.part.family.replace(/_/g, " "));
     }
-    if (cut.length) local.bundleMeta[bundleId] = { label, from: c.name, ts: Date.now() };
     local.locationOf[sid] = "chop";
     local.selectedId = curId;
     if (cut.length) logEntry(`🔪 Took the ${label} (${cut.join(", ")}) off ${c.name}. Bagged and into the freezer.`);
@@ -787,19 +784,19 @@ function renderChopModeButtons() {
   const title = document.getElementById("chop-center-title");
   if (!slabBtn || !trayBtn) return;
   const mode = local.chopMode ?? "slab";
-  const hasBundle = !!local.openBundle;
+  const hasGroup = !!local.openGroup;
   slabBtn.classList.toggle("active", mode === "slab");
-  trayBtn.classList.toggle("active", mode === "tray" && hasBundle);
-  trayBtn.disabled = !hasBundle;
-  if (title) title.textContent = mode === "tray" && hasBundle ? "Surgical tray" : "The slab";
+  trayBtn.classList.toggle("active", mode === "tray" && hasGroup);
+  trayBtn.disabled = !hasGroup;
+  if (title) title.textContent = mode === "tray" && hasGroup ? "Surgical tray" : "The slab";
 }
 
 function renderChopCenter() {
   const mode = local.chopMode ?? "slab";
-  if (mode === "tray" && local.openBundle && bundleItems(local.openBundle).length > 0) {
+  if (mode === "tray" && local.openGroup && groupItems(local.openGroup).length > 0) {
     renderChopTray();
   } else {
-    if (mode === "tray") { local.chopMode = "slab"; local.openBundle = null; saveLocal(); }
+    if (mode === "tray") { local.chopMode = "slab"; local.openGroup = null; saveLocal(); }
     renderChopSlab();
   }
 }
@@ -890,11 +887,10 @@ function renderChopRegions() {
 }
 
 // The freezer: four labeled drawers (native <details> -- click a label,
-// it pops open right there, no extra state to track). Inside, one tile
-// per BATCH -- a whole head stays one tile, "whole", until you actually
-// open it in the tray. Single-part batches (a lone heart, a pair of legs)
-// look the same way, so the whole system is one consistent interaction:
-// open a drawer, click a tile, work it in the tray.
+// it pops open right there, no extra state to track). Inside, one SIMPLE
+// thumbnail per specimen that's contributed to that drawer -- "the head
+// from Specimen-01" -- not a breakdown of what's inside. Click it to open
+// everything from that specimen in that drawer, in the surgical tray.
 function renderChopFreezer() {
   const el = document.getElementById("chop-freezer");
   if (tray.length === 0) { el.innerHTML = `<div class="empty">The freezer is empty. Harvest something to fill a drawer.</div>`; return; }
@@ -903,39 +899,41 @@ function renderChopFreezer() {
 
   el.innerHTML = DRAWERS.map(d => {
     const items = byDrawer[d.key] ?? [];
-    const bundles = [...new Set(items.map(t => bundleIdOfItem(t.itemId)))]
-      .map(bundleId => ({ bundleId, items: items.filter(t => bundleIdOfItem(t.itemId) === bundleId) }));
+    const groups = new Map();
+    for (const t of items) {
+      const k = groupKeyOf(t);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(t);
+    }
     return `<details class="drawer-unit" ${items.length ? "" : "data-empty"}>
       <summary class="drawer-label"><span>${d.title}</span><span class="drawer-count">${items.length}</span></summary>
       <div class="drawer-contents">
-        ${bundles.length === 0 ? `<div class="empty">Empty.</div>` : bundles.map(bundleTileHtml).join("")}
+        ${groups.size === 0 ? `<div class="empty">Empty.</div>` : [...groups.entries()].map(([k, its]) => groupTileHtml(d, k, its)).join("")}
       </div>
     </details>`;
   }).join("");
 
-  el.querySelectorAll("[data-open-bundle]").forEach(t =>
+  el.querySelectorAll("[data-open-group]").forEach(t =>
     t.addEventListener("click", () => {
-      local.openBundle = t.dataset.openBundle;
+      local.openGroup = t.dataset.openGroup;
       local.chopMode = "tray";
       saveLocal(); renderChop();
     }));
 }
 
-function bundleTileHtml(b) {
-  const meta = local.bundleMeta?.[b.bundleId];
-  const whole = b.items.length > 1;
-  const icon = whole ? "🧩" : partIcon(b.items[0].item);
-  const label = meta?.label ?? (whole ? "parts" : partName(b.items[0].item));
-  const from = meta?.from ?? b.items[0].from;
-  return `<div class="part-tile" data-open-bundle="${b.bundleId}" title="Open in the surgical tray">
+function groupTileHtml(drawer, groupKey, items) {
+  const from = local.trayFrom[items[0].itemId] ?? "unknown";
+  const icon = drawer.title.match(/^\S+/)?.[0] ?? "🦴";
+  const label = drawer.title.replace(/^\S+\s/, "");
+  return `<div class="part-tile" data-open-group="${esc(groupKey)}" title="Open in the surgical tray">
     <div class="part-thumb">${icon}</div>
-    <div class="part-name">${esc(label)}${whole ? ` <span class="badge">whole · ${b.items.length}</span>` : ""}</div>
+    <div class="part-name">${esc(label)}</div>
     <div class="part-from">from ${esc(from)}</div>
   </div>`;
 }
 
-// One part's full card: thumbnail, its own gene-axis stats, and (in the
-// tray) a button to send just that piece onto whatever's on the slab.
+// One part's full card: thumbnail, its own gene-axis stats, and a button
+// to graft just that piece onto whatever's on the slab.
 function partTileHtml(t, { canSend }) {
   const item = t.item;
   const originBadge = item.kind === "heart" ? "" : `<span class="badge ${originOf(item.family)}">${originOf(item.family)}</span>`;
@@ -944,25 +942,26 @@ function partTileHtml(t, { canSend }) {
     <div class="part-body">
       <div class="part-name">${esc(partName(item))} ${originBadge}</div>
       <div class="part-stats kv">${partStatsHtml(item)}</div>
-      <button class="small" data-item="${t.itemId}" ${canSend ? "" : "disabled"} title="${canSend ? "" : "Pick a specimen on the slab first"}">➡ Send to slab (🩸5)</button>
+      <button class="small" data-item="${t.itemId}" ${canSend ? "" : "disabled"} title="${canSend ? "" : "Pick a specimen on the slab first"}">🪡 Graft to slab (🩸5)</button>
     </div>
   </div>`;
 }
 
-// The surgical tray: one opened batch, its pieces laid out individually.
-// Each can go onto the slab (grafted onto whatever specimen is selected)
-// or the whole batch can just be put back, unopened parts and all.
+// The surgical tray: everything one specimen has ever contributed to one
+// drawer, laid out piece by piece. Each can be grafted onto whatever
+// specimen is on the slab, or the whole group just put back untouched.
 function renderChopTray() {
   const wrap = document.getElementById("chop-slab");
   destroyRenderer();
-  const items = bundleItems(local.openBundle);
-  const meta = local.bundleMeta?.[local.openBundle];
+  const items = groupItems(local.openGroup);
+  const drawer = DRAWERS.find(d => local.openGroup.startsWith(d.key + "|"));
+  const from = local.trayFrom[items[0]?.itemId] ?? "unknown";
   const c = selected();
   wrap.innerHTML = `
     <div class="tray-view">
       <div class="tray-head">
-        <div class="tray-title">${esc(meta?.label ?? "parts")} <span class="badge">${items.length} piece${items.length === 1 ? "" : "s"}</span></div>
-        <div class="tray-from">from ${esc(meta?.from ?? items[0]?.from ?? "unknown")}</div>
+        <div class="tray-title">${esc(drawer?.title.replace(/^\S+\s/, "") ?? "parts")} <span class="badge">${items.length} piece${items.length === 1 ? "" : "s"}</span></div>
+        <div class="tray-from">from ${esc(from)}</div>
       </div>
       <div class="tray-parts">${items.map(t => partTileHtml(t, { canSend: !!c })).join("")}</div>
       <button id="btn-return-drawer">↩️ Return to drawer</button>
@@ -970,7 +969,7 @@ function renderChopTray() {
   wrap.querySelectorAll("button[data-item]").forEach(b =>
     b.addEventListener("click", () => doSew(b.dataset.item)));
   document.getElementById("btn-return-drawer")?.addEventListener("click", () => {
-    local.chopMode = "slab"; local.openBundle = null; saveLocal(); renderChop();
+    local.chopMode = "slab"; local.openGroup = null; saveLocal(); renderChop();
   });
 }
 
@@ -1085,7 +1084,7 @@ document.getElementById("btn-mode-slab").addEventListener("click", () => {
   local.chopMode = "slab"; saveLocal(); renderChop();
 });
 document.getElementById("btn-mode-tray").addEventListener("click", () => {
-  if (!local.openBundle) return;
+  if (!local.openGroup) return;
   local.chopMode = "tray"; saveLocal(); renderChop();
 });
 local.faction ??= "maddr";
