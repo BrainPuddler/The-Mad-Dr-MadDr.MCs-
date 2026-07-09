@@ -470,6 +470,52 @@ async function doRestore() {
   saveLocal(); showBusy(false); await sync();
 }
 
+// Slab-mode shortcut: click a freezer thumbnail and its whole group grafts
+// straight onto whatever's currently on the slab, no trip through the
+// tray. (In Tray mode the same click opens the group instead -- see the
+// freezer's click handler -- since there you're working piece by piece.)
+async function doGraftGroup(groupKey) {
+  const c = selected(); if (!c) return;
+  const items = groupItems(groupKey);
+  if (!items.length) return;
+  const sid = specimenIdOf(c.id);
+  showBusy(true);
+  try {
+    let curId = c.id;
+    const grafted = [];
+    for (const t of items) {
+      if (t.item.kind === "heart") {
+        const rec = await api("POST", "/sew/heart", { idempotencyKey: ikey(), creatureId: curId, itemId: t.itemId });
+        if (rec.result !== "survived") {
+          if (rec.genomeId) { registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); markDead(rec.genomeId); curId = rec.genomeId; }
+          logEntry(`☠️ Grafting the ${t.item.tier} heart killed ${c.name} on the table — stopped there.`);
+          break;
+        }
+        registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); curId = rec.genomeId;
+        if (rec.explantedHeartItemId) registerFrom(rec.explantedHeartItemId, c.name);
+        grafted.push(`${t.item.tier} heart`);
+      } else {
+        const slot = homologOf(t.item.family);
+        const rec = await api("POST", "/sew/part", { idempotencyKey: ikey(), creatureId: curId, slot, itemId: t.itemId });
+        if (rec.result === "limb_rejected") {
+          logEntry(`🦠 ${c.name}'s heart rejected the ${t.item.family.replace(/_/g, " ")} — stopped there. Still usable.`);
+          break;
+        }
+        if (rec.result === "patient_died") {
+          registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); markDead(rec.genomeId); curId = rec.genomeId;
+          logEntry(`☠️ Grafting the ${t.item.family.replace(/_/g, " ")} overloaded ${c.name}'s heart — dies on the table.`);
+          break;
+        }
+        registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); curId = rec.genomeId;
+        grafted.push(t.item.family.replace(/_/g, " "));
+      }
+    }
+    local.selectedId = curId;
+    if (grafted.length) logEntry(`🪡 Grafted the ${grafted.join(", ")} onto ${c.name} straight off the slab.`);
+  } catch (e) { logEntry(`⚠️ Graft failed: ${e.message}`); }
+  saveLocal(); showBusy(false); await sync();
+}
+
 async function doReset() {
   if (!confirm("Reset this Lab session? Clears names, history, and your session ID. Server genomes are NOT deleted.")) return;
   destroyRenderer(); _lastPortraitId = null;
@@ -784,21 +830,16 @@ function renderChopModeButtons() {
   const title = document.getElementById("chop-center-title");
   if (!slabBtn || !trayBtn) return;
   const mode = local.chopMode ?? "slab";
-  const hasGroup = !!local.openGroup;
   slabBtn.classList.toggle("active", mode === "slab");
-  trayBtn.classList.toggle("active", mode === "tray" && hasGroup);
-  trayBtn.disabled = !hasGroup;
-  if (title) title.textContent = mode === "tray" && hasGroup ? "Surgical tray" : "The slab";
+  trayBtn.classList.toggle("active", mode === "tray");
+  trayBtn.disabled = tray.length === 0;   // nothing in the freezer to inspect at all
+  if (title) title.textContent = mode === "tray" ? "Surgical tray" : "The slab";
 }
 
 function renderChopCenter() {
   const mode = local.chopMode ?? "slab";
-  if (mode === "tray" && local.openGroup && groupItems(local.openGroup).length > 0) {
-    renderChopTray();
-  } else {
-    if (mode === "tray") { local.chopMode = "slab"; local.openGroup = null; saveLocal(); }
-    renderChopSlab();
-  }
+  if (mode === "tray") renderChopTray();   // handles "nothing open yet" itself
+  else renderChopSlab();
 }
 
 function renderChopRoster() {
@@ -889,11 +930,18 @@ function renderChopRegions() {
 // The freezer: four labeled drawers (native <details> -- click a label,
 // it pops open right there, no extra state to track). Inside, one SIMPLE
 // thumbnail per specimen that's contributed to that drawer -- "the head
-// from Specimen-01" -- not a breakdown of what's inside. Click it to open
-// everything from that specimen in that drawer, in the surgical tray.
+// from Specimen-01" -- not a breakdown of what's inside.
+//
+// What clicking a thumbnail does depends on which mode the slab is in:
+//   - Slab mode: grafts the whole group straight onto whatever's on the
+//     slab right now -- no detour through the tray.
+//   - Tray mode: opens that group in the tray instead, for picking pieces
+//     apart one at a time (Return to drawer gets back here to browse).
 function renderChopFreezer() {
   const el = document.getElementById("chop-freezer");
   if (tray.length === 0) { el.innerHTML = `<div class="empty">The freezer is empty. Harvest something to fill a drawer.</div>`; return; }
+  const inSlabMode = (local.chopMode ?? "slab") === "slab";
+  const c = selected();
   const byDrawer = Object.fromEntries(DRAWERS.map(d => [d.key, []]));
   for (const t of tray) (byDrawer[drawerKeyForItem(t.item)] ??= []).push(t);
 
@@ -908,26 +956,35 @@ function renderChopFreezer() {
     return `<details class="drawer-unit" ${items.length ? "" : "data-empty"}>
       <summary class="drawer-label"><span>${d.title}</span><span class="drawer-count">${items.length}</span></summary>
       <div class="drawer-contents">
-        ${groups.size === 0 ? `<div class="empty">Empty.</div>` : [...groups.entries()].map(([k, its]) => groupTileHtml(d, k, its)).join("")}
+        ${groups.size === 0 ? `<div class="empty">Empty.</div>` : [...groups.entries()].map(([k, its]) => groupTileHtml(d, k, its, { inSlabMode, canGraft: !!c })).join("")}
       </div>
     </details>`;
   }).join("");
 
   el.querySelectorAll("[data-open-group]").forEach(t =>
     t.addEventListener("click", () => {
-      local.openGroup = t.dataset.openGroup;
-      local.chopMode = "tray";
-      saveLocal(); renderChop();
+      const key = t.dataset.openGroup;
+      if (inSlabMode) {
+        if (c) doGraftGroup(key);
+      } else {
+        local.openGroup = key;
+        local.chopMode = "tray";
+        saveLocal(); renderChop();
+      }
     }));
 }
 
-function groupTileHtml(drawer, groupKey, items) {
+function groupTileHtml(drawer, groupKey, items, { inSlabMode, canGraft }) {
   const from = local.trayFrom[items[0].itemId] ?? "unknown";
   const icon = drawer.title.match(/^\S+/)?.[0] ?? "🦴";
   const label = drawer.title.replace(/^\S+\s/, "");
-  return `<div class="part-tile" data-open-group="${esc(groupKey)}" title="Open in the surgical tray">
+  const graftable = inSlabMode && canGraft;
+  const title = inSlabMode
+    ? (canGraft ? "Graft straight onto the specimen on the slab" : "Pick a specimen on the slab first")
+    : "Open in the surgical tray";
+  return `<div class="part-tile ${inSlabMode && !canGraft ? "disabled" : ""}" data-open-group="${esc(groupKey)}" title="${title}">
     <div class="part-thumb">${icon}</div>
-    <div class="part-name">${esc(label)}</div>
+    <div class="part-name">${esc(label)}${graftable ? ` <span class="badge">🪡 graft</span>` : ""}</div>
     <div class="part-from">from ${esc(from)}</div>
   </div>`;
 }
@@ -950,10 +1007,17 @@ function partTileHtml(t, { canSend }) {
 // The surgical tray: everything one specimen has ever contributed to one
 // drawer, laid out piece by piece. Each can be grafted onto whatever
 // specimen is on the slab, or the whole group just put back untouched.
+// With nothing opened yet (just switched into Tray mode) it's a picker:
+// go click a thumbnail in the freezer.
 function renderChopTray() {
   const wrap = document.getElementById("chop-slab");
   destroyRenderer();
-  const items = groupItems(local.openGroup);
+  const items = local.openGroup ? groupItems(local.openGroup) : [];
+  if (items.length === 0) {
+    if (local.openGroup) { local.openGroup = null; saveLocal(); }   // that group emptied out from under us
+    wrap.innerHTML = `<div class="tray-view"><div class="empty">Open a drawer in the freezer and click a part to inspect it here.</div></div>`;
+    return;
+  }
   const drawer = DRAWERS.find(d => local.openGroup.startsWith(d.key + "|"));
   const from = local.trayFrom[items[0]?.itemId] ?? "unknown";
   const c = selected();
@@ -1084,7 +1148,6 @@ document.getElementById("btn-mode-slab").addEventListener("click", () => {
   local.chopMode = "slab"; saveLocal(); renderChop();
 });
 document.getElementById("btn-mode-tray").addEventListener("click", () => {
-  if (!local.openGroup) return;
   local.chopMode = "tray"; saveLocal(); renderChop();
 });
 local.faction ??= "maddr";

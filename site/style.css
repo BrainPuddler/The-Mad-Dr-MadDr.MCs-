@@ -259,6 +259,9 @@ body[data-faction="alien"] button { border-radius: 12px; }
 }
 .drawer-contents .part-tile { cursor: pointer; }
 .drawer-contents .part-tile:hover { border-color: var(--acid); }
+.drawer-contents .part-tile.disabled { cursor: not-allowed; opacity: .5; }
+.drawer-contents .part-tile.disabled:hover { border-color: var(--line); }
+.part-name .badge { color: var(--acid); border-color: var(--acid); }
 .part-thumb { font-size: 26px; line-height: 1; margin: 2px 0; }
 .part-name { font-size: 12px; text-transform: capitalize; }
 .part-from { font-size: 10px; color: var(--dim); }
