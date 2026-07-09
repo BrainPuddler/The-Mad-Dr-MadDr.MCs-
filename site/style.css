@@ -195,6 +195,24 @@ body[data-faction="alien"] button { border-radius: 12px; }
 .chop-slab-actions { display: flex; flex-direction: column; gap: 6px; width: 100%; margin-top: 6px; }
 .chop-slab-actions button { width: 100%; }
 
+/* slab / tray mode toggle, sat in the panel-head next to the title */
+.mode-toggle { display: flex; gap: 4px; }
+.mode-toggle button { padding: 3px 9px; }
+.mode-toggle button.active { border-color: var(--acid); color: var(--acid); }
+
+/* the surgical tray: a batch of parts pulled out of a drawer, worked on
+   one piece at a time -- same panel the slab occupies, swapped in */
+.tray-view { padding: 14px; display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.tray-head { text-align: center; border-bottom: 1px dashed var(--line); padding-bottom: 8px; }
+.tray-title { font-size: 15px; font-weight: bold; letter-spacing: .5px; text-transform: capitalize; }
+.tray-from { font-size: 11px; color: var(--dim); margin-top: 2px; }
+.tray-parts { display: flex; flex-direction: column; gap: 8px; }
+.tray-parts .part-tile { flex-direction: row; align-items: flex-start; gap: 12px; text-align: left; padding: 10px; }
+.tray-parts .part-thumb { flex-shrink: 0; margin: 4px 0 0; }
+.tray-parts .part-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.tray-parts .part-body button { align-self: flex-start; white-space: nowrap; }
+#btn-return-drawer { align-self: center; margin-top: 4px; }
+
 .chop-regions { padding: 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
 .region-card {
   border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
@@ -206,20 +224,46 @@ body[data-faction="alien"] button { border-radius: 12px; }
 .region-actions button { text-align: left; font-size: 11px; }
 .region-note { font-size: 10.5px; color: var(--dim); line-height: 1.4; border-top: 1px dashed var(--line); padding-top: 5px; margin-top: 2px; }
 
-/* the freezer: a bank of steel drawers, formaldehyde-blue */
+/* the freezer: four labeled drawers, formaldehyde-blue. Each is a native
+   <details> -- clicking its label pops it open right there, no separate
+   accordion state to track. Inside, one tile per batch of parts. */
 .chop-freezer {
   padding: 10px; display: flex; flex-direction: column; gap: 8px;
   max-height: 78vh; overflow-y: auto;
   background: repeating-linear-gradient(0deg, #10181c 0 46px, #0c1316 46px 48px);
 }
-.drawer {
+.drawer-unit {
   border: 1px solid #2a4048; border-left: 3px solid var(--ichor); border-radius: 4px;
-  padding: 7px 9px; background: linear-gradient(180deg, #16262b, #101c20);
-  display: flex; flex-direction: column; gap: 3px;
+  background: linear-gradient(180deg, #16262b, #101c20); overflow: hidden;
 }
-.drawer-label { font-size: 12px; }
-.drawer-from { font-size: 10px; color: var(--dim); }
-.drawer button { align-self: flex-start; margin-top: 2px; }
+.drawer-unit[data-empty] { opacity: .55; }
+.drawer-label {
+  list-style: none; cursor: pointer; user-select: none;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 10px; font-size: 12px; font-weight: bold; letter-spacing: .3px;
+}
+.drawer-label::-webkit-details-marker { display: none; }
+.drawer-label:hover { color: var(--acid); }
+.drawer-unit[open] .drawer-label { border-bottom: 1px dashed var(--line); }
+.drawer-count {
+  font-size: 10px; color: var(--dim); background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 1px 7px;
+}
+.drawer-contents { padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+
+/* one part (or one whole unopened batch) as a graphical tile */
+.part-tile {
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px;
+  background: var(--panel2); cursor: default;
+  display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center;
+}
+.drawer-contents .part-tile { cursor: pointer; }
+.drawer-contents .part-tile:hover { border-color: var(--acid); }
+.part-thumb { font-size: 26px; line-height: 1; margin: 2px 0; }
+.part-name { font-size: 12px; text-transform: capitalize; }
+.part-from { font-size: 10px; color: var(--dim); }
+.part-stats { grid-template-columns: 62px 1fr; font-size: 10.5px; width: 100%; margin-top: 2px; }
+.part-stats .k { text-transform: capitalize; }
 
 @media (max-width: 980px) {
   #view-chop { flex-direction: column; }

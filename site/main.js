@@ -39,6 +39,15 @@ const LOCAL_KEY   = "maddr-lab-v2";
 //                 recently harvested item for each of ITS OWN missing
 //                 parts, so "Restore" knows what to graft back and can
 //                 tell if that exact piece has since been used elsewhere
+//
+// The freezer is a hierarchy, not a flat list: items land in ONE of four
+// labeled drawers (derived from the part's own homolog, never stored) and,
+// within a drawer, group into the batch they were cut in -- "the whole
+// head" stays one whole thing until you actually open it up.
+// bundleOf      : { [itemId]: bundleId }  — which cut/batch an item is from
+// bundleMeta    : { [bundleId]: { label, from, ts } }  — that batch's info
+// chopMode      : "slab" | "tray"  — which the Chop Shop's center panel shows
+// openBundle    : bundleId | null  — the batch currently open in the tray
 
 let local = (() => {
   try { return JSON.parse(localStorage.getItem(LOCAL_KEY)); } catch { return null; }
@@ -49,6 +58,7 @@ function newLocal() {
     accountId: crypto.randomUUID(), nameMap: {}, deadSet: [], trayFrom: {}, log: [], seq: 0,
     selectedId: null, faction: "maddr", stable: [], hidden: [], factionOf: {}, view: "lab",
     specimenOf: {}, currentGenomeOf: {}, locationOf: {}, originItem: {},
+    bundleOf: {}, bundleMeta: {}, chopMode: "slab", openBundle: null,
   };
 }
 function saveLocal() { localStorage.setItem(LOCAL_KEY, JSON.stringify(local)); }
@@ -78,6 +88,33 @@ function specimenIdOf(genomeId) { return local.specimenOf?.[genomeId] ?? genomeI
 function setSpecimenGenome(sid, genomeId) {
   local.specimenOf[genomeId] = sid;
   local.currentGenomeOf[sid] = genomeId;
+}
+
+// ── freezer part display (icons, batch grouping, gene-axis stats) ───────────
+// Legacy items harvested before batching existed have no bundleOf entry;
+// they just fall back to being their own one-item batch.
+function bundleIdOfItem(itemId) { return local.bundleOf?.[itemId] ?? itemId; }
+function bundleItems(bundleId)  { return tray.filter(t => bundleIdOfItem(t.itemId) === bundleId); }
+
+// Which of the freezer's four labeled drawers an item belongs in --
+// derived from its own homolog, never stored, so it can't drift out of
+// sync with the part catalog.
+function drawerKeyForItem(item) {
+  if (item.kind === "heart") return "torso";
+  const h = homologOf(item.family);
+  if (h === "sensor" || h === "eye") return "head";
+  if (h === "leg") return "lower";
+  return "arms";
+}
+const PART_ICON = { hand: "✋", sensor: "📡", eye: "👁️", leg: "🦵" };
+function partIcon(item) { return item.kind === "heart" ? "🫀" : (PART_ICON[homologOf(item.family)] ?? "🦴"); }
+function partName(item) { return item.kind === "heart" ? `${item.tier} heart` : item.family.replace(/_/g, " "); }
+const PART_AXES = ["length", "girth", "taper", "curl", "count", "ornament"];
+function partStatsHtml(item) {
+  if (item.kind === "heart") {
+    return `<div class="k">tier</div><div>${esc(item.tier)}</div><div class="k">vigor</div><div>${bar(heartVigor(item))}</div>`;
+  }
+  return item.params.map((p, i) => `<div class="k">${PART_AXES[i]}</div><div>${bar(p)}</div>`).join("");
 }
 // The exact signature harvestHeart() leaves behind (surgery.ts): a real
 // "faint" tier is a normal, weak-but-working heart -- only an all-zero
@@ -253,6 +290,9 @@ async function doHarvestHeart() {
     setSpecimenGenome(sid, rec.genomeId);
     local.originItem[sid] = local.originItem[sid] ?? {};
     local.originItem[sid].heart = rec.itemId;
+    const bundleId = crypto.randomUUID();
+    local.bundleOf[rec.itemId] = bundleId;
+    local.bundleMeta[bundleId] = { label: "heart", from: c.name, ts: Date.now() };
     local.locationOf[sid] = "chop";
     local.selectedId = rec.genomeId;
     const v = viability(rec.genome);
@@ -278,6 +318,7 @@ async function doHarvestRegion(slots, label) {
   try {
     let curId = c.id, curGenome = c.genome;
     const cut = [];
+    const bundleId = crypto.randomUUID();
     for (const slot of slots) {
       if (isVestigial(curGenome.slots[slot].family)) continue;
       const rec = await api("POST", "/harvest/part", { idempotencyKey: ikey(), creatureId: curId, slot });
@@ -286,9 +327,11 @@ async function doHarvestRegion(slots, label) {
       setSpecimenGenome(sid, rec.genomeId);
       local.originItem[sid] = local.originItem[sid] ?? {};
       local.originItem[sid][slot] = rec.itemId;
+      local.bundleOf[rec.itemId] = bundleId;   // stays one whole thing until opened
       curId = rec.genomeId; curGenome = rec.genome;
       cut.push(rec.part.family.replace(/_/g, " "));
     }
+    if (cut.length) local.bundleMeta[bundleId] = { label, from: c.name, ts: Date.now() };
     local.locationOf[sid] = "chop";
     local.selectedId = curId;
     if (cut.length) logEntry(`🔪 Took the ${label} (${cut.join(", ")}) off ${c.name}. Bagged and into the freezer.`);
@@ -692,9 +735,9 @@ const CHOP_REGIONS = [
     key: "head", title: "🧠 Head", slots: ["sensor", "eye"],
     note: "The brain never leaves the skull — there is no cut for that.",
     actions: [
-      { label: "Take the whole head (sensors + eyes)", slots: ["sensor", "eye"] },
-      { label: "Take the sensors, leave the eyes", slots: ["sensor"] },
-      { label: "Take the eyes only", slots: ["eye"] },
+      { label: "Take the whole head (sensors + eyes)", slots: ["sensor", "eye"], cutLabel: "head" },
+      { label: "Take the sensors, leave the eyes", slots: ["sensor"], cutLabel: "sensors" },
+      { label: "Take the eyes only", slots: ["eye"], cutLabel: "eyes" },
     ],
   },
   {
@@ -705,22 +748,60 @@ const CHOP_REGIONS = [
   {
     key: "lower", title: "🦵 Lower body", slots: ["leg"],
     note: "Both legs come off together as one cut — no separate foot yet.",
-    actions: [{ label: "Take the legs", slots: ["leg"] }],
+    actions: [{ label: "Take the legs", slots: ["leg"], cutLabel: "legs" }],
   },
   {
     key: "arms", title: "✋ Arms & hands", slots: ["hand"],
     note: "Arm and hand are one piece today — no separate wrist cut yet.",
-    actions: [{ label: "Take the arms (hands included)", slots: ["hand"] }],
+    actions: [{ label: "Take the arms (hands included)", slots: ["hand"], cutLabel: "arms" }],
   },
+];
+// The freezer's four labeled drawers, in the same order as the regions
+// above -- one physical place per body area, however many batches of
+// parts have piled up in it over time.
+const DRAWERS = [
+  { key: "head",  title: "🧠 Head" },
+  { key: "torso", title: "🫀 Torso" },
+  { key: "lower", title: "🦵 Lower body" },
+  { key: "arms",  title: "✋ Arms & hands" },
 ];
 
 function renderChop() {
   document.getElementById("wallet").textContent = `🩸 ${blood}`;
   if (local.view !== "chop") return;
   renderChopRoster();
-  renderChopSlab();
+  renderChopModeButtons();
+  renderChopCenter();
   renderChopRegions();
   renderChopFreezer();
+}
+
+// The center panel is either "the slab" (the live specimen) or "the
+// surgical tray" (one opened batch of harvested parts, worked on in
+// isolation). Clicking a batch's thumbnail in the freezer switches here
+// automatically; the two buttons let the user flip back manually without
+// re-opening the drawer.
+function renderChopModeButtons() {
+  const slabBtn = document.getElementById("btn-mode-slab");
+  const trayBtn = document.getElementById("btn-mode-tray");
+  const title = document.getElementById("chop-center-title");
+  if (!slabBtn || !trayBtn) return;
+  const mode = local.chopMode ?? "slab";
+  const hasBundle = !!local.openBundle;
+  slabBtn.classList.toggle("active", mode === "slab");
+  trayBtn.classList.toggle("active", mode === "tray" && hasBundle);
+  trayBtn.disabled = !hasBundle;
+  if (title) title.textContent = mode === "tray" && hasBundle ? "Surgical tray" : "The slab";
+}
+
+function renderChopCenter() {
+  const mode = local.chopMode ?? "slab";
+  if (mode === "tray" && local.openBundle && bundleItems(local.openBundle).length > 0) {
+    renderChopTray();
+  } else {
+    if (mode === "tray") { local.chopMode = "slab"; local.openBundle = null; saveLocal(); }
+    renderChopSlab();
+  }
 }
 
 function renderChopRoster() {
@@ -803,30 +884,94 @@ function renderChopRegions() {
       const r = CHOP_REGIONS.find(x => x.key === b.dataset.region);
       const a = r.actions[Number(b.dataset.action)];
       if (a.heart) doHarvestHeart();
-      else doHarvestRegion(a.slots, r.title.replace(/^\S+\s/, "").toLowerCase());
+      else doHarvestRegion(a.slots, a.cutLabel);
     });
   });
 }
 
+// The freezer: four labeled drawers (native <details> -- click a label,
+// it pops open right there, no extra state to track). Inside, one tile
+// per BATCH -- a whole head stays one tile, "whole", until you actually
+// open it in the tray. Single-part batches (a lone heart, a pair of legs)
+// look the same way, so the whole system is one consistent interaction:
+// open a drawer, click a tile, work it in the tray.
 function renderChopFreezer() {
   const el = document.getElementById("chop-freezer");
   if (tray.length === 0) { el.innerHTML = `<div class="empty">The freezer is empty. Harvest something to fill a drawer.</div>`; return; }
-  const c = selected();
-  const canSew = !!c;
-  el.innerHTML = tray.map(t => {
-    const isHeart = t.item.kind === "heart";
-    const label = isHeart
-      ? `🫀 ${esc(t.item.tier)} heart`
-      : `🦴 ${esc(t.item.family.replace(/_/g, " "))} <span class="badge ${originOf(t.item.family)}">${originOf(t.item.family)}</span>`;
-    const target = isHeart ? "" : ` → ${homologOf(t.item.family)}`;
-    return `<div class="drawer">
-      <div class="drawer-label">${label}</div>
-      <div class="drawer-from">from ${esc(t.from)}</div>
-      <button class="small" data-item="${t.itemId}" ${canSew ? "" : "disabled"}>🪡 Graft onto slab${target} (🩸5)</button>
-    </div>`;
+  const byDrawer = Object.fromEntries(DRAWERS.map(d => [d.key, []]));
+  for (const t of tray) (byDrawer[drawerKeyForItem(t.item)] ??= []).push(t);
+
+  el.innerHTML = DRAWERS.map(d => {
+    const items = byDrawer[d.key] ?? [];
+    const bundles = [...new Set(items.map(t => bundleIdOfItem(t.itemId)))]
+      .map(bundleId => ({ bundleId, items: items.filter(t => bundleIdOfItem(t.itemId) === bundleId) }));
+    return `<details class="drawer-unit" ${items.length ? "" : "data-empty"}>
+      <summary class="drawer-label"><span>${d.title}</span><span class="drawer-count">${items.length}</span></summary>
+      <div class="drawer-contents">
+        ${bundles.length === 0 ? `<div class="empty">Empty.</div>` : bundles.map(bundleTileHtml).join("")}
+      </div>
+    </details>`;
   }).join("");
-  el.querySelectorAll("button[data-item]").forEach(b =>
+
+  el.querySelectorAll("[data-open-bundle]").forEach(t =>
+    t.addEventListener("click", () => {
+      local.openBundle = t.dataset.openBundle;
+      local.chopMode = "tray";
+      saveLocal(); renderChop();
+    }));
+}
+
+function bundleTileHtml(b) {
+  const meta = local.bundleMeta?.[b.bundleId];
+  const whole = b.items.length > 1;
+  const icon = whole ? "🧩" : partIcon(b.items[0].item);
+  const label = meta?.label ?? (whole ? "parts" : partName(b.items[0].item));
+  const from = meta?.from ?? b.items[0].from;
+  return `<div class="part-tile" data-open-bundle="${b.bundleId}" title="Open in the surgical tray">
+    <div class="part-thumb">${icon}</div>
+    <div class="part-name">${esc(label)}${whole ? ` <span class="badge">whole · ${b.items.length}</span>` : ""}</div>
+    <div class="part-from">from ${esc(from)}</div>
+  </div>`;
+}
+
+// One part's full card: thumbnail, its own gene-axis stats, and (in the
+// tray) a button to send just that piece onto whatever's on the slab.
+function partTileHtml(t, { canSend }) {
+  const item = t.item;
+  const originBadge = item.kind === "heart" ? "" : `<span class="badge ${originOf(item.family)}">${originOf(item.family)}</span>`;
+  return `<div class="part-tile">
+    <div class="part-thumb">${partIcon(item)}</div>
+    <div class="part-body">
+      <div class="part-name">${esc(partName(item))} ${originBadge}</div>
+      <div class="part-stats kv">${partStatsHtml(item)}</div>
+      <button class="small" data-item="${t.itemId}" ${canSend ? "" : "disabled"} title="${canSend ? "" : "Pick a specimen on the slab first"}">➡ Send to slab (🩸5)</button>
+    </div>
+  </div>`;
+}
+
+// The surgical tray: one opened batch, its pieces laid out individually.
+// Each can go onto the slab (grafted onto whatever specimen is selected)
+// or the whole batch can just be put back, unopened parts and all.
+function renderChopTray() {
+  const wrap = document.getElementById("chop-slab");
+  destroyRenderer();
+  const items = bundleItems(local.openBundle);
+  const meta = local.bundleMeta?.[local.openBundle];
+  const c = selected();
+  wrap.innerHTML = `
+    <div class="tray-view">
+      <div class="tray-head">
+        <div class="tray-title">${esc(meta?.label ?? "parts")} <span class="badge">${items.length} piece${items.length === 1 ? "" : "s"}</span></div>
+        <div class="tray-from">from ${esc(meta?.from ?? items[0]?.from ?? "unknown")}</div>
+      </div>
+      <div class="tray-parts">${items.map(t => partTileHtml(t, { canSend: !!c })).join("")}</div>
+      <button id="btn-return-drawer">↩️ Return to drawer</button>
+    </div>`;
+  wrap.querySelectorAll("button[data-item]").forEach(b =>
     b.addEventListener("click", () => doSew(b.dataset.item)));
+  document.getElementById("btn-return-drawer")?.addEventListener("click", () => {
+    local.chopMode = "slab"; local.openBundle = null; saveLocal(); renderChop();
+  });
 }
 
 function renderLog() {
@@ -936,6 +1081,13 @@ document.getElementById("btn-reset").addEventListener("click", doReset);
 document.getElementById("nav-lab").addEventListener("click", () => setView("lab"));
 document.getElementById("nav-chop").addEventListener("click", () => setView("chop"));
 document.getElementById("nav-stable").addEventListener("click", () => setView("stable"));
+document.getElementById("btn-mode-slab").addEventListener("click", () => {
+  local.chopMode = "slab"; saveLocal(); renderChop();
+});
+document.getElementById("btn-mode-tray").addEventListener("click", () => {
+  if (!local.openBundle) return;
+  local.chopMode = "tray"; saveLocal(); renderChop();
+});
 local.faction ??= "maddr";
 local.view ??= "lab";
 applyFaction(local.faction);
