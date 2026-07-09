@@ -103,7 +103,9 @@ async function sync() {
     local.selectedId = lab[0]?.id ?? null;
   }
 
-  if (local.view === "stable") renderStable(); else render();
+  if (local.view === "stable") renderStable();
+  else if (local.view === "chop") renderChop();
+  else render();
 }
 
 // ── operations ────────────────────────────────────────────────────────────────
@@ -241,6 +243,32 @@ async function doHarvestHeart() {
   saveLocal(); showBusy(false); await sync();
 }
 
+// Chop Shop region cuts: several slots taken in one motion (e.g. "the
+// whole head" = sensor + eye). Each slot is still its own /harvest/part
+// call under the hood -- the genome's slot granularity hasn't changed,
+// this just walks the chain of stumped genomes the calls produce and
+// reports it as one cut. Slots already a stump are skipped quietly.
+async function doHarvestRegion(slots, label) {
+  const c = selected(); if (!c) return;
+  showBusy(true);
+  try {
+    let curId = c.id, curGenome = c.genome;
+    const cut = [];
+    for (const slot of slots) {
+      if (isVestigial(curGenome.slots[slot].family)) continue;
+      const rec = await api("POST", "/harvest/part", { idempotencyKey: ikey(), creatureId: curId, slot });
+      registerName(rec.genomeId, c.name);
+      registerFrom(rec.itemId, c.name);
+      curId = rec.genomeId; curGenome = rec.genome;
+      cut.push(rec.part.family.replace(/_/g, " "));
+    }
+    local.selectedId = curId;
+    if (cut.length) logEntry(`🔪 Took the ${label} (${cut.join(", ")}) off ${c.name}. Bagged and into the freezer.`);
+    else logEntry(`✂️ ${c.name}'s ${label} is already bare — nothing left to take.`);
+  } catch (e) { logEntry(`⚠️ Harvest failed: ${e.message}`); }
+  saveLocal(); showBusy(false); await sync();
+}
+
 async function doSew(itemId) {
   const c = selected(); if (!c?.alive) return;
   const entry = tray.find(t => t.itemId === itemId); if (!entry) return;
@@ -347,11 +375,15 @@ function doUnsaveStable(id) {
 function setView(v) {
   local.view = v; saveLocal();
   document.getElementById("view-lab").style.display = v === "lab" ? "" : "none";
+  document.getElementById("view-chop").style.display = v === "chop" ? "flex" : "none";
   document.getElementById("view-stable").style.display = v === "stable" ? "flex" : "none";
   document.getElementById("nav-lab").classList.toggle("active", v === "lab");
+  document.getElementById("nav-chop").classList.toggle("active", v === "chop");
   document.getElementById("nav-stable").classList.toggle("active", v === "stable");
   destroyRenderer(); _lastPortraitId = null;   // hand the single renderer over
-  if (v === "stable") renderStable(); else { applyFaction(local.faction); render(); }
+  if (v === "stable") renderStable();
+  else if (v === "chop") { applyFaction(local.faction); renderChop(); }
+  else { applyFaction(local.faction); render(); }
 }
 
 function applyFaction(f) {
@@ -376,7 +408,7 @@ function showBusy(on) {
 // ── render ────────────────────────────────────────────────────────────────────
 function render() {
   document.getElementById("wallet").textContent = `🩸 ${blood}`;
-  if (local.view === "stable") return;      // the stable draws itself
+  if (local.view !== "lab") return;      // the stable/chop shop draw themselves
   for (const fn of [renderRoster, renderActions, renderScreen, renderTray, renderLog, renderPortrait]) {
     try { fn(); } catch (err) { console.error(`${fn.name} crashed:`, err); }
   }
@@ -517,6 +549,144 @@ function renderTray() {
     b.addEventListener("click", () => doSew(b.dataset.item)));
 }
 
+// ── the Chop Shop (separate screen) ────────────────────────────────────────────
+// The current specimen sits "on the slab"; cuts move parts into "the
+// freezer" (the same server-side tray/inventory the old inline harvest
+// controls use — this screen is a friendlier front end on the same
+// /harvest, /sew, and /tray calls, not a new backend). Region granularity
+// is capped by what the genome schema actually models: hand (=arm+hand),
+// sensor, eye, leg (=leg+foot), heart. "Head" bundles sensor+eye since
+// those are the two head-mounted slots and eyes genuinely can be taken
+// separately from the rest of the head. The brain isn't a separable part
+// at all yet, so "heads and brains never separate" holds by construction
+// — there's simply no cut that could split them.
+const CHOP_REGIONS = [
+  {
+    key: "head", title: "🧠 Head", slots: ["sensor", "eye"],
+    note: "The brain never leaves the skull — there is no cut for that.",
+    actions: [
+      { label: "Take the whole head (sensors + eyes)", slots: ["sensor", "eye"] },
+      { label: "Take the sensors, leave the eyes", slots: ["sensor"] },
+      { label: "Take the eyes only", slots: ["eye"] },
+    ],
+  },
+  {
+    key: "torso", title: "🫀 Torso", slots: [], heartOnly: true,
+    note: "Only the heart is a separable cut today — hide and ribs stay with whatever body remains.",
+    actions: [{ label: "Take the heart", heart: true }],
+  },
+  {
+    key: "lower", title: "🦵 Lower body", slots: ["leg"],
+    note: "Both legs come off together as one cut — no separate foot yet.",
+    actions: [{ label: "Take the legs", slots: ["leg"] }],
+  },
+  {
+    key: "arms", title: "✋ Arms & hands", slots: ["hand"],
+    note: "Arm and hand are one piece today — no separate wrist cut yet.",
+    actions: [{ label: "Take the arms (hands included)", slots: ["hand"] }],
+  },
+];
+
+function renderChop() {
+  document.getElementById("wallet").textContent = `🩸 ${blood}`;
+  if (local.view !== "chop") return;
+  renderChopRoster();
+  renderChopSlab();
+  renderChopRegions();
+  renderChopFreezer();
+}
+
+function renderChopRoster() {
+  const el = document.getElementById("chop-roster");
+  const list = labCreatures();
+  if (list.length === 0) {
+    el.innerHTML = `<div class="empty">No specimens on this bench. Spawn one in the Lab first.</div>`; return;
+  }
+  el.innerHTML = list.map(c => {
+    const v = viability(c.genome);
+    const badge = c.alive ? `<span class="badge ${v.state}">${v.state}</span>` : `<span class="badge dead">DEAD</span>`;
+    return `<div class="card small ${c.id === local.selectedId ? "selected" : ""} ${c.alive ? "" : "dead"}" data-id="${c.id}">
+      <div class="name">${c.alive ? "" : "💀 "}${esc(c.name)}${badge}</div>
+      <div class="meta">${esc(c.genome.body.plan)}</div>
+    </div>`;
+  }).join("");
+  el.querySelectorAll(".card").forEach(card =>
+    card.addEventListener("click", () => { local.selectedId = card.dataset.id; saveLocal(); renderChop(); }));
+}
+
+function renderChopSlab() {
+  const wrap = document.getElementById("chop-slab");
+  const c = selected();
+  destroyRenderer();
+  if (!c) { wrap.innerHTML = `<div class="empty">Nothing on the slab. Pick a specimen above.</div>`; return; }
+  const g = c.genome;
+  const v = viability(g);
+  const vClass = !c.alive ? "bad" : v.state === "viable" ? "ok" : v.state === "strained" ? "warn" : "bad";
+  wrap.innerHTML = `
+    <canvas id="chop-canvas"></canvas>
+    <div class="chop-slab-label">
+      <div class="pl-name">${c.alive ? "" : "💀 "}${esc(c.name)}</div>
+      <div class="pl-plan">${esc(g.body.plan)} · ${esc(g.brain.tier)} brain · ${esc(g.heart.tier)} heart</div>
+      <div class="pl-stat ${vClass}">${c.alive ? v.state.toUpperCase() : "DEAD ON THE TABLE"}</div>
+    </div>`;
+  try { initRenderer(document.getElementById("chop-canvas"), g); } catch (e) { console.error(e); }
+}
+
+function renderChopRegions() {
+  const el = document.getElementById("chop-regions");
+  const c = selected();
+  if (!c) { el.innerHTML = `<div class="empty">Nothing on the slab.</div>`; return; }
+  const g = c.genome;
+  el.innerHTML = CHOP_REGIONS.map(r => {
+    const occ = r.heartOnly
+      ? `🫀 ${esc(g.heart.tier)} heart`
+      : r.slots.map(s => {
+          const fam = g.slots[s].family;
+          const stump = isVestigial(fam);
+          return `${s}: ${esc(fam.replace(/_/g, " "))}${stump ? ' <span class="badge stump">stump</span>' : ""}`;
+        }).join(" · ");
+    const btns = r.actions.map((a, i) => {
+      const already = a.heart ? false : a.slots.every(s => isVestigial(g.slots[s].family));
+      return `<button class="small" data-region="${r.key}" data-action="${i}" ${already ? "disabled" : ""}>✂️ ${esc(a.label)}</button>`;
+    }).join("");
+    return `<div class="region-card">
+      <div class="region-title">${r.title}</div>
+      <div class="region-occ">${occ}</div>
+      <div class="region-actions">${btns}</div>
+      <div class="region-note">${esc(r.note)}</div>
+    </div>`;
+  }).join("");
+  el.querySelectorAll("button[data-region]").forEach(b => {
+    b.addEventListener("click", () => {
+      const r = CHOP_REGIONS.find(x => x.key === b.dataset.region);
+      const a = r.actions[Number(b.dataset.action)];
+      if (a.heart) doHarvestHeart();
+      else doHarvestRegion(a.slots, r.title.replace(/^\S+\s/, "").toLowerCase());
+    });
+  });
+}
+
+function renderChopFreezer() {
+  const el = document.getElementById("chop-freezer");
+  if (tray.length === 0) { el.innerHTML = `<div class="empty">The freezer is empty. Harvest something to fill a drawer.</div>`; return; }
+  const c = selected();
+  const canSew = !!c?.alive;
+  el.innerHTML = tray.map(t => {
+    const isHeart = t.item.kind === "heart";
+    const label = isHeart
+      ? `🫀 ${esc(t.item.tier)} heart`
+      : `🦴 ${esc(t.item.family.replace(/_/g, " "))} <span class="badge ${originOf(t.item.family)}">${originOf(t.item.family)}</span>`;
+    const target = isHeart ? "" : ` → ${homologOf(t.item.family)}`;
+    return `<div class="drawer">
+      <div class="drawer-label">${label}</div>
+      <div class="drawer-from">from ${esc(t.from)}</div>
+      <button class="small" data-item="${t.itemId}" ${canSew ? "" : "disabled"}>🪡 Graft onto slab${target} (🩸5)</button>
+    </div>`;
+  }).join("");
+  el.querySelectorAll("button[data-item]").forEach(b =>
+    b.addEventListener("click", () => doSew(b.dataset.item)));
+}
+
 function renderLog() {
   document.getElementById("log").innerHTML =
     local.log.map(l => `<p><span class="t">${l.t}</span>${esc(l.msg)}</p>`).join("") ||
@@ -622,6 +792,7 @@ function showStableDetail(id) {
 document.getElementById("btn-spawn").addEventListener("click", doSpawn);
 document.getElementById("btn-reset").addEventListener("click", doReset);
 document.getElementById("nav-lab").addEventListener("click", () => setView("lab"));
+document.getElementById("nav-chop").addEventListener("click", () => setView("chop"));
 document.getElementById("nav-stable").addEventListener("click", () => setView("stable"));
 local.faction ??= "maddr";
 local.view ??= "lab";
@@ -631,7 +802,7 @@ document.getElementById("sel-faction").addEventListener("change", (e) => {
   saveLocal();
   applyFaction(local.faction);
   logEntry(`🚪 Crossed over to ${e.target.selectedOptions[0].textContent.trim()}.`);
-  render();
+  if (local.view === "chop") renderChop(); else render();
 });
 
 // Show connecting state, then sync
