@@ -113,10 +113,6 @@ td, th { padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line); }
 .ok { color: var(--acid); } .warn { color: var(--fuel); } .bad { color: var(--blood); }
 .empty { color: var(--dim); padding: 16px; text-align: center; }
 
-.tray { padding: 8px; display: flex; flex-direction: column; gap: 8px; max-height: 30vh; overflow-y: auto; }
-.tray .item { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--panel2); display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-.tray .item .what { font-size: 12px; }
-
 .log { padding: 8px 12px; font-size: 12px; max-height: 38vh; overflow-y: auto; }
 .log p { margin: 4px 0; border-bottom: 1px dotted var(--line); padding-bottom: 4px; }
 .log .t { color: var(--dim); margin-right: 6px; font-size: 10px; }
@@ -196,6 +192,8 @@ body[data-faction="alien"] button { border-radius: 12px; }
 .chop-slab-label .pl-name { font-size: 15px; color: var(--ink); font-weight: bold; letter-spacing: 1px; }
 .chop-slab-label .pl-plan { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
 .chop-slab-label .pl-stat { font-size: 12px; margin-top: 4px; }
+.chop-slab-actions { display: flex; flex-direction: column; gap: 6px; width: 100%; margin-top: 6px; }
+.chop-slab-actions button { width: 100%; }
 
 .chop-regions { padding: 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
 .region-card {

@@ -21,20 +21,35 @@ const MUTATOR_URL = "https://maddr-mutator.onrender.com";
 const LOCAL_KEY   = "maddr-lab-v2";
 
 // ── local-only state (localStorage) ──────────────────────────────────────────
-// accountId : stable UUID → identifies this browser to the server
-// nameMap   : { [genomeId]: string }  — we assign human names, server assigns IDs
-// deadSet   : string[]  — genomeIds that died on the table
-// trayFrom  : { [itemId]: string }  — creature name a tray item came from
-// log       : notebook entries
-// seq       : auto-name counter
-// selectedId: currently selected genome ID
+// accountId     : stable UUID → identifies this browser to the server
+// nameMap       : { [genomeId]: string }  — we assign human names, server assigns IDs
+// deadSet       : string[]  — genomeIds that died on the table
+// trayFrom      : { [itemId]: string }  — creature name a tray item came from
+// log           : notebook entries
+// seq           : auto-name counter
+// selectedId    : currently selected genome ID
+//
+// A "specimen" is the physical animal; a "genome id" is one immutable
+// snapshot of it (docs/07 lineage — every mutate/splice/harvest/sew mints
+// a new row). These track the animal across that churn:
+// specimenOf    : { [genomeId]: specimenId }  — which animal a row belongs to
+// currentGenomeOf: { [specimenId]: genomeId }  — that animal's latest row
+// locationOf    : { [specimenId]: "lab" | "chop" }  — which room it's in
+// originItem    : { [specimenId]: { [slot|"heart"]: itemId } }  — the most
+//                 recently harvested item for each of ITS OWN missing
+//                 parts, so "Restore" knows what to graft back and can
+//                 tell if that exact piece has since been used elsewhere
 
 let local = (() => {
   try { return JSON.parse(localStorage.getItem(LOCAL_KEY)); } catch { return null; }
 })() ?? newLocal();
 
 function newLocal() {
-  return { accountId: crypto.randomUUID(), nameMap: {}, deadSet: [], trayFrom: {}, log: [], seq: 0, selectedId: null, faction: "maddr", stable: [], hidden: [], factionOf: {}, view: "lab" };
+  return {
+    accountId: crypto.randomUUID(), nameMap: {}, deadSet: [], trayFrom: {}, log: [], seq: 0,
+    selectedId: null, faction: "maddr", stable: [], hidden: [], factionOf: {}, view: "lab",
+    specimenOf: {}, currentGenomeOf: {}, locationOf: {}, originItem: {},
+  };
 }
 function saveLocal() { localStorage.setItem(LOCAL_KEY, JSON.stringify(local)); }
 
@@ -57,6 +72,20 @@ function pct(x)         { return `${Math.round(x * 100)}%`; }
 function esc(s)         { return String(s).replace(/[&<>"]/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[ch])); }
 function bar(x)         { return `<span class="bar"><i style="width:${Math.round(x*100)}%"></i></span>${pct(x)}`; }
 function ikey()         { return crypto.randomUUID(); }
+
+// ── specimen identity (survives surgery's ever-changing genome ids) ─────────
+function specimenIdOf(genomeId) { return local.specimenOf?.[genomeId] ?? genomeId; }
+function setSpecimenGenome(sid, genomeId) {
+  local.specimenOf[genomeId] = sid;
+  local.currentGenomeOf[sid] = genomeId;
+}
+// The exact signature harvestHeart() leaves behind (surgery.ts): a real
+// "faint" tier is a normal, weak-but-working heart -- only an all-zero
+// param vector marks the cavity as emptied.
+function heartHarvested(heart) { return heart.tier === "faint" && heart.params.every(p => p === 0); }
+function isWhole(g) {
+  return SLOT_NAMES.every(s => !isVestigial(g.slots[s].family)) && !heartHarvested(g.heart);
+}
 
 // ── API ───────────────────────────────────────────────────────────────────────
 async function api(method, path, body) {
@@ -96,12 +125,9 @@ async function sync() {
     from: local.trayFrom[inv.itemId] ?? "tray",
   }));
 
-  // selection must be a member of the current faction's bench; default to
+  // selection must be a member of the current screen's bench; default to
   // the first one so the data screen is never blank when creatures exist
-  const lab = labCreatures();
-  if (!lab.find(c => c.id === local.selectedId)) {
-    local.selectedId = lab[0]?.id ?? null;
-  }
+  ensureSelection();
 
   if (local.view === "stable") renderStable();
   else if (local.view === "chop") renderChop();
@@ -164,6 +190,9 @@ async function doSpawn() {
     } else {
       const name = nextName();
       registerName(rec.genomeId, name);
+      const sid = crypto.randomUUID();
+      setSpecimenGenome(sid, rec.genomeId);
+      local.locationOf[sid] = "lab";
       local.selectedId = rec.genomeId;
       logEntry(`⚡ ${name} crawls off the slab.`);
     }
@@ -181,6 +210,9 @@ async function doMutate(biasSlot) {
     } else {
       const name = nextName();
       registerName(rec.genomeId, name);
+      const sid = crypto.randomUUID();
+      setSpecimenGenome(sid, rec.genomeId);
+      local.locationOf[sid] = "lab";
       local.selectedId = rec.genomeId;
       logEntry(`🧬 Mutated ${c.name} → ${name}${biasSlot ? ` (fed the ${biasSlot})` : ""}.`);
     }
@@ -199,6 +231,9 @@ async function doSplice(partnerId) {
     } else {
       const name = nextName();
       registerName(rec.genomeId, name);
+      const sid = crypto.randomUUID();
+      setSpecimenGenome(sid, rec.genomeId);
+      local.locationOf[sid] = "lab";
       local.selectedId = rec.genomeId;
       logEntry(`🧪 Spliced ${a.name} × ${b.name} → ${name}.`);
     }
@@ -206,31 +241,19 @@ async function doSplice(partnerId) {
   saveLocal(); showBusy(false); await sync();
 }
 
-async function doHarvestPart(slot) {
-  const c = selected(); if (!c) return;
-  if (isVestigial(c.genome.slots[slot].family)) {
-    logEntry(`✂️ ${c.name}'s ${slot} is already a stump.`); render(); return;
-  }
-  showBusy(true);
-  try {
-    const rec = await api("POST", "/harvest/part", { idempotencyKey: ikey(), creatureId: c.id, slot });
-    // rec: { genomeId (stumped), genome, part, itemId }
-    registerName(rec.genomeId, c.name);
-    registerFrom(rec.itemId, c.name);
-    local.selectedId = rec.genomeId;
-    logEntry(`✂️ Cut the ${rec.part.family.replace(/_/g, " ")} off ${c.name}. The ${slot} heals to a stump; part is in the tray.`);
-  } catch (e) { logEntry(`⚠️ Harvest failed: ${e.message}`); }
-  saveLocal(); showBusy(false); await sync();
-}
-
 async function doHarvestHeart() {
   const c = selected(); if (!c) return;
+  const sid = specimenIdOf(c.id);
   showBusy(true);
   try {
     const rec = await api("POST", "/harvest/heart", { idempotencyKey: ikey(), creatureId: c.id });
     // rec: { genomeId (corpse/survivor), genome, heart, itemId }
     registerName(rec.genomeId, c.name);
     registerFrom(rec.itemId, c.name);
+    setSpecimenGenome(sid, rec.genomeId);
+    local.originItem[sid] = local.originItem[sid] ?? {};
+    local.originItem[sid].heart = rec.itemId;
+    local.locationOf[sid] = "chop";
     local.selectedId = rec.genomeId;
     const v = viability(rec.genome);
     if (v.state === "nonviable") {
@@ -250,6 +273,7 @@ async function doHarvestHeart() {
 // reports it as one cut. Slots already a stump are skipped quietly.
 async function doHarvestRegion(slots, label) {
   const c = selected(); if (!c) return;
+  const sid = specimenIdOf(c.id);
   showBusy(true);
   try {
     let curId = c.id, curGenome = c.genome;
@@ -259,9 +283,13 @@ async function doHarvestRegion(slots, label) {
       const rec = await api("POST", "/harvest/part", { idempotencyKey: ikey(), creatureId: curId, slot });
       registerName(rec.genomeId, c.name);
       registerFrom(rec.itemId, c.name);
+      setSpecimenGenome(sid, rec.genomeId);
+      local.originItem[sid] = local.originItem[sid] ?? {};
+      local.originItem[sid][slot] = rec.itemId;
       curId = rec.genomeId; curGenome = rec.genome;
       cut.push(rec.part.family.replace(/_/g, " "));
     }
+    local.locationOf[sid] = "chop";
     local.selectedId = curId;
     if (cut.length) logEntry(`🔪 Took the ${label} (${cut.join(", ")}) off ${c.name}. Bagged and into the freezer.`);
     else logEntry(`✂️ ${c.name}'s ${label} is already bare — nothing left to take.`);
@@ -269,9 +297,15 @@ async function doHarvestRegion(slots, label) {
   saveLocal(); showBusy(false); await sync();
 }
 
+// Sewing works on dead specimens too -- a heart transplant is exactly how
+// a corpse (per local.deadSet) comes back: the new genome id it produces
+// was never added to deadSet, so `alive` just becomes true again on the
+// next sync. No revival flag needed -- it falls out of the immutable-row
+// design for free.
 async function doSew(itemId) {
-  const c = selected(); if (!c?.alive) return;
+  const c = selected(); if (!c) return;
   const entry = tray.find(t => t.itemId === itemId); if (!entry) return;
+  const sid = specimenIdOf(c.id);
   showBusy(true);
   try {
     let rec;
@@ -284,6 +318,7 @@ async function doSew(itemId) {
 
     if (rec.result === "survived") {
       registerName(rec.genomeId, c.name);
+      setSpecimenGenome(sid, rec.genomeId);
       local.selectedId = rec.genomeId;
       if (entry.item.kind === "heart") {
         if (rec.explantedHeartItemId) registerFrom(rec.explantedHeartItemId, c.name);
@@ -294,7 +329,7 @@ async function doSew(itemId) {
     } else if (rec.result === "limb_rejected") {
       logEntry(`🦠 ${c.name}'s heart can't feed the new ${(entry.item.family ?? "part").replace(/_/g, " ")} — rejected. The part is still usable.`);
     } else if (rec.result === "patient_died") {
-      if (rec.genomeId) { registerName(rec.genomeId, c.name); markDead(rec.genomeId); local.selectedId = rec.genomeId; }
+      if (rec.genomeId) { registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); markDead(rec.genomeId); local.selectedId = rec.genomeId; }
       if (entry.item.kind === "heart") {
         logEntry(`☠️ The ${entry.item.tier} heart could not drive ${c.name}'s body — ${c.name} dies on the table.`);
       } else {
@@ -302,6 +337,96 @@ async function doSew(itemId) {
       }
     }
   } catch (e) { logEntry(`⚠️ Sew failed: ${e.message}`); }
+  saveLocal(); showBusy(false); await sync();
+}
+
+// ── moving specimens between the Lab and the Chop Shop ──────────────────────
+// A specimen lives in exactly one room. Sending it under the knife pulls
+// it off the Lab's bench entirely -- there is only ever one card for it,
+// wherever it currently is -- and it only comes back once it's whole
+// again: "only a whole functioning specimen can exist in the lab."
+function doSendToChop() {
+  const c = selected(); if (!c) return;
+  const sid = specimenIdOf(c.id);
+  local.locationOf[sid] = "chop";
+  saveLocal();
+  logEntry(`🔪 Wheeled ${c.name} into the chop shop.`);
+  setView("chop");
+}
+
+function doSendToLab() {
+  const c = selected(); if (!c) return;
+  if (!c.alive || !isWhole(c.genome)) return;
+  const sid = specimenIdOf(c.id);
+  local.locationOf[sid] = "lab";
+  saveLocal();
+  logEntry(`🏠 ${c.name} is whole again — back to the lab.`);
+  setView("lab");
+}
+
+// What a specimen is missing, and whether ITS OWN original parts (not
+// some other creature's) are still sitting unclaimed in the freezer. If
+// even one has already been grafted onto something else, a full restore
+// is impossible -- the button greys out rather than doing a partial job
+// silently.
+function restoreCheck(sid, g) {
+  const missing = SLOT_NAMES.filter(s => isVestigial(g.slots[s].family));
+  if (heartHarvested(g.heart)) missing.push("heart");
+  if (missing.length === 0) return { ok: false, missing, reason: "whole" };
+  const origins = local.originItem[sid] ?? {};
+  for (const m of missing) {
+    const itemId = origins[m];
+    if (!itemId || !tray.find(t => t.itemId === itemId)) return { ok: false, missing, reason: "unavailable" };
+  }
+  return { ok: true, missing };
+}
+
+async function doRestore() {
+  const c = selected(); if (!c) return;
+  const sid = specimenIdOf(c.id);
+  const check = restoreCheck(sid, c.genome);
+  if (!check.ok) return;
+  showBusy(true);
+  try {
+    const origins = local.originItem[sid];
+    // heart first: restoring pumping capacity before adding load back is
+    // the one ordering that can never itself provoke a rejection that a
+    // different order might
+    const order = check.missing.includes("heart")
+      ? ["heart", ...check.missing.filter(m => m !== "heart")]
+      : [...check.missing];
+    let curId = c.id;
+    const restored = [];
+    for (const m of order) {
+      const itemId = origins[m];
+      if (m === "heart") {
+        const rec = await api("POST", "/sew/heart", { idempotencyKey: ikey(), creatureId: curId, itemId });
+        if (rec.result !== "survived") {
+          if (rec.genomeId) { registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); markDead(rec.genomeId); curId = rec.genomeId; }
+          logEntry(`☠️ Restoring ${c.name}'s heart killed it on the table — stopped there.`);
+          break;
+        }
+        registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); curId = rec.genomeId;
+        restored.push("heart");
+      } else {
+        const rec = await api("POST", "/sew/part", { idempotencyKey: ikey(), creatureId: curId, slot: m, itemId });
+        if (rec.result === "limb_rejected") {
+          logEntry(`🦠 ${c.name}'s heart rejected the restored ${m} — stopped there.`);
+          break;
+        }
+        if (rec.result === "patient_died") {
+          registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); markDead(rec.genomeId); curId = rec.genomeId;
+          logEntry(`☠️ Restoring ${c.name}'s ${m} killed it on the table — stopped there.`);
+          break;
+        }
+        registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); curId = rec.genomeId;
+        restored.push(m);
+      }
+    }
+    local.selectedId = curId;
+    if (restored.length === order.length) logEntry(`🧵 Restored ${c.name} to whole (${restored.join(", ")}).`);
+    else if (restored.length) logEntry(`🧵 Partially restored ${c.name} (${restored.join(", ")}) before the surgery gave out.`);
+  } catch (e) { logEntry(`⚠️ Restore failed: ${e.message}`); }
   saveLocal(); showBusy(false); await sync();
 }
 
@@ -336,10 +461,40 @@ function factionOfCreature(c) {
   return "maddr";
 }
 
-// The current lab's bench: this faction's creatures, minus ones cleared.
-function labCreatures() {
+// Where a specimen lives when nothing has recorded it explicitly yet
+// (legacy local state from before rooms existed): infer it from its own
+// structural state -- whole goes to the lab, anything short of that to
+// the chop shop -- rather than defaulting everything to one room.
+function locationOfSpecimen(sid, genome) {
+  return local.locationOf[sid] ?? (isWhole(genome) ? "lab" : "chop");
+}
+
+// One card per PHYSICAL specimen, in the given room, on this faction's
+// bench. Surgery mints a new immutable genome row on every cut or graft
+// (docs/07 lineage) -- that's bookkeeping, not a new animal, so only the
+// latest row for each specimen is ever shown.
+function benchCreatures(loc) {
   const hidden = new Set(local.hidden ?? []);
-  return creatures.filter(c => !hidden.has(c.id) && factionOfCreature(c) === local.faction);
+  const out = [];
+  for (const c of creatures) {
+    if (hidden.has(c.id)) continue;
+    if (factionOfCreature(c) !== local.faction) continue;
+    const sid = specimenIdOf(c.id);
+    const current = local.currentGenomeOf[sid] ?? c.id;
+    if (c.id !== current) continue;                          // superseded row
+    if (locationOfSpecimen(sid, c.genome) !== loc) continue;
+    out.push(c);
+  }
+  return out;
+}
+function labCreatures()  { return benchCreatures("lab"); }
+function chopCreatures() { return benchCreatures("chop"); }
+
+// Selection must belong to whichever room is on screen; default to the
+// first specimen there so the view is never blank when one exists.
+function ensureSelection() {
+  const list = local.view === "chop" ? chopCreatures() : labCreatures();
+  if (!list.find(c => c.id === local.selectedId)) local.selectedId = list[0]?.id ?? null;
 }
 
 // ── specimen actions: name / delete / stable ──────────────────────────────────
@@ -395,8 +550,7 @@ function applyFaction(f) {
   setLabFaction(f);
   destroyRenderer();            // force the portrait to rebuild its scene
   _lastPortraitId = null;
-  const lab = labCreatures();
-  if (!lab.find(c => c.id === local.selectedId)) local.selectedId = lab[0]?.id ?? null;
+  ensureSelection();
 }
 
 // ── busy indicator ────────────────────────────────────────────────────────────
@@ -409,7 +563,7 @@ function showBusy(on) {
 function render() {
   document.getElementById("wallet").textContent = `🩸 ${blood}`;
   if (local.view !== "lab") return;      // the stable/chop shop draw themselves
-  for (const fn of [renderRoster, renderActions, renderScreen, renderTray, renderLog, renderPortrait]) {
+  for (const fn of [renderRoster, renderActions, renderScreen, renderLog, renderPortrait]) {
     try { fn(); } catch (err) { console.error(`${fn.name} crashed:`, err); }
   }
 }
@@ -437,7 +591,6 @@ function renderActions() {
   const partners = labCreatures().filter(x => x.alive && x.id !== c.id);
   const feedOpts = `<option value="">no feeding</option>` + SLOT_NAMES.map(s => `<option value="${s}">feed the ${s}</option>`).join("");
   const partnerOpts = partners.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
-  const slotOpts = SLOT_NAMES.map(s => `<option value="${s}">${s}</option>`).join("");
   const dead = !c.alive;
   el.innerHTML = `
     <div class="group"><span class="lbl">Mutator</span>
@@ -446,26 +599,20 @@ function renderActions() {
       <select id="sel-partner" ${dead || !partners.length ? "disabled" : ""}>${partnerOpts || "<option>no partner</option>"}</select>
       <button id="btn-splice" ${dead || !partners.length ? "disabled" : ""}>🧪 Splice (🩸20)</button>
     </div>
-    <div class="group"><span class="lbl">Chop shop</span>
-      <select id="sel-slot">${slotOpts}</select>
-      <button id="btn-harvest">✂️ Harvest part (🩸5)</button>
-      <button id="btn-harvest-heart">💔 Harvest heart (🩸5)</button>
-    </div>
     <div class="group"><span class="lbl">Specimen</span>
       <button id="btn-rename">🏷️ Name</button>
       <button id="btn-save">${isSaved(c.id) ? "★ In stable" : "⭐ Save to stable"}</button>
+      <button id="btn-chop">🔪 Send to chop shop</button>
       <button id="btn-delete" class="danger">🗑️ Delete</button>
     </div>`;
   document.getElementById("btn-rename")?.addEventListener("click", doRename);
   document.getElementById("btn-save")?.addEventListener("click", doSaveStable);
+  document.getElementById("btn-chop")?.addEventListener("click", doSendToChop);
   document.getElementById("btn-delete")?.addEventListener("click", doDelete);
   document.getElementById("btn-mutate")?.addEventListener("click", () =>
     doMutate(document.getElementById("sel-feed").value || undefined));
   document.getElementById("btn-splice")?.addEventListener("click", () =>
     doSplice(document.getElementById("sel-partner").value));
-  document.getElementById("btn-harvest")?.addEventListener("click", () =>
-    doHarvestPart(document.getElementById("sel-slot").value));
-  document.getElementById("btn-harvest-heart")?.addEventListener("click", doHarvestHeart);
 }
 
 function renderScreen() {
@@ -529,26 +676,6 @@ function _renderScreenInner(el) {
     </div>`;
 }
 
-function renderTray() {
-  const el = document.getElementById("tray");
-  if (tray.length === 0) { el.innerHTML = `<div class="empty">Harvest a part to fill the tray.</div>`; return; }
-  const c = selected();
-  const canSew = !!c?.alive;
-  el.innerHTML = tray.map(t => {
-    const isHeart = t.item.kind === "heart";
-    const label = isHeart
-      ? `🫀 ${esc(t.item.tier)} heart`
-      : `🦴 ${esc(t.item.family.replace(/_/g, " "))} <span class="badge ${originOf(t.item.family)}">${originOf(t.item.family)}</span>`;
-    const target = isHeart ? "" : ` → ${homologOf(t.item.family)}`;
-    return `<div class="item">
-      <span class="what">${label}<br><small style="color:var(--dim)">from ${esc(t.from)}</small></span>
-      <button class="small" data-item="${t.itemId}" ${canSew ? "" : "disabled"}>🪡 Sew${target} (🩸5)</button>
-    </div>`;
-  }).join("");
-  el.querySelectorAll("button[data-item]").forEach(b =>
-    b.addEventListener("click", () => doSew(b.dataset.item)));
-}
-
 // ── the Chop Shop (separate screen) ────────────────────────────────────────────
 // The current specimen sits "on the slab"; cuts move parts into "the
 // freezer" (the same server-side tray/inventory the old inline harvest
@@ -598,9 +725,9 @@ function renderChop() {
 
 function renderChopRoster() {
   const el = document.getElementById("chop-roster");
-  const list = labCreatures();
+  const list = chopCreatures();
   if (list.length === 0) {
-    el.innerHTML = `<div class="empty">No specimens on this bench. Spawn one in the Lab first.</div>`; return;
+    el.innerHTML = `<div class="empty">Nobody's under the knife. Send a specimen over from the Lab.</div>`; return;
   }
   el.innerHTML = list.map(c => {
     const v = viability(c.genome);
@@ -618,18 +745,33 @@ function renderChopSlab() {
   const wrap = document.getElementById("chop-slab");
   const c = selected();
   destroyRenderer();
-  if (!c) { wrap.innerHTML = `<div class="empty">Nothing on the slab. Pick a specimen above.</div>`; return; }
+  if (!c) { wrap.innerHTML = `<div class="empty">Nothing on the slab. Send a specimen over from the Lab.</div>`; return; }
   const g = c.genome;
   const v = viability(g);
   const vClass = !c.alive ? "bad" : v.state === "viable" ? "ok" : v.state === "strained" ? "warn" : "bad";
+  const sid = specimenIdOf(c.id);
+  const whole = isWhole(g);
+  const check = restoreCheck(sid, g);
+  const canSendBack = c.alive && whole;
+  const restoreTitle = check.ok ? "Sew this specimen's own harvested parts back on"
+    : check.reason === "whole" ? "Already whole -- nothing to restore"
+    : "One or more of its original parts have already been grafted onto something else";
+  const sendTitle = canSendBack ? "" : !c.alive ? "Dead specimens can't go back to the lab"
+    : "Must be whole -- no stumps, working heart -- first";
   wrap.innerHTML = `
     <canvas id="chop-canvas"></canvas>
     <div class="chop-slab-label">
       <div class="pl-name">${c.alive ? "" : "💀 "}${esc(c.name)}</div>
       <div class="pl-plan">${esc(g.body.plan)} · ${esc(g.brain.tier)} brain · ${esc(g.heart.tier)} heart</div>
       <div class="pl-stat ${vClass}">${c.alive ? v.state.toUpperCase() : "DEAD ON THE TABLE"}</div>
+    </div>
+    <div class="chop-slab-actions">
+      <button id="btn-restore" title="${restoreTitle}" ${check.ok ? "" : "disabled"}>🩹 Restore original parts</button>
+      <button id="btn-tolab" class="primary" title="${sendTitle}" ${canSendBack ? "" : "disabled"}>🏠 Send back to lab</button>
     </div>`;
   try { initRenderer(document.getElementById("chop-canvas"), g); } catch (e) { console.error(e); }
+  document.getElementById("btn-restore")?.addEventListener("click", doRestore);
+  document.getElementById("btn-tolab")?.addEventListener("click", doSendToLab);
 }
 
 function renderChopRegions() {
@@ -670,7 +812,7 @@ function renderChopFreezer() {
   const el = document.getElementById("chop-freezer");
   if (tray.length === 0) { el.innerHTML = `<div class="empty">The freezer is empty. Harvest something to fill a drawer.</div>`; return; }
   const c = selected();
-  const canSew = !!c?.alive;
+  const canSew = !!c;
   el.innerHTML = tray.map(t => {
     const isHeart = t.item.kind === "heart";
     const label = isHeart
