@@ -141,7 +141,7 @@ class MeshB {
   constructor() {
     this.v = []; this.idx = []; this.glows = [];
     this.anim = ANIM0; this.fx = 0; this.tex = TEX_NONE; this.gait = GAIT0; this.alpha = 1;
-    this.heart = 0;
+    this.heart = 0; this.organ = 0;
   }
   setAnim(a) { this.anim = a; }
   setFx(f) { this.fx = f; }
@@ -162,14 +162,19 @@ class MeshB {
    * driven by gaitStep()) rather than the shared breathing/gait channels,
    * since a heart keeps beating at rest when neither of those animate. */
   setHeart(h) { this.heart = h; }
+  /** Suspension weight, 0 = rigidly on the torso (default). >0 tags a
+   * vertex as belonging to a loose internal organ (heart, stomach, gut)
+   * that gets pushed by a damped spring (uOrganOffset) instead of
+   * riding the torso exactly -- see organLevel(). */
+  setOrgan(o) { this.organ = o; }
   vert(p, n, c, g, e) {
     const a = this.anim, t = this.tex, gt = this.gait;
     this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], c[0]/255, c[1]/255, c[2]/255, g, e, this.fx,
       t[0], t[1], t[2], t[3],
       a[0], a[1], a[2], a[3],
       gt[0], gt[1], gt[2], gt[3],
-      this.alpha, this.heart);
-    return this.v.length / 26 - 1;
+      this.alpha, this.heart, this.organ);
+    return this.v.length / 27 - 1;
   }
   tri(a, b, c) { this.idx.push(a, b, c); }
   quad(a, b, c, d) { this.idx.push(a, b, c, a, c, d); }
@@ -1116,15 +1121,18 @@ function planBlob(mb, o) {
   // three trapezoidal chambers (low-segment lathes -- faceted, not
   // smooth, to read as built rather than a round blob): one large main
   // chamber as the base, tapering to the anatomical apex point, with the
-  // left and right ventricles stacked directly on TOP of it -- same
-  // centerline, not offset to the side or set behind it -- left (bright,
-  // oxygenated) below right (darker, deoxygenated). Each beats on
-  // setHeart()'s own clock (uHeartBeat, gaitStep() in the JS), which
-  // tracks the creature's current locomotion speed but never goes fully
-  // silent at rest the way the shared gait channel does.
+  // left and right ventricles sitting SIDE BY SIDE on top of it -- same
+  // Y range, offset from each other in X, not stacked on each other --
+  // left (bright, oxygenated) beside right (darker, deoxygenated). Each
+  // beats on setHeart()'s own clock (uHeartBeat, gaitStep() in the JS),
+  // which tracks the creature's current locomotion speed but never goes
+  // fully silent at rest the way the shared gait channel does. All three
+  // chambers are also tagged setOrgan() -- loose on the torso, pushed by
+  // organLevel()'s spring (uOrganOffset) instead of sitting rigid.
   const hs = Math.min(dR[0], dR[1], dR[2]) * 0.20;
   const heartBase = [dR[0]*0.12, dC[1] + dR[1]*0.20, dR[2]*0.16];
 
+  mb.setOrgan(1);
   // the large main chamber -- the base everything else sits on
   mb.setHeart(0.30);
   lathe(mb, [
@@ -1133,18 +1141,18 @@ function planBlob(mb, o) {
     { y: heartBase[1] + hs*0.80, x: heartBase[0], z: heartBase[2], rx: hs*0.60, rz: hs*0.52 },
   ], HEARTC_L, 0.55, 0, 6);
 
-  // left ventricle, directly on top of the main chamber
+  // left and right ventricles, side by side on top of the main chamber
   const topY = heartBase[1] + hs*0.80;
+  const vSide = hs * 0.36;
   mb.setHeart(0.30);
   lathe(mb, [
-    { y: topY + hs*0.02, x: heartBase[0], z: heartBase[2], rx: hs*0.32, rz: hs*0.28 },
-    { y: topY + hs*0.46, x: heartBase[0], z: heartBase[2], rx: hs*0.50, rz: hs*0.44 },
+    { y: topY + hs*0.02, x: heartBase[0] - vSide, z: heartBase[2], rx: hs*0.30, rz: hs*0.27 },
+    { y: topY + hs*0.50, x: heartBase[0] - vSide, z: heartBase[2], rx: hs*0.46, rz: hs*0.40 },
   ], HEARTC_L, 0.55, 0, 6);
-  // right ventricle, stacked directly on top of the left
   mb.setHeart(0.22);
   lathe(mb, [
-    { y: topY + hs*0.44, x: heartBase[0], z: heartBase[2], rx: hs*0.42, rz: hs*0.37 },
-    { y: topY + hs*0.86, x: heartBase[0], z: heartBase[2], rx: hs*0.34, rz: hs*0.30 },
+    { y: topY + hs*0.02, x: heartBase[0] + vSide, z: heartBase[2], rx: hs*0.26, rz: hs*0.23 },
+    { y: topY + hs*0.46, x: heartBase[0] + vSide, z: heartBase[2], rx: hs*0.40, rz: hs*0.34 },
   ], HEARTC_R, 0.55, 0, 5);
   mb.setHeart(0);
   // the stomach: a fleshy sac slung mid-body
@@ -1166,6 +1174,7 @@ function planBlob(mb, o) {
     gutR.push(dR[0] * 0.055 * (1 - 0.25 * Math.sin(t*8)));
   }
   tube(mb, gutPath, gutR, GUTC, 0.35, 0, 8, 3);
+  mb.setOrgan(0);
   mb.setTex(prevTex);
   mb.setAnim(prevAnim);
 
@@ -2609,11 +2618,12 @@ function buildClouds() {
 const VS_CREATURE = `
 attribute vec3 aPos, aNor, aCol, aMat;
 attribute vec4 aTex, aAnim, aGait;
-attribute float aAlpha, aHeart;
+attribute float aAlpha, aHeart, aOrgan;
 uniform mat4 uPV;
 uniform float uCos, uSin;
 uniform float uTime, uBreath, uBlink, uTongue;
 uniform float uGait, uGaitAmp, uHeartBeat;
+uniform vec3 uOrganOffset;
 uniform vec2 uGaze;
 varying vec3 vNor, vCol, vPos, vMat, vLoc, vLNor;
 varying vec4 vTex;
@@ -2629,6 +2639,11 @@ void main() {
   float lub = pow(max(sin(uHeartBeat), 0.0), 3.0);
   float dub = pow(max(sin(uHeartBeat - 1.1), 0.0), 6.0) * 0.4;
   lp += aNor * (aHeart * (lub + dub));
+  // internal organs hang off a damped spring rather than sitting rigid
+  // on the torso -- a straight translation (not normal-scaled, unlike
+  // the heartbeat pulse above), so the whole organ swings as one lump
+  // instead of breathing in and out -- see organLevel()
+  lp += aOrgan * uOrganOffset;
   lp.y += max(aAnim.y, 0.0) * sin(uTime * 2.6 + aAnim.w);    // traveling sinusoidal flap
   lp.y -= max(-aAnim.y, 0.0) * uBlink;                       // eyelid blink
   float sway = aAnim.z * sin(uTime * 1.4 + aAnim.w);         // pendulum sway
@@ -2855,6 +2870,33 @@ function gaitStep() {
   return [G.phase, G.amp, G.heartPhase];
 }
 
+// Internal organs (aOrgan-tagged: heart, stomach, gut) aren't rigid with
+// the torso -- they hang off their own SOD spring, chasing an impulse
+// target built from footfalls and heartbeats, so they lag and jiggle like
+// they're on bungee cords instead of moving in lockstep. Same k2s-clamped
+// SOD math as the gait/gaze springs above, which is what keeps this from
+// ever overshooting into runaway oscillation ("exploding") no matter how
+// hard or fast it gets kicked.
+function organLevel() {
+  const G = _gait;
+  if (!R?.sodOrganY) return [0, 0, 0];
+  const scale = (R.maxR ?? 4) * 0.05;
+  // a footfall lands twice per stride and jolts everything hanging inside
+  // -- silent at idle (G.amp is 0 there, same gate the legs use), sharper
+  // the faster the creature moves
+  const footfall = Math.pow(Math.max(Math.sin(G.phase * 2), 0), 10) * G.amp;
+  // each heartbeat gives the organs packed around it a small kick too,
+  // off the same clock as the shader's lub-DUB
+  const hbKick = Math.pow(Math.max(Math.sin(G.heartPhase), 0), 3);
+  const targetY = -footfall * 1.0 - hbKick * 0.22;
+  const targetX = Math.sin(G.phase) * 0.35 * G.amp;
+  const targetZ = Math.cos(G.heartPhase * 0.5) * 0.10 * hbKick;
+  const oy = R.sodOrganY.update(1 / 60, targetY) * scale;
+  const ox = R.sodOrganX.update(1 / 60, targetX) * scale;
+  const oz = R.sodOrganZ.update(1 / 60, targetZ) * scale;
+  return [ox, oy, oz];
+}
+
 // Gaze: pupils saccade — a quick eased hop to a new target, then a long
 // hold. All eyes move together (conjugate gaze).
 const _gaze = { cur: [0, 0], from: [0, 0], to: [0, 0], t: 99, next: 80 };
@@ -3048,9 +3090,16 @@ function uploadCreature(genome, X = R) {
   X.sodHz  = new SOD(pf * 0.8, pz, pr * 0.5, X.loco.walkHz);
   X.sodGX  = new SOD(pf * 1.6, pz * 0.85, pr, 0);
   X.sodGY  = new SOD(pf * 1.6, pz * 0.85, pr, 0);
+  // internal-organ suspension springs: fixed, not personality-linked --
+  // damping ratio 0.55 is comfortably above critical enough that no
+  // parameter choice here reads as unstable, and the SOD's own k2s clamp
+  // (see class SOD) guarantees it can't diverge regardless
+  X.sodOrganX = new SOD(3.2, 0.55, 0, 0);
+  X.sodOrganY = new SOD(3.6, 0.55, 0, 0);
+  X.sodOrganZ = new SOD(3.2, 0.55, 0, 0);
   if (X === R) { _gait.mode = 0; _gait.t = 0; _gait.amp = 0; }
   let mr = 2.5;
-  for (let i = 0; i < mb.v.length; i += 25)
+  for (let i = 0; i < mb.v.length; i += 27)
     mr = Math.max(mr, Math.hypot(mb.v[i], mb.v[i + 2]));
   X.maxR = Math.min(mr, 13);
 
@@ -3156,7 +3205,7 @@ function drawFrame(X = R, still = false) {
   const p = X.progC;
   gl.useProgram(p);
   gl.bindBuffer(gl.ARRAY_BUFFER, X.meshBuf);
-  const stride = 104;
+  const stride = 108;
   const attr = (name, size, off) => {
     const a = gl.getAttribLocation(p, name);
     gl.enableVertexAttribArray(a);
@@ -3164,7 +3213,7 @@ function drawFrame(X = R, still = false) {
   };
   attr('aPos', 3, 0); attr('aNor', 3, 12); attr('aCol', 3, 24); attr('aMat', 3, 36);
   attr('aTex', 4, 48); attr('aAnim', 4, 64); attr('aGait', 4, 80); attr('aAlpha', 1, 96);
-  attr('aHeart', 1, 100);
+  attr('aHeart', 1, 100); attr('aOrgan', 1, 104);
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_2D, X.skinTex);
   gl.uniform1i(gl.getUniformLocation(p, 'uSkin'), 1);
@@ -3188,6 +3237,8 @@ function drawFrame(X = R, still = false) {
   gl.uniform1f(gl.getUniformLocation(p, 'uGait'), gs[0]);
   gl.uniform1f(gl.getUniformLocation(p, 'uGaitAmp'), gs[1]);
   gl.uniform1f(gl.getUniformLocation(p, 'uHeartBeat'), gs[2]);
+  const oo = still ? [0, 0, 0] : organLevel();
+  gl.uniform3f(gl.getUniformLocation(p, 'uOrganOffset'), oo[0], oo[1], oo[2]);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, X.idxBuf);
   gl.drawElements(gl.TRIANGLES, X.idxCount, X.idxType, 0);
   gl.disable(gl.BLEND);
