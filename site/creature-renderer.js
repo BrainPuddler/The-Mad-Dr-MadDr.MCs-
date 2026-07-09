@@ -1085,23 +1085,74 @@ function planTetrapod(mb, o) {
 }
 
 function planBlob(mb, o) {
-  // limb gene sets the pour: 0 = wide flat puddle, 1 = tall gelatin tower
+  // limb gene sets the pour: 0 = wide flat puddle (it slides), 1 = tall
+  // gelatin tower (it rolls). A blob never gets a leg socket at all
+  // (ignoresSlots, catalog.ts) -- it slides or rolls, full stop -- so a
+  // roller has no business keeping a flattened base like it's missing
+  // legs it never had; the puddle end of the axis keeps that base
+  // because a puddle sliding along the ground plausibly has one.
   const tall = o.limb;
   const dr = (3.0 + 1.3*o.bulk) * (1.15 - 0.40*tall);
   const dR = [dr, (2.5 + 1.0*o.bulk) * (0.62 + 1.05*tall), dr];
   const dC = [0, dR[1]*0.9, 0];
   const JELLY = [0.13, 0, 0.10, 0.7];
   const SQUELCH = [0, 0, 0, 0.16];
-  mb.setAnim(JELLY);
+
+  // Organs first: the outer mass draws translucent, so whatever should
+  // show through has to already be in the mesh before that call (same
+  // draw-order rule the glass dome runs on, docs/08).
+  const prevTex = mb.tex, prevAnim = mb.anim;
+  mb.setTex(TEX_NONE);
+  mb.setGait(GAIT0);   // organs don't ride the locomotion cycle; gait is reset to SQUELCH below, for the body
+  const HEARTC = [200, 40, 55], STOMACHC = [214, 172, 92], GUTC = [188, 116, 132];
+  // the beating heart: a strong pulse on the breathing channel (in sync
+  // with the body's own breath -- there's only one breath phase to hook
+  // into) plus a quicker flutter on the flap channel's faster sine, so
+  // it doesn't just read as "part of the body breathing"
+  mb.setAnim([0.4, 0.18, 0, 0.6]);
+  const heartC = [dR[0]*0.12, dC[1] + dR[1]*0.32, dR[2]*0.18];
+  ellipsoid(mb, heartC, [dR[0]*0.15, dR[1]*0.13, dR[2]*0.15], HEARTC, 0.55, 0, 10);
+  ellipsoid(mb, [heartC[0]-dR[0]*0.05, heartC[1]-dR[1]*0.04, heartC[2]],
+    [dR[0]*0.08, dR[1]*0.07, dR[2]*0.08], sh(HEARTC, 1.2), 0.55, 0, 8);
+  // the stomach: a fleshy sac slung mid-body
+  mb.setAnim(ANIM0);
+  ellipsoid(mb, [-dR[0]*0.10, dC[1] - dR[1]*0.05, dR[2]*0.08],
+    [dR[0]*0.30, dR[1]*0.24, dR[2]*0.28], STOMACHC, 0.4, 0, 10);
+  // the digestive tract: coiled through the lower half
+  const gutPath = [], gutR = [];
+  const nSeg = 12;
+  for (let i = 0; i <= nSeg; i++) {
+    const t = i / nSeg;
+    const ang = t * Math.PI * 3.4;
+    const rad = dR[0] * (0.42 - 0.20*t);
+    gutPath.push([
+      Math.cos(ang) * rad,
+      dC[1] - dR[1]*0.4 + t * dR[1]*0.45,
+      Math.sin(ang) * rad * (dR[2] / dR[0]),
+    ]);
+    gutR.push(dR[0] * 0.055 * (1 - 0.25 * Math.sin(t*8)));
+  }
+  tube(mb, gutPath, gutR, GUTC, 0.35, 0, 8, 3);
+  mb.setTex(prevTex);
+  mb.setAnim(prevAnim);
+
   mb.setGait(SQUELCH);
   mb.setTex(o.bodyTex('slick', o.texScale, 0.85));
-  // squash-and-stretch: the crown bobs on the flap channel, the base stays
+  // the mass itself: translucent gelatin now, organs showing through
+  mb.setAnim(JELLY);
+  mb.setAlpha(0.55);
   ellipsoid(mb, dC, dR, o.skin, 0.34, 0, 18, o.skinFn,
     (u) => [0.13, 0.30 * Math.max(0, u[1]), 0.10, 0.7]);
-  // drooping skirt
-  mb.setAnim([0.05, 0, 0.05, 0.7]);
-  ellipsoid(mb, [0, 0.62, 0], [dr*1.14, 0.85, dr*1.14], sh(o.skin, 0.92), 0.3, 0, 12, o.skinFn);
-  // surface boils
+  // the flattened base: full puddle at limb=0, gone by limb~0.87 -- a
+  // rolling ball keeps no flat foot to sit on
+  const skirtK = Math.max(0, 1 - tall * 1.15);
+  if (skirtK > 0.03) {
+    mb.setAnim([0.05 * skirtK, 0, 0.05 * skirtK, 0.7]);
+    ellipsoid(mb, [0, 0.62, 0], [dr*1.14*skirtK, 0.85*skirtK, dr*1.14*skirtK],
+      sh(o.skin, 0.92), 0.3, 0, 12, o.skinFn);
+  }
+  mb.setAlpha(1);
+  // surface boils: opaque flecks on the translucent hide
   mb.setAnim(JELLY);
   for (let a = 0; a < 6; a++) {
     const th = a * 1.047 + 0.4;
