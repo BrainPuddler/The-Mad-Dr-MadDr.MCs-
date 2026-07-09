@@ -265,6 +265,11 @@ body[data-faction="alien"] button { border-radius: 12px; }
 .drawer-contents .part-tile.disabled:hover { border-color: var(--line); }
 .part-name .badge { color: var(--acid); border-color: var(--acid); }
 .part-thumb { font-size: 26px; line-height: 1; margin: 2px 0; }
+.part-thumb img {
+  width: 56px; height: 56px; object-fit: cover; border-radius: 4px;
+  background: #05070c; display: block;
+}
+.tray-parts .part-thumb img { width: 72px; height: 72px; }
 .part-name { font-size: 12px; text-transform: capitalize; }
 .part-from { font-size: 10px; color: var(--dim); }
 .part-stats { grid-template-columns: 62px 1fr; font-size: 10.5px; width: 100%; margin-top: 2px; }

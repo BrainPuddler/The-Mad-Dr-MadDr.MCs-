@@ -15,7 +15,7 @@ import {
   originOf, isVestigial, homologOf, brainSize, bodyAxis, brainAxis, heartVigor,
   capacity as controlCapacity, controlCost, controlRadius, berserkThreshold,
 } from "./lib/index.js";
-import { initRenderer, updateGenome, destroyRenderer, locomotionProfile, setLabFaction, renderThumbnail } from "./creature-renderer.js";
+import { initRenderer, updateGenome, destroyRenderer, locomotionProfile, setLabFaction, renderThumbnail, renderPartThumbnail } from "./creature-renderer.js";
 
 const MUTATOR_URL = "https://maddr-mutator.onrender.com";
 const LOCAL_KEY   = "maddr-lab-v2";
@@ -109,7 +109,21 @@ function groupKeyOf(t) { return `${drawerKeyForItem(t.item)}|${local.originSpeci
 function groupItems(groupKey) { return tray.filter(t => groupKeyOf(t) === groupKey); }
 const PART_ICON = { hand: "✋", sensor: "📡", eye: "👁️", leg: "🦵" };
 function partIcon(item) { return item.kind === "heart" ? "🫀" : (PART_ICON[homologOf(item.family)] ?? "🦴"); }
+function partSlot(item) { return item.kind === "heart" ? "heart" : homologOf(item.family); }
 function partName(item) { return item.kind === "heart" ? `${item.tier} heart` : item.family.replace(/_/g, " "); }
+// Real renders of the harvested piece itself -- the freezer used to show
+// a category emoji (a brain for "head", say) no matter what was actually
+// inside. One cached still per item, worn by a neutral mannequin body
+// (renderPartThumbnail) and zoomed to wherever that piece sockets in.
+const partThumbCache = {};
+function partThumbHtml(t) {
+  if (!(t.itemId in partThumbCache)) {
+    try { partThumbCache[t.itemId] = renderPartThumbnail(t.item, partSlot(t.item), local.faction); }
+    catch { partThumbCache[t.itemId] = ""; }
+  }
+  const url = partThumbCache[t.itemId];
+  return url ? `<img src="${url}" alt="${esc(partName(t.item))}">` : partIcon(t.item);
+}
 const PART_AXES = ["length", "girth", "taper", "curl", "count", "ornament"];
 function partStatsHtml(item) {
   if (item.kind === "heart") {
@@ -817,6 +831,7 @@ function renderChop() {
   renderChopCenter();
   renderChopRegions();
   renderChopFreezer();
+  renderLog();
 }
 
 // The center panel is either "the slab" (the live specimen) or "the
@@ -953,8 +968,12 @@ function renderChopFreezer() {
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(t);
     }
+    // the badge counts what's actually rendered below -- tiles (one per
+    // contributing specimen), not raw harvested pieces, so "the whole
+    // head" (sensor + eye, 2 pieces) off ONE specimen reads as 1, matching
+    // the 1 tile you'll actually see, not a confusing 2
     return `<details class="drawer-unit" ${items.length ? "" : "data-empty"}>
-      <summary class="drawer-label"><span>${d.title}</span><span class="drawer-count">${items.length}</span></summary>
+      <summary class="drawer-label"><span>${d.title}</span><span class="drawer-count">${groups.size}</span></summary>
       <div class="drawer-contents">
         ${groups.size === 0 ? `<div class="empty">Empty.</div>` : [...groups.entries()].map(([k, its]) => groupTileHtml(d, k, its, { inSlabMode, canGraft: !!c })).join("")}
       </div>
@@ -976,14 +995,13 @@ function renderChopFreezer() {
 
 function groupTileHtml(drawer, groupKey, items, { inSlabMode, canGraft }) {
   const from = local.trayFrom[items[0].itemId] ?? "unknown";
-  const icon = drawer.title.match(/^\S+/)?.[0] ?? "🦴";
   const label = drawer.title.replace(/^\S+\s/, "");
   const graftable = inSlabMode && canGraft;
   const title = inSlabMode
     ? (canGraft ? "Graft straight onto the specimen on the slab" : "Pick a specimen on the slab first")
     : "Open in the surgical tray";
   return `<div class="part-tile ${inSlabMode && !canGraft ? "disabled" : ""}" data-open-group="${esc(groupKey)}" title="${title}">
-    <div class="part-thumb">${icon}</div>
+    <div class="part-thumb">${partThumbHtml(items[0])}</div>
     <div class="part-name">${esc(label)}${graftable ? ` <span class="badge">🪡 graft</span>` : ""}</div>
     <div class="part-from">from ${esc(from)}</div>
   </div>`;
@@ -995,7 +1013,7 @@ function partTileHtml(t, { canSend }) {
   const item = t.item;
   const originBadge = item.kind === "heart" ? "" : `<span class="badge ${originOf(item.family)}">${originOf(item.family)}</span>`;
   return `<div class="part-tile">
-    <div class="part-thumb">${partIcon(item)}</div>
+    <div class="part-thumb">${partThumbHtml(t)}</div>
     <div class="part-body">
       <div class="part-name">${esc(partName(item))} ${originBadge}</div>
       <div class="part-stats kv">${partStatsHtml(item)}</div>
@@ -1037,10 +1055,17 @@ function renderChopTray() {
   });
 }
 
+// Two copies of the notebook exist in the DOM -- the Lab's side panel and
+// a compact one in the Chop Shop -- since surgery happens on a screen
+// that has no other feedback: without this, a successful graft (or a
+// rejected one) shows nothing at all unless you flip back to the Lab.
 function renderLog() {
-  document.getElementById("log").innerHTML =
-    local.log.map(l => `<p><span class="t">${l.t}</span>${esc(l.msg)}</p>`).join("") ||
+  const html = local.log.map(l => `<p><span class="t">${l.t}</span>${esc(l.msg)}</p>`).join("") ||
     `<div class="empty">The notebook is blank.</div>`;
+  for (const id of ["log", "chop-log"]) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  }
 }
 
 // ── build version indicator ──────────────────────────────────────────────────

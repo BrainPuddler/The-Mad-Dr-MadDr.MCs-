@@ -3301,6 +3301,63 @@ export function renderThumbnail(genome, faction, size = 168) {
   return url;
 }
 
+// A fixed, otherwise-generic body wearing the harvested part, so the
+// freezer can show what the THING actually looks like instead of a
+// drawer icon. Always the same neutral tetrapod (mid bulk/limb/tail,
+// 'average' brain, 'steady' heart, plain default parts everywhere else)
+// -- a heart has no external geometry on any OTHER plan, so a heart item
+// swaps the mannequin to 'blob' instead, the one plan with a visible
+// internal heart. Camera numbers below are read straight off those two
+// plans' own placement math (planTetrapod's shoulder/head/leg sockets,
+// planBlob's heartBase) at these exact mid-gene values.
+const MANNEQUIN_SLOTS = {
+  hand:   { family: 'claw_hand', params: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] },
+  sensor: { family: 'horn',      params: [0.5, 0.5, 0.5, 0.5, 0.5, 0.9] },
+  eye:    { family: 'bug_eyes',  params: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] },
+  leg:    { family: 'hoofed_leg', params: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] },
+};
+const PART_CAMERA = {
+  sensor: { eye: [0, 9.0, 7],   target: [0, 9.0, 0] },
+  eye:    { eye: [0, 9.0, 7],   target: [0, 9.0, 0] },
+  hand:   { eye: [7.5, 6.0, 12.0], target: [2.2, 5.0, 0.5] },
+  leg:    { eye: [0, 2.0, 7],   target: [0, 2.0, 0] },
+  heart:  { eye: [0, 4.2, 6],   target: [0, 3.9, 0] },
+};
+
+/** One-shot square still of a single harvested part (or heart) worn by
+ * the neutral mannequin above, zoomed to the body region it sockets
+ * into -- the freezer's real per-part thumbnail. `slot` is 'hand' |
+ * 'sensor' | 'eye' | 'leg' | 'heart' (the caller already knows this from
+ * homologOf / item.kind, so it isn't re-derived here). */
+export function renderPartThumbnail(item, slot, faction, size = 96) {
+  const prevFac = _faction;
+  _faction = SCENES[faction] ? faction : 'maddr';
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  let url = '';
+  try {
+    const isHeart = slot === 'heart';
+    const slotFor = (s) => (!isHeart && slot === s) ? { family: item.family, params: item.params } : MANNEQUIN_SLOTS[s];
+    const genome = {
+      genomeVersion: 2, parentIds: [],
+      body: { plan: isHeart ? 'blob' : 'tetrapod', params: [0.5, 0.5, 0.5, 0.5] },
+      brain: { tier: 'average', params: [0.5, 0.5, 0.5, 0.5, 0.5] },
+      heart: isHeart ? { tier: item.tier, params: item.params } : { tier: 'steady', params: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] },
+      slots: { hand: slotFor('hand'), sensor: slotFor('sensor'), eye: slotFor('eye'), leg: slotFor('leg') },
+    };
+    const cam = PART_CAMERA[slot] ?? PART_CAMERA.hand;
+    const X = setupGL(canvas, { preserve: true, vw: size, vh: size, eye: cam.eye, target: cam.target });
+    uploadCreature(genome, X);
+    drawFrame(X, true);
+    url = canvas.toDataURL('image/png');
+    X.gl.getExtension('WEBGL_lose_context')?.loseContext();
+  } catch (e) {
+    console.error('part thumbnail failed:', e);
+  }
+  _faction = prevFac;
+  return url;
+}
+
 // ── public API ──────────────────────────────────────────────────────────────
 
 export function initRenderer(canvas, genome) {
