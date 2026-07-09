@@ -15,7 +15,7 @@ import {
   originOf, isVestigial, homologOf, brainSize, bodyAxis, brainAxis, heartVigor,
   capacity as controlCapacity, controlCost, controlRadius, berserkThreshold,
 } from "./lib/index.js";
-import { initRenderer, updateGenome, destroyRenderer, locomotionProfile, setLabFaction, renderThumbnail, renderPartThumbnail, initPartTurntable } from "./creature-renderer.js";
+import { initRenderer, updateGenome, destroyRenderer, locomotionProfile, setLabFaction, renderThumbnail, renderPartThumbnail, initBenchTurntable } from "./creature-renderer.js";
 
 const MUTATOR_URL = "https://maddr-mutator.onrender.com";
 const LOCAL_KEY   = "maddr-lab-v2";
@@ -48,7 +48,13 @@ const LOCAL_KEY   = "maddr-lab-v2";
 // was. Clicking it opens every piece that's ever landed in that group.
 // originSpecimen: { [itemId]: specimenId }  — which animal a part came from
 // chopMode      : "slab" | "tray"  — which the Chop Shop's center panel shows
-// openGroup     : groupKey | null  — the "drawerKey|specimenId" open in the tray
+// trayBench     : itemId[] — the "mini-slab": tray items currently pulled
+//                 out onto the surgical tray, worked on as their own
+//                 little assembly (add more, harvest pieces back off,
+//                 graft the lot onto whatever's on the real slab). Purely
+//                 a local staging list -- an item sitting here is still
+//                 the same freezer item, unmoved and ungrouped, until it
+//                 actually gets grafted (consumed) or just stays put.
 
 let local = (() => {
   try { return JSON.parse(localStorage.getItem(LOCAL_KEY)); } catch { return null; }
@@ -59,7 +65,7 @@ function newLocal() {
     accountId: crypto.randomUUID(), nameMap: {}, deadSet: [], trayFrom: {}, log: [], seq: 0,
     selectedId: null, faction: "maddr", stable: [], hidden: [], factionOf: {}, view: "lab",
     specimenOf: {}, currentGenomeOf: {}, locationOf: {}, originItem: {},
-    originSpecimen: {}, chopMode: "slab", openGroup: null,
+    originSpecimen: {}, chopMode: "slab", trayBench: [],
   };
 }
 function saveLocal() { localStorage.setItem(LOCAL_KEY, JSON.stringify(local)); }
@@ -110,6 +116,17 @@ function groupItems(groupKey) { return tray.filter(t => groupKeyOf(t) === groupK
 const PART_ICON = { hand: "✋", sensor: "📡", eye: "👁️", leg: "🦵" };
 function partIcon(item) { return item.kind === "heart" ? "🫀" : (PART_ICON[homologOf(item.family)] ?? "🦴"); }
 function partSlot(item) { return item.kind === "heart" ? "heart" : homologOf(item.family); }
+// The tray-as-mini-slab: whatever's currently pulled onto it, resolved
+// against the live tray (so a bench itemId that got consumed elsewhere,
+// or a stale one from an old session shape, just quietly drops out).
+function benchItems() { return tray.filter(t => (local.trayBench ?? []).includes(t.itemId)); }
+// One item per slot for the preview mannequin -- last one added wins if
+// the bench somehow holds two for the same slot (e.g. two eyes).
+function benchParts() {
+  const parts = {};
+  for (const t of benchItems()) parts[partSlot(t.item)] = t.item;
+  return parts;
+}
 function partName(item) { return item.kind === "heart" ? `${item.tier} heart` : item.family.replace(/_/g, " "); }
 // Real renders of the harvested piece itself -- the freezer used to show
 // a category emoji (a brain for "head", say) no matter what was actually
@@ -124,10 +141,10 @@ function partThumbHtml(t) {
   const url = partThumbCache[t.itemId];
   return url ? `<img src="${url}" alt="${esc(partName(t.item))}">` : partIcon(t.item);
 }
-// The surgical tray shows a LIVE turntable per part instead of a static
-// thumbnail -- a real WebGL context + its own rAF loop per canvas
-// (initPartTurntable), so they must be stopped before the tray's DOM is
-// rebuilt out from under them, or the loops (and GL contexts) leak.
+// The tray shows the whole assembled bench as ONE live turntable -- a
+// real WebGL context + its own rAF loop (initBenchTurntable), so it must
+// be stopped before the tray's DOM is rebuilt out from under it, or the
+// loop (and GL context) leaks.
 let activeTurntables = [];
 function stopTurntables() { activeTurntables.forEach(h => h.stop()); activeTurntables = []; }
 const PART_AXES = ["length", "girth", "taper", "curl", "count", "ornament"];
@@ -380,6 +397,7 @@ async function doSew(itemId) {
       registerName(rec.genomeId, c.name);
       setSpecimenGenome(sid, rec.genomeId);
       local.selectedId = rec.genomeId;
+      local.trayBench = (local.trayBench ?? []).filter(id => id !== itemId);   // consumed -- off the tray too
       if (entry.item.kind === "heart") {
         if (rec.explantedHeartItemId) registerFrom(rec.explantedHeartItemId, c.name);
         logEntry(`🫀 Transplanted a ${entry.item.tier} heart into ${c.name} (${vword(rec.viability)}). Old heart back in tray.`);
@@ -495,50 +513,79 @@ async function doRestore() {
   saveLocal(); showBusy(false); await sync();
 }
 
+// Sews each item in order onto whatever's on the slab (c), stopping at
+// the first rejection/death -- whatever's left in `items` just stays put
+// (in the freezer, or still on the tray), nothing forces the run to
+// finish. Shared by the freezer's one-click group graft and the tray's
+// "graft the whole bench" -- same surgery, two different sources for
+// the batch of items.
+async function graftItems(c, items) {
+  const sid = specimenIdOf(c.id);
+  let curId = c.id;
+  const grafted = [], consumed = [];
+  let swapped = 0;
+  for (const t of items) {
+    if (t.item.kind === "heart") {
+      const rec = await api("POST", "/sew/heart", { idempotencyKey: ikey(), creatureId: curId, itemId: t.itemId });
+      if (rec.result !== "survived") {
+        if (rec.genomeId) { registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); markDead(rec.genomeId); curId = rec.genomeId; }
+        logEntry(`☠️ Grafting the ${t.item.tier} heart killed ${c.name} on the table — stopped there.`);
+        break;
+      }
+      registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); curId = rec.genomeId;
+      if (rec.explantedHeartItemId) registerFrom(rec.explantedHeartItemId, c.name);
+      grafted.push(`${t.item.tier} heart`); consumed.push(t.itemId);
+    } else {
+      const slot = homologOf(t.item.family);
+      const rec = await api("POST", "/sew/part", { idempotencyKey: ikey(), creatureId: curId, slot, itemId: t.itemId });
+      if (rec.result === "limb_rejected") {
+        logEntry(`🦠 ${c.name}'s heart rejected the ${t.item.family.replace(/_/g, " ")} — stopped there. Still usable.`);
+        break;
+      }
+      if (rec.result === "patient_died") {
+        registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); markDead(rec.genomeId); curId = rec.genomeId;
+        logEntry(`☠️ Grafting the ${t.item.family.replace(/_/g, " ")} overloaded ${c.name}'s heart — dies on the table.`);
+        break;
+      }
+      registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); curId = rec.genomeId;
+      if (rec.explantedPartItemId) { registerFrom(rec.explantedPartItemId, c.name); swapped++; }
+      grafted.push(t.item.family.replace(/_/g, " ")); consumed.push(t.itemId);
+    }
+  }
+  local.selectedId = curId;
+  return { grafted, consumed, swapped };
+}
+
 // Slab-mode shortcut: click a freezer thumbnail and its whole group grafts
 // straight onto whatever's currently on the slab, no trip through the
-// tray. (In Tray mode the same click opens the group instead -- see the
-// freezer's click handler -- since there you're working piece by piece.)
+// tray. (In Tray mode the same click adds the group to the tray's bench
+// instead -- see the freezer's click handler.)
 async function doGraftGroup(groupKey) {
   const c = selected(); if (!c) return;
   const items = groupItems(groupKey);
   if (!items.length) return;
-  const sid = specimenIdOf(c.id);
   showBusy(true);
   try {
-    let curId = c.id;
-    const grafted = [];
-    let swapped = 0;
-    for (const t of items) {
-      if (t.item.kind === "heart") {
-        const rec = await api("POST", "/sew/heart", { idempotencyKey: ikey(), creatureId: curId, itemId: t.itemId });
-        if (rec.result !== "survived") {
-          if (rec.genomeId) { registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); markDead(rec.genomeId); curId = rec.genomeId; }
-          logEntry(`☠️ Grafting the ${t.item.tier} heart killed ${c.name} on the table — stopped there.`);
-          break;
-        }
-        registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); curId = rec.genomeId;
-        if (rec.explantedHeartItemId) registerFrom(rec.explantedHeartItemId, c.name);
-        grafted.push(`${t.item.tier} heart`);
-      } else {
-        const slot = homologOf(t.item.family);
-        const rec = await api("POST", "/sew/part", { idempotencyKey: ikey(), creatureId: curId, slot, itemId: t.itemId });
-        if (rec.result === "limb_rejected") {
-          logEntry(`🦠 ${c.name}'s heart rejected the ${t.item.family.replace(/_/g, " ")} — stopped there. Still usable.`);
-          break;
-        }
-        if (rec.result === "patient_died") {
-          registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); markDead(rec.genomeId); curId = rec.genomeId;
-          logEntry(`☠️ Grafting the ${t.item.family.replace(/_/g, " ")} overloaded ${c.name}'s heart — dies on the table.`);
-          break;
-        }
-        registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); curId = rec.genomeId;
-        if (rec.explantedPartItemId) { registerFrom(rec.explantedPartItemId, c.name); swapped++; }
-        grafted.push(t.item.family.replace(/_/g, " "));
-      }
-    }
-    local.selectedId = curId;
+    const { grafted, swapped } = await graftItems(c, items);
     if (grafted.length) logEntry(`🪡 Grafted the ${grafted.join(", ")} onto ${c.name} straight off the slab.` +
+      (swapped ? ` Swapped out ${swapped} old part${swapped === 1 ? "" : "s"}, back in the freezer.` : ""));
+  } catch (e) { logEntry(`⚠️ Graft failed: ${e.message}`); }
+  saveLocal(); showBusy(false); await sync();
+}
+
+// The tray's "graft the whole bench" -- whatever's currently pulled onto
+// the mini-slab goes onto the real one, in one motion. Anything that
+// stops the run early (rejection, death) simply stays on the tray for
+// another attempt; only what actually took comes off it.
+async function doGraftBench() {
+  const c = selected(); if (!c) return;
+  const items = benchItems();
+  if (!items.length) return;
+  showBusy(true);
+  try {
+    const { grafted, consumed, swapped } = await graftItems(c, items);
+    local.trayBench = (local.trayBench ?? []).filter(id => !consumed.includes(id));
+    if (grafted.length) logEntry(`🪡 Grafted the ${grafted.join(", ")} onto ${c.name} straight off the tray.` +
       (swapped ? ` Swapped out ${swapped} old part${swapped === 1 ? "" : "s"}, back in the freezer.` : ""));
   } catch (e) { logEntry(`⚠️ Graft failed: ${e.message}`); }
   saveLocal(); showBusy(false); await sync();
@@ -973,8 +1020,9 @@ function renderChopRegions() {
 // What clicking a thumbnail does depends on which mode the slab is in:
 //   - Slab mode: grafts the whole group straight onto whatever's on the
 //     slab right now -- no detour through the tray.
-//   - Tray mode: opens that group in the tray instead, for picking pieces
-//     apart one at a time (Return to drawer gets back here to browse).
+//   - Tray mode: adds that group onto the tray's own mini-slab (the
+//     bench) instead of touching the real slab -- click another tile
+//     and it piles on rather than replacing what's already there.
 function renderChopFreezer() {
   const el = document.getElementById("chop-freezer");
   if (tray.length === 0) { el.innerHTML = `<div class="empty">The freezer is empty. Harvest something to fill a drawer.</div>`; return; }
@@ -1009,8 +1057,8 @@ function renderChopFreezer() {
       if (inSlabMode) {
         if (c) doGraftGroup(key);
       } else {
-        local.openGroup = key;
-        local.chopMode = "tray";
+        const ids = groupItems(key).map(x => x.itemId);
+        local.trayBench = [...new Set([...(local.trayBench ?? []), ...ids])];
         saveLocal(); renderChop();
       }
     }));
@@ -1020,68 +1068,74 @@ function groupTileHtml(drawer, groupKey, items, { inSlabMode, canGraft }) {
   const from = local.trayFrom[items[0].itemId] ?? "unknown";
   const label = drawer.title.replace(/^\S+\s/, "");
   const graftable = inSlabMode && canGraft;
+  const onBench = !inSlabMode && items.every(t => (local.trayBench ?? []).includes(t.itemId));
   const title = inSlabMode
     ? (canGraft ? "Graft straight onto the specimen on the slab" : "Pick a specimen on the slab first")
-    : "Open in the surgical tray";
+    : (onBench ? "Already on the tray" : "Add to the tray");
   return `<div class="part-tile ${inSlabMode && !canGraft ? "disabled" : ""}" data-open-group="${esc(groupKey)}" title="${title}">
     <div class="part-thumb">${partThumbHtml(items[0])}</div>
-    <div class="part-name">${esc(label)}${graftable ? ` <span class="badge">🪡 graft</span>` : ""}</div>
+    <div class="part-name">${esc(label)}${graftable ? ` <span class="badge">🪡 graft</span>` : ""}${onBench ? ` <span class="badge">🗄️ on tray</span>` : ""}</div>
     <div class="part-from">from ${esc(from)}</div>
   </div>`;
 }
 
-// One part's full card: thumbnail, its own gene-axis stats, and a button
-// to graft just that piece onto whatever's on the slab.
-function partTileHtml(t, { canSend }) {
+// One item's card on the tray: graft just this piece onto the slab, or
+// harvest it back off the tray into the freezer (it was never anywhere
+// else -- this just drops it out of the bench selection).
+function benchChipHtml(t, { canSend }) {
   const item = t.item;
   const originBadge = item.kind === "heart" ? "" : `<span class="badge ${originOf(item.family)}">${originOf(item.family)}</span>`;
   return `<div class="part-tile">
-    <div class="part-thumb"><canvas class="part-canvas" data-turntable="${esc(t.itemId)}"></canvas></div>
+    <div class="part-thumb">${partThumbHtml(t)}</div>
     <div class="part-body">
       <div class="part-name">${esc(partName(item))} ${originBadge}</div>
       <div class="part-stats kv">${partStatsHtml(item)}</div>
-      <button class="small" data-item="${t.itemId}" ${canSend ? "" : "disabled"} title="${canSend ? "" : "Pick a specimen on the slab first"}">🪡 Graft to slab (🩸5)</button>
+      <div class="bench-chip-actions">
+        <button class="small" data-item="${t.itemId}" ${canSend ? "" : "disabled"} title="${canSend ? "" : "Pick a specimen on the slab first"}">🪡 Graft (🩸5)</button>
+        <button class="small" data-harvest="${t.itemId}" title="Take it back off the tray -- stays in the freezer">🔪 Harvest</button>
+      </div>
     </div>
   </div>`;
 }
 
-// The surgical tray: everything one specimen has ever contributed to one
-// drawer, laid out piece by piece. Each can be grafted onto whatever
-// specimen is on the slab, or the whole group just put back untouched.
-// With nothing opened yet (just switched into Tray mode) it's a picker:
-// go click a thumbnail in the freezer.
+// The surgical tray, now a mini-slab: click freezer tiles (in Tray mode)
+// to pull parts onto it -- they pile up rather than replace each other --
+// see them assembled as one live turntable, harvest any single piece back
+// off, or graft the whole bench onto whatever's on the real slab at once.
 function renderChopTray() {
   const wrap = document.getElementById("chop-slab");
   destroyRenderer();
   stopTurntables();
-  const items = local.openGroup ? groupItems(local.openGroup) : [];
+  const items = benchItems();
   if (items.length === 0) {
-    if (local.openGroup) { local.openGroup = null; saveLocal(); }   // that group emptied out from under us
-    wrap.innerHTML = `<div class="tray-view"><div class="empty">Open a drawer in the freezer and click a part to inspect it here.</div></div>`;
+    wrap.innerHTML = `<div class="tray-view"><div class="empty">Nothing on the tray. Click a freezer drawer tile to pull its parts onto it.</div></div>`;
     return;
   }
-  const drawer = DRAWERS.find(d => local.openGroup.startsWith(d.key + "|"));
-  const from = local.trayFrom[items[0]?.itemId] ?? "unknown";
   const c = selected();
+  const canGraft = !!c;
   wrap.innerHTML = `
     <div class="tray-view">
+      <canvas id="bench-canvas"></canvas>
       <div class="tray-head">
-        <div class="tray-title">${esc(drawer?.title.replace(/^\S+\s/, "") ?? "parts")} <span class="badge">${items.length} piece${items.length === 1 ? "" : "s"}</span></div>
-        <div class="tray-from">from ${esc(from)}</div>
+        <div class="tray-title">The tray <span class="badge">${items.length} piece${items.length === 1 ? "" : "s"}</span></div>
       </div>
-      <div class="tray-parts">${items.map(t => partTileHtml(t, { canSend: !!c })).join("")}</div>
-      <button id="btn-return-drawer">↩️ Return to drawer</button>
+      <div class="tray-parts">${items.map(t => benchChipHtml(t, { canSend: canGraft })).join("")}</div>
+      <div class="chop-slab-actions">
+        <button id="btn-graft-bench" class="primary" ${canGraft ? "" : "disabled"} title="${canGraft ? "" : "Pick a specimen on the slab first"}">🪡 Graft all to slab (🩸${items.length * 5})</button>
+        <button id="btn-clear-bench">↩️ Clear the tray</button>
+      </div>
     </div>`;
-  // one live turntable canvas per part, matching each card up by itemId
-  const byId = Object.fromEntries(items.map(t => [t.itemId, t]));
-  wrap.querySelectorAll("canvas[data-turntable]").forEach(cv => {
-    const t = byId[cv.dataset.turntable]; if (!t) return;
-    activeTurntables.push(initPartTurntable(cv, t.item, partSlot(t.item), local.faction));
-  });
+  activeTurntables.push(initBenchTurntable(document.getElementById("bench-canvas"), benchParts(), local.faction));
   wrap.querySelectorAll("button[data-item]").forEach(b =>
     b.addEventListener("click", () => doSew(b.dataset.item)));
-  document.getElementById("btn-return-drawer")?.addEventListener("click", () => {
-    local.chopMode = "slab"; local.openGroup = null; saveLocal(); renderChop();
+  wrap.querySelectorAll("button[data-harvest]").forEach(b =>
+    b.addEventListener("click", () => {
+      local.trayBench = (local.trayBench ?? []).filter(id => id !== b.dataset.harvest);
+      saveLocal(); renderChop();
+    }));
+  document.getElementById("btn-graft-bench")?.addEventListener("click", doGraftBench);
+  document.getElementById("btn-clear-bench")?.addEventListener("click", () => {
+    local.trayBench = []; saveLocal(); renderChop();
   });
 }
 

@@ -3440,27 +3440,62 @@ export function renderPartThumbnail(item, slot, faction, size = 96) {
   return url;
 }
 
-/** A live, continuously-rotating turntable of a single harvested part (or
- * heart) on its own canvas + WebGL context -- the surgical tray's real
- * per-part view, "just like the slab" but for one loose piece on a tray
- * instead of a whole creature on the dais. Deliberately simple: no
- * breathing/blinking/gait -- those all read off the single shared "live"
- * creature (R) and belong to a body that's still attached; a part sitting
- * in a tray just turns slowly so you can see it from every side. Returns
- * `{ stop }` -- call it when the tray card is torn down, or this canvas's
- * rAF loop and GL context leak forever. */
-export function initPartTurntable(canvas, item, slot, faction, size = 160) {
+// Healed-over family per slot -- the same names surgery.ts's STUMP_OF
+// uses server-side, kept as a local literal here rather than an import:
+// creature-renderer.js is a standalone, zero-deps module (site/lib is
+// genome-core's own vendored copy, wired into main.js, not this file).
+const STUMP_FAMILY = { hand: 'hand_stump', sensor: 'sensor_stub', eye: 'eye_socket', leg: 'leg_stump' };
+const FAINT_HEART = { tier: 'faint', params: [0, 0, 0, 0, 0, 0] };
+
+// The tray's own genome: a mannequin wearing ONLY whatever's actually on
+// the bench right now, healed stumps everywhere else -- unlike
+// buildMannequinGenome (which fills the other slots with a generic
+// default part, so a single freezer thumbnail doesn't look like a fresh
+// corpse), this one is honest about exactly what's there: no heart on
+// the bench reads as a harvested (faint) heart, no leg reads as a healed
+// stump. A heart makes the mannequin a blob (the one plan with visible
+// internal organs) UNLESS there's also a limb part on the bench, in
+// which case the limbs win -- a blob and a tetrapod can't both be shown
+// at once, and seeing what you're actually building matters more than
+// seeing the heart beat. `parts` is { hand?, sensor?, eye?, leg?, heart? }
+// (each a PartItem/HeartItem, keyed by its own slot).
+function buildBenchGenome(parts) {
+  const hasHeart = !!parts.heart;
+  const hasLimb = !!(parts.hand || parts.sensor || parts.eye || parts.leg);
+  const plan = hasHeart && !hasLimb ? 'blob' : 'tetrapod';
+  const slotFor = (s) => parts[s]
+    ? { family: parts[s].family, params: parts[s].params, hue: parts[s].hue }
+    : { family: STUMP_FAMILY[s], params: [0, 0, 0, 0, 0, 0] };
+  return {
+    genomeVersion: 2, parentIds: [],
+    body: { plan, params: [0.5, 0.5, 0.5, 0.5] },
+    brain: { tier: 'average', params: [0.5, 0.5, 0.5, 0.5, 0.5] },
+    heart: parts.heart ? { tier: parts.heart.tier, params: parts.heart.params } : FAINT_HEART,
+    slots: { hand: slotFor('hand'), sensor: slotFor('sensor'), eye: slotFor('eye'), leg: slotFor('leg') },
+  };
+}
+const BENCH_CAMERA = { eye: [0, 6.6, 20], target: [0, 5.8, 0] };
+
+/** A live, continuously-rotating turntable of everything currently on the
+ * tray's mini-slab (bench) -- one combined mannequin wearing whatever
+ * parts are there and healed stumps everywhere else, "just like the
+ * slab" but for a loose assembly instead of a whole creature. Deliberately
+ * simple: no breathing/blink/gait -- those read off the single shared
+ * "live" creature (R) and belong to a body that's still attached; a
+ * bench just turns slowly so you can see it from every side. Returns
+ * `{ stop }` -- call it when the tray's DOM is torn down, or this
+ * canvas's rAF loop and GL context leak forever. */
+export function initBenchTurntable(canvas, parts, faction, size = 220) {
   canvas.width = canvas.height = size;
   const prevFac = _faction;
   _faction = SCENES[faction] ? faction : 'maddr';
   let X;
   try {
-    const genome = buildMannequinGenome(item, slot);
-    const cam = PART_CAMERA[slot] ?? PART_CAMERA.hand;
-    X = setupGL(canvas, { vw: size, vh: size, eye: cam.eye, target: cam.target, background: 'tray' });
+    const genome = buildBenchGenome(parts);
+    X = setupGL(canvas, { vw: size, vh: size, eye: BENCH_CAMERA.eye, target: BENCH_CAMERA.target, background: 'tray' });
     uploadCreature(genome, X);
   } catch (e) {
-    console.error('part turntable failed:', e);
+    console.error('bench turntable failed:', e);
     _faction = prevFac;
     return { stop() {} };
   }
@@ -3469,9 +3504,9 @@ export function initPartTurntable(canvas, item, slot, faction, size = 160) {
   let theta = 0.2, raf = 0, stopped = false;
   const step = () => {
     if (stopped) return;
-    theta += 0.007;
+    theta += 0.006;
     try { drawFrame(X, true, theta); }
-    catch (e) { console.error('part turntable frame failed:', e); stopped = true; return; }
+    catch (e) { console.error('bench turntable frame failed:', e); stopped = true; return; }
     raf = requestAnimationFrame(step);
   };
   raf = requestAnimationFrame(step);
