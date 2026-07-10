@@ -47,6 +47,8 @@ Read it as two senses of one word, the way a butcher's "brains" (a cut, sold by 
 
 Bones and Blood don't get a parallel bulk sub-resource of their own: they're already bulk/quantity currencies, so a citizen kill just adds a small amount of the *same* currency — no meaning to dilute. The discrete Brain tier-item has no such bulk form until now, so this is genuinely new, not a rename of existing behavior.
 
+**Player-facing vs. internal naming.** Everything above — the HUD, the Lab, this doc's prose — is what the player reads, and it says "Brains" throughout, per creator direction. That's a presentation-layer decision, not a schema mandate: internally (wallet field names, code, engineering shorthand), this resource is free to keep its working development name, **`greyMatter`**, distinct from the genome's `brainQuality` field. Two names, one player-facing word — the split exists so engineers never have to say "which Brains" in code or commit messages, while the player only ever sees the one word.
+
 **Per-citizen yield table (v0.1):**
 
 | Yield | Amount |
