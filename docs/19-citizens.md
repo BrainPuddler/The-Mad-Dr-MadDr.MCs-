@@ -65,7 +65,7 @@ Flagged as Q15 — the promotion trigger and its distance/noise thresholds are t
 
 At **Night**, Citizens shelter indoors: visible street density drops. This ties back to [03-mana-system.md](03-mana-system.md)'s day/night theme directly (the Archon homage this whole game is built around) while easing the Calm-crowd rendering load at the same time — theme and performance pulling the same direction.
 
-**Revision (2026-07, [20-harvest-and-repair.md](20-harvest-and-repair.md) introduces Collection Stations): Citizens are now economic actors.** A Citizen's death inside a captured Collection Station's radius converts to banked Blood/Bones/Grey Matter for its controller ([05-component-economy.md](05-component-economy.md), [18](18-city-battlefields.md)). This doc's earlier "not economic actors" line is explicitly reversed here, not silently overwritten, per the decision-log convention ([12](12-open-questions.md)). What's still true: Citizens still never interact with **emitters** specifically — that boundary holds unchanged. What's new: a Citizen's death location relative to a Collection Station is now as economically legible as a monster's death hex already is for salvage ([04](04-combat-model.md)).
+**Revision (2026-07, [20-harvest-and-repair.md](20-harvest-and-repair.md) introduces Collection Stations): Citizens are now economic actors.** A Citizen's death inside a captured Collection Station's radius converts to banked Blood/Bones/Brains for its controller ([05-component-economy.md](05-component-economy.md), [18](18-city-battlefields.md)). This doc's earlier "not economic actors" line is explicitly reversed here, not silently overwritten, per the decision-log convention ([12](12-open-questions.md)). What's still true: Citizens still never interact with **emitters** specifically — that boundary holds unchanged. What's new: a Citizen's death location relative to a Collection Station is now as economically legible as a monster's death hex already is for salvage ([04](04-combat-model.md)).
 
 ## 7. v0.1 tuning table (consolidated)
 
@@ -79,7 +79,7 @@ At **Night**, Citizens shelter indoors: visible street density drops. This ties 
 | Night density multiplier | reduced vs. Day (exact factor TBD — Q15) |
 | Calm→Alarmed promotion | server-rolled; proximity/noise/threat trigger (Q15) |
 | Community Hub density multiplier vs. standard block | **4×** baseline (160–320 Citizens per hub vs. the 40–80/block baseline, [18](18-city-battlefields.md)) |
-| Per-citizen harvest yield | Blood 2 / Bones 1 / Grey Matter 1 ([05](05-component-economy.md), [20](20-harvest-and-repair.md)) |
+| Per-citizen harvest yield | Blood 2 / Bones 1 / Brains 1 ([05](05-component-economy.md), [20](20-harvest-and-repair.md)) |
 
 ## Open questions
 

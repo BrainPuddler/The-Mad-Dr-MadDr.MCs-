@@ -39,13 +39,13 @@ A commander can hold subordinates whose summed **cost ≤ capacity**. So a Maste
 
 The formula above has a real ceiling, worth stating in numbers rather than leaving implicit: max base Capacity (Mastermind, `command=1`) is `4 × (0.4+0.8×1) = 4.8`. Min subordinate Cost (`size=1, will=0`) is `1 × 0.3 = 0.3`. Max headcount under the *unmodified* formula is `4.8 / 0.3 = 16` — nowhere near a 40-creature platoon. The gap: 40 subordinates at minimum cost need `40 × 0.3 = 12.0` total capacity, **7.2 more than the base formula can ever produce.**
 
-[06-mutator-design.md](06-mutator-design.md)'s **Megabrain Augmentation** closes it — 100 Grey Matter, spent once, for a flat capacity bonus:
+[06-mutator-design.md](06-mutator-design.md)'s **Megabrain Augmentation** closes it — 100 harvested Brains, spent once, for a flat capacity bonus:
 
 ```
 Capacity_total = size × (0.4 + 0.8 × command) + capacityBonus
 ```
 
-Worked example (this doc's sanity anchor, matching [04](04-combat-model.md)'s convention): a Mastermind (size 4, `command=1`) with the Augmentation purchased: base Capacity 4.8 + `capacityBonus` 7.2 = **12.0 total**. At minimum subordinate cost 0.3, that's `12.0 / 0.3 = 40` — exactly the platoon size, for exactly 100 Grey Matter. Sourcing (harvesting Citizens via Collection Stations) lives in [20-harvest-and-repair.md](20-harvest-and-repair.md); the purchase itself is [06](06-mutator-design.md)'s.
+Worked example (this doc's sanity anchor, matching [04](04-combat-model.md)'s convention): a Mastermind (size 4, `command=1`) with the Augmentation purchased: base Capacity 4.8 + `capacityBonus` 7.2 = **12.0 total**. At minimum subordinate cost 0.3, that's `12.0 / 0.3 = 40` — exactly the platoon size, for exactly 100 harvested Brains. Sourcing (harvesting Citizens and vanquished foes via Collection Stations and corpse salvage) lives in [20-harvest-and-repair.md](20-harvest-and-repair.md); the purchase itself is [06](06-mutator-design.md)'s.
 
 **Not fully solved by this alone**: **Radius** (`4 + 8×command` hexes) is unchanged — a 40-strong platoon is capacity-*legal* but not automatically commandable at the existing radius if it's spread out. Flagged, not assumed fine — part of **Q21** ([12-open-questions.md](12-open-questions.md)).
 
