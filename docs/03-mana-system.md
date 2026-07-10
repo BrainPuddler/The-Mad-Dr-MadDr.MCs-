@@ -52,6 +52,8 @@ Every monster carries an **affinity gene** — `solar | lunar | neutral` ([06-mu
 
 Auras don't stack; the strongest applicable single modifier wins. The aura's polarity doesn't matter for the buff — *any* emitter focuses the ambient essence; the phase and the monster's gene decide the sign.
 
+*(On a realized 3D city battlefield, 1 hex = 20 m, so the 3-hex aura radius is 60 m — [18-city-battlefields.md](18-city-battlefields.md); the formula and thresholds above are unchanged.)*
+
 ### Strategic intent & counterplay
 
 - A lunar-heavy army owns the Night but must survive the Day: retreat, hold un-aura'd ground, or fight outside auras (where everyone is 1.0).

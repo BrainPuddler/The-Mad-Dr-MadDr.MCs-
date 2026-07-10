@@ -23,6 +23,8 @@ This is the Archon lesson applied to factions: asymmetric sides that remain *com
 
 ## Humans: technology as issued equipment
 
+*(Not to be confused with **Citizens** — the unarmed-by-default city population of [19-citizens.md](19-citizens.md). Citizens are civilians on a battlefield map; the Human Army below is a full playable faction, bred from the same genome as every other unit in this game.)*
+
 Human units express through the same genome — body plan locked to upright tetrapod, but their hand/eye/sensor/leg slots carry **tech-origin part families**: `rifle_arm`, `optic_visor`, `sensor_mast`, `piston_leg`. The origin tag changes the breeding rules, and this is the design heart of the faction:
 
 > **Tech never mutates and never blends.** A rifle passes through a splice whole or not at all; Gaussian drift doesn't touch a trigger group. Equipment changes only by **Graft** — which for humans is fictionally the *quartermaster*, not the vat. The same deterministic operator, re-skinned.

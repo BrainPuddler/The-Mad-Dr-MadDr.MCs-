@@ -38,6 +38,7 @@ Earnings flow into the **Mutator** ([06](06-mutator-design.md)): mutate, splice,
 - **High ground**: ridge hexes granting the +0.1 posMod ([04](04-combat-model.md)).
 - **Emitter hexes**: capture points with a 3-hex aura ([03](03-mana-system.md)).
 - Fog of war: light — monsters reveal a radius; emitter status is always visible to both players (the moon dial is public information by design; pillar 2).
+- The abstract hex map above is what this doc's rules run on; [18-city-battlefields.md](18-city-battlefields.md) realizes it as a continuous, procedurally generated 3D city (Unity), with the hex grid preserved underneath as the pathing/positioning index.
 
 ## Victory conditions
 

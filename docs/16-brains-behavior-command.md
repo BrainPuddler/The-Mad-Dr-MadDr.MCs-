@@ -99,6 +99,7 @@ Brains are already a battlefield commodity: corpses drop 40–60% of their compo
 - **[04 Combat](04-combat-model.md):** combat damage feeds loyalty stress; wavering units suffer an order-response penalty; `command` could grant a small aura buff to held subordinates (a leadership bonus) — flagged for tuning.
 - **[06 Mutator](06-mutator-design.md):** the brain budget gains the four behavioral axes; `command`/`will` also feed the **power budget** matchmaking reads ([09](09-multiplayer-architecture.md)), so a control-heavy army is costed fairly.
 - **[09 Multiplayer](09-multiplayer-architecture.md):** loyalty is server-authoritative state, integrated in the same seeded-RNG sim as combat — clients display loyalty, never decide it. The prototype's determinism test mirrors this.
+- **[19 Citizens](19-citizens.md):** city-battlefield civilians reuse this doc's *vocabulary and thresholded-state-machine pattern* (calm state, a stress input, a snap threshold, server-authoritative resolution) at a much lighter weight — no command/capacity/radius network, no genome. Citizens are generated, not bred; this doc's brain genes and budget are unaffected.
 
 ## The prototype (run it)
 

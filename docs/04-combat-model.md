@@ -47,6 +47,8 @@ damage = max(1, round( Power × posMod × emitterMod × luckRoll ) − Armor)
 
 Arc model on hexes: front = the faced hex-edge ±1; rear = opposite edge ±1; the remaining two edges are flanks. Modifiers above 1.0 stack additively onto the arc multiplier (e.g., rear + high ground + 2 allies = 1.5 + 0.1 + 0.2 = ×1.8 — the theoretical max).
 
+On a realized city battlefield ([18-city-battlefields.md](18-city-battlefields.md)), "high ground" includes rooftops and upper floors of buildings still standing — a destroyed building's remaining structure grants the same +0.10 posMod term, no new formula.
+
 ### emitterMod — mana proximity
 
 Direct from [03-mana-system.md](03-mana-system.md): **0.85 / 1.00 / 1.10 / 1.25** by aura, phase, and affinity.

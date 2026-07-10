@@ -34,6 +34,8 @@ Lockstep's one advantage (bandwidth) is worthless at 60 entities, and every one 
 
 ~60 entities × ~20 B average delta × 10 Hz = **~12 kB/s worst case**, typically far less with delta compression and at-rest entities omitted. Cellular budgets this with an order of magnitude to spare; a 15-minute match costs ≈ 10 MB worst case.
 
+On a city battlefield, this budget applies **per engagement zone**, not per map ([18-city-battlefields.md](18-city-battlefields.md) §5) — a 5 km map does not multiply the entity count, only the number of zones that could theoretically be active at once (v1: one, occasionally two adjacent). One additional line item: **building Structure-HP deltas**, sent only for buildings with damage > 0, delta-compressed the same way.
+
 ## Mobile resilience
 
 | Scenario | Handling |
@@ -48,6 +50,8 @@ Lockstep's one advantage (bandwidth) is worthless at 60 entities, and every one 
 1. Matchmaker pairs players and assigns a match server.
 2. Match server fetches both players' Menagerie genomes **directly from the Mutator service** ([07-mutator-server-architecture.md](07-mutator-server-architecture.md)), each genome **signed by the Mutator service**. Clients never upload genomes — a client cannot inject a hand-crafted monster (cross-ref [06](06-mutator-design.md) anti-cheat posture).
 3. Both clients receive both rosters' genomes and **pre-assemble all monsters during the loading screen** ([08-creature-visualization.md](08-creature-visualization.md)) — no mid-match assembly hitches, and your opponent's horrors render identically on your device (deterministic assembly).
+
+On a city battlefield ([18-city-battlefields.md](18-city-battlefields.md)), the same handshake payload also carries the **city seed, style preset, and size** — both clients generate the identical map from the seed alone during the same loading screen, so the city itself is never transmitted.
 
 ## Matchmaking
 

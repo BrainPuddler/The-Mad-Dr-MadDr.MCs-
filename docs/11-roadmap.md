@@ -51,6 +51,10 @@ Two independent tracks; neither blocks the other, and **no netcode in either**.
 
 - Launch checklist gated on Phase 5 telemetry. First two live-ops beats, pre-designed: (1) a **Lunar Eclipse event** — limited-time Lumen variant (Night-heavy cycles); (2) the first **new part-family drop**, exercising the content lever ([08](08-creature-visualization.md)) and the discovery system ([06](06-mutator-design.md)).
 
+## City Battlefields track (parallel, not yet phased)
+
+[18-city-battlefields.md](18-city-battlefields.md) and [19-citizens.md](19-citizens.md) specify a much higher-production-value battlefield (procedural 3D cities, destructible buildings, civilian population) than any phase above assumes. It is explicitly **not** part of Phase 1's ugly-box hex sandbox and does not block Phases 1–3. It needs its own validation spike, in the same spirit as the Phase 1 engine spike ([10](10-engine-evaluation.md)) — e.g. one procedurally generated Small Town with destructible buildings holding 60 fps on the reference Android device under the engagement-zone LOD scheme. Exact phase placement is left open as **Q14** ([12-open-questions.md](12-open-questions.md)) rather than asserted here.
+
 ## De-scope ladder (cut in this order if behind)
 
 1. PC lab bench client (mobile lab keeps the Mutator alive)
