@@ -15,7 +15,7 @@ import {
   originOf, isVestigial, homologOf, brainSize, bodyAxis, brainAxis, heartVigor,
   capacity as controlCapacity, controlCost, controlRadius, berserkThreshold,
 } from "./lib/index.js";
-import { initRenderer, updateGenome, destroyRenderer, locomotionProfile, setLabFaction, renderThumbnail, renderPartThumbnail, initBenchTurntable } from "./creature-renderer.js";
+import { initRenderer, updateGenome, destroyRenderer, locomotionProfile, setLabFaction, renderThumbnail, renderPartThumbnail } from "./creature-renderer.js";
 
 const MUTATOR_URL = "https://maddr-mutator.onrender.com";
 const LOCAL_KEY   = "maddr-lab-v2";
@@ -45,16 +45,9 @@ const LOCAL_KEY   = "maddr-lab-v2";
 // and within a drawer, a SIMPLE thumbnail per (drawer, source specimen)
 // pair -- "the head from Specimen-01" is one tile no matter how many
 // separate cuts it took to remove it all, or how many genomes ago that
-// was. Clicking it opens every piece that's ever landed in that group.
+// was. Clicking it grafts the whole group straight onto whatever's on
+// the slab.
 // originSpecimen: { [itemId]: specimenId }  — which animal a part came from
-// chopMode      : "slab" | "tray"  — which the Chop Shop's center panel shows
-// trayBench     : itemId[] — the "mini-slab": tray items currently pulled
-//                 out onto the surgical tray, worked on as their own
-//                 little assembly (add more, harvest pieces back off,
-//                 graft the lot onto whatever's on the real slab). Purely
-//                 a local staging list -- an item sitting here is still
-//                 the same freezer item, unmoved and ungrouped, until it
-//                 actually gets grafted (consumed) or just stays put.
 
 let local = (() => {
   try { return JSON.parse(localStorage.getItem(LOCAL_KEY)); } catch { return null; }
@@ -65,7 +58,7 @@ function newLocal() {
     accountId: crypto.randomUUID(), nameMap: {}, deadSet: [], trayFrom: {}, log: [], seq: 0,
     selectedId: null, faction: "maddr", stable: [], hidden: [], factionOf: {}, view: "lab",
     specimenOf: {}, currentGenomeOf: {}, locationOf: {}, originItem: {},
-    originSpecimen: {}, chopMode: "slab", trayBench: [],
+    originSpecimen: {},
   };
 }
 function saveLocal() { localStorage.setItem(LOCAL_KEY, JSON.stringify(local)); }
@@ -116,17 +109,6 @@ function groupItems(groupKey) { return tray.filter(t => groupKeyOf(t) === groupK
 const PART_ICON = { hand: "✋", sensor: "📡", eye: "👁️", leg: "🦵" };
 function partIcon(item) { return item.kind === "heart" ? "🫀" : (PART_ICON[homologOf(item.family)] ?? "🦴"); }
 function partSlot(item) { return item.kind === "heart" ? "heart" : homologOf(item.family); }
-// The tray-as-mini-slab: whatever's currently pulled onto it, resolved
-// against the live tray (so a bench itemId that got consumed elsewhere,
-// or a stale one from an old session shape, just quietly drops out).
-function benchItems() { return tray.filter(t => (local.trayBench ?? []).includes(t.itemId)); }
-// One item per slot for the preview mannequin -- last one added wins if
-// the bench somehow holds two for the same slot (e.g. two eyes).
-function benchParts() {
-  const parts = {};
-  for (const t of benchItems()) parts[partSlot(t.item)] = t.item;
-  return parts;
-}
 function partName(item) { return item.kind === "heart" ? `${item.tier} heart` : item.family.replace(/_/g, " "); }
 // Real renders of the harvested piece itself -- the freezer used to show
 // a category emoji (a brain for "head", say) no matter what was actually
@@ -140,19 +122,6 @@ function partThumbHtml(t) {
   }
   const url = partThumbCache[t.itemId];
   return url ? `<img src="${url}" alt="${esc(partName(t.item))}">` : partIcon(t.item);
-}
-// The tray shows the whole assembled bench as ONE live turntable -- a
-// real WebGL context + its own rAF loop (initBenchTurntable), so it must
-// be stopped before the tray's DOM is rebuilt out from under it, or the
-// loop (and GL context) leaks.
-let activeTurntables = [];
-function stopTurntables() { activeTurntables.forEach(h => h.stop()); activeTurntables = []; }
-const PART_AXES = ["length", "girth", "taper", "curl", "count", "ornament"];
-function partStatsHtml(item) {
-  if (item.kind === "heart") {
-    return `<div class="k">tier</div><div>${esc(item.tier)}</div><div class="k">vigor</div><div>${bar(heartVigor(item))}</div>`;
-  }
-  return item.params.map((p, i) => `<div class="k">${PART_AXES[i]}</div><div>${bar(p)}</div>`).join("");
 }
 // The exact signature harvestHeart() leaves behind (surgery.ts): a real
 // "faint" tier is a normal, weak-but-working heart -- only an all-zero
@@ -374,55 +343,6 @@ async function doHarvestRegion(slots, label) {
   saveLocal(); showBusy(false); await sync();
 }
 
-// Sewing works on dead specimens too -- a heart transplant is exactly how
-// a corpse (per local.deadSet) comes back: the new genome id it produces
-// was never added to deadSet, so `alive` just becomes true again on the
-// next sync. No revival flag needed -- it falls out of the immutable-row
-// design for free.
-async function doSew(itemId) {
-  const c = selected(); if (!c) return;
-  const entry = tray.find(t => t.itemId === itemId); if (!entry) return;
-  const sid = specimenIdOf(c.id);
-  showBusy(true);
-  try {
-    let rec;
-    if (entry.item.kind === "heart") {
-      rec = await api("POST", "/sew/heart", { idempotencyKey: ikey(), creatureId: c.id, itemId });
-    } else {
-      const slot = homologOf(entry.item.family);
-      rec = await api("POST", "/sew/part", { idempotencyKey: ikey(), creatureId: c.id, slot, itemId });
-    }
-
-    if (rec.result === "survived") {
-      registerName(rec.genomeId, c.name);
-      setSpecimenGenome(sid, rec.genomeId);
-      local.selectedId = rec.genomeId;
-      local.trayBench = (local.trayBench ?? []).filter(id => id !== itemId);   // consumed -- off the tray too
-      if (entry.item.kind === "heart") {
-        if (rec.explantedHeartItemId) registerFrom(rec.explantedHeartItemId, c.name);
-        logEntry(`🫀 Transplanted a ${entry.item.tier} heart into ${c.name} (${vword(rec.viability)}). Old heart back in tray.`);
-      } else {
-        if (rec.explantedPartItemId) {
-          registerFrom(rec.explantedPartItemId, c.name);
-          logEntry(`🪡 Sewed the ${entry.item.family.replace(/_/g, " ")} onto ${c.name}'s ${homologOf(entry.item.family)}, swapping out what was there (${vword(rec.viability)}). Old part back in the freezer.`);
-        } else {
-          logEntry(`🪡 Sewed the ${entry.item.family.replace(/_/g, " ")} onto ${c.name}'s ${homologOf(entry.item.family)} (${vword(rec.viability)}).`);
-        }
-      }
-    } else if (rec.result === "limb_rejected") {
-      logEntry(`🦠 ${c.name}'s heart can't feed the new ${(entry.item.family ?? "part").replace(/_/g, " ")} — rejected. The part is still usable.`);
-    } else if (rec.result === "patient_died") {
-      if (rec.genomeId) { registerName(rec.genomeId, c.name); setSpecimenGenome(sid, rec.genomeId); markDead(rec.genomeId); local.selectedId = rec.genomeId; }
-      if (entry.item.kind === "heart") {
-        logEntry(`☠️ The ${entry.item.tier} heart could not drive ${c.name}'s body — ${c.name} dies on the table.`);
-      } else {
-        logEntry(`☠️ The graft overloaded ${c.name}'s heart far past shock — ${c.name} dies on the table.`);
-      }
-    }
-  } catch (e) { logEntry(`⚠️ Sew failed: ${e.message}`); }
-  saveLocal(); showBusy(false); await sync();
-}
-
 // ── moving specimens between the Lab and the Chop Shop ──────────────────────
 // A specimen lives in exactly one room. Sending it under the knife pulls
 // it off the Lab's bench entirely -- there is only ever one card for it,
@@ -515,10 +435,7 @@ async function doRestore() {
 
 // Sews each item in order onto whatever's on the slab (c), stopping at
 // the first rejection/death -- whatever's left in `items` just stays put
-// (in the freezer, or still on the tray), nothing forces the run to
-// finish. Shared by the freezer's one-click group graft and the tray's
-// "graft the whole bench" -- same surgery, two different sources for
-// the batch of items.
+// in the freezer, nothing forces the run to finish.
 async function graftItems(c, items) {
   const sid = specimenIdOf(c.id);
   let curId = c.id;
@@ -556,10 +473,8 @@ async function graftItems(c, items) {
   return { grafted, consumed, swapped };
 }
 
-// Slab-mode shortcut: click a freezer thumbnail and its whole group grafts
-// straight onto whatever's currently on the slab, no trip through the
-// tray. (In Tray mode the same click adds the group to the tray's bench
-// instead -- see the freezer's click handler.)
+// Click a freezer thumbnail and its whole group grafts straight onto
+// whatever's currently on the slab -- no detour, no staging.
 async function doGraftGroup(groupKey) {
   const c = selected(); if (!c) return;
   const items = groupItems(groupKey);
@@ -568,24 +483,6 @@ async function doGraftGroup(groupKey) {
   try {
     const { grafted, swapped } = await graftItems(c, items);
     if (grafted.length) logEntry(`🪡 Grafted the ${grafted.join(", ")} onto ${c.name} straight off the slab.` +
-      (swapped ? ` Swapped out ${swapped} old part${swapped === 1 ? "" : "s"}, back in the freezer.` : ""));
-  } catch (e) { logEntry(`⚠️ Graft failed: ${e.message}`); }
-  saveLocal(); showBusy(false); await sync();
-}
-
-// The tray's "graft the whole bench" -- whatever's currently pulled onto
-// the mini-slab goes onto the real one, in one motion. Anything that
-// stops the run early (rejection, death) simply stays on the tray for
-// another attempt; only what actually took comes off it.
-async function doGraftBench() {
-  const c = selected(); if (!c) return;
-  const items = benchItems();
-  if (!items.length) return;
-  showBusy(true);
-  try {
-    const { grafted, consumed, swapped } = await graftItems(c, items);
-    local.trayBench = (local.trayBench ?? []).filter(id => !consumed.includes(id));
-    if (grafted.length) logEntry(`🪡 Grafted the ${grafted.join(", ")} onto ${c.name} straight off the tray.` +
       (swapped ? ` Swapped out ${swapped} old part${swapped === 1 ? "" : "s"}, back in the freezer.` : ""));
   } catch (e) { logEntry(`⚠️ Graft failed: ${e.message}`); }
   saveLocal(); showBusy(false); await sync();
@@ -704,7 +601,6 @@ function setView(v) {
   document.getElementById("nav-chop").classList.toggle("active", v === "chop");
   document.getElementById("nav-stable").classList.toggle("active", v === "stable");
   destroyRenderer(); _lastPortraitId = null;   // hand the single renderer over
-  stopTurntables();   // leaving the Chop Shop mid-tray shouldn't leave rAF loops spinning
   if (v === "stable") renderStable();
   else if (v === "chop") { applyFaction(local.faction); renderChop(); }
   else { applyFaction(local.faction); render(); }
@@ -896,34 +792,10 @@ function renderChop() {
   document.getElementById("wallet").textContent = `🩸 ${blood}`;
   if (local.view !== "chop") return;
   renderChopRoster();
-  renderChopModeButtons();
-  renderChopCenter();
+  renderChopSlab();
   renderChopRegions();
   renderChopFreezer();
   renderLog();
-}
-
-// The center panel is either "the slab" (the live specimen) or "the
-// surgical tray" (one opened batch of harvested parts, worked on in
-// isolation). Clicking a batch's thumbnail in the freezer switches here
-// automatically; the two buttons let the user flip back manually without
-// re-opening the drawer.
-function renderChopModeButtons() {
-  const slabBtn = document.getElementById("btn-mode-slab");
-  const trayBtn = document.getElementById("btn-mode-tray");
-  const title = document.getElementById("chop-center-title");
-  if (!slabBtn || !trayBtn) return;
-  const mode = local.chopMode ?? "slab";
-  slabBtn.classList.toggle("active", mode === "slab");
-  trayBtn.classList.toggle("active", mode === "tray");
-  trayBtn.disabled = tray.length === 0;   // nothing in the freezer to inspect at all
-  if (title) title.textContent = mode === "tray" ? "Surgical tray" : "The slab";
-}
-
-function renderChopCenter() {
-  const mode = local.chopMode ?? "slab";
-  if (mode === "tray") renderChopTray();   // handles "nothing open yet" itself
-  else renderChopSlab();
 }
 
 function renderChopRoster() {
@@ -948,7 +820,6 @@ function renderChopSlab() {
   const wrap = document.getElementById("chop-slab");
   const c = selected();
   destroyRenderer();
-  stopTurntables();
   if (!c) { wrap.innerHTML = `<div class="empty">Nothing on the slab. Send a specimen over from the Lab.</div>`; return; }
   const g = c.genome;
   const v = viability(g);
@@ -1015,18 +886,11 @@ function renderChopRegions() {
 // The freezer: four labeled drawers (native <details> -- click a label,
 // it pops open right there, no extra state to track). Inside, one SIMPLE
 // thumbnail per specimen that's contributed to that drawer -- "the head
-// from Specimen-01" -- not a breakdown of what's inside.
-//
-// What clicking a thumbnail does depends on which mode the slab is in:
-//   - Slab mode: grafts the whole group straight onto whatever's on the
-//     slab right now -- no detour through the tray.
-//   - Tray mode: adds that group onto the tray's own mini-slab (the
-//     bench) instead of touching the real slab -- click another tile
-//     and it piles on rather than replacing what's already there.
+// from Specimen-01" -- not a breakdown of what's inside. Clicking a
+// thumbnail grafts the whole group straight onto whatever's on the slab.
 function renderChopFreezer() {
   const el = document.getElementById("chop-freezer");
   if (tray.length === 0) { el.innerHTML = `<div class="empty">The freezer is empty. Harvest something to fill a drawer.</div>`; return; }
-  const inSlabMode = (local.chopMode ?? "slab") === "slab";
   const c = selected();
   const byDrawer = Object.fromEntries(DRAWERS.map(d => [d.key, []]));
   for (const t of tray) (byDrawer[drawerKeyForItem(t.item)] ??= []).push(t);
@@ -1046,97 +910,26 @@ function renderChopFreezer() {
     return `<details class="drawer-unit" ${items.length ? "" : "data-empty"}>
       <summary class="drawer-label"><span>${d.title}</span><span class="drawer-count">${groups.size}</span></summary>
       <div class="drawer-contents">
-        ${groups.size === 0 ? `<div class="empty">Empty.</div>` : [...groups.entries()].map(([k, its]) => groupTileHtml(d, k, its, { inSlabMode, canGraft: !!c })).join("")}
+        ${groups.size === 0 ? `<div class="empty">Empty.</div>` : [...groups.entries()].map(([k, its]) => groupTileHtml(d, k, its, { canGraft: !!c })).join("")}
       </div>
     </details>`;
   }).join("");
 
   el.querySelectorAll("[data-open-group]").forEach(t =>
     t.addEventListener("click", () => {
-      const key = t.dataset.openGroup;
-      if (inSlabMode) {
-        if (c) doGraftGroup(key);
-      } else {
-        const ids = groupItems(key).map(x => x.itemId);
-        local.trayBench = [...new Set([...(local.trayBench ?? []), ...ids])];
-        saveLocal(); renderChop();
-      }
+      if (c) doGraftGroup(t.dataset.openGroup);
     }));
 }
 
-function groupTileHtml(drawer, groupKey, items, { inSlabMode, canGraft }) {
+function groupTileHtml(drawer, groupKey, items, { canGraft }) {
   const from = local.trayFrom[items[0].itemId] ?? "unknown";
   const label = drawer.title.replace(/^\S+\s/, "");
-  const graftable = inSlabMode && canGraft;
-  const onBench = !inSlabMode && items.every(t => (local.trayBench ?? []).includes(t.itemId));
-  const title = inSlabMode
-    ? (canGraft ? "Graft straight onto the specimen on the slab" : "Pick a specimen on the slab first")
-    : (onBench ? "Already on the tray" : "Add to the tray");
-  return `<div class="part-tile ${inSlabMode && !canGraft ? "disabled" : ""}" data-open-group="${esc(groupKey)}" title="${title}">
+  const title = canGraft ? "Graft straight onto the specimen on the slab" : "Pick a specimen on the slab first";
+  return `<div class="part-tile ${canGraft ? "" : "disabled"}" data-open-group="${esc(groupKey)}" title="${title}">
     <div class="part-thumb">${partThumbHtml(items[0])}</div>
-    <div class="part-name">${esc(label)}${graftable ? ` <span class="badge">🪡 graft</span>` : ""}${onBench ? ` <span class="badge">🗄️ on tray</span>` : ""}</div>
+    <div class="part-name">${esc(label)}${canGraft ? ` <span class="badge">🪡 graft</span>` : ""}</div>
     <div class="part-from">from ${esc(from)}</div>
   </div>`;
-}
-
-// One item's card on the tray: graft just this piece onto the slab, or
-// harvest it back off the tray into the freezer (it was never anywhere
-// else -- this just drops it out of the bench selection).
-function benchChipHtml(t, { canSend }) {
-  const item = t.item;
-  const originBadge = item.kind === "heart" ? "" : `<span class="badge ${originOf(item.family)}">${originOf(item.family)}</span>`;
-  return `<div class="part-tile">
-    <div class="part-thumb">${partThumbHtml(t)}</div>
-    <div class="part-body">
-      <div class="part-name">${esc(partName(item))} ${originBadge}</div>
-      <div class="part-stats kv">${partStatsHtml(item)}</div>
-      <div class="bench-chip-actions">
-        <button class="small" data-item="${t.itemId}" ${canSend ? "" : "disabled"} title="${canSend ? "" : "Pick a specimen on the slab first"}">🪡 Graft (🩸5)</button>
-        <button class="small" data-harvest="${t.itemId}" title="Take it back off the tray -- stays in the freezer">🔪 Harvest</button>
-      </div>
-    </div>
-  </div>`;
-}
-
-// The surgical tray, now a mini-slab: click freezer tiles (in Tray mode)
-// to pull parts onto it -- they pile up rather than replace each other --
-// see them assembled as one live turntable, harvest any single piece back
-// off, or graft the whole bench onto whatever's on the real slab at once.
-function renderChopTray() {
-  const wrap = document.getElementById("chop-slab");
-  destroyRenderer();
-  stopTurntables();
-  const items = benchItems();
-  if (items.length === 0) {
-    wrap.innerHTML = `<div class="tray-view"><div class="empty">Nothing on the tray. Click a freezer drawer tile to pull its parts onto it.</div></div>`;
-    return;
-  }
-  const c = selected();
-  const canGraft = !!c;
-  wrap.innerHTML = `
-    <div class="tray-view">
-      <canvas id="bench-canvas"></canvas>
-      <div class="tray-head">
-        <div class="tray-title">The tray <span class="badge">${items.length} piece${items.length === 1 ? "" : "s"}</span></div>
-      </div>
-      <div class="tray-parts">${items.map(t => benchChipHtml(t, { canSend: canGraft })).join("")}</div>
-      <div class="chop-slab-actions">
-        <button id="btn-graft-bench" class="primary" ${canGraft ? "" : "disabled"} title="${canGraft ? "" : "Pick a specimen on the slab first"}">🪡 Graft all to slab (🩸${items.length * 5})</button>
-        <button id="btn-clear-bench">↩️ Clear the tray</button>
-      </div>
-    </div>`;
-  activeTurntables.push(initBenchTurntable(document.getElementById("bench-canvas"), benchParts(), local.faction));
-  wrap.querySelectorAll("button[data-item]").forEach(b =>
-    b.addEventListener("click", () => doSew(b.dataset.item)));
-  wrap.querySelectorAll("button[data-harvest]").forEach(b =>
-    b.addEventListener("click", () => {
-      local.trayBench = (local.trayBench ?? []).filter(id => id !== b.dataset.harvest);
-      saveLocal(); renderChop();
-    }));
-  document.getElementById("btn-graft-bench")?.addEventListener("click", doGraftBench);
-  document.getElementById("btn-clear-bench")?.addEventListener("click", () => {
-    local.trayBench = []; saveLocal(); renderChop();
-  });
 }
 
 // Two copies of the notebook exist in the DOM -- the Lab's side panel and
@@ -1288,12 +1081,6 @@ document.getElementById("btn-reset").addEventListener("click", doReset);
 document.getElementById("nav-lab").addEventListener("click", () => setView("lab"));
 document.getElementById("nav-chop").addEventListener("click", () => setView("chop"));
 document.getElementById("nav-stable").addEventListener("click", () => setView("stable"));
-document.getElementById("btn-mode-slab").addEventListener("click", () => {
-  local.chopMode = "slab"; saveLocal(); renderChop();
-});
-document.getElementById("btn-mode-tray").addEventListener("click", () => {
-  local.chopMode = "tray"; saveLocal(); renderChop();
-});
 local.faction ??= "maddr";
 local.view ??= "lab";
 applyFaction(local.faction);
