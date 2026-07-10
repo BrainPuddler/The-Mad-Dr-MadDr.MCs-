@@ -38,6 +38,7 @@ wallet ships with the Postgres store (Phase 2).
 | **Corpse salvage** | 40–60% of the dead monster's bill | From [04-combat-model.md](04-combat-model.md); works on enemy corpses too — paid in the **corpse's own material flavors** ([17](17-factions.md)) |
 | **Earth world-sources** | Faction-flavored materials (hospitals, junkyards, farms…) | Node table + asymmetric valuation in [17](17-factions.md#world-sources-on-earth) |
 | **Collection Stations** | Blood, Bones, Brains (small, flat, per-citizen) | Only from Citizen deaths inside a *captured* station's radius, on a city battlefield ([18-city-battlefields.md](18-city-battlefields.md), [19-citizens.md](19-citizens.md)); full mechanic in [20-harvest-and-repair.md](20-harvest-and-repair.md) |
+| **Cannibalize** | Bones, Body Parts, a Brain-tier roll (50% of the source's own build cost) | *In match*: recall and dismantle one of your own living creatures at the Vat. The design/Notebook equivalent — retiring an owned genome at the Workshop between matches — is the same formula but a meta-wallet, not an in-match, source ([06-mutator-design.md](06-mutator-design.md), [20](20-harvest-and-repair.md)) |
 
 ### Brains, the bulk resource — the same word, a different scale
 

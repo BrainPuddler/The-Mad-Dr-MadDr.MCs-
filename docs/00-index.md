@@ -11,7 +11,7 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | [03-mana-system.md](03-mana-system.md) | The Lumen Cycle, emitter polarities, affinity auras, capture rules — concrete numbers | Draft |
 | [04-combat-model.md](04-combat-model.md) | Stat block, the damage formula, positioning/facing, bounded luck, salvage | Draft |
 | [05-component-economy.md](05-component-economy.md) | Blood/Bones/Parts/Brains: sources, sinks, reanimation costs, anti-snowball | Draft |
-| [06-mutator-design.md](06-mutator-design.md) | **The genome schema (normative)**, Mutate/Splice/Graft, brain budget, lab UX | Draft |
+| [06-mutator-design.md](06-mutator-design.md) | **The genome schema (normative)**, brain budget, **the Workshop**: Mutate/Splice/Graft/Megabrain Augmentation/Cannibalize, resource-driven construction | Draft |
 | [07-mutator-server-architecture.md](07-mutator-server-architecture.md) | The cross-device Mutator service: data model, API, commute mode, scaling | Draft |
 | [08-creature-visualization.md](08-creature-visualization.md) | Genome → 3D: socketed parts, blend shapes, uber-shader, perf budgets | Draft |
 | [09-multiplayer-architecture.md](09-multiplayer-architecture.md) | Server-authoritative netcode, mobile resilience, matchmaking, anti-cheat | Draft |
@@ -25,7 +25,7 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | [17-factions.md](17-factions.md) | Factions as expression profiles: human army (issued tech, rout/rally), alien hive (biotech, queen cohesion); prototyped in [`/prototype/mutator/factions.py`](../prototype/mutator/factions.py) | Draft |
 | [18-city-battlefields.md](18-city-battlefields.md) | Unity battlefield layer: 5 km match scale, procedural city generation, destructible buildings, the engagement-zone LOD scheme, Unity↔Lab integration | Draft |
 | [19-citizens.md](19-citizens.md) | Civilian city population: age/body type, aggression & weapon access, sync-tier LOD; distinct from the Human Army faction | Draft |
-| [20-harvest-and-repair.md](20-harvest-and-repair.md) | Citizen and vanquished-foe harvesting (Collection Stations, faction corpse salvage, hybrid-monster parts), resource-gated construction (Bones cost, Megabrain Augmentation), and field Repair | Draft |
+| [20-harvest-and-repair.md](20-harvest-and-repair.md) | Citizen and vanquished-foe harvesting (Collection Stations, faction corpse salvage, hybrid-monster parts), resource-gated construction (Bones cost, Megabrain Augmentation), field Repair, and in-match Cannibalize | Draft |
 
 **Status legend**: *Draft* (numbers are v0.1 proposals) → *Reviewed* (survived Phase-0 paper playtest and a read-through) → *Locked* (implementation depends on it; changes require a decision-log entry in [12](12-open-questions.md)).
 
@@ -46,6 +46,7 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | **Aura** | The 3-hex radius around an emitter where affinity modifiers apply ([03](03-mana-system.md)) |
 | **Brain budget** | The stat-point and quirk cap imposed by a monster's brain quality (Dim/Average/Gifted/Mastermind) ([06](06-mutator-design.md)) |
 | **Brains** | Player-facing term for two things: the discrete, one-per-monster Brain tier-item that gates the genome's stat budget (see **Brain budget**, above); and the bulk, counted resource harvested from Citizens and vanquished foes, individually weak, whose only sink is Megabrain Augmentation — internally tracked as the distinct field `greyMatter` so the two never collide in code ([05](05-component-economy.md), [20](20-harvest-and-repair.md)) |
+| **Cannibalize** | Retire one of your own genomes at the Workshop, or recall a living fielded creature at the Vat mid-match, converting it back into Bones/Body Parts/a Brain-tier roll at 50% of its build cost — the same operation in two contexts ([06](06-mutator-design.md), [20](20-harvest-and-repair.md)) |
 | **Citizen** | A non-combatant city NPC — age, body type, and personality generated, never bred; distinct from the Human Army faction ([17](17-factions.md)) ([19](19-citizens.md)) |
 | **Collection Station** | A capturable structure (captures like an emitter) that converts Citizen deaths within its radius into banked Blood/Bones/Brains for its controller; one per Community Hub ([18](18-city-battlefields.md), [20](20-harvest-and-repair.md)) |
 | **Community Hub** | A high-population landmark building type — hospital, school, or old-age home — generated at 4× standard Citizen density ([18](18-city-battlefields.md), [19](19-citizens.md), [20](20-harvest-and-repair.md)) |
@@ -79,3 +80,4 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | **Style preset** | An authored parameter set (road layout, density, facade/prop kit) skinning the shared city generator per theme ([18](18-city-battlefields.md)) |
 | **Territory tick** | The per-controlled-hex blood trickle (+0.1 blood/min) ([05](05-component-economy.md)) |
 | **Vat** | Your base: the reanimation point and the destroy-to-win target ([02](02-gameplay-overview.md)) |
+| **The Workshop** | The resource-facing section of the Lab: build a monster from Bones/Parts/Brains/Blood, priced live as you build. Its tools are Mutate, Splice, Graft, Megabrain Augmentation, and Cannibalize ([06](06-mutator-design.md)) |

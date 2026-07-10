@@ -26,7 +26,7 @@ Lockstep's one advantage (bandwidth) is worthless at 60 entities, and every one 
 ## Simulation & sync model
 
 - **Authoritative server sim at 10 Hz** (upgradeable to 15 Hz if feel demands; fixed-point math per [04](04-combat-model.md)).
-- Clients send **commands** (move, attack, harvest, capture-channel, reanimate, ability) — at most a few per second per player.
+- Clients send **commands** (move, attack, harvest, capture-channel, reanimate, ability, repair, cannibalize) — at most a few per second per player. `repair` and `cannibalize` are Vat-only real-time commands, not Mutator-service ops — full specs in [20-harvest-and-repair.md](20-harvest-and-repair.md).
 - Server broadcasts **delta-compressed entity state** per tick; full keyframe every 2 s and on demand.
 - Clients **render-interpolate ~150 ms behind** server time (smooths jitter; at RTS pace, 150 ms presentation delay is imperceptible). Client-side *command acknowledgment* effects (move marker, "she's moving" bark) fire instantly; positions never predicted speculatively in v1 — RTS units, unlike FPS avatars, don't need it.
 

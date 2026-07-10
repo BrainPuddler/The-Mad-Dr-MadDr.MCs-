@@ -64,7 +64,11 @@ A creature is fully described by a **genome**: a structured, versioned record of
 
 A design whose genome exceeds the equipped brain's budget cannot be reanimated with that brain. The **power budget** (stat-point sum, normalized) is also what matchmaking reads ([09](09-multiplayer-architecture.md)) — Mutator balance and matchmaking interlock through this one number.
 
-### Bones cost: the resource-gate readout
+## The Workshop: building a monster from resources
+
+This is the section the creator asked for by name: the resource-facing side of the Lab, rolled into one place. Every tool below — Mutate, Splice, Graft, Megabrain Augmentation, and Cannibalize — is a way of spending or recovering the same currencies ([05-component-economy.md](05-component-economy.md)): Bones, Body Parts, Brains, Blood. "I want a tank, I need a lot of Bones" isn't a slogan here; the Workshop shows it to you as a live number while you build, not something you discover at the reanimation screen — and if you don't have the Bones, the Workshop is also where you get them: gather more, or **Cannibalize** a design you don't need anymore.
+
+### The bill: Bones, Parts, and a Brain
 
 [05-component-economy.md](05-component-economy.md) states plainly that Bone cost "scales with Vitality, Armor, and size" — this is the formula that claim was always implicitly obeying, made explicit (v0.1):
 
@@ -84,23 +88,9 @@ Bones = 4 × sizeClass + 0.1 × Vitality + 2 × Armor
 
 Worked example — why "a tank-type unit costs a lot of bone" is a formula, not a slogan: a max-stat build (sizeClass 4, Vitality 400, Armor 10) costs `16 + 40 + 20 = 76` Bones; a min-stat build (sizeClass 1, Vitality 50, Armor 0) costs `4 + 5 + 0 = 9` Bones — an **~8.4× spread** between the lightest and heaviest thing you can breed.
 
-This is a **readout, not a new construction system**: it's what Mutate/Splice/Graft already implicitly charged (doc 05's component bills), now shown as a live number next to the stat sliders as you build — "I want a tank, I need a lot of bones" is something the Lab tells you up front, not something you discover at the reanimation screen.
+This is a **readout, not a parallel construction system**: it's what Mutate/Splice/Graft below already implicitly charge (doc 05's component bills), shown as a live number next to the stat sliders as you build.
 
 **Reconciliation note**: [17-factions.md](17-factions.md) already ships a Phase-2 Structure-class formula, `structure = 2 + 8·bulk`, for the eventual sparse-material wallet. That formula and this one are not yet reconciled — this is the v0.1 stand-in for today's `{blood, bones}` wallet; 17's is the forward-looking generalization. Tracked as **Q18** ([12-open-questions.md](12-open-questions.md)).
-
-## Megabrain Augmentation: a Mastermind-only upgrade
-
-A fourth, narrower operation alongside Mutate/Splice/Graft below — not one of "the three operators," but the same server-computed, deterministic-cost shape as Graft.
-
-**Gate**: Mastermind-tier brains only. **Cost**: 100 harvested **Brains** (player-facing; internal field name `greyMatter`) — a bulk resource harvested from Citizens and vanquished foes ([20-harvest-and-repair.md](20-harvest-and-repair.md)). This shares its display name with, but is mechanically separate from, the discrete Brain tier-item above (`brainQuality` in the genome — the two-senses disambiguation lives in [05](05-component-economy.md)) — this operation spends the bulk resource only, and never touches or consumes the genome's actual Brain tier-item. **Effect**: a one-time, flat `capacityBonus: 7.2` added to the genome, feeding the Capacity term in [16-brains-behavior-command.md](16-brains-behavior-command.md)'s command-capacity formula — the mechanism that lets a single Mastermind commander actually hold a large platoon (the worked example lives in doc 16).
-
-Mechanically identical in shape to Graft: server-computed, deterministic (no RNG), produces a new immutable child genome (`parentIds: [thisGenome]`). Not repeatable in v0.1 — one augmentation per genome, a deliberate anti-snowball dial rather than an assumed-safe unlimited stack (open, **Q21**).
-
-**Two structural costs, stated plainly, not glossed over:**
-- Adding `capacityBonus` to the genome is a real schema change and trips this doc's own normative-schema notice at the top — [04](04-combat-model.md), [07](07-mutator-server-architecture.md), and [08](08-creature-visualization.md) all need the co-update in the same revision that ships this.
-- `command`/`will` already feed the [09-multiplayer-architecture.md](09-multiplayer-architecture.md) matchmaking power budget. A capacity bonus left out of that same sum is a free-power hole — recommend it contribute to the power-budget sum proportionally, not left unpriced. Open, **Q21**.
-
-## The three operators
 
 ### Mutate — one parent, biased randomness
 
@@ -122,6 +112,34 @@ Feed one creature plus **optional components**; components bias the outcome (the
 Pay Body Parts to set one slot's allele directly — choose the family, set size/variant sliders. Costs **3× the Mutate fee** plus the part itself. Graft exists so the GA never feels like a pure slot machine (pillar 1 demands ownership, not gambling): when you need *that claw* on *that monster*, you can have it — expensively.
 
 This is the **lab** graft: composing a genome on the bench, where viability is checked *before* you commit. Its violent twin is **surgery** below.
+
+### Megabrain Augmentation — a Mastermind-only upgrade
+
+A fourth tool, narrower than the three above — not one of the historical "three operators," but the same server-computed, deterministic-cost shape as Graft.
+
+**Gate**: Mastermind-tier brains only. **Cost**: 100 harvested **Brains** (player-facing; internal field name `greyMatter`) — a bulk resource harvested from Citizens and vanquished foes ([20-harvest-and-repair.md](20-harvest-and-repair.md)). This shares its display name with, but is mechanically separate from, the discrete Brain tier-item above (`brainQuality` in the genome — the two-senses disambiguation lives in [05](05-component-economy.md)) — this operation spends the bulk resource only, and never touches or consumes the genome's actual Brain tier-item. **Effect**: a one-time, flat `capacityBonus: 7.2` added to the genome, feeding the Capacity term in [16-brains-behavior-command.md](16-brains-behavior-command.md)'s command-capacity formula — the mechanism that lets a single Mastermind commander actually hold a large platoon (the worked example lives in doc 16).
+
+Mechanically identical in shape to Graft: server-computed, deterministic (no RNG), produces a new immutable child genome (`parentIds: [thisGenome]`). Not repeatable in v0.1 — one augmentation per genome, a deliberate anti-snowball dial rather than an assumed-safe unlimited stack (open, **Q21**).
+
+**Two structural costs, stated plainly, not glossed over:**
+- Adding `capacityBonus` to the genome is a real schema change and trips this doc's own normative-schema notice at the top — [04](04-combat-model.md), [07](07-mutator-server-architecture.md), and [08](08-creature-visualization.md) all need the co-update in the same revision that ships this.
+- `command`/`will` already feed the [09-multiplayer-architecture.md](09-multiplayer-architecture.md) matchmaking power budget. A capacity bonus left out of that same sum is a free-power hole — recommend it contribute to the power-budget sum proportionally, not left unpriced. Open, **Q21**.
+
+### Cannibalize — scrapping your own designs for parts
+
+The Workshop's other direction: instead of feeding it fresh materials, feed it one of your own genomes. **Cannibalize** retires an owned design — Menagerie-active or bench-only, your choice — and converts it back into Bones, Body Parts, and a Brain-tier roll, deposited straight into the same wallet the Workshop spends from. Want a tank? Recycle what's in the way.
+
+**Formula (v0.1)**: 50% of the design's own Bones-cost bill (above, "The bill") in Bones, 50% of its Body Parts, and its Brain tier salvages at the existing 50% rate ([05](05-component-economy.md)) — the same numbers doc 05 already uses for corpse salvage, reused rather than inventing a new rate.
+
+**The genome isn't deleted.** Per this doc's own immutable-row rule ([07](07-mutator-server-architecture.md)), a cannibalized genome is marked **retired**, not erased — it drops out of the Notebook's active catalog and can never be Menagerie-loaded or bred from again, but its lineage stays intact for any descendant's pedigree view.
+
+**Worked example — "I want a tank, so I scrap what's in the way":** four obsolete Shambler-tier designs (20 Bones bill each) cannibalized return 10 Bones apiece — 40 Bones pooled, over half of a Stitched-Brute-class 76-Bones tank build (above) without waiting on a fresh harvest.
+
+**In-match twin**: the same fantasy, mid-battle, on a *living* creature instead of a bench design — recall and dismantle a fielded creature at the Vat for immediate in-match resources. Full spec in [20-harvest-and-repair.md](20-harvest-and-repair.md), since it's a real-time Vat command, not a Mutator-service op — this doc's Cannibalize only ever touches genomes you own, never something on the battlefield.
+
+Mechanically identical in shape to Graft and Megabrain Augmentation: server-computed, deterministic — no RNG beyond the existing Brain-salvage roll — one new REST op ([07](07-mutator-server-architecture.md)).
+
+**Anti-snowball note, stated plainly**: Cannibalize always returns *less* than a design cost to build (50%, matching every other salvage rate in this game), so build-then-immediately-scrap is a guaranteed net loss — the value is recycling designs that already did their job (an FTUE Shambler once you've bred better bipeds), not laundering resources for free.
 
 ## Grafting as surgery: cut parts off, sew them on
 
@@ -153,16 +171,16 @@ An operation that would produce an invalid genome returns a **failed experiment*
 - Part families have **discovery states**: families appear in your catalog when first obtained — from salvaged enemy genome fragments ([02](02-gameplay-overview.md)), from mutation jumps, or from event drops. The catalog is a Notebook chapter that fills in like a field guide.
 - No rarity tiers on stats (anti-gacha, [01](01-vision.md)); rarity is *aesthetic and morphological* — an uncommon part family is a new shape, not a bigger number.
 
-## Lab UX: commute mode vs. bench mode
+## Workshop UX: commute mode vs. bench mode
 
 | | Mobile (commute) | PC (bench) |
 | --- | --- | --- |
-| Core ops | Mutate / Splice / Graft, ≤3 taps each | Same, plus bulk queueing |
+| Core ops | Mutate / Splice / Graft / Cannibalize, ≤3 taps each | Same, plus bulk queueing |
 | Offline | Queue operations; they run when connectivity returns; push notification "your experiment is ready" ([07](07-mutator-server-architecture.md)) | Assumed online |
 | Lineage | Simple parent/child view | Full pedigree tree, side-by-side genome diff |
 | Preview | Single 3D turntable | Multi-creature compare, animation preview |
 
-Both surfaces call the same server API; the lab state is server-side so the train-to-desk handoff is seamless (pillar 4).
+Both surfaces call the same server API; the Workshop's state is server-side so the train-to-desk handoff is seamless (pillar 4).
 
 ## Anti-cheat posture (design level)
 

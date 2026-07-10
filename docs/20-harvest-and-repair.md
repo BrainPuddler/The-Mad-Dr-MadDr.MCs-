@@ -1,10 +1,10 @@
 # 20 — Harvest & Repair: The Battlefield Economy and Field Recovery
 
-Status: Draft v0.1 · Pillars served: 1 (*Every monster is yours*), 3 (*Honest combat*) · This is the narrative/system doc tying together mechanics that actually live in [05-component-economy.md](05-component-economy.md), [06-mutator-design.md](06-mutator-design.md), [16-brains-behavior-command.md](16-brains-behavior-command.md), [17-factions.md](17-factions.md), [18-city-battlefields.md](18-city-battlefields.md), and [19-citizens.md](19-citizens.md) — formulas are reproduced here for the story, not re-derived. Terms: [glossary](00-index.md#glossary). Open items tracked as Q17–Q22 in [12-open-questions.md](12-open-questions.md).
+Status: Draft v0.1 · Pillars served: 1 (*Every monster is yours*), 3 (*Honest combat*) · This is the narrative/system doc tying together mechanics that actually live in [05-component-economy.md](05-component-economy.md), [06-mutator-design.md](06-mutator-design.md), [16-brains-behavior-command.md](16-brains-behavior-command.md), [17-factions.md](17-factions.md), [18-city-battlefields.md](18-city-battlefields.md), and [19-citizens.md](19-citizens.md) — formulas are reproduced here for the story, not re-derived. Terms: [glossary](00-index.md#glossary). Open items tracked as Q17–Q23 in [12-open-questions.md](12-open-questions.md).
 
 ## Scope
 
-This doc doesn't introduce new formulas of its own except for Repair (§6), which has no other home. Everything else — Collection Station yields, the Bones-cost formula, the Megabrain Augmentation, Community Hub density, faction corpse salvage, surgery grafting — is specified where it structurally belongs (05/06/16/17/18/19) and just told here as one continuous player-facing story.
+This doc doesn't introduce new formulas of its own except Repair (§6) and in-match Cannibalize's channel time (§7, open — Q23), which have no other home. Everything else — Collection Station yields, the Bones-cost formula, the Megabrain Augmentation, Cannibalize's recovery rate, Community Hub density, faction corpse salvage, surgery grafting — is specified where it structurally belongs (05/06/16/17/18/19) and just told here as one continuous player-facing story.
 
 ## 1. The harvesting loop
 
@@ -85,7 +85,7 @@ time  = max(2 s, 0.05 s × missingHP)
 
 **Where/when**: at the Vat, mirroring reanimation's location constraint — retreat to repair, or fight on, is a real decision, not a menu action. **Scoped to in-match only for v0.1**: no existing doc establishes that combat damage persists between matches (every reanimation reference assumes a fresh, full-Vitality field), so this plan doesn't quietly assume a persistent wounded-roster meta-model. That would be a bigger, separate design question — parked as **Q22**.
 
-**API shape**: Repair never touches the genome — HP is runtime battle state, Vitality is the gene it recovers *toward*, not a schema change. It doesn't belong in [07-mutator-server-architecture.md](07-mutator-server-architecture.md)'s Mutator REST surface the way Megabrain Augmentation does; it belongs as a new real-time client command in [09-multiplayer-architecture.md](09-multiplayer-architecture.md)'s existing list (`move, attack, harvest, capture-channel, reanimate, ability`):
+**API shape**: Repair never touches the genome — HP is runtime battle state, Vitality is the gene it recovers *toward*, not a schema change. It doesn't belong in [07-mutator-server-architecture.md](07-mutator-server-architecture.md)'s Mutator REST surface the way Megabrain Augmentation does; it belongs as a new real-time client command in [09-multiplayer-architecture.md](09-multiplayer-architecture.md)'s existing list:
 
 ```
 {cmd: "repair", creatureId, hpToRestore, idempotencyKey}
@@ -94,7 +94,28 @@ time  = max(2 s, 0.05 s × missingHP)
 
 Still idempotent and server-validated per [07](07-mutator-server-architecture.md)'s pattern: reject a request that exceeds missing HP or that the wallet can't afford, never silently clamp.
 
-## 7. v0.1 tuning table (consolidated)
+## 7. Cannibalize (in-match): recall and render down
+
+A living decision, not a battlefield inevitability: recall one of your own fielded creatures to the Vat and dismantle it there, converting it directly into in-match Bones/Parts/Brains — the same fantasy as retiring a design at the Workshop ([06](06-mutator-design.md)), just mid-match and on a living body instead of a design on paper. Want a tank right now? Recycle the grunt that isn't pulling its weight.
+
+**Not corpse salvage** ([04](04-combat-model.md)): corpse salvage is involuntary — a monster died in a fight, either side can loot 40–60% of its bill within 15 s. Cannibalize is voluntary and safe — walk it home, no combat required — but pays a flat, lower recovery rate than a contested kill, so it's never strictly better than fighting well.
+
+**Formula (v0.1)**: recovers 50% of the creature's own Bones-cost bill ([06](06-mutator-design.md)) in Bones, 50% of its Body Parts, and rolls its Brain tier at the existing 50% salvage rate ([05](05-component-economy.md)) — the same recovery rate as Cannibalize's Workshop twin, so the two read as one mechanic wearing two hats.
+
+**Worked example**: cannibalizing a fielded Stitched Brute (60 Bones bill, 8 Parts, Average Brain) at the Vat returns 30 Bones, 4 Parts, and a 50% chance at the Average Brain — enough, with a matching haul from a second grunt, to reanimate something meaningfully bigger from the Menagerie.
+
+**Where/when**: at the Vat only (mirrors Reanimation and Repair's location constraint). Channel time isn't set yet — parked as **Q23**, since it needs its own tuning pass to make sure it isn't spammable enough to trivialize the risk/safety tension corpse salvage already relies on.
+
+**API shape**: another new real-time client command in [09-multiplayer-architecture.md](09-multiplayer-architecture.md)'s list:
+
+```
+{cmd: "cannibalize", creatureId, idempotencyKey}
+  → {bonesRecovered, partsRecovered, brainRecovered}
+```
+
+Server-validated, idempotent, per [07](07-mutator-server-architecture.md)'s pattern. The creature is removed from the field permanently — no un-cannibalizing.
+
+## 8. v0.1 tuning table (consolidated)
 
 | Knob | Value | Lives in |
 | --- | --- | --- |
@@ -108,7 +129,9 @@ Still idempotent and server-validated per [07](07-mutator-server-architecture.md
 | Megabrain Augmentation cost / effect | 100 harvested Brains / +7.2 Capacity, one-time | [06](06-mutator-design.md), [16](16-brains-behavior-command.md) |
 | Repair cost formula | `0.10×missingHP` Bones, `0.20×missingHP` Blood | this doc |
 | Repair channel time | `max(2s, 0.05s × missingHP)` | this doc |
+| Cannibalize recovery rate (Workshop & in-match) | 50% Bones / 50% Parts / 50% Brain-salvage roll | [06](06-mutator-design.md), this doc |
+| Cannibalize channel time | Not yet set — **Q23** | this doc |
 
-## 8. Open questions
+## 9. Open questions
 
-Logged in [12-open-questions.md](12-open-questions.md): **Q17** (harvested-Brains meta-conversion rate), **Q18** (reconciling the Bones formula with doc 17's `structure = 2 + 8·bulk`), **Q19** (whether/how bulk Brains, the discrete Brain tier-item, and doc 17's Phase-2 `brain` material mechanically unify), **Q20** (Collection Station vs. the existing Hospital world-source node), **Q21** (Megabrain Augmentation stacking/radius/power-budget interaction), **Q22** (Repair's in-match-only scope vs. a persistent between-match damage model). §3's faction-harvest narrative introduced no new open questions — it connects existing mechanics from [06](06-mutator-design.md) and [17](17-factions.md) only.
+Logged in [12-open-questions.md](12-open-questions.md): **Q17** (harvested-Brains meta-conversion rate), **Q18** (reconciling the Bones formula with doc 17's `structure = 2 + 8·bulk`), **Q19** (whether/how bulk Brains, the discrete Brain tier-item, and doc 17's Phase-2 `brain` material mechanically unify), **Q20** (Collection Station vs. the existing Hospital world-source node), **Q21** (Megabrain Augmentation stacking/radius/power-budget interaction), **Q22** (Repair's in-match-only scope vs. a persistent between-match damage model), **Q23** (in-match Cannibalize's channel time / spam tuning). §3's faction-harvest narrative introduced no new open questions — it connects existing mechanics from [06](06-mutator-design.md) and [17](17-factions.md) only.

@@ -80,6 +80,8 @@ future faction is a column, not a rewrite. **Migration**: existing `bones` →
 becomes a material-priced bill in Phase 2 (Postgres store). Sparse map ⇒ a
 `jsonb` column or a thin `wallet_materials(accountId, type, amount)` table.
 
+**Note on Cannibalize** ([06](06-mutator-design.md)): retiring a genome via Cannibalize adds a `retiredAt` timestamp to the `CreatureGenome` *table row*, not to the genome *blob* itself — the immutable, signed genome content is unchanged; only its lifecycle state gains a marker (retired genomes are excluded from Menagerie loading and breeding, but stay in lineage views for descendants' pedigrees). This is a service-table column, not a schema field, so it does **not** trip [06](06-mutator-design.md)'s normative-schema rule (04/07/08 co-update) the way Megabrain Augmentation's `capacityBonus` does.
+
 **Why immutable genomes + `parentIds` lineage**: family trees and pedigree UI for free ([06](06-mutator-design.md) bench mode), rollback/restore is a pointer change, future genome *sharing/trading* ([12-open-questions.md](12-open-questions.md)) needs no schema change, and signed immutable rows are what match servers can trust. Genomes are tiny, so keeping every ancestor forever is cheap (arithmetic below).
 
 ## API surface (first draft — REST + JSON)
@@ -89,6 +91,7 @@ becomes a material-priced bill in Phase 2 (Postgres store). Sparse map ⇒ a
 | `POST /mutate` | body: `{parentId, fedComponents[], idempotencyKey}` → new genome (or failed-experiment result) |
 | `POST /splice` | `{parentAId, parentBId, fedComponents[], idempotencyKey}` → new genome / failed experiment |
 | `POST /graft` | `{parentId, slot, partFamilyId, sizeGene, variantGene, idempotencyKey}` → new genome (deterministic) |
+| `POST /cannibalize` | `{genomeId, idempotencyKey}` → wallet credit (bones, parts, brainRoll); marks the genome `retiredAt`, deterministic ([06](06-mutator-design.md)) |
 | `GET /creatures?cursor=` | Paged collection |
 | `GET /creature/{id}` / `GET /creature/{id}/lineage` | Single genome / ancestor tree |
 | `GET /menagerie` / `PUT /menagerie` | Read / set the ≤12 loadout |
