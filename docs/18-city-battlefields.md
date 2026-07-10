@@ -1,6 +1,6 @@
 # 18 — City Battlefields: Scale, Procedural Generation & Destruction
 
-Status: Draft v0.1 · Pillars served: 2 (*the battlefield breathes*), 3 (*honest combat*) · Realizes the hex battlefield of [02](02-gameplay-overview.md)/[03](03-mana-system.md) in continuous 3D space; consumes the damage formula from [04](04-combat-model.md) unchanged; perf budgets extend [08](08-creature-visualization.md); netcode extends [09](09-multiplayer-architecture.md); engine already decided in [10](10-engine-evaluation.md). Terms: [glossary](00-index.md#glossary). Scope/sequencing tracked as Q14–Q16 in [12-open-questions.md](12-open-questions.md).
+Status: Draft v0.1 · Pillars served: 2 (*the battlefield breathes*), 3 (*honest combat*) · Realizes the hex battlefield of [02](02-gameplay-overview.md)/[03](03-mana-system.md) in continuous 3D space; consumes the damage formula from [04](04-combat-model.md) unchanged; perf budgets extend [08](08-creature-visualization.md); netcode extends [09](09-multiplayer-architecture.md); engine already decided in [10](10-engine-evaluation.md). Terms: [glossary](00-index.md#glossary). Scope/sequencing tracked as Q14–Q16 and Q20 in [12-open-questions.md](12-open-questions.md).
 
 ## Scope: this realizes docs 02–04, it doesn't replace them
 
@@ -35,6 +35,14 @@ Same economy principle as the part library ([08](08-creature-visualization.md)) 
 **Determinism requirement** (mirrors [08](08-creature-visualization.md) exactly): city generation is a **pure function of `(seed, preset, size)`**. Both clients in a match generate an identical city from the seed alone — the seed travels in the match-start handshake (§6), the city itself never needs to be transmitted.
 
 Emitters ([03](03-mana-system.md)) place at generated landmark nodes (plaza, town hall, cathedral, rail depot — preset-dependent), 1–2 per km² of built area, preserving the existing 6–10-per-map density at Small Town/Big City scale.
+
+### Community Hubs & Collection Stations
+
+A second landmark-node subtype: **Community Hub** (`hospital | school | old-age-home`), density **~1 per 2 km²** of built area — half the Emitter density, so hubs read as true landmarks, not as common as emitters. Landmark nodes are allocated **either** an Emitter **or** a Community Hub by their generated archetype, never both — plaza/cathedral/town-hall get emitters, hospital/school/old-age-home get Community Hubs. Building tier reuses the existing **Landmark** tier from §3 unchanged (Structure HP 3000, Armor 8) — a new archetype skin on an existing tier, not a new HP class.
+
+Each Community Hub hosts exactly one **Collection Station** — a capturable structure that converts Citizen deaths within its radius into banked resources for its controller. The capture rule **reuses [03](03-mana-system.md)'s emitter pattern exactly**: stand-and-hold 8 s uncontested, contested capture pauses, ownership persists until recaptured. Radius **5 hexes (100 m)** — deliberately larger than the emitter's 3-hex (60 m) aura, since a Community Hub footprint is a large campus building, not a point landmark. Yield rates and the full harvesting loop live in [20-harvest-and-repair.md](20-harvest-and-repair.md); Citizen population density at these hubs is [19-citizens.md](19-citizens.md) §7.
+
+Community Hubs are placed independently of, and coexist with, [17-factions.md](17-factions.md)'s existing `Hospital / blood bank` Earth world-source node — that node taps a building's static medical stock via channel-harvest regardless of combat; a Collection Station taps *citizen deaths* nearby, combat-driven. Both can apply to the same hospital landmark. Flagged as **Q20**, not silently merged.
 
 ## 3. Destructible buildings
 
@@ -92,9 +100,11 @@ No new engine decision is required — Unity is already the recommendation ([10]
 | Building Armor (house/storefront/block/landmark) | 2 / 4 / 6 / 8 |
 | Damage-state threshold (Intact→Damaged) | ≤50% Structure HP |
 | Engagement / Local-city / Distant-skyline zone radius | 150–200 m / 1 km / beyond 1 km |
+| Community Hub density | ~1 per 2 km² of built area |
+| Collection Station radius / capture channel | 5 hex (100 m) / 8 s |
 
 All values marked for validation in this track's own spike (Q14) before the Phase-3 netcode build ([11-roadmap.md](11-roadmap.md)).
 
 ## Open questions
 
-Logged in [12-open-questions.md](12-open-questions.md): **Q14** (roadmap placement and validation spike), **Q15** (engagement-zone LOD radii and sync-tier promotion trigger), **Q16** (destroyed-landmark/emitter and building-salvage interactions).
+Logged in [12-open-questions.md](12-open-questions.md): **Q14** (roadmap placement and validation spike), **Q15** (engagement-zone LOD radii and sync-tier promotion trigger), **Q16** (destroyed-landmark/emitter and building-salvage interactions), **Q20** (Collection Station vs. doc 17's existing Hospital world-source node).

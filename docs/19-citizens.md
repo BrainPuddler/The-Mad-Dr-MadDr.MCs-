@@ -1,6 +1,6 @@
 # 19 — Citizens: City Population, Personality & Armed Bystanders
 
-Status: Draft v0.1 · Pillars served: 2 (*the battlefield breathes*), 3 (*honest combat*) · Reuses the behavior *pattern* of [16-brains-behavior-command.md](16-brains-behavior-command.md) — not the genome schema; explicitly disambiguated from the Human Army faction of [17-factions.md](17-factions.md); placed spatially by [18-city-battlefields.md](18-city-battlefields.md); combat resolves through [04-combat-model.md](04-combat-model.md) unchanged; sync cost governed by [18](18-city-battlefields.md) §5's engagement-zone LOD. Terms: [glossary](00-index.md#glossary). Open items tracked as Q15–Q16 in [12-open-questions.md](12-open-questions.md).
+Status: Draft v0.1 · Pillars served: 2 (*the battlefield breathes*), 3 (*honest combat*) · Reuses the behavior *pattern* of [16-brains-behavior-command.md](16-brains-behavior-command.md) — not the genome schema; explicitly disambiguated from the Human Army faction of [17-factions.md](17-factions.md); placed spatially by [18-city-battlefields.md](18-city-battlefields.md); combat resolves through [04-combat-model.md](04-combat-model.md) unchanged; sync cost governed by [18](18-city-battlefields.md) §5's engagement-zone LOD. Terms: [glossary](00-index.md#glossary). Open items tracked as Q15–Q16 and Q20 in [12-open-questions.md](12-open-questions.md). Economic-actor status revised, see §6.
 
 ## Naming disambiguation (read this first)
 
@@ -65,7 +65,7 @@ Flagged as Q15 — the promotion trigger and its distance/noise thresholds are t
 
 At **Night**, Citizens shelter indoors: visible street density drops. This ties back to [03-mana-system.md](03-mana-system.md)'s day/night theme directly (the Archon homage this whole game is built around) while easing the Calm-crowd rendering load at the same time — theme and performance pulling the same direction.
 
-**Citizens do not interact with emitters.** They're a battlefield hazard/flavor layer, not economic actors — an explicit scope boundary, not an oversight.
+**Revision (2026-07, [20-harvest-and-repair.md](20-harvest-and-repair.md) introduces Collection Stations): Citizens are now economic actors.** A Citizen's death inside a captured Collection Station's radius converts to banked Blood/Bones/Grey Matter for its controller ([05-component-economy.md](05-component-economy.md), [18](18-city-battlefields.md)). This doc's earlier "not economic actors" line is explicitly reversed here, not silently overwritten, per the decision-log convention ([12](12-open-questions.md)). What's still true: Citizens still never interact with **emitters** specifically — that boundary holds unchanged. What's new: a Citizen's death location relative to a Collection Station is now as economically legible as a monster's death hex already is for salvage ([04](04-combat-model.md)).
 
 ## 7. v0.1 tuning table (consolidated)
 
@@ -78,7 +78,9 @@ At **Night**, Citizens shelter indoors: visible street density drops. This ties 
 | Weapon Power (by tier above) | 2–5 / 8–12 / 15–18 / 25–35 |
 | Night density multiplier | reduced vs. Day (exact factor TBD — Q15) |
 | Calm→Alarmed promotion | server-rolled; proximity/noise/threat trigger (Q15) |
+| Community Hub density multiplier vs. standard block | **4×** baseline (160–320 Citizens per hub vs. the 40–80/block baseline, [18](18-city-battlefields.md)) |
+| Per-citizen harvest yield | Blood 2 / Bones 1 / Grey Matter 1 ([05](05-component-economy.md), [20](20-harvest-and-repair.md)) |
 
 ## Open questions
 
-Logged in [12-open-questions.md](12-open-questions.md): **Q15** (sync-tier promotion trigger, shared with [18](18-city-battlefields.md)), **Q16** (building-destruction interactions, shared with [18](18-city-battlefields.md)).
+Logged in [12-open-questions.md](12-open-questions.md): **Q15** (sync-tier promotion trigger, shared with [18](18-city-battlefields.md)), **Q16** (building-destruction interactions, shared with [18](18-city-battlefields.md)), **Q20** (Collection Station vs. doc 17's Hospital world-source node, shared with [18](18-city-battlefields.md)).

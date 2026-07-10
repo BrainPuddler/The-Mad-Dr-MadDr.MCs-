@@ -1,6 +1,6 @@
 # 05 — The Component Economy
 
-Status: Draft v0.1 · Pillars served: 1, 3 · Terms: [glossary](00-index.md#glossary). All numbers **v0.1 — to be validated in the Phase-1 sandbox**.
+Status: Draft v0.1 · Pillars served: 1, 3 · Terms: [glossary](00-index.md#glossary). All numbers **v0.1 — to be validated in the Phase-1 sandbox**. Citizen-harvest and Repair extensions tracked as Q17, Q18, Q22 in [12-open-questions.md](12-open-questions.md).
 
 ## The four components
 
@@ -37,6 +37,25 @@ wallet ships with the Postgres store (Phase 2).
 | **Territory trickle** | Blood | Each controlled hex ticks +0.1 blood/min — territory *is* the blood supply |
 | **Corpse salvage** | 40–60% of the dead monster's bill | From [04-combat-model.md](04-combat-model.md); works on enemy corpses too — paid in the **corpse's own material flavors** ([17](17-factions.md)) |
 | **Earth world-sources** | Faction-flavored materials (hospitals, junkyards, farms…) | Node table + asymmetric valuation in [17](17-factions.md#world-sources-on-earth) |
+| **Collection Stations** | Blood, Bones, Grey Matter (small, flat, per-citizen) | Only from Citizen deaths inside a *captured* station's radius, on a city battlefield ([18-city-battlefields.md](18-city-battlefields.md), [19-citizens.md](19-citizens.md)); full mechanic in [20-harvest-and-repair.md](20-harvest-and-repair.md) |
+
+### A fifth, narrower resource: Grey Matter
+
+Citizens ([19](19-citizens.md)) are now a resource source, harvested via Collection Stations (above). This is **additive**, not a reinterpretation of the existing **Brains** component: **Grey Matter** does *not* satisfy the discrete, one-per-monster brain-tier-item requirement above — a Mastermind still needs one actual tier-quality Brain to be built at all. Grey Matter is a bulk, common, individually-weak resource with exactly one sink: the **Megabrain Augmentation** ([06-mutator-design.md](06-mutator-design.md), [16-brains-behavior-command.md](16-brains-behavior-command.md)).
+
+Bones and Blood don't get a parallel new sub-resource: they're already bulk/quantity currencies, so a citizen kill just adds a small amount of the *same* currency — no meaning to dilute. Brains is discrete and tier-gated, so bulk citizen yield needed somewhere honest to go.
+
+**Per-citizen yield table (v0.1):**
+
+| Yield | Amount |
+| --- | --- |
+| Blood | 2 |
+| Bones | 1 |
+| Grey Matter | 1 |
+
+Blood has never dropped from monster corpse salvage before now (the existing 40–60% salvage rule only ever covered Bones/Parts/Brain — Blood is upkeep tempo, not a stored component). Citizen Blood yield is a genuinely new source type, not a change to the salvage rule above.
+
+**Worked example — "vanquished foes have more resources than humans," made falsifiable:** Shambler bill 20 Bones, salvaged at the 50% midpoint = **10 Bones** — the same as **10 average citizens** harvested through a Collection Station (1 Bone each). Stitched Brute bill 60 Bones → 30 Bones salvaged = **30 citizens' worth**. The comparison actually understates it: a monster kill also drops Body Parts and a chance at a tier Brain — resource classes no number of citizens ever yields. Vanquished foes are richer in both volume *and* kind.
 
 ## Reanimation
 
@@ -59,6 +78,10 @@ component bill (bones + parts + brain)  +  mana surge (03)  +  reanimation time 
 | Indicative stats | Vit 150 / Pow 12 | Vit 320 / Pow 28 / slow | Vit 120 / Pow 18 / fast, flies over ridge hexes |
 
 These three are the sandbox's seed roster and the FTUE monsters ([02](02-gameplay-overview.md)).
+
+### Repair — a second Vat sink
+
+A damaged-but-living creature can be healed at the Vat for a resource cost, proportional to missing HP — full mechanic and formula in [20-harvest-and-repair.md](20-harvest-and-repair.md). Stated here because it's a real sink, not a detail: Repair costs **Bone + Blood only — never Parts, Brain, or mana surge.** Deliberate boundary: Repair patches a frame back to what it already was, it never grants new capability, so it can't be used to dodge the brain-tier gate or any other construction cost above.
 
 ## Flows
 
@@ -87,7 +110,7 @@ Three interlocking brakes, so a won fight doesn't end the match at minute four:
 ## Meta economy (between matches)
 
 - Match rewards (v0.1): **win** = 100 blood / 40 bones / 6 parts / 1 brain-roll (70% Dim, 25% Average, 5% Gifted); **loss** = 60 / 25 / 4 / brain-roll at half odds. Losses must stay worth playing — the Mutator loop is the consolation engine ([02](02-gameplay-overview.md)).
-- Residual in-match stock converts to meta wallet at 25% (so hoarding in-match is bad play, but not punished to zero).
+- Residual in-match stock converts to meta wallet at 25% (so hoarding in-match is bad play, but not punished to zero). Whether Grey Matter follows this same rate, or a bespoke one given it's single-purpose feedstock for one Mutator op, is open — **Q17**.
 - **The fairness rule (load-bearing, cites pillar — [01-vision.md](01-vision.md))**: *meta components are spent only in the Mutator — fees, feedstock, grafts. They never buy in-match resources, boosts, or reanimations.* Match power comes only from what you harvest in the match and the quality of designs you bring. This is the wall that keeps the Mutator economy from becoming pay-to-win plumbing, whatever monetization becomes ([12-open-questions.md](12-open-questions.md)).
 
 ## v0.1 tuning table (consolidated)
@@ -101,3 +124,6 @@ Three interlocking brakes, so a won fight doesn't end the match at minute four:
 | Brain salvage recovery | 50% |
 | Match-end stock conversion | 25% |
 | Win / loss rewards | above |
+| Per-citizen yield (Blood / Bones / Grey Matter) | 2 / 1 / 1 |
+| Bones cost formula | `4×sizeClass + 0.1×Vitality + 2×Armor` ([06](06-mutator-design.md)) |
+| Repair cost | Bone/Blood proportional to missing HP ([20](20-harvest-and-repair.md)) |

@@ -64,6 +64,42 @@ A creature is fully described by a **genome**: a structured, versioned record of
 
 A design whose genome exceeds the equipped brain's budget cannot be reanimated with that brain. The **power budget** (stat-point sum, normalized) is also what matchmaking reads ([09](09-multiplayer-architecture.md)) — Mutator balance and matchmaking interlock through this one number.
 
+### Bones cost: the resource-gate readout
+
+[05-component-economy.md](05-component-economy.md) states plainly that Bone cost "scales with Vitality, Armor, and size" — this is the formula that claim was always implicitly obeying, made explicit (v0.1):
+
+```
+Bones = 4 × sizeClass + 0.1 × Vitality + 2 × Armor
+```
+
+`sizeClass` (1–4) is the same size-mass bucket [04-combat-model.md](04-combat-model.md) already uses for `turnTime`. Checked against doc 05's existing sample table (Vitality is published there; Armor isn't, so the fit below is approximate where marked):
+
+| Archetype | sizeClass | Vitality | Armor | Formula | Table's actual Bones |
+| --- | --- | --- | --- | --- | --- |
+| Shambler (biped) | 1 | 150 | ~0.5* | 4 + 15 + 1 ≈ 20 | 20 |
+| Stitched Brute (hulking) | 4 | 320 | 6* | 16 + 32 + 12 = 60 | 60 (exact) |
+| Winged Horror (winged) | 2 | 120 | ~2.5* | 8 + 12 + 5 ≈ 25 | 25 |
+
+*Armor isn't published in doc 05's table today; these are the values the formula implies, not independently sourced — recommend publishing Armor alongside the other stats when this formula ships.
+
+Worked example — why "a tank-type unit costs a lot of bone" is a formula, not a slogan: a max-stat build (sizeClass 4, Vitality 400, Armor 10) costs `16 + 40 + 20 = 76` Bones; a min-stat build (sizeClass 1, Vitality 50, Armor 0) costs `4 + 5 + 0 = 9` Bones — an **~8.4× spread** between the lightest and heaviest thing you can breed.
+
+This is a **readout, not a new construction system**: it's what Mutate/Splice/Graft already implicitly charged (doc 05's component bills), now shown as a live number next to the stat sliders as you build — "I want a tank, I need a lot of bones" is something the Lab tells you up front, not something you discover at the reanimation screen.
+
+**Reconciliation note**: [17-factions.md](17-factions.md) already ships a Phase-2 Structure-class formula, `structure = 2 + 8·bulk`, for the eventual sparse-material wallet. That formula and this one are not yet reconciled — this is the v0.1 stand-in for today's `{blood, bones}` wallet; 17's is the forward-looking generalization. Tracked as **Q18** ([12-open-questions.md](12-open-questions.md)).
+
+## Megabrain Augmentation: a Mastermind-only upgrade
+
+A fourth, narrower operation alongside Mutate/Splice/Graft below — not one of "the three operators," but the same server-computed, deterministic-cost shape as Graft.
+
+**Gate**: Mastermind-tier brains only. **Cost**: 100 **Grey Matter** — a bulk resource harvested from Citizens ([20-harvest-and-repair.md](20-harvest-and-repair.md)), distinct from the discrete Brain tier-item above, which this operation doesn't touch. **Effect**: a one-time, flat `capacityBonus: 7.2` added to the genome, feeding the Capacity term in [16-brains-behavior-command.md](16-brains-behavior-command.md)'s command-capacity formula — the mechanism that lets a single Mastermind commander actually hold a large platoon (the worked example lives in doc 16).
+
+Mechanically identical in shape to Graft: server-computed, deterministic (no RNG), produces a new immutable child genome (`parentIds: [thisGenome]`). Not repeatable in v0.1 — one augmentation per genome, a deliberate anti-snowball dial rather than an assumed-safe unlimited stack (open, **Q21**).
+
+**Two structural costs, stated plainly, not glossed over:**
+- Adding `capacityBonus` to the genome is a real schema change and trips this doc's own normative-schema notice at the top — [04](04-combat-model.md), [07](07-mutator-server-architecture.md), and [08](08-creature-visualization.md) all need the co-update in the same revision that ships this.
+- `command`/`will` already feed the [09-multiplayer-architecture.md](09-multiplayer-architecture.md) matchmaking power budget. A capacity bonus left out of that same sum is a free-power hole — recommend it contribute to the power-budget sum proportionally, not left unpriced. Open, **Q21**.
+
 ## The three operators
 
 ### Mutate — one parent, biased randomness

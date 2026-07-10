@@ -25,6 +25,7 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | [17-factions.md](17-factions.md) | Factions as expression profiles: human army (issued tech, rout/rally), alien hive (biotech, queen cohesion); prototyped in [`/prototype/mutator/factions.py`](../prototype/mutator/factions.py) | Draft |
 | [18-city-battlefields.md](18-city-battlefields.md) | Unity battlefield layer: 5 km match scale, procedural city generation, destructible buildings, the engagement-zone LOD scheme, Unity↔Lab integration | Draft |
 | [19-citizens.md](19-citizens.md) | Civilian city population: age/body type, aggression & weapon access, sync-tier LOD; distinct from the Human Army faction | Draft |
+| [20-harvest-and-repair.md](20-harvest-and-repair.md) | Citizen harvesting via Collection Stations, resource-gated construction (Bones cost, Megabrain Augmentation), and field Repair | Draft |
 
 **Status legend**: *Draft* (numbers are v0.1 proposals) → *Reviewed* (survived Phase-0 paper playtest and a read-through) → *Locked* (implementation depends on it; changes require a decision-log entry in [12](12-open-questions.md)).
 
@@ -45,6 +46,8 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | **Aura** | The 3-hex radius around an emitter where affinity modifiers apply ([03](03-mana-system.md)) |
 | **Brain budget** | The stat-point and quirk cap imposed by a monster's brain quality (Dim/Average/Gifted/Mastermind) ([06](06-mutator-design.md)) |
 | **Citizen** | A non-combatant city NPC — age, body type, and personality generated, never bred; distinct from the Human Army faction ([17](17-factions.md)) ([19](19-citizens.md)) |
+| **Collection Station** | A capturable structure (captures like an emitter) that converts Citizen deaths within its radius into banked Blood/Bones/Grey Matter for its controller; one per Community Hub ([18](18-city-battlefields.md), [20](20-harvest-and-repair.md)) |
+| **Community Hub** | A high-population landmark building type — hospital, school, or old-age home — generated at 4× standard Citizen density ([18](18-city-battlefields.md), [19](19-citizens.md), [20](20-harvest-and-repair.md)) |
 | **Commute mode** | Offline-queued Mutator operations from the mobile lab; results delivered by push ([07](07-mutator-server-architecture.md)) |
 | **Components** | The four material resources: **Blood** (upkeep), **Bones** (structure), **Body Parts** (capability + feedstock), **Brains** (gating) ([05](05-component-economy.md)) |
 | **Distant skyline** | The outermost engagement-zone LOD tier: pure visual backdrop beyond ~1 km of any live engagement, no simulation ([18](18-city-battlefields.md)) |
@@ -55,9 +58,11 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | **Genome** | The complete, immutable, server-signed description of a creature (~200–400 B). The normative schema lives in [06](06-mutator-design.md) |
 | **Genome fragment** | A salvage drop that reveals one enemy part family to your catalog ([04](04-combat-model.md)) |
 | **Graft** | The deterministic Mutator operator: pay parts to set a slot directly ([06](06-mutator-design.md)) |
+| **Grey Matter** | A bulk, common, counted resource harvested from Citizens, distinct from the rare discrete Brain tier-item; its only sink is Megabrain Augmentation ([05](05-component-economy.md), [20](20-harvest-and-repair.md)) |
 | **Local city** | The mid engagement-zone LOD tier (~1 km): buildings static, Citizens run as client-side crowd only ([18](18-city-battlefields.md)) |
 | **Lumen Cycle** | The 4-minute Day→Dusk→Night→Dawn match clock driving emitter output and affinity buffs ([03](03-mana-system.md)) |
 | **Mana** | The *energy* currency, earned only from emitters; pays reanimation surges and abilities. Distinct from components (*material*) ([03](03-mana-system.md)) |
+| **Megabrain Augmentation** | A Mastermind-only, one-time Mutator operation: 100 Grey Matter for a flat +7.2 Capacity bonus ([06](06-mutator-design.md), [16](16-brains-behavior-command.md)) |
 | **Menagerie** | The ≤12 active monster designs you can reanimate in a match ([02](02-gameplay-overview.md)) |
 | **Moon dial** | The always-public HUD clock showing the current Lumen phase and the 10-second transition warning |
 | **Mutate** | The one-parent Mutator operator: biased random mutation, steered by fed components ([06](06-mutator-design.md)) |
@@ -67,6 +72,7 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | **Power budget** | A genome's normalized stat-point sum; capped by brain quality, read by matchmaking ([06](06-mutator-design.md), [09](09-multiplayer-architecture.md)) |
 | **Quirk** | A minor rule-bending genome trait (regeneration, fear aura…); max 2 per monster ([06](06-mutator-design.md)) |
 | **Reanimation** | Fielding a Menagerie design at the Vat: component bill + mana surge + 5–20 s build time ([05](05-component-economy.md)) |
+| **Repair** | An in-match Vat command that restores a living creature's lost HP for a Bone+Blood cost scaled to missing HP; distinct from surgery/graft and the `regeneration` quirk ([20](20-harvest-and-repair.md)) |
 | **Salvage** | The 40–60% component drop on a monster's death hex, lootable by either side for 15 s ([04](04-combat-model.md)) |
 | **Splice** | The two-parent Mutator operator: crossover breeding, with low-odds cross-archetype hybrids ([06](06-mutator-design.md)) |
 | **Structure HP** | A building's Vitality-equivalent stat, resolved through the existing damage formula ([04](04-combat-model.md), [18](18-city-battlefields.md)) |
