@@ -921,9 +921,25 @@ function renderChopFreezer() {
     }));
 }
 
+// Only the head drawer bundles two independent slots (sensor, eye) --
+// every other drawer maps 1:1 to a single slot, so its own title is
+// always an accurate label. A head-drawer group's real label depends on
+// which of the two it actually holds: both together read as "Head",
+// either alone reads as specifically what it is (matching the Cutting
+// Board's own wording for that cut), not a generic "Head" that implies
+// eyes are still there when only the sensors were taken.
+function groupLabel(drawer, items) {
+  if (drawer.key !== "head") return drawer.title.replace(/^\S+\s/, "");
+  const slots = new Set(items.map(t => partSlot(t.item)));
+  if (slots.has("sensor") && slots.has("eye")) return "Head";
+  if (slots.has("sensor")) return "Sensors";
+  if (slots.has("eye")) return "Eyes";
+  return "Head";
+}
+
 function groupTileHtml(drawer, groupKey, items, { canGraft }) {
   const from = local.trayFrom[items[0].itemId] ?? "unknown";
-  const label = drawer.title.replace(/^\S+\s/, "");
+  const label = groupLabel(drawer, items);
   const title = canGraft ? "Graft straight onto the specimen on the slab" : "Pick a specimen on the slab first";
   return `<div class="part-tile ${canGraft ? "" : "disabled"}" data-open-group="${esc(groupKey)}" title="${title}">
     <div class="part-thumb">${partThumbHtml(items[0])}</div>

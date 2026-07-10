@@ -3373,21 +3373,11 @@ export function renderThumbnail(genome, faction, size = 168) {
   return url;
 }
 
-// A fixed, otherwise-generic body wearing the harvested part, so the
-// freezer can show what the THING actually looks like instead of a
-// drawer icon. Always the same neutral tetrapod (mid bulk/limb/tail,
-// 'average' brain, 'steady' heart, plain default parts everywhere else)
-// -- a heart has no external geometry on any OTHER plan, so a heart item
-// swaps the mannequin to 'blob' instead, the one plan with a visible
-// internal heart. Camera numbers below are read straight off those two
-// plans' own placement math (planTetrapod's shoulder/head/leg sockets,
-// planBlob's heartBase) at these exact mid-gene values.
-const MANNEQUIN_SLOTS = {
-  hand:   { family: 'claw_hand', params: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] },
-  sensor: { family: 'horn',      params: [0.5, 0.5, 0.5, 0.5, 0.5, 0.9] },
-  eye:    { family: 'bug_eyes',  params: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] },
-  leg:    { family: 'hoofed_leg', params: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] },
-};
+// Healed-over family per slot -- the same names surgery.ts's STUMP_OF
+// uses server-side, kept as a local literal here rather than an import:
+// creature-renderer.js is a standalone, zero-deps module (site/lib is
+// genome-core's own vendored copy, wired into main.js, not this file).
+const STUMP_FAMILY = { hand: 'hand_stump', sensor: 'sensor_stub', eye: 'eye_socket', leg: 'leg_stump' };
 const PART_CAMERA = {
   sensor: { eye: [0, 9.0, 7],   target: [0, 9.0, 0] },
   eye:    { eye: [0, 9.0, 7],   target: [0, 9.0, 0] },
@@ -3396,21 +3386,26 @@ const PART_CAMERA = {
   heart:  { eye: [0, 4.2, 6],   target: [0, 3.9, 0] },
 };
 
-// A mannequin genome wearing one harvested part (or heart), for the
-// freezer thumbnail and the surgical-tray turntable to share. `slot` is
-// 'hand' | 'sensor' | 'eye' | 'leg' | 'heart'. The part keeps its OWN hue
-// (surgery.ts) rather than the mannequin's, so the render matches exactly
-// the color it'll keep once actually grafted on.
+// A mannequin genome wearing ONLY the one harvested part (or heart) --
+// every other slot is a healed stump, not a generic filled-in part.
+// Sensor and eye in particular share a camera angle (same head-region
+// shot), so a generic "default eyes" sitting next to a real sensor would
+// read as "the eyes are still there" -- which they aren't, that's the
+// whole point of a per-part thumbnail. A heart has no external geometry
+// on any OTHER plan, so a heart item swaps the mannequin to 'blob'
+// instead, the one plan with a visible internal heart. The part keeps
+// its OWN hue (surgery.ts) rather than the mannequin's, so the render
+// matches exactly the color it'll keep once actually grafted on.
 function buildMannequinGenome(item, slot) {
   const isHeart = slot === 'heart';
   const slotFor = (s) => (!isHeart && slot === s)
     ? { family: item.family, params: item.params, hue: item.hue }
-    : MANNEQUIN_SLOTS[s];
+    : { family: STUMP_FAMILY[s], params: [0, 0, 0, 0, 0, 0] };
   return {
     genomeVersion: 2, parentIds: [],
     body: { plan: isHeart ? 'blob' : 'tetrapod', params: [0.5, 0.5, 0.5, 0.5] },
     brain: { tier: 'average', params: [0.5, 0.5, 0.5, 0.5, 0.5] },
-    heart: isHeart ? { tier: item.tier, params: item.params } : { tier: 'steady', params: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] },
+    heart: isHeart ? { tier: item.tier, params: item.params } : { tier: 'faint', params: [0, 0, 0, 0, 0, 0] },
     slots: { hand: slotFor('hand'), sensor: slotFor('sensor'), eye: slotFor('eye'), leg: slotFor('leg') },
   };
 }
