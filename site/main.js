@@ -872,14 +872,14 @@ const CHOP_REGIONS = [
     actions: [{ label: "Take the heart", heart: true }],
   },
   {
-    key: "lower", title: "🦵 Lower body", slots: ["leg"],
-    note: "Both legs come off together as one cut — no separate foot yet.",
-    actions: [{ label: "Take the legs", slots: ["leg"], cutLabel: "legs" }],
-  },
-  {
     key: "arms", title: "✋ Arms & hands", slots: ["hand"],
     note: "Arm and hand are one piece today — no separate wrist cut yet.",
     actions: [{ label: "Take the arms (hands included)", slots: ["hand"], cutLabel: "arms" }],
+  },
+  {
+    key: "lower", title: "🦵 Legs", slots: ["leg"],
+    note: "Both legs come off together as one cut — no separate foot yet.",
+    actions: [{ label: "Take the legs", slots: ["leg"], cutLabel: "legs" }],
   },
 ];
 // The freezer's four labeled drawers, in the same order as the regions
@@ -888,8 +888,8 @@ const CHOP_REGIONS = [
 const DRAWERS = [
   { key: "head",  title: "🧠 Head" },
   { key: "torso", title: "🫀 Torso" },
-  { key: "lower", title: "🦵 Lower body" },
   { key: "arms",  title: "✋ Arms & hands" },
+  { key: "lower", title: "🦵 Legs" },
 ];
 
 function renderChop() {
