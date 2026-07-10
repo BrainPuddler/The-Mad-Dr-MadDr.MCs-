@@ -189,6 +189,49 @@ test("heart transplant: a bigger heart is consumed and the old one returns to th
 
 // ---- menagerie + roster ------------------------------------------------------
 
+// ---- cannibalize ---------------------------------------------------------
+
+test("cannibalize credits Bones, strips every slot and the heart into the tray, and retires the genome", () => {
+  const { store, svc } = fresh();
+  const before = svc.getWallet(ACC).bones;
+  const id = seedCreature(store, bigHeart());
+
+  const r: any = svc.cannibalize(ACC, key(), { genomeId: id });
+  assert.equal(r.status, "completed");
+  assert.ok(r.result.bonesRecovered > 0);
+  assert.equal(svc.getWallet(ACC).bones, before + r.result.bonesRecovered);
+
+  const tray = svc.listTray(ACC);
+  assert.equal(tray.filter((i) => i.item.kind === "part").length, 4, "all four slots harvested");
+  assert.equal(tray.filter((i) => i.item.kind === "heart").length, 1, "heart harvested");
+
+  assert.throws(() => svc.setMenagerie(ACC, [id]), /retired/);
+});
+
+test("cannibalize is idempotent: retrying the same key never double-credits", () => {
+  const { svc } = fresh();
+  const id = spawn(svc);
+  const k = key();
+  const r1: any = svc.cannibalize(ACC, k, { genomeId: id });
+  const walletAfterFirst = svc.getWallet(ACC).bones;
+  const r2: any = svc.cannibalize(ACC, k, { genomeId: id });
+  assert.deepEqual(r1.result, r2.result);
+  assert.equal(svc.getWallet(ACC).bones, walletAfterFirst);
+});
+
+test("cannibalize refuses to retire the same genome twice", () => {
+  const { svc } = fresh();
+  const id = spawn(svc);
+  svc.cannibalize(ACC, key(), { genomeId: id });
+  assert.throws(() => svc.cannibalize(ACC, key(), { genomeId: id }), (e: any) => e.status === 409);
+});
+
+test("cannibalize refuses a genome you don't own", () => {
+  const { svc } = fresh();
+  const id = spawn(svc);
+  assert.throws(() => svc.cannibalize("acct-2", key(), { genomeId: id }), (e: any) => e.status === 403);
+});
+
 test("menagerie enforces ownership, the 12 cap, and no duplicates", () => {
   const { svc } = fresh();
   const a = spawn(svc);

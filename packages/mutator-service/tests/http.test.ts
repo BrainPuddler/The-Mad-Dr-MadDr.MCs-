@@ -89,6 +89,37 @@ test("missing auth is 401; internal roster needs the internal key", async () => 
   }
 });
 
+test("POST /cannibalize retires a genome, credits Bones, and rejects loading it back into the menagerie", async () => {
+  const { base, close } = await startServer();
+  try {
+    const spawn = await (await fetch(`${base}/spawn`, {
+      method: "POST", headers: ACC, body: JSON.stringify({ idempotencyKey: "cb-spawn" }),
+    })).json();
+    const genomeId = spawn.genomeId;
+
+    const before = await (await fetch(`${base}/wallet`, { headers: ACC })).json();
+
+    const cann = await (await fetch(`${base}/cannibalize`, {
+      method: "POST", headers: ACC, body: JSON.stringify({ idempotencyKey: "cb-1", genomeId }),
+    })).json();
+    assert.equal(cann.status, "completed");
+    assert.ok(cann.bonesRecovered > 0);
+
+    const after = await (await fetch(`${base}/wallet`, { headers: ACC })).json();
+    assert.equal(after.bones, before.bones + cann.bonesRecovered);
+
+    const tray = await (await fetch(`${base}/tray`, { headers: ACC })).json();
+    assert.equal(tray.items.length, 5); // 4 parts + 1 heart
+
+    const menagerie = await fetch(`${base}/menagerie`, {
+      method: "PUT", headers: ACC, body: JSON.stringify({ creatureIds: [genomeId] }),
+    });
+    assert.equal(menagerie.status, 400);
+  } finally {
+    await close();
+  }
+});
+
 test("/health and /version are public -- no x-account-id needed", async () => {
   const { base, close } = await startServer();
   try {

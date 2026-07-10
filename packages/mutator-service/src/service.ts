@@ -15,6 +15,7 @@
 import {
   Rng,
   SLOT_NAMES,
+  bonesCost,
   graft as graftOp,
   harvestHeart as harvestHeartOp,
   harvestPart as harvestPartOp,
@@ -353,6 +354,63 @@ export class MutatorService {
     return itemId;
   }
 
+  // ---- cannibalize: scrap an owned genome for parts (docs/06 Workshop) -----
+
+  /** Retire a genome you own and recycle it: every slot and the heart are
+   * stripped into the surgical tray (100% recovery -- "nothing is wasted",
+   * docs/01 -- reusing the exact harvest functions surgery already runs),
+   * plus a Bones credit at 50% of the genome's own build cost (the same
+   * recovery rate docs/05 already uses for corpse salvage). The genome
+   * itself is never deleted (immutable rows, docs/07) -- it's marked
+   * retired so it can never be Menagerie-loaded or bred from again, but
+   * stays fully readable for any descendant's lineage view.
+   *
+   * This is the Workshop's meta-side Cannibalize. Its in-match twin --
+   * recalling and dismantling a *living* fielded creature at the Vat --
+   * is a real-time match-server command (docs/09, docs/20), not a
+   * Mutator-service op; there is no match server in this repo yet. */
+  cannibalize(
+    accountId: string,
+    idempotencyKey: string,
+    args: { genomeId: string },
+  ): OperationRecord {
+    const source = this.requireOwned(accountId, args.genomeId);
+    const bonesRecovered = Math.round(0.5 * bonesCost(source.genome));
+
+    return this.perform(
+      accountId,
+      idempotencyKey,
+      "cannibalize",
+      { bones: -bonesRecovered },
+      () => {
+        // Checked here, inside the idempotency-gated body -- not before
+        // `perform()` is called -- so a retry of the SAME key replays the
+        // stored result (perform()'s own idempotency check short-circuits
+        // before this ever runs) instead of tripping "already retired" on
+        // a genome this exact call already retired.
+        if (this.store.isRetired(source.id)) {
+          throw conflict(`creature ${source.id} is already retired`);
+        }
+        let g = source.genome;
+        const partItemIds: Record<SlotName, string> = {} as Record<SlotName, string>;
+        for (const slot of SLOT_NAMES) {
+          const { donor, part } = harvestPartOp(g, slot);
+          partItemIds[slot] = this.stashItem(accountId, part);
+          g = donor;
+        }
+        const { heart } = harvestHeartOp(g);
+        const heartItemId = this.stashItem(accountId, heart);
+
+        this.store.retireGenome(source.id);
+
+        return {
+          status: "completed",
+          extra: { bonesRecovered, partItemIds, heartItemId },
+        };
+      },
+    );
+  }
+
   // ---- reads ---------------------------------------------------------------
 
   getCreature(accountId: string, id: string): StoredGenome {
@@ -404,7 +462,10 @@ export class MutatorService {
     if (new Set(creatureIds).size !== creatureIds.length) {
       throw badRequest("menagerie has duplicate creatures");
     }
-    for (const id of creatureIds) this.requireOwned(accountId, id);
+    for (const id of creatureIds) {
+      this.requireOwned(accountId, id);
+      if (this.store.isRetired(id)) throw badRequest(`creature ${id} is retired (cannibalized)`);
+    }
     const m = { accountId, creatureIds, updatedAt: new Date().toISOString() };
     this.store.saveMenagerie(m);
     return m;

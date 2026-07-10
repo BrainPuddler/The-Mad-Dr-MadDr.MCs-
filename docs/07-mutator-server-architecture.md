@@ -91,7 +91,7 @@ becomes a material-priced bill in Phase 2 (Postgres store). Sparse map ⇒ a
 | `POST /mutate` | body: `{parentId, fedComponents[], idempotencyKey}` → new genome (or failed-experiment result) |
 | `POST /splice` | `{parentAId, parentBId, fedComponents[], idempotencyKey}` → new genome / failed experiment |
 | `POST /graft` | `{parentId, slot, partFamilyId, sizeGene, variantGene, idempotencyKey}` → new genome (deterministic) |
-| `POST /cannibalize` | `{genomeId, idempotencyKey}` → wallet credit (bones, parts, brainRoll); marks the genome `retiredAt`, deterministic ([06](06-mutator-design.md)) |
+| `POST /cannibalize` | `{genomeId, idempotencyKey}` → `{bonesRecovered, partItemIds, heartItemId}`: every slot + the heart go to the tray at 100% (reuses `harvestPart`/`harvestHeart`), plus a Bones credit at 50% of `bonesCost(genome)`; retires the genome, deterministic ([06](06-mutator-design.md)) |
 | `GET /creatures?cursor=` | Paged collection |
 | `GET /creature/{id}` / `GET /creature/{id}/lineage` | Single genome / ancestor tree |
 | `GET /menagerie` / `PUT /menagerie` | Read / set the ≤12 loadout |

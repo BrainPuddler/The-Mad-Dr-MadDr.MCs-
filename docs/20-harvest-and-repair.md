@@ -100,9 +100,9 @@ A living decision, not a battlefield inevitability: recall one of your own field
 
 **Not corpse salvage** ([04](04-combat-model.md)): corpse salvage is involuntary — a monster died in a fight, either side can loot 40–60% of its bill within 15 s. Cannibalize is voluntary and safe — walk it home, no combat required — but pays a flat, lower recovery rate than a contested kill, so it's never strictly better than fighting well.
 
-**Formula (v0.1)**: recovers 50% of the creature's own Bones-cost bill ([06](06-mutator-design.md)) in Bones, 50% of its Body Parts, and rolls its Brain tier at the existing 50% salvage rate ([05](05-component-economy.md)) — the same recovery rate as Cannibalize's Workshop twin, so the two read as one mechanic wearing two hats.
+**Formula (v0.1)**: the same shape as Cannibalize's Workshop twin ([06](06-mutator-design.md)) — every slot and the heart recovered at 100% (reusing the existing harvest system), plus a 50% Bones bonus on the creature's own Bones-cost bill for the frame itself. Not yet implemented as a real-time command (no match server exists yet, below) — this is the target shape once one does, kept identical to the Workshop version so the two read as one mechanic wearing two hats, not two.
 
-**Worked example**: cannibalizing a fielded Stitched Brute (60 Bones bill, 8 Parts, Average Brain) at the Vat returns 30 Bones, 4 Parts, and a 50% chance at the Average Brain — enough, with a matching haul from a second grunt, to reanimate something meaningfully bigger from the Menagerie.
+**Worked example**: cannibalizing a fielded Stitched Brute (60 Bones bill, 8 Parts) at the Vat returns all 8 Parts, its heart, and 30 Bones (the 50% frame bonus) — enough, with a matching haul from a second grunt, to reanimate something meaningfully bigger from the Menagerie.
 
 **Where/when**: at the Vat only (mirrors Reanimation and Repair's location constraint). Channel time isn't set yet — parked as **Q23**, since it needs its own tuning pass to make sure it isn't spammable enough to trivialize the risk/safety tension corpse salvage already relies on.
 
@@ -129,7 +129,7 @@ Server-validated, idempotent, per [07](07-mutator-server-architecture.md)'s patt
 | Megabrain Augmentation cost / effect | 100 harvested Brains / +7.2 Capacity, one-time | [06](06-mutator-design.md), [16](16-brains-behavior-command.md) |
 | Repair cost formula | `0.10×missingHP` Bones, `0.20×missingHP` Blood | this doc |
 | Repair channel time | `max(2s, 0.05s × missingHP)` | this doc |
-| Cannibalize recovery rate (Workshop & in-match) | 50% Bones / 50% Parts / 50% Brain-salvage roll | [06](06-mutator-design.md), this doc |
+| Cannibalize recovery rate (Workshop & in-match) | 100% Parts + heart / +50% Bones bonus on the frame | [06](06-mutator-design.md), this doc |
 | Cannibalize channel time | Not yet set — **Q23** | this doc |
 
 ## 9. Open questions

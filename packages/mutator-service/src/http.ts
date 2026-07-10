@@ -119,6 +119,9 @@ export function createApp(service: MutatorService): ReturnType<typeof createServ
       itemId: c.body.itemId,
     }),
   );
+  add("POST", "/cannibalize", (c) =>
+    service.cannibalize(c.accountId, c.body.idempotencyKey, { genomeId: c.body.genomeId }),
+  );
 
   // reads
   add("GET", "/creatures", (c) =>

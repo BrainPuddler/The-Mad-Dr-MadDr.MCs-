@@ -28,7 +28,8 @@ export type OpType =
   | "harvestPart"
   | "harvestHeart"
   | "sewPart"
-  | "sewHeart";
+  | "sewHeart"
+  | "cannibalize";
 
 export type OpStatus = "completed" | "failed_experiment";
 
@@ -79,6 +80,14 @@ export interface Store {
   getGenome(id: string): StoredGenome | undefined;
   listGenomes(accountId: string, cursor: string | undefined, limit: number): Page<StoredGenome>;
 
+  /** Genome lifecycle marker (docs/06 Cannibalize, docs/07): a *separate*
+   * retired-set, not a field on the genome row -- the genome blob itself
+   * stays untouched and immutable; only its usability state changes.
+   * Retired genomes are excluded from new Mutator/Menagerie use but stay
+   * fully readable for lineage/pedigree views. */
+  retireGenome(id: string): void;
+  isRetired(id: string): boolean;
+
   // operations (idempotency + audit)
   getOpByKey(accountId: string, idempotencyKey: string): OperationRecord | undefined;
   putOp(op: OperationRecord): void;
@@ -111,6 +120,7 @@ export class InMemoryStore implements Store {
   private items = new Map<string, InventoryItem>();
   private menageries = new Map<string, Menagerie>();
   private catalogs = new Map<string, Set<string>>();
+  private retired = new Set<string>();
 
   private opKey(accountId: string, key: string): string {
     return `${accountId}::${key}`;
@@ -190,5 +200,12 @@ export class InMemoryStore implements Store {
       this.catalogs.set(accountId, c);
     }
     for (const f of families) c.add(f);
+  }
+
+  retireGenome(id: string): void {
+    this.retired.add(id);
+  }
+  isRetired(id: string): boolean {
+    return this.retired.has(id);
   }
 }
