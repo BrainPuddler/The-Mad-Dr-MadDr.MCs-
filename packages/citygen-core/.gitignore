@@ -1,8 +1,14 @@
 # dotnet build artifacts. The root .gitignore's Unity-oriented /[Oo]bj/ and
 # /[Bb]uild/ patterns are anchored to the repo root, so they don't reach
-# nested bin/obj dirs here -- this package needs its own.
+# nested bin/obj dirs here -- this package needs its own. Outputs are
+# redirected to bin~/obj~ (Directory.Build.props) so Unity's importer --
+# which skips ~-suffixed folders -- never sees dotnet-built dlls; the
+# plain names stay listed as a belt-and-suspenders for anyone building
+# with older tooling that ignores the props file.
 bin/
 obj/
+bin~/
+obj~/
 
 # The root .gitignore blanket-ignores *.csproj (Unity's auto-generated IDE
 # project files under Assets/). Nothing under this package is Unity --

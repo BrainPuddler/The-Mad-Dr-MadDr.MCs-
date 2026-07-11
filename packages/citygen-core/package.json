@@ -1,0 +1,8 @@
+{
+  "name": "com.maddr.citygen-core",
+  "version": "0.1.0",
+  "displayName": "MadDr CityGen Core",
+  "description": "Engine-agnostic logic core for the City Battlefields track (docs/18): hex grid index (1 hex = 20 m), Ring/Range radius queries, and the Front/Flank/Rear attack-arc model (docs/04 posMod). Pure C#, zero UnityEngine reference; also built and tested standalone via dotnet (see Tests~, hidden from Unity's importer by the ~ suffix).",
+  "unity": "6000.0",
+  "author": { "name": "MadDr.MCs" }
+}

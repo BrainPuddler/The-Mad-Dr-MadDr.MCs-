@@ -1,0 +1,18 @@
+# Top-level attribute macros. Git only allows [attr] macro definitions in
+# the repo's TOP-LEVEL .gitattributes -- unity-client/.gitattributes (the
+# standard Unity template, which assumes the Unity project IS the repo
+# root) tried to define these itself and git rejected them with
+# "not allowed" warnings on every operation. The macros live here; the
+# per-extension rules that use them stay in unity-client/.gitattributes.
+
+# Deliberately NOT git-lfs yet: filter=lfs would require git-lfs installed
+# on every machine that clones this repo (and in CI), or adds/checkouts of
+# matching files hard-fail. Until that's a deliberate decision (docs/12),
+# "lfs" here just marks files binary: no diffs, no EOL conversion, stored
+# as ordinary git blobs. Flipping this one line to
+#   [attr]lfs filter=lfs diff=lfs merge=lfs -text
+# (plus installing git-lfs everywhere + migrating existing blobs) is the
+# real-LFS upgrade path later.
+[attr]lfs               -text
+[attr]unity-json        eol=lf linguist-language=json
+[attr]unity-yaml        merge=unityyamlmerge eol=lf linguist-language=yaml

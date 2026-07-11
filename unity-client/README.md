@@ -2,49 +2,60 @@
 
 The Unity project for the City Battlefields track ([docs/18](../docs/18-city-battlefields.md)).
 
-**Status: not created yet.** This folder exists ahead of time to reserve
-the location and carry the Unity-specific `.gitignore` fix (see below) —
-there's no Unity project here. It's deliberately *not* pre-populated with
-`ProjectSettings/`, `Assets/`, or a `Packages/manifest.json`: those are
-version-locked to whatever Editor actually creates them, and Unity Hub's
-"New Project" flow works best pointed at an empty (or near-empty) folder.
-Hand-authoring them here, blind, risks conflicting with that flow rather
-than helping it.
+**Status: created** — Unity **6000.3.13f1** (Unity 6.3), **3D (URP)**
+template, with Unity's default Mobile/PC render-pipeline asset split
+(matches the mobile-first perf posture of
+[docs/08](../docs/08-creature-visualization.md)/[09](../docs/09-multiplayer-architecture.md)).
+Contents are still the stock template (SampleScene, TutorialInfo) plus:
 
-## Setup (once you have Unity Hub + an Editor installed)
+- **`Assets/Scripts/HexGridGizmo.cs`** — a Scene-view smoke test for the
+  `com.maddr.citygen-core` package reference: drop it on any GameObject
+  and it draws the docs/18 hex grid (1 hex = 20 m) plus the 5-hex
+  Collection Station radius as gizmos. If it compiles and draws, the
+  package wiring works.
 
-1. In Unity Hub, **New Project**, with **Location** set to this repo's
-   root and **Project Name** set to `unity-client` — so it lands exactly
-   here, not a new sibling folder.
-2. Template: **3D (URP)** — Universal Render Pipeline. The design docs
-   are mobile-first ([docs/09](../docs/09-multiplayer-architecture.md))
-   and assume a shared perf-budgeted uber-shader
-   ([docs/08](../docs/08-creature-visualization.md)); URP is the right
-   fit, HDRP is desktop/console-only.
-3. Before your first commit, set two Editor settings (`Edit → Project
-   Settings → Editor`):
-   - **Version Control → Mode**: `Visible Meta Files` (not Hidden) — git
-     needs to see `.meta` files, or asset references break for anyone
-     else who clones the repo.
-   - **Asset Serialization → Mode**: `Force Text` — keeps scenes/prefabs
-     as readable YAML so diffs and merges are actually possible.
+## The citygen-core package reference
 
-## Referencing `packages/citygen-core`
+[`packages/citygen-core`](../packages/citygen-core/) (engine-agnostic hex
+grid + attack-arc math, docs/18 §1 / docs/04 posMod) is referenced in
+`Packages/manifest.json` as a local package:
 
-[`packages/citygen-core`](../packages/citygen-core/) is the engine-agnostic
-hex-grid/attack-arc logic (docs/18 §1, docs/04 posMod) — plain C#, zero
-`UnityEngine` reference, built and tested independently of this project
-(`dotnet test`, see its own README). It isn't laid out as a Unity package
-yet (no `package.json`/`.asmdef`) — that's a fast follow once this project
-exists and a Unity version is locked in, so the reference can be a single
-line in `Packages/manifest.json` rather than a guess made before either
-side existed.
+```
+"com.maddr.citygen-core": "file:../../packages/citygen-core"
+```
 
-## What's actually built so far
+Notes for whoever opens the Editor:
 
-Nothing Unity-side. `packages/citygen-core`'s hex grid and arc math are
-the only tested code against this track. See
-[docs/18](../docs/18-city-battlefields.md)'s implementation note and
-Open Questions (Q14 — this track doesn't block Phases 1–3, and Phase 1's
-own hex combat sandbox doesn't exist in this repo yet either) for
-sequencing context before diving in further.
+- **First open after pulling this**: Unity resolves the package, compiles
+  `MadDr.CityGen` from source (the `.asmdef` in its `src/`), and
+  **generates `.meta` files inside `packages/citygen-core/`** — local
+  `file:` packages are mutable, so Unity metadata lands in the package
+  folder itself. **Commit those `.meta` files when they appear**; they're
+  how asset identities stay stable.
+- The package's xunit tests live in `Tests~/` and its dotnet build
+  outputs go to `bin~`/`obj~` — tilde-suffixed folders are invisible to
+  Unity's importer by convention, which is what keeps the dotnet and
+  Unity toolchains from tripping over each other. Run the tests with
+  `dotnet test Tests~/CityGenCore.Tests.csproj` from the package folder.
+
+## Two Editor settings to verify before heavy work
+
+`Edit → Project Settings → Editor`:
+
+- **Version Control → Mode**: `Visible Meta Files`
+- **Asset Serialization → Mode**: `Force Text`
+
+Both are Unity 6 defaults, so a fresh 6000.x project should already have
+them — verify rather than assume, since changing them later re-serializes
+half the project.
+
+## Git notes
+
+- `.gitignore` here is Unity's standard template (Library/Temp/obj etc.),
+  correct now that a real project sits at this folder's root.
+- `.gitattributes` here is Unity's standard template too, but its
+  `[attr]` macro definitions moved to the **repo-root** `.gitattributes`
+  (git only allows macros in the top-level file — nested definitions
+  produced warnings on every git operation). The `lfs` macro currently
+  means *plain binary, not Git LFS* — deliberately, so clones don't
+  require git-lfs; the upgrade path is documented in the root file.

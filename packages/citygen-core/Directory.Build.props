@@ -1,0 +1,14 @@
+<Project>
+  <!-- Redirect MSBuild outputs from bin/obj to bin~/obj~. This package is
+       referenced by the Unity project (unity-client/Packages/manifest.json,
+       file: reference), and Unity imports EVERYTHING in a local package
+       folder except tilde-suffixed and dot-prefixed paths; a stray dotnet
+       build would otherwise put MadDr.CityGen.dll under src/bin/, and Unity
+       would import it alongside the compiled sources: duplicate types.
+       The tilde names keep dotnet builds and Unity imports from ever
+       seeing each other. -->
+  <PropertyGroup>
+    <BaseOutputPath>$(MSBuildProjectDirectory)/bin~/</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildProjectDirectory)/obj~/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>

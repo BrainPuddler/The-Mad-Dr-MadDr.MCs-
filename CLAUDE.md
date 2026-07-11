@@ -26,12 +26,16 @@ decision log). Vision pillars: ownership of creations, no gacha.
   `cd packages/genome-core && npm run build && cp dist/src/*.js ../../site/lib/`
 - `packages/citygen-core` — engine-agnostic C# logic for the City
   Battlefields track (docs/18): hex grid + attack-arc math so far, zero
-  `UnityEngine` reference. **No Unity project exists in this repo yet** —
-  this is the first slice only; see its README for what's built vs. not.
-- `unity-client/` — reserved location for the actual Unity project (docs/18).
-  Not created yet — no Editor available in this environment to do it
-  safely; see its README for the setup steps once someone with Unity Hub
-  creates it there.
+  `UnityEngine` reference. Doubles as a local UPM package consumed by
+  `unity-client/` (package.json + asmdef; xunit tests hidden from Unity
+  in `Tests~/`, dotnet outputs in `bin~`/`obj~` — tilde dirs are
+  invisible to Unity's importer, on purpose).
+- `unity-client/` — the Unity project (docs/18): Unity **6000.3.13f1**,
+  URP template, created by the creator 2026-07. References citygen-core
+  via `file:` in `Packages/manifest.json`. No Editor exists in this
+  environment — scenes/prefabs/Editor-side verification happen on the
+  creator's machine; expect Unity to generate `.meta` files inside
+  `packages/citygen-core/` on first open (commit them).
 
 ## Build & test
 
@@ -41,7 +45,7 @@ npm test` (tsc + node:test; tests live in `tests/`, compiled to
 dependency).
 
 `citygen-core` (C#, requires the .NET 8 SDK): `dotnet test
-tests/CityGenCore.Tests.csproj` from `packages/citygen-core/`.
+Tests~/CityGenCore.Tests.csproj` from `packages/citygen-core/`.
 
 ## Invariants (do not break casually)
 

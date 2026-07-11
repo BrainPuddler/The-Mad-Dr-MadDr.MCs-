@@ -4,10 +4,11 @@ The engine-agnostic logic core for the City Battlefields track
 ([docs/18](../../docs/18-city-battlefields.md)) — the same architectural
 role `packages/genome-core` plays for the genome
 ([docs/06](../../docs/06-mutator-design.md)): pure data and pure
-functions, no `UnityEngine` reference, no rendering, no I/O. A Unity
-project imports this as a plain .NET assembly (or an `.asmdef` reference
-once one exists) and builds scenes, prefabs, and MonoBehaviours on top —
-nothing here ever will.
+functions, no `UnityEngine` reference, no rendering, no I/O. The Unity
+project ([`unity-client/`](../../unity-client/)) references it as a local
+UPM package (`"com.maddr.citygen-core": "file:../../packages/citygen-core"`
+in its `Packages/manifest.json`) and builds scenes, prefabs, and
+MonoBehaviours on top — nothing here ever will.
 
 **This is a first slice, not the full track.** Implemented so far: the
 hex grid index and the attack-arc model. Not yet started: procedural
@@ -20,13 +21,30 @@ questions for sequencing (Q14: this whole track doesn't block Phases
 either).
 
 ```
-dotnet test tests/CityGenCore.Tests.csproj   # build + 26 tests
+dotnet test Tests~/CityGenCore.Tests.csproj   # build + 26 tests
 ```
 
 | Module | Contents |
 | --- | --- |
 | `src/HexCoord.cs` | Axial hex coordinates: neighbors, exact distance, `Ring`/`Range` (aura/radius queries), and the world-space (meters) conversion at `HexCoord.HexMeters = 20` ([docs/18](../../docs/18-city-battlefields.md) §1) |
 | `src/Facing.cs` | The attack-arc model — `Facing.ArcOf(attacker, defender, defenderFacing)` classifies Front/Flank/Rear ([docs/04](../../docs/04-combat-model.md) posMod) |
+| `package.json`, `src/MadDr.CityGen.asmdef` | The UPM face of the package: Unity compiles `src/` from source as assembly `MadDr.CityGen` (`noEngineReferences: true`) |
+
+## Dual-toolchain layout (why the tilde folders)
+
+Unity imports **everything** in a `file:`-referenced package folder except
+tilde-suffixed and dot-prefixed paths. This package is also a plain dotnet
+project, so the two toolchains are kept out of each other's way:
+
+- `Tests~/` — the xunit test project. Unity never sees it (it couldn't
+  compile xunit anyway); dotnet runs it fine (a non-leading `~` is just a
+  filename character).
+- `bin~`/`obj~` — dotnet build outputs, redirected there by
+  `Directory.Build.props`, so a locally-built `MadDr.CityGen.dll` can
+  never be double-imported by Unity next to the compiled sources.
+- Unity **generates `.meta` files in here** when the Editor opens the
+  referencing project (local `file:` packages are mutable). That's
+  expected — commit them.
 
 ## Why a separate package, not inside genome-core
 
