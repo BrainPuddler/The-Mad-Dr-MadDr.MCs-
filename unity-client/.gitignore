@@ -1,0 +1,16 @@
+# Unity build/cache artifacts. The repo-root .gitignore already has these
+# patterns, but they're all anchored with a leading slash (e.g. /[Ll]ibrary/),
+# which only matches directly at the repo root -- it can't reach into this
+# subfolder. Same class of bug as packages/citygen-core's nested obj/ dirs;
+# fixed here the same way, ahead of time, before a real Unity project lands.
+# (*.csproj, *.sln, *.tmp, .vs/ etc. are already unanchored at the root and
+# don't need repeating here.)
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
