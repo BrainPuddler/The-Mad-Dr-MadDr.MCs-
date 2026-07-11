@@ -28,6 +28,10 @@ decision log). Vision pillars: ownership of creations, no gacha.
   Battlefields track (docs/18): hex grid + attack-arc math so far, zero
   `UnityEngine` reference. **No Unity project exists in this repo yet** —
   this is the first slice only; see its README for what's built vs. not.
+- `unity-client/` — reserved location for the actual Unity project (docs/18).
+  Not created yet — no Editor available in this environment to do it
+  safely; see its README for the setup steps once someone with Unity Hub
+  creates it there.
 
 ## Build & test
 
