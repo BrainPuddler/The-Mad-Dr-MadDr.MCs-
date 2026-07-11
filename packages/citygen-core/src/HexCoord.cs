@@ -35,6 +35,18 @@ namespace MadDr.CityGen
             R = r;
         }
 
+        /// <summary>Axial coordinate of the hex at (col, row) of an odd-r
+        /// offset rectangle -- the map-region shape docs/18 SS1 implies
+        /// ("a Big City map at 5 km/side is therefore a 250x250 hex
+        /// index"): rows stack vertically, odd rows shove right half a
+        /// hex, so a WxH offset rectangle reads as a roughly square field
+        /// in world space rather than the sheared parallelogram raw axial
+        /// ranges produce.</summary>
+        public static HexCoord FromOffset(int col, int row)
+        {
+            return new HexCoord(col - (row - (row & 1)) / 2, row);
+        }
+
         // Pointy-top axial neighbor directions, index = HexEdge (see Facing.cs),
         // in the standard cube/axial convention (Red Blob Games' reference
         // algorithms -- the well-established approach, not invented here).
