@@ -107,7 +107,7 @@ namespace MadDr.CityGen
         }
 
         public bool Equals(HexCoord other) => Q == other.Q && R == other.R;
-        public override bool Equals(object obj) => obj is HexCoord other && Equals(other);
+        public override bool Equals(object? obj) => obj is HexCoord other && Equals(other);
         public override int GetHashCode() => (Q, R).GetHashCode();
         public override string ToString() => $"({Q}, {R})";
         public static bool operator ==(HexCoord left, HexCoord right) => left.Equals(right);

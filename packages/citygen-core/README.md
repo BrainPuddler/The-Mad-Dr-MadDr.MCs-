@@ -11,23 +11,25 @@ in its `Packages/manifest.json`) and builds scenes, prefabs, and
 MonoBehaviours on top — nothing here ever will.
 
 **This is a first slice, not the full track.** Implemented so far: the
-hex grid index and the attack-arc model. Not yet started: procedural
-city generation ([docs/18](../../docs/18-city-battlefields.md) §2),
-destructible-building state ([docs/18](../../docs/18-city-battlefields.md)
-§3), the engagement-zone LOD manager (§5), or the Mutator-service HTTP
-client (§6) — see [docs/18](../../docs/18-city-battlefields.md)'s Open
-questions for sequencing (Q14: this whole track doesn't block Phases
-1–3, and Phase 1's own combat sandbox doesn't exist in this repo yet
-either).
+hex grid index, the attack-arc model, and the deterministic RNG. Not yet
+started: procedural city generation itself
+([docs/18](../../docs/18-city-battlefields.md) §2 — the RNG below is the
+prerequisite, not the generator), destructible-building state
+([docs/18](../../docs/18-city-battlefields.md) §3), the engagement-zone
+LOD manager (§5), or the Mutator-service HTTP client (§6) — see
+[docs/18](../../docs/18-city-battlefields.md)'s Open questions for
+sequencing (Q14: this whole track doesn't block Phases 1–3, and Phase 1's
+own combat sandbox doesn't exist in this repo yet either).
 
 ```
-dotnet test Tests~/CityGenCore.Tests.csproj   # build + 26 tests
+dotnet test Tests~/CityGenCore.Tests.csproj   # build + 37 tests
 ```
 
 | Module | Contents |
 | --- | --- |
 | `src/HexCoord.cs` | Axial hex coordinates: neighbors, exact distance, `Ring`/`Range` (aura/radius queries), and the world-space (meters) conversion at `HexCoord.HexMeters = 20` ([docs/18](../../docs/18-city-battlefields.md) §1) |
 | `src/Facing.cs` | The attack-arc model — `Facing.ArcOf(attacker, defender, defenderFacing)` classifies Front/Flank/Rear ([docs/04](../../docs/04-combat-model.md) posMod) |
+| `src/Rng.cs` | A **bit-exact port** of `packages/genome-core/src/rng.ts`'s sfc32 RNG — not just "also deterministic," but proven to produce the identical output sequence for the same seed as the TypeScript reference (golden values captured from a live node process, `Tests~/RngTests.cs`). The prerequisite for docs/18 §2's "city generation is a pure function of (seed, preset, size)" requirement. |
 | `package.json`, `src/MadDr.CityGen.asmdef` | The UPM face of the package: Unity compiles `src/` from source as assembly `MadDr.CityGen` (`noEngineReferences: true`) |
 
 ## Dual-toolchain layout (why the tilde folders)
