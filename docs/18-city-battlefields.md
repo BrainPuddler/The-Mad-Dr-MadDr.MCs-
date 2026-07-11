@@ -2,6 +2,8 @@
 
 Status: Draft v0.1 · Pillars served: 2 (*the battlefield breathes*), 3 (*honest combat*) · Realizes the hex battlefield of [02](02-gameplay-overview.md)/[03](03-mana-system.md) in continuous 3D space; consumes the damage formula from [04](04-combat-model.md) unchanged; perf budgets extend [08](08-creature-visualization.md); netcode extends [09](09-multiplayer-architecture.md); engine already decided in [10](10-engine-evaluation.md). Terms: [glossary](00-index.md#glossary). Scope/sequencing tracked as Q14–Q16 and Q20 in [12-open-questions.md](12-open-questions.md).
 
+> **Implementation:** a first slice of this doc's engine-agnostic math is built in [`packages/citygen-core`](../packages/citygen-core/) (C#, .NET 8, zero `UnityEngine` reference — mirrors [`packages/genome-core`](../packages/genome-core/)'s role for the genome): the hex grid index (§1: `HexCoord`, `HexMeters = 20`, `Ring`/`Range` for aura/radius queries) and the attack-arc model ([04](04-combat-model.md) `Front`/`Flank`/`Rear`, `Facing.ArcOf`). No Unity project exists in this repo yet — see the README there for exactly what's built vs. not, and Q14 below for why this is a first slice rather than a full Unity client.
+
 ## Scope: this realizes docs 02–04, it doesn't replace them
 
 Everything that decides a fight — the stat block, the damage formula, positioning, the Lumen Cycle, salvage — is unchanged from [03](03-mana-system.md)/[04](04-combat-model.md). What changes is the *space* those rules run in: a continuous 3D city instead of an abstract 24×24 hex grid. The hex grid doesn't go away; it becomes the pathing/positioning index laid *underneath* the city (§1), so "flank," "high ground," and "aura radius" keep exact meanings, just realized in meters instead of hex-counts.

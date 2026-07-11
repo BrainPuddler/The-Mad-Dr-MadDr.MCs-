@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MadDr.CityGen</RootNamespace>
+    <AssemblyName>MadDr.CityGen</AssemblyName>
+    <!-- No UnityEngine, no engine reference at all: this is the
+         engine-agnostic logic core for docs/18-city-battlefields.md,
+         the same architectural role packages/genome-core plays for the
+         genome (docs/06). A Unity project imports this as a plain
+         .NET assembly / asmdef reference and builds MonoBehaviours,
+         scenes, and rendering on top; nothing here ever will. -->
+  </PropertyGroup>
+
+</Project>

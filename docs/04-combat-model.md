@@ -45,7 +45,7 @@ damage = max(1, round( Power × posMod × emitterMod × luckRoll ) − Armor)
 | Attacker on high ground over target | +0.10 |
 | Each additional adjacent ally engaging the same target | +0.10 (max +0.20) |
 
-Arc model on hexes: front = the faced hex-edge ±1; rear = opposite edge ±1; the remaining two edges are flanks. Modifiers above 1.0 stack additively onto the arc multiplier (e.g., rear + high ground + 2 allies = 1.5 + 0.1 + 0.2 = ×1.8 — the theoretical max).
+Arc model on hexes: a hex has 6 edges; front = the faced edge and its two neighbors (3 edges); rear = the single exact-opposite edge; the remaining two edges are flanks. (Corrected 2026-07 — the original phrasing, "front = the faced hex-edge ±1; rear = opposite edge ±1," gives front and rear 3 edges each and leaves none for "the remaining two flanks"; taken literally the two ±1 spans tile all six edges between them. This is the one reading that satisfies both "front spans 3 edges" and "two edges remain as flank" at once — a textual fix only, no multiplier below changed. First implemented in `Facing.ArcOf`, [`packages/citygen-core`](../packages/citygen-core/).) Modifiers above 1.0 stack additively onto the arc multiplier (e.g., rear + high ground + 2 allies = 1.5 + 0.1 + 0.2 = ×1.8 — the theoretical max).
 
 On a realized city battlefield ([18-city-battlefields.md](18-city-battlefields.md)), "high ground" includes rooftops and upper floors of buildings still standing — a destroyed building's remaining structure grants the same +0.10 posMod term, no new formula.
 

@@ -1,0 +1,11 @@
+# dotnet build artifacts. The root .gitignore's Unity-oriented /[Oo]bj/ and
+# /[Bb]uild/ patterns are anchored to the repo root, so they don't reach
+# nested bin/obj dirs here -- this package needs its own.
+bin/
+obj/
+
+# The root .gitignore blanket-ignores *.csproj (Unity's auto-generated IDE
+# project files under Assets/). Nothing under this package is Unity --
+# these ARE the hand-authored source defining the package, not generated
+# cruft -- so un-ignore them.
+!*.csproj

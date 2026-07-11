@@ -24,12 +24,20 @@ decision log). Vision pillars: ownership of creations, no gacha.
   `site/lib/` is a **vendored copy** of compiled genome-core; after
   changing genome-core run:
   `cd packages/genome-core && npm run build && cp dist/src/*.js ../../site/lib/`
+- `packages/citygen-core` — engine-agnostic C# logic for the City
+  Battlefields track (docs/18): hex grid + attack-arc math so far, zero
+  `UnityEngine` reference. **No Unity project exists in this repo yet** —
+  this is the first slice only; see its README for what's built vs. not.
 
 ## Build & test
 
-Each package: `npm install && npm test` (tsc + node:test; tests live in
-`tests/`, compiled to `dist/tests/`). Build genome-core before
-mutator-service (file: dependency).
+TypeScript packages (`genome-core`, `mutator-service`): `npm install &&
+npm test` (tsc + node:test; tests live in `tests/`, compiled to
+`dist/tests/`). Build genome-core before mutator-service (file:
+dependency).
+
+`citygen-core` (C#, requires the .NET 8 SDK): `dotnet test
+tests/CityGenCore.Tests.csproj` from `packages/citygen-core/`.
 
 ## Invariants (do not break casually)
 
