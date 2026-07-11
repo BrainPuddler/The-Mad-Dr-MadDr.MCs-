@@ -46,6 +46,25 @@ project, so the two toolchains are kept out of each other's way:
   referencing project (local `file:` packages are mutable). That's
   expected — commit them.
 
+## `src/` is C# 9, on purpose — read this before adding syntax
+
+Unity's asmdef compiler caps at **C# 9** (confirmed against a real Editor
+build: `error CS8773: Feature 'file-scoped namespace' is not available in
+C# 9.0`) and does **not** do implicit usings, regardless of what this
+package's own `.csproj` targets for the standalone `dotnet test` build —
+Unity ignores that file entirely and compiles `src/*.cs` itself via
+`MadDr.CityGen.asmdef`. `src/CityGenCore.csproj` pins `LangVersion` to
+`9.0` and disables `ImplicitUsings` specifically so `dotnet test` fails on
+the same things Unity would, instead of passing here and only breaking in
+the Editor. Concretely, in `src/` (not `Tests~/` — Unity never compiles
+that):
+
+- Braced namespaces (`namespace X { ... }`), not file-scoped
+  (`namespace X;` — C# 10)
+- Plain `struct`/`class`, not `record`/`record struct` (C# 9/10) —
+  hand-write `Equals`/`GetHashCode`/operators if you need value equality
+- Explicit `using` directives at the top of every file — nothing is implicit
+
 ## Why a separate package, not inside genome-core
 
 Different concerns, different lifecycles: `genome-core` is the

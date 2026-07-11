@@ -2,7 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>9.0</LangVersion>
     <Nullable>enable</Nullable>
     <RootNamespace>MadDr.CityGen</RootNamespace>
     <AssemblyName>MadDr.CityGen</AssemblyName>
@@ -11,7 +12,17 @@
          the same architectural role packages/genome-core plays for the
          genome (docs/06). A Unity project imports this as a plain
          .NET assembly / asmdef reference and builds MonoBehaviours,
-         scenes, and rendering on top; nothing here ever will. -->
+         scenes, and rendering on top; nothing here ever will.
+
+         LangVersion pinned to 9.0 and ImplicitUsings disabled on
+         purpose: Unity's asmdef compiler caps at C# 9 and doesn't do
+         implicit usings, and it ignores this TargetFramework entirely
+         (it compiles src/*.cs itself via MadDr.CityGen.asmdef). Pinning
+         both here means `dotnet test` fails on any C# 10+ syntax or a
+         missing `using` BEFORE it ever reaches Unity, instead of
+         passing here and only breaking in the Editor. Tests~/ has no
+         such constraint; Unity never compiles it, so it stays on the
+         SDK defaults. -->
   </PropertyGroup>
 
 </Project>
