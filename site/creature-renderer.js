@@ -2221,7 +2221,7 @@ function armDrop(mb, S, side, armR, scale, o, pg = [], N = null, capLen = Infini
     const armPt = (frac) => [
       ex[0] + (elbow[0]-ex[0])*frac, ex[1] + (elbow[1]-ex[1])*frac, ex[2] + (elbow[2]-ex[2])*frac,
     ];
-    const bicepR = armR * (0.75 + 0.5*girth);
+    const bicepR = armR * (0.75 + 0.5*girth) * 1.18;   // creator: "too small, make them bigger by 18%"
     tube(mb, [armPt(0.20), armPt(0.45), armPt(0.70)], [bicepR*0.55, bicepR, bicepR*0.55],
       o.skinFn ? o.skin : CHITIN, 0.3, 0, 8, 3, null,
       (t) => swing(armT(0.20 + t*0.50)),
