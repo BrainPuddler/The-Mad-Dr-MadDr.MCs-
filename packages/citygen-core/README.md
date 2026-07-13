@@ -12,19 +12,18 @@ MonoBehaviours on top — nothing here ever will.
 
 **This is a growing slice, not the full track.** Implemented so far: the
 hex grid index, the attack-arc model, the deterministic RNG, the
-procedural city generator, and a terrain layer (river, ponds, hills,
+procedural city generator, a terrain layer (river, ponds, hills,
 destructible bridges — [docs/18](../../docs/18-city-battlefields.md) §2 /
-docs/04's water rule — geometry and allocation; the skin/prop passes are
-renderer-side by design). Not yet started: destructible-building runtime
-state ([docs/18](../../docs/18-city-battlefields.md) §3 — the tier stat
-table exists, damage staging doesn't), the engagement-zone LOD manager
-(§5), or the Mutator-service HTTP client (§6) — see
-[docs/18](../../docs/18-city-battlefields.md)'s Open questions for
-sequencing (Q14: this whole track doesn't block Phases 1–3, and Phase 1's
-own combat sandbox doesn't exist in this repo yet either).
+docs/04's water rule), destructible-building runtime state (§3), and the
+engagement-zone LOD classifier (§5). Not yet started: the Mutator-service
+HTTP client (§6), and — the real gap — none of this is wired into an
+actual match sim yet, because no match sim exists in this repo (Phase 1's
+own "ugly-box" combat sandbox doesn't exist either, [11](../../docs/11-roadmap.md)).
+See [docs/18](../../docs/18-city-battlefields.md)'s Open questions for
+sequencing (Q14: this whole track doesn't block Phases 1–3).
 
 ```
-dotnet test Tests~/CityGenCore.Tests.csproj   # build + 86 tests
+dotnet test Tests~/CityGenCore.Tests.csproj   # build + 130 tests
 ```
 
 | Module | Contents |
@@ -35,6 +34,9 @@ dotnet test Tests~/CityGenCore.Tests.csproj   # build + 86 tests
 | `src/CityGenerator.cs` | The docs/18 §2 pipeline: seeded terrain (river/ponds/hills) → road network (Grid / MainStreet / Radial per preset) → block subdivision (connected components) → landmark allocation (emitter **xor** Community Hub per node, docs/02's 6–10 emitter cap, hubs ~1 per 2 km²) → building-footprint placement with tier downgrade. Integer/hex math throughout; every loop that matters walks an (R,Q)-sorted list, so output order is part of the determinism contract. The river is proven, not just plausible: `Tests~/TerrainTests.cs` flood-fills the map with all bridges standing (one connected walk) and again with every bridge destroyed (banks disconnect) — across 10 seeds, not one lucky one |
 | `src/CityPreset.cs` | The three authored presets as **data** (docs/18 §1 table): `village` 1 km radial, `small_town` 2 km Main-Street grid, `big_city` 5 km dense grid — pitch, density, tier mix, landmark archetype rosters, river width, bridge/pond/hill counts |
 | `src/CityModel.cs`, `src/BuildingTier.cs` | The output model (roads incl. bridge decks, water, ridges, buildings, landmarks with emitter-aura-3 / Collection-Station-5 radii, destructible `Bridge`s at the Large tier) and docs/18 §3's building tier table (300/2 · 600/4 · 1500/6 · 3000/8), verbatim |
+| `src/Destruction.cs` | docs/18 §3's damage staging (`DamageStage`: Intact / Damaged at ≤50% HP / Destroyed at 0) and per-instance runtime HP (`BuildingRuntimeState`, `BridgeRuntimeState`) — immutable, `ApplyDamage` returns a new instance, same discipline as genome-core's surgery/mutation operators. No new combat math: whatever computes the damage amount is docs/04's existing formula, this only tracks the resulting HP |
+| `src/BattlefieldState.cs` | Ties a `CityModel` to live building/bridge HP and derives what actually changes with damage: `BlockedToGround`/`BlockedToAmphibious` (a Destroyed building opens a flank route; a Destroyed bridge reverts to water, blocking ground but not amphibious plans) and `HighGround` (stage-independent — "a destroyed building's remaining structure grants the same +0.10 posMod," docs/04) |
+| `src/EngagementZone.cs` | The docs/18 §5 LOD classifier: `EngagementZoneManager.ClassifyHex`/`ClassifyBuilding` sort any position into Engagement (~175 m, full sim) / LocalCity (~1 km, lightweight) / DistantSkyline (visual only) by distance to the nearest live engagement. Radii are `EngagementZoneConfig` data, not constants — "the radii are the first thing to retune" (docs/18), so retuning is a number, not a code change |
 | `package.json`, `src/MadDr.CityGen.asmdef` | The UPM face of the package: Unity compiles `src/` from source as assembly `MadDr.CityGen` (`noEngineReferences: true`) |
 
 Sample composition at seed 42 (the sanity anchor — regenerate any time,
