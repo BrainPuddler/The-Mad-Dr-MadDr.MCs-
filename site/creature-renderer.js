@@ -608,6 +608,8 @@ const ALIEN_HIDE = [
 ];
 const BRAINP = [214, 150, 160];
 const ICHOR_N = [150, 235, 190];   // bioluminescent node
+const LASER_N  = [130, 220, 255];  // laser_array emitter glow -- cool cyan, reads distinct from plasma_lance's warm ICHOR/BLTGLO
+const PHOTON_N = [255, 235, 175];  // photon_blaster maw glow -- warm near-white, "stored light" rather than plasma or laser
 
 function metalColorFn(base) {
   // brushed-metal: catches a hard chrome highlight up top, sinks dark below
@@ -1726,6 +1728,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     claw_hand: ['warts', 0.45], pincer: ['chitin', 0.5], tentacle: ['slick', 0.8],
     rifle_arm: ['none', 0], plasma_lance: ['chitin', 0.6], hand_stump: ['warts', 0.3],
     chain_blade: ['none', 0], spore_launcher: ['chitin', 0.55],
+    laser_array: ['chitin', 0.5], photon_blaster: ['chitin', 0.6],
     antenna: ['ridge', 0.35], horn: ['ridge', 0.55], sensor_mast: ['none', 0],
     sensor_stub: ['warts', 0.3],
     bug_eyes: ['none', 0], cyclops_eye: ['none', 0], stalk_eyes: ['none', 0],
@@ -1857,6 +1860,38 @@ function buildPart(mb, slot, family, params, side, sock, o) {
         ellipsoid(mb, mp, [0.09, 0.09, 0.09], ICHOR, 0.4, 0.7, 4);
         mb.glow(mp, ICHOR, 10);
       }
+      break;
+    }
+    case 'laser_array': {
+      // a fleshy arm bearing a rigid cluster of narrow crystalline
+      // emitters -- count sets how many spikes fan out (docs/17: the
+      // family's own canalized bounds keep curl low, so the fan reads
+      // rigid rather than tentacle-like)
+      const wrist = armDrop(mb, S, side, 0.44*scale, scale, { skin: CHITIN, skinFn: null }, [len, girth, taper, curl], N, armCapLen);
+      const mountR = (0.4 + 0.3*girth) * scale;
+      ellipsoid(mb, wrist, [mountR, mountR*0.9, mountR], CHITIN, 0.4, 0, 8);
+      const nEmit = clamp(3 + Math.round(count*4), 3, 7);
+      const L = (1.3 + 1.3*len) * scale;
+      for (let i = 0; i < nEmit; i++) {
+        const a = (i/(nEmit-1||1) - 0.5) * 1.1;   // rigid fan, not a droop
+        const tip = [wrist[0]+Math.sin(a)*0.35*scale, wrist[1]+L, wrist[2]+Math.cos(a)*0.35*scale+0.3*scale];
+        tube(mb, [wrist, tip], [0.09*scale, 0.03*scale], lp(CHITIN, [210, 230, 238], 0.4), 0.6, 0.3, 6);
+        ellipsoid(mb, tip, [0.06, 0.06, 0.06], LASER_N, 0.5, 1, 5);
+        mb.glow(tip, LASER_N, 9);
+      }
+      break;
+    }
+    case 'photon_blaster': {
+      // a fleshy arm ending in a broad bioluminescent maw -- girth sets
+      // how wide the pod is, ornament how bright the stored charge glows
+      const wrist = armDrop(mb, S, side, 0.5*scale, scale, { skin: CHITIN, skinFn: null }, [len, girth, taper, curl], N, armCapLen);
+      const podR = (0.55 + 0.55*girth) * scale;
+      ellipsoid(mb, wrist, [podR, podR*0.95, podR*1.1], lp(CHITIN, PHOTON_N, 0.15), 0.45, 0, 10);
+      const mawC = [wrist[0], wrist[1]+podR*0.9, wrist[2]+podR*0.6];
+      ellipsoid(mb, mawC, [podR*0.55, podR*0.5, podR*0.3], sh(CHITIN, 0.7), 0.3, 0, 10);   // dark maw rim
+      const irisScale = 0.6 + 0.4*orn;
+      ellipsoid(mb, mawC, [podR*0.38*irisScale, podR*0.34*irisScale, podR*0.18], PHOTON_N, 0.5, 0.85 + 0.15*orn, 8);
+      mb.glow(mawC, PHOTON_N, 14 + 10*orn);
       break;
     }
 
