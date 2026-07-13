@@ -70,6 +70,30 @@ namespace MadDr.CityGen
         }
     }
 
+    /// <summary>A destructible river crossing (docs/18 terrain). A bridge
+    /// IS a road surface over water: its hexes appear in
+    /// <see cref="CityModel.Roads"/> and are excluded from
+    /// <see cref="CityModel.Water"/>. Destroying it removes those road
+    /// hexes and reverts them to water -- severing the crossing for
+    /// ground units (amphibious and airborne plans don't care, which is
+    /// exactly the counterplay). Stats reuse the Large building tier
+    /// (1500 Structure HP / 6 Armor, docs/18 SS3) -- cutting an army's
+    /// path is meant to be a real investment, not a drive-by.</summary>
+    public sealed class Bridge
+    {
+        public IReadOnlyList<HexCoord> Footprint { get; }
+
+        public BuildingTier Tier
+        {
+            get { return BuildingTier.Large; }
+        }
+
+        public Bridge(IReadOnlyList<HexCoord> footprint)
+        {
+            Footprint = footprint;
+        }
+    }
+
     /// <summary>The generated city: a pure-data description a renderer
     /// walks and a match server indexes. Deterministic content for a
     /// given (seed, preset) -- docs/18 SS2's determinism requirement; the
@@ -84,11 +108,24 @@ namespace MadDr.CityGen
 
         /// <summary>Road hexes, sorted by (R, Q) -- stable order so two
         /// models generated from the same inputs compare identical
-        /// element-by-element, not just set-equal.</summary>
+        /// element-by-element, not just set-equal. Includes bridge decks.</summary>
         public IReadOnlyList<HexCoord> Roads { get; }
+
+        /// <summary>Water hexes (river + ponds), sorted by (R, Q).
+        /// Impassable to ground plans; amphibious plans (crab,
+        /// serpentine -- genome-core catalog) cross freely; winged/
+        /// floater pass over. Excludes standing bridge decks -- a
+        /// destroyed bridge's hexes rejoin this set at runtime.</summary>
+        public IReadOnlyList<HexCoord> Water { get; }
+
+        /// <summary>Ridge (high-ground) hexes, sorted by (R, Q) -- the
+        /// existing docs/02/04 ridge feature, now placed by generation:
+        /// +0.10 posMod for an attacker on them, winged fly over.</summary>
+        public IReadOnlyList<HexCoord> Ridges { get; }
 
         public IReadOnlyList<Building> Buildings { get; }
         public IReadOnlyList<Landmark> Landmarks { get; }
+        public IReadOnlyList<Bridge> Bridges { get; }
 
         public CityModel(
             uint seed,
@@ -96,16 +133,22 @@ namespace MadDr.CityGen
             int widthHexes,
             int heightHexes,
             IReadOnlyList<HexCoord> roads,
+            IReadOnlyList<HexCoord> water,
+            IReadOnlyList<HexCoord> ridges,
             IReadOnlyList<Building> buildings,
-            IReadOnlyList<Landmark> landmarks)
+            IReadOnlyList<Landmark> landmarks,
+            IReadOnlyList<Bridge> bridges)
         {
             Seed = seed;
             PresetName = presetName;
             WidthHexes = widthHexes;
             HeightHexes = heightHexes;
             Roads = roads;
+            Water = water;
+            Ridges = ridges;
             Buildings = buildings;
             Landmarks = landmarks;
+            Bridges = bridges;
         }
     }
 }

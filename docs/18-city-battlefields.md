@@ -2,7 +2,7 @@
 
 Status: Draft v0.1 · Pillars served: 2 (*the battlefield breathes*), 3 (*honest combat*) · Realizes the hex battlefield of [02](02-gameplay-overview.md)/[03](03-mana-system.md) in continuous 3D space; consumes the damage formula from [04](04-combat-model.md) unchanged; perf budgets extend [08](08-creature-visualization.md); netcode extends [09](09-multiplayer-architecture.md); engine already decided in [10](10-engine-evaluation.md). Terms: [glossary](00-index.md#glossary). Scope/sequencing tracked as Q14–Q16 and Q20 in [12-open-questions.md](12-open-questions.md).
 
-> **Implementation:** this doc's engine-agnostic core is built in [`packages/citygen-core`](../packages/citygen-core/) (C#, .NET 8, zero `UnityEngine` reference — mirrors [`packages/genome-core`](../packages/genome-core/)'s role for the genome): the hex grid index (§1: `HexCoord`, `HexMeters = 20`, `Ring`/`Range` for aura/radius queries), the attack-arc model ([04](04-combat-model.md) `Front`/`Flank`/`Rear`, `Facing.ArcOf`), a **bit-exact port of genome-core's sfc32 RNG** (proven identical to the TypeScript reference via golden values, not just independently deterministic), and **the §2 generator itself** (`CityGenerator.Generate(seed, preset)`: seeded roads → blocks → emitter-xor-hub landmark allocation → building footprints, with the three §1 presets as data and §3's tier table verbatim; skin/prop passes stay renderer-side per §2's own pipeline split). Still logic-only: destructible-building *runtime state* (§3's damage staging), the engagement-zone LOD manager (§5), and all rendering remain unbuilt. The Unity project (`unity-client/`, Unity 6000.3.13f1, URP) references `citygen-core` as a local UPM package — see both READMEs for exactly what's built vs. not, and Q14 below for sequencing.
+> **Implementation:** this doc's engine-agnostic core is built in [`packages/citygen-core`](../packages/citygen-core/) (C#, .NET 8, zero `UnityEngine` reference — mirrors [`packages/genome-core`](../packages/genome-core/)'s role for the genome): the hex grid index (§1: `HexCoord`, `HexMeters = 20`, `Ring`/`Range` for aura/radius queries), the attack-arc model ([04](04-combat-model.md) `Front`/`Flank`/`Rear`, `Facing.ArcOf`), a **bit-exact port of genome-core's sfc32 RNG** (proven identical to the TypeScript reference via golden values, not just independently deterministic), **the §2 generator itself** (`CityGenerator.Generate(seed, preset)`: seeded roads → blocks → emitter-xor-hub landmark allocation → building footprints, with the three §1 presets as data and §3's tier table verbatim; skin/prop passes stay renderer-side per §2's own pipeline split), and **the terrain layer** (river/ponds/hills + destructible bridges, below — proven to actually sever the map into two banks via a flood-fill connectivity test, not just "generates something that looks like a river"). Still logic-only: destructible-building *runtime state* (§3's damage staging), the engagement-zone LOD manager (§5), and all rendering remain unbuilt. The Unity project (`unity-client/`, Unity 6000.3.13f1, URP) references `citygen-core` as a local UPM package — see both READMEs for exactly what's built vs. not, and Q14 below for sequencing.
 
 ## Scope: this realizes docs 02–04, it doesn't replace them
 
@@ -45,6 +45,18 @@ A second landmark-node subtype: **Community Hub** (`hospital | school | old-age-
 Each Community Hub hosts exactly one **Collection Station** — a capturable structure that converts Citizen deaths within its radius into banked resources for its controller. The capture rule **reuses [03](03-mana-system.md)'s emitter pattern exactly**: stand-and-hold 8 s uncontested, contested capture pauses, ownership persists until recaptured. Radius **5 hexes (100 m)** — deliberately larger than the emitter's 3-hex (60 m) aura, since a Community Hub footprint is a large campus building, not a point landmark. Yield rates and the full harvesting loop live in [20-harvest-and-repair.md](20-harvest-and-repair.md); Citizen population density at these hubs is [19-citizens.md](19-citizens.md) §7.
 
 Community Hubs are placed independently of, and coexist with, [17-factions.md](17-factions.md)'s existing `Hospital / blood bank` Earth world-source node — that node taps a building's static medical stock via channel-harvest regardless of combat; a Collection Station taps *citizen deaths* nearby, combat-driven. Both can apply to the same hospital landmark. Flagged as **Q20**, not silently merged.
+
+### Terrain: hills, water & destructible bridges (natural choke points)
+
+Streets and destructible buildings give the city *urban* choke points; this layer adds the *natural* ones. Three features, generated in the same seeded pass as everything else (identical terrain from the seed alone):
+
+- **Hills** — blobs of the existing **ridge hexes** ([02](02-gameplay-overview.md)/[04](04-combat-model.md)): +0.10 posMod for attackers on them, winged fly over. No new combat math — the generator now *places* the feature docs 02/04 always had.
+- **Ponds** — small impassable water blobs, walked around rather than bridged. Local cover-and-flank texture.
+- **The river** — the headline: a band of water hexes crossing the full map (width 1 hex on a Village up to 3 hexes / 60 m on a Big City), confined to the upper or lower half so the plaza/arterial/landmark belt stays dry. It severs the battlefield into **two banks**, joined only by bridges.
+
+**Water rule** (the [04](04-combat-model.md) side of this): water hexes are impassable to ground plans; **amphibious body plans — `crab` and `serpentine`** (a catalog property in `packages/genome-core`, like a plan's slot list) — cross freely; winged/floater pass over. No speed penalty in v0.1: water *is* the amphibious breeds' perk, and breeding a crab lineage specifically to own the river is exactly the kind of build the Mutator exists for.
+
+**Bridges are structures, and structures die.** A bridge is a road deck over water — it reuses the **Large** building tier from §3 unchanged (Structure HP 1500, Armor 6; the same damage formula as everything else). Destroy it and its hexes revert to water: the crossing is gone, ground armies must reroute to the next bridge (or hold what's left), while amphibious and airborne forces don't care — which is precisely the counterplay that keeps bridge-demolition from being strictly dominant. Bridges are deliberately scarce (2–3 per map): scarcity is what makes them choke points. Whether a destroyed bridge can be rebuilt in-match is open — **Q24**, not assumed either way.
 
 ## 3. Destructible buildings
 
@@ -104,6 +116,10 @@ No new engine decision is required — Unity is already the recommendation ([10]
 | Engagement / Local-city / Distant-skyline zone radius | 150–200 m / 1 km / beyond 1 km |
 | Community Hub density | ~1 per 2 km² of built area |
 | Collection Station radius / capture channel | 5 hex (100 m) / 8 s |
+| River width (Village / Small Town / Big City) | 1 / 2 / 3 hexes (20/40/60 m) |
+| Bridges per map (Village / Small Town / Big City) | 2 / 2 / 3 |
+| Bridge stats | Large tier: 1500 Structure HP / 6 Armor; destroyed → reverts to water |
+| Ponds / hills per map | 2–5 / 3–6 blobs by preset |
 
 All values marked for validation in this track's own spike (Q14) before the Phase-3 netcode build ([11-roadmap.md](11-roadmap.md)).
 
