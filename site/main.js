@@ -589,12 +589,32 @@ function doRename() {
   c.name = name.trim();
   saveLocal(); logEntry(`🏷️ Renamed to ${c.name}.`); render();
 }
+// A REAL delete, from anywhere: bench, stable, and the server-side
+// Menagerie all at once. The old half-delete ("cleared from the bench,
+// a saved stable copy is kept") left the creature on the battlefield
+// roster invisibly -- exactly the class of hidden state that made the
+// first Unity roster test so hard to debug. The server genome row
+// itself is immutable and stays (docs/07 -- lineage for descendants);
+// delete here means "gone from every roster this account fields".
+function deleteEverywhere(id, name) {
+  local.hidden = [...new Set([...(local.hidden ?? []), id])];
+  const wasStabled = isSaved(id);
+  local.stable = (local.stable ?? []).filter(x => x !== id);
+  if (local.selectedId === id) local.selectedId = null;
+  saveLocal();
+  logEntry(`🗑️ ${name} deleted${wasStabled ? " (and pulled off the battlefield roster)" : ""}.`);
+  if (wasStabled) syncMenagerie();
+}
+
 function doDelete() {
   const c = selected(); if (!c) return;
-  if (!confirm(`Clear ${c.name} from the bench? A saved stable copy is kept.`)) return;
-  local.hidden = [...new Set([...(local.hidden ?? []), c.id])];
-  local.selectedId = null;
-  saveLocal(); logEntry(`🗑️ ${c.name} cleared from the bench.`); render();
+  const stabled = isSaved(c.id);
+  const warning = stabled
+    ? `Delete ${c.name}? This also removes it from the stable and the battlefield roster.`
+    : `Delete ${c.name} from the bench?`;
+  if (!confirm(warning)) return;
+  deleteEverywhere(c.id, c.name);
+  render();
 }
 function isSaved(id) { return (local.stable ?? []).includes(id); }
 
@@ -677,8 +697,9 @@ function renderRoster() {
   el.innerHTML = list.map(c => {
     const v = viability(c.genome);
     const badge = c.alive ? `<span class="badge ${v.state}">${v.state}</span>` : `<span class="badge dead">DEAD</span>`;
+    const star = isSaved(c.id) ? "⭐ " : "";
     return `<div class="card ${c.id === local.selectedId ? "selected" : ""} ${c.alive ? "" : "dead"}" data-id="${c.id}">
-      <div class="name">${c.alive ? "" : "💀 "}${esc(c.name)}${badge}</div>
+      <div class="name">${star}${c.alive ? "" : "💀 "}${esc(c.name)}${badge}</div>
       <div class="meta">${esc(c.genome.body.plan)} · ${esc(c.genome.brain.tier)} brain · ${esc(c.genome.heart.tier)} heart</div>
     </div>`;
   }).join("");
@@ -1081,7 +1102,7 @@ function renderStable() {
     if (!thumbCache[c.id]) { try { thumbCache[c.id] = renderThumbnail(c.genome, fac); } catch { thumbCache[c.id] = ""; } }
     return `<div class="stable-card ${c.id === local.selectedId ? "selected" : ""}" data-id="${c.id}">
       <div class="sc-thumb">${thumbCache[c.id] ? `<img src="${thumbCache[c.id]}" alt="">` : ""}<span class="sc-fac">${FACTION_GLYPH[fac]}</span></div>
-      <div class="sc-name">${esc(c.name)}${c.alive ? "" : " 💀"}</div>
+      <div class="sc-name">⭐ ${esc(c.name)}${c.alive ? "" : " 💀"}</div>
       <div class="sc-meta">${esc(c.genome.body.plan)} · ${esc(c.genome.heart.tier)} heart</div>
     </div>`;
   }).join("");
@@ -1115,7 +1136,8 @@ function showStableDetail(id) {
       </div>
       <div class="sd-actions">
         <button id="sd-rename">🏷️ Rename</button>
-        <button id="sd-remove" class="danger">\u2796 Remove from stable</button>
+        <button id="sd-remove">\u2796 Remove from stable</button>
+        <button id="sd-delete" class="danger">\ud83d\uddd1\ufe0f Delete monster</button>
       </div>
     </div>`;
   setLabFaction(fac);
@@ -1126,6 +1148,11 @@ function showStableDetail(id) {
     if (n && n.trim()) { local.nameMap[id] = n.trim(); c.name = n.trim(); saveLocal(); delete thumbCache[id]; renderStable(); }
   });
   document.getElementById("sd-remove").addEventListener("click", () => doUnsaveStable(id));
+  document.getElementById("sd-delete").addEventListener("click", () => {
+    if (!confirm(`Delete ${c.name}? This removes it from the stable, the bench, and the battlefield roster.`)) return;
+    deleteEverywhere(id, c.name);
+    renderStable();
+  });
 }
 
 // \u2500\u2500 boot \u2500\u2500

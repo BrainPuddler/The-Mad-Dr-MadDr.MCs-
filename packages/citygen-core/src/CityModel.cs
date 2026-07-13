@@ -150,5 +150,28 @@ namespace MadDr.CityGen
             Landmarks = landmarks;
             Bridges = bridges;
         }
+
+        /// <summary>Whether a hex lies on this map at all -- the inverse
+        /// of the odd-r offset rectangle the generator enumerates. Every
+        /// consumer that walks outward from a hex (spawn placement,
+        /// wander targets, future pathfinding) needs this: "not in the
+        /// blocked set" is NOT the same as "on the map", and treating
+        /// off-map hexes as walkable is exactly how the first spawned
+        /// monsters wandered out of the city.</summary>
+        public bool Contains(HexCoord hex)
+        {
+            var row = hex.R;
+            if (row < 0 || row >= HeightHexes) return false;
+            var col = hex.Q + (row - (row & 1)) / 2;
+            return col >= 0 && col < WidthHexes;
+        }
+
+        /// <summary>The map's central hex -- NOT axial (0,0), which is the
+        /// offset rectangle's top-left corner. Spawning "at the middle of
+        /// the city" means this hex.</summary>
+        public HexCoord CenterHex
+        {
+            get { return HexCoord.FromOffset(WidthHexes / 2, HeightHexes / 2); }
+        }
     }
 }

@@ -24,6 +24,7 @@ public class MonsterAvatar : MonoBehaviour
     private const float WanderSpeedMetersPerSecond = 3f;
     private const int WanderRadiusHexes = 10;
 
+    private CityModel _city;
     private BattlefieldState _battlefield;
     private HexCoord _homeHex;
     private bool _isAmphibious;
@@ -33,6 +34,7 @@ public class MonsterAvatar : MonoBehaviour
 
     public void Init(StoredGenomeDto creature, CityModel city, BattlefieldState battlefield, HexCoord homeHex, Vector3 origin, int rngSeed)
     {
+        _city = city;
         _battlefield = battlefield;
         _homeHex = homeHex;
         _origin = origin;
@@ -75,9 +77,13 @@ public class MonsterAvatar : MonoBehaviour
         // BlockedTo*() call walks every building/bridge in the city.
         var blocked = _isAmphibious ? _battlefield.BlockedToAmphibious() : _battlefield.BlockedToGround();
 
+        // Contains() matters as much as the blocked check: off-map hexes
+        // are in no blocked set, so without it monsters near an edge
+        // happily wander off into the void outside the city -- the
+        // first live test's visible bug.
         var candidates = new List<HexCoord>();
         foreach (var hex in _homeHex.Range(WanderRadiusHexes))
-            if (!blocked.Contains(hex)) candidates.Add(hex);
+            if (_city.Contains(hex) && !blocked.Contains(hex)) candidates.Add(hex);
         if (candidates.Count == 0) return; // stay put rather than pick an illegal target
 
         var choice = candidates[_rng.Next(candidates.Count)];

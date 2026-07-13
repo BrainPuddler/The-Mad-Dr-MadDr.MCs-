@@ -144,11 +144,16 @@ public class RuntimeCityBuilder : MonoBehaviour
         var monsters = new GameObject("Monsters").transform;
         monsters.SetParent(transform, false);
 
-        var center = new HexCoord(0, 0);
+        // CenterHex, not axial (0,0): the axial origin is the offset
+        // rectangle's top-left CORNER, and spawning there is why the
+        // first live test's monsters wandered around outside the city.
+        // Landing spots must also be on the map -- "not blocked" alone
+        // includes every off-map hex, since those are in no blocked set.
+        var center = _city.CenterHex;
         var blockedToGround = _battlefield.BlockedToGround();
         var landingSpots = new List<HexCoord>();
         foreach (var hex in center.Range(6))
-            if (!blockedToGround.Contains(hex)) landingSpots.Add(hex);
+            if (_city.Contains(hex) && !blockedToGround.Contains(hex)) landingSpots.Add(hex);
 
         for (var i = 0; i < cache.Creatures.Length; i++)
         {

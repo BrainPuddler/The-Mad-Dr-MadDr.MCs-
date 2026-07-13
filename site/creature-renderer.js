@@ -744,9 +744,32 @@ function alienDetails(mb, headC, headR, heartLevel, o) {
   mb.setTex(prevTex);
 }
 
-// chest-front detailing by faction (torso already built)
+// chest-front detailing by faction (torso already built).
+// An anchor tagged `up: true` (planCrab) means the decoration lies flat
+// on TOP of the shell facing the sky -- the identity disk rides on a
+// crab's back, its only billboard, instead of at the front edge where it
+// crowded under the fused head (creator direction, 2026-07).
 function robotChest(mb, ch, h, o) {
-  const prevTex = mb.tex, y = ch.y - h*0.10, z = ch.z + ch.rz + 0.02;
+  const prevTex = mb.tex;
+  if (ch.up) {
+    mb.setTex(TEX_NONE);
+    const y = ch.y + 0.02, z = ch.z;
+    // same recessed plate / dial / gauge needle / lamp row / rivet ring,
+    // rotated to face +y; "up the panel" now runs along -z (toward the head)
+    ellipsoid(mb, [0, y, z], [ch.rx*0.5, 0.12, ch.rx*0.42], sh(METAL, 0.55), 0.7, 0, 12);
+    ellipsoid(mb, [0, y+0.12, z - ch.rx*0.12], [ch.rx*0.18, 0.08, ch.rx*0.18], [30,34,40], 0.6, 0, 10);
+    ellipsoid(mb, [0, y+0.16, z - ch.rx*0.12], [ch.rx*0.04, 0.04, ch.rx*0.1], ROBOT_LENS, 0.6, 0.9, 6);  // needle
+    for (let i = -1; i <= 1; i++)                                    // lamp row
+      ellipsoid(mb, [i*ch.rx*0.2, y+0.12, z + ch.rx*0.2], [0.06,0.05,0.06],
+        [ROBOT_LENS, [90,220,120], [90,150,255]][i+1], 0.5, 1, 5);
+    for (let i = 0; i < 10; i++) {                                   // panel rivets
+      const a = (i/10)*Math.PI*2;
+      ellipsoid(mb, [Math.cos(a)*ch.rx*0.52, y+0.02, z + Math.sin(a)*ch.rx*0.44], [0.05,0.05,0.05], RIVET, 0.8, 0, 4);
+    }
+    mb.setTex(prevTex);
+    return;
+  }
+  const y = ch.y - h*0.10, z = ch.z + ch.rz + 0.02;
   mb.setTex(TEX_NONE);
   // a control panel: recessed plate, central dial, gauge, blinking lamps
   ellipsoid(mb, [0, y, z], [ch.rx*0.5, ch.rx*0.42, 0.12], sh(METAL, 0.55), 0.7, 0, 12);
@@ -763,7 +786,21 @@ function robotChest(mb, ch, h, o) {
 }
 
 function alienChest(mb, ch, h, o) {
-  const prevTex = mb.tex, y = ch.y - h*0.08, z = ch.z + ch.rz;
+  const prevTex = mb.tex;
+  if (ch.up) {
+    // the sac cluster + translucent plate lie on the carapace top
+    const y = ch.y;
+    ellipsoid(mb, [0, y + 0.02, ch.z], [ch.rx*0.46, 0.14, ch.rx*0.5], sh(o.skin, 1.05), 0.5, 0, 12, o.skinFn);
+    mb.setTex(TEX_NONE);
+    const sacsUp = [[0,0.15],[ -0.24,-0.1],[0.24,-0.1],[0,-0.32]];
+    for (const [sx, sz] of sacsUp) {
+      ellipsoid(mb, [sx*ch.rx, y + 0.14, ch.z + sz*ch.rx], [0.12,0.09,0.15], ICHOR_N, 0.5, 0.85, 7);
+      mb.glow([sx*ch.rx, y + 0.2, ch.z + sz*ch.rx], ICHOR_N, 15);
+    }
+    mb.setTex(prevTex);
+    return;
+  }
+  const y = ch.y - h*0.08, z = ch.z + ch.rz;
   // a cluster of glowing ichor sacs beneath a translucent belly-plate
   ellipsoid(mb, [0, y, z], [ch.rx*0.46, ch.rx*0.5, 0.14], sh(o.skin, 1.05), 0.5, 0, 12, o.skinFn);
   mb.setTex(TEX_NONE);
@@ -1404,7 +1441,10 @@ function planCrab(mb, o) {
   mb.setTex(o.bodyTex('chitin', o.texScale, 0.6));
   mb.setGait([0, 0, 0, 0.1]);
   lathe(mb, levels, o.skin, 0.3, 0, 20, o.skinFn);
-  if (o.chestDeco) o.chestDeco(mb, levels[2], h, o);
+  // identity disk rides ON the carapace (a crab's back is its only
+  // billboard), not at the shell's front edge where it crowded in under
+  // the fused head -- `up: true` flips the deco to face the sky
+  if (o.chestDeco) o.chestDeco(mb, { y: y0 + h*0.90, x: 0, z: -0.06*D, rx: W*0.55, rz: D*0.55, up: true }, h, o);
   mb.setGait(GAIT0);
 
   // no true neck: the head fuses low and forward onto the shell edge
