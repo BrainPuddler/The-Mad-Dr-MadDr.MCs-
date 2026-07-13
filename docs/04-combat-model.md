@@ -49,6 +49,8 @@ Arc model on hexes: a hex has 6 edges; front = the faced edge and its two neighb
 
 On a realized city battlefield ([18-city-battlefields.md](18-city-battlefields.md)), "high ground" includes rooftops and upper floors of buildings still standing — a destroyed building's remaining structure grants the same +0.10 posMod term, no new formula.
 
+**Water hexes** (added 2026-07 with [18](18-city-battlefields.md)'s terrain layer — rivers, ponds): impassable to ground movement; **amphibious body plans** (`crab` and `serpentine` — a catalog property of the plan, like its slot list, implemented in `packages/genome-core` `catalog.ts`) cross freely; winged and floater plans pass over, as they already do ridge hexes. Water grants no high-ground term and adds no combat math — it is pure passability. One deliberately emergent consequence, no new rule needed: a corpse whose death hex is water can only be salvaged by something that can *stand* there — harvest is already a stand-and-channel action, so the riverbed becomes the amphibious breeds' private larder.
+
 ### emitterMod — mana proximity
 
 Direct from [03-mana-system.md](03-mana-system.md): **0.85 / 1.00 / 1.10 / 1.25** by aura, phase, and affinity.

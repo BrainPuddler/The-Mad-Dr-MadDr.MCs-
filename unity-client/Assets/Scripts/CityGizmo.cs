@@ -52,6 +52,27 @@ public class CityGizmo : MonoBehaviour
         var origin = transform.position;
         var hexSize = (float)HexCoord.HexMeters;
 
+        Gizmos.color = new Color(0.15f, 0.3f, 0.9f, 0.85f); // water: river + ponds
+        foreach (var water in _model.Water)
+        {
+            Gizmos.DrawCube(WorldOf(water, origin, -0.4f), new Vector3(hexSize * 0.95f, 0.8f, hexSize * 0.95f));
+        }
+
+        Gizmos.color = new Color(0.35f, 0.55f, 0.25f, 0.9f); // ridges: high ground (+0.10 posMod)
+        foreach (var ridge in _model.Ridges)
+        {
+            Gizmos.DrawCube(WorldOf(ridge, origin, 1.5f), new Vector3(hexSize * 0.9f, 3f, hexSize * 0.9f));
+        }
+
+        Gizmos.color = new Color(0.5f, 0.33f, 0.15f, 1f); // bridge decks: the destructible choke points
+        foreach (var bridge in _model.Bridges)
+        {
+            foreach (var hex in bridge.Footprint)
+            {
+                Gizmos.DrawCube(WorldOf(hex, origin, 0.6f), new Vector3(hexSize * 0.95f, 1.2f, hexSize * 0.95f));
+            }
+        }
+
         Gizmos.color = new Color(0.15f, 0.15f, 0.15f, 0.9f);
         foreach (var road in _model.Roads)
         {

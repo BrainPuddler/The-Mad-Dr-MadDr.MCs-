@@ -15,6 +15,10 @@ public class CityGeneratorTests
         sb.Append(m.Seed).Append('|').Append(m.PresetName).Append('|');
         foreach (var r in m.Roads) sb.Append(r.Q).Append(',').Append(r.R).Append(';');
         sb.Append('|');
+        foreach (var w in m.Water) sb.Append(w.Q).Append(',').Append(w.R).Append(';');
+        sb.Append('|');
+        foreach (var g in m.Ridges) sb.Append(g.Q).Append(',').Append(g.R).Append(';');
+        sb.Append('|');
         foreach (var b in m.Buildings)
         {
             sb.Append((int)b.Tier).Append(':').Append(b.Archetype).Append(':');
@@ -24,6 +28,12 @@ public class CityGeneratorTests
         sb.Append('|');
         foreach (var l in m.Landmarks)
             sb.Append((int)l.Kind).Append(':').Append(l.Archetype).Append(':').Append(l.Site.Q).Append(',').Append(l.Site.R).Append(';');
+        sb.Append('|');
+        foreach (var br in m.Bridges)
+        {
+            foreach (var h in br.Footprint) sb.Append(h.Q).Append(',').Append(h.R).Append(' ');
+            sb.Append(';');
+        }
         return sb.ToString();
     }
 
@@ -66,6 +76,7 @@ public class CityGeneratorTests
                 region.Add(HexCoord.FromOffset(col, row));
 
         var roads = new HashSet<HexCoord>(m.Roads);
+        var water = new HashSet<HexCoord>(m.Water);
         var taken = new HashSet<HexCoord>();
         foreach (var b in m.Buildings)
         {
@@ -74,6 +85,7 @@ public class CityGeneratorTests
             {
                 Assert.Contains(h, region);
                 Assert.DoesNotContain(h, roads);
+                Assert.DoesNotContain(h, water);
                 Assert.True(taken.Add(h), $"hex {h} used by two buildings");
             }
         }

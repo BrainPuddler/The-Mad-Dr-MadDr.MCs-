@@ -4,22 +4,30 @@ using System.Collections.Generic;
 namespace MadDr.CityGen
 {
     /// <summary>
-    /// The procedural city generator, docs/18 SS2: seeded road-network
-    /// growth, block subdivision, landmark allocation (emitter XOR
-    /// Community Hub per node), and building-footprint placement -- all on
-    /// the hex index, in integers, so the result is a pure function of
-    /// (seed, preset): both match clients generate the identical city from
-    /// the seed alone and the city itself is never transmitted.
+    /// The procedural city generator, docs/18 SS2 + terrain: seeded
+    /// terrain (river, ponds, hills), road-network growth, block
+    /// subdivision, landmark allocation (emitter XOR Community Hub per
+    /// node), and building-footprint placement -- all on the hex index,
+    /// in integers, so the result is a pure function of (seed, preset):
+    /// both match clients generate the identical city from the seed
+    /// alone and the city itself is never transmitted.
+    ///
+    /// Terrain is the natural-choke-point layer: the river severs the
+    /// map into two banks joined only by a handful of destructible
+    /// bridges (ground units must funnel; amphibious/airborne plans
+    /// don't care); ponds are local walls you flow around; hills are
+    /// the existing docs/04 high-ground ridge feature, placed.
     ///
     /// Determinism rules obeyed throughout (same discipline as
-    /// genome-core): the only randomness is the seeded Rng passed through;
-    /// no wall-clock, no System.Random, and no iteration of hash
-    /// containers ever affects output or RNG draw order -- every loop that
-    /// matters walks an explicitly (R, Q)-sorted list.
+    /// genome-core): the only randomness is the seeded Rng passed
+    /// through; no wall-clock, no System.Random, and no iteration of
+    /// hash containers ever affects output or RNG draw order -- every
+    /// loop that matters walks an explicitly (R, Q)-sorted list, and
+    /// terrain draws happen in one fixed sequence (river, ponds, hills)
+    /// before any road or building draw.
     ///
-    /// The skin pass and prop/dressing pass from docs/18 SS2's pipeline are
-    /// deliberately absent: those consume this model renderer-side using
-    /// the preset's art kits. This class is geometry and allocation only.
+    /// The skin pass and prop/dressing pass from docs/18 SS2's pipeline
+    /// are deliberately absent: those consume this model renderer-side.
     /// </summary>
     public static class CityGenerator
     {
@@ -30,37 +38,267 @@ namespace MadDr.CityGen
             var height = preset.HeightHexes;
             var center = HexCoord.FromOffset(width / 2, height / 2);
 
-            // -- 1. region + roads (pattern is pure geometry, no RNG) ----
+            // -- 0. region ----------------------------------------------
             var region = new HashSet<HexCoord>();
-            var roads = new HashSet<HexCoord>();
+            for (var row = 0; row < height; row++)
+                for (var col = 0; col < width; col++)
+                    region.Add(HexCoord.FromOffset(col, row));
+
+            // -- 1. terrain (fixed draw order: river, ponds, hills) ------
+            var riverWater = CarveRiver(preset, rng);
+            var pondWater = CarvePonds(preset, rng, region, center, riverWater);
+            var allWater = new HashSet<HexCoord>(riverWater);
+            allWater.UnionWith(pondWater);
+            var ridgeCandidates = RaiseHills(preset, rng, region, center, allWater);
+
+            // -- 2. road geometry (pure pattern, ignores water) ----------
+            var roadGeom = new HashSet<HexCoord>();
             for (var row = 0; row < height; row++)
             {
                 for (var col = 0; col < width; col++)
                 {
                     var hex = HexCoord.FromOffset(col, row);
-                    region.Add(hex);
-                    if (IsRoad(preset, col, row, hex, center)) roads.Add(hex);
+                    if (IsRoad(preset, col, row, hex, center)) roadGeom.Add(hex);
                 }
             }
 
-            // -- 2. blocks: connected components of the non-road field ---
-            var blocks = FindBlocks(region, roads, width, height);
+            // -- 3. bridges: where roads meet the river ------------------
+            var bridges = ChooseBridges(preset, roadGeom, riverWater);
+            var bridgeHexes = new HashSet<HexCoord>();
+            foreach (var b in bridges)
+                foreach (var h in b.Footprint) bridgeHexes.Add(h);
 
-            // -- 3. landmarks: emitter XOR Community Hub per node --------
+            // Drowned road segments vanish; bridge decks survive as road.
+            var roadSet = new HashSet<HexCoord>();
+            foreach (var h in roadGeom)
+                if (!allWater.Contains(h)) roadSet.Add(h);
+            roadSet.UnionWith(bridgeHexes);
+
+            // Ridges never coincide with roads or water.
+            var ridgeSet = new HashSet<HexCoord>();
+            foreach (var h in ridgeCandidates)
+                if (!roadSet.Contains(h)) ridgeSet.Add(h);
+
+            // -- 4. blocks: connected components of open land ------------
+            var blocked = new HashSet<HexCoord>(roadSet);
+            blocked.UnionWith(allWater);
+            var blocks = FindBlocks(region, blocked, width, height);
+
+            // -- 5. landmarks + buildings --------------------------------
             var occupied = new HashSet<HexCoord>();
             var landmarks = new List<Landmark>();
             var buildings = new List<Building>();
             PlaceLandmarks(preset, center, blocks, occupied, landmarks, buildings);
-
-            // -- 4. ordinary buildings fill the remaining block space ----
             PlaceBuildings(preset, rng, blocks, occupied, buildings);
 
-            var roadList = new List<HexCoord>(roads);
+            // -- 6. model (all lists sorted for element-wise identity) ---
+            var waterList = new List<HexCoord>();
+            foreach (var h in allWater)
+                if (!bridgeHexes.Contains(h)) waterList.Add(h);
+            waterList.Sort(CompareRQ);
+
+            var roadList = new List<HexCoord>(roadSet);
             roadList.Sort(CompareRQ);
-            return new CityModel(seed, preset.Name, width, height, roadList, buildings, landmarks);
+
+            var ridgeList = new List<HexCoord>(ridgeSet);
+            ridgeList.Sort(CompareRQ);
+
+            return new CityModel(seed, preset.Name, width, height,
+                roadList, waterList, ridgeList, buildings, landmarks, bridges);
         }
 
-        // ---- roads ----------------------------------------------------
+        // ---- terrain ----------------------------------------------------
+
+        /// <summary>A horizontal river band drifting across the full map
+        /// width, confined to the upper or lower half (RNG-chosen) so it
+        /// never swallows the map center -- the plaza block, the
+        /// MainStreet arterial, and the landmark-rich middle stay dry.
+        /// Guaranteed to touch both the left and right map edges, which
+        /// is what makes it a full partition into two banks.</summary>
+        private static HashSet<HexCoord> CarveRiver(CityPreset preset, Rng rng)
+        {
+            var water = new HashSet<HexCoord>();
+            var w = preset.RiverWidthHexes;
+            if (w <= 0) return water;
+
+            var height = preset.HeightHexes;
+            const int edgeMargin = 3;   // banks never pinch to nothing
+            const int centerMargin = 4; // keep off the center row
+
+            var lowerHalf = rng.Bool();
+            int lo, hi; // bounds for the band's top row
+            if (lowerHalf)
+            {
+                lo = height / 2 + centerMargin;
+                hi = height - edgeMargin - w;
+            }
+            else
+            {
+                lo = edgeMargin;
+                hi = height / 2 - centerMargin - w;
+            }
+            if (hi < lo) hi = lo;
+
+            var row = lo + rng.IntRange(hi - lo + 1);
+            var prevRow = row;
+            for (var col = 0; col < preset.WidthHexes; col++)
+            {
+                // Staircase fill: span from the previous column's row to
+                // this one's, sealing the drift seam. A straight width-1
+                // row is already impermeable on a hex grid (offset rows 2
+                // apart are never adjacent), but at every DRIFT step the
+                // two banks touch diagonally -- without this fill, ground
+                // units leak across the "river" at each bend, and the
+                // choke-point property silently dies. Found by the
+                // connectivity test, kept as a fill rather than a wider
+                // river because it only pays the extra hex at bends.
+                var top = Math.Min(prevRow, row);
+                var bottom = Math.Max(prevRow, row) + w - 1;
+                for (var k = top; k <= bottom; k++) water.Add(HexCoord.FromOffset(col, k));
+
+                prevRow = row;
+                row += rng.IntRange(3) - 1; // drift -1 / 0 / +1
+                if (row < lo) row = lo;
+                if (row > hi) row = hi;
+            }
+            return water;
+        }
+
+        /// <summary>Pond blobs: local impassable obstacles. Kept at least
+        /// 4 hexes clear of the river (so combined water can never pinch
+        /// a bank shut), 5 hexes off the map edge (so a pond can never
+        /// isolate a corner pocket), and off the center (plaza).</summary>
+        private static HashSet<HexCoord> CarvePonds(
+            CityPreset preset, Rng rng, HashSet<HexCoord> region, HexCoord center,
+            HashSet<HexCoord> riverWater)
+        {
+            var ponds = new HashSet<HexCoord>();
+            for (var i = 0; i < preset.PondCount; i++)
+            {
+                for (var attempt = 0; attempt < 12; attempt++)
+                {
+                    var col = 5 + rng.IntRange(Math.Max(1, preset.WidthHexes - 10));
+                    var row = 5 + rng.IntRange(Math.Max(1, preset.HeightHexes - 10));
+                    var radius = 1 + rng.IntRange(2); // 1..2
+                    var hex = HexCoord.FromOffset(col, row);
+
+                    if (hex.DistanceTo(center) < 8 + radius) continue;
+
+                    var tooClose = false;
+                    foreach (var probe in hex.Range(radius + 4))
+                    {
+                        if (riverWater.Contains(probe) || ponds.Contains(probe)) { tooClose = true; break; }
+                    }
+                    if (tooClose) continue;
+
+                    foreach (var h in hex.Range(radius))
+                        if (region.Contains(h)) ponds.Add(h);
+                    break;
+                }
+            }
+            return ponds;
+        }
+
+        /// <summary>Hill blobs of ridge hexes -- the docs/02/04 high-ground
+        /// feature (+0.10 posMod, winged fly over), placed on dry land.</summary>
+        private static HashSet<HexCoord> RaiseHills(
+            CityPreset preset, Rng rng, HashSet<HexCoord> region, HexCoord center,
+            HashSet<HexCoord> water)
+        {
+            var ridges = new HashSet<HexCoord>();
+            for (var i = 0; i < preset.HillCount; i++)
+            {
+                for (var attempt = 0; attempt < 12; attempt++)
+                {
+                    var col = rng.IntRange(preset.WidthHexes);
+                    var row = rng.IntRange(preset.HeightHexes);
+                    var hex = HexCoord.FromOffset(col, row);
+                    if (water.Contains(hex)) continue;
+                    if (hex.DistanceTo(center) < 4) continue;
+
+                    foreach (var h in hex.Range(preset.HillRadiusHexes))
+                        if (region.Contains(h) && !water.Contains(h)) ridges.Add(h);
+                    break;
+                }
+            }
+            return ridges;
+        }
+
+        /// <summary>Bridges: connected runs of road-over-river, size-capped
+        /// (a road running ALONG inside the band is a drowned road, not a
+        /// map-wide bridge), spread evenly along the river, limited to the
+        /// preset's count -- scarcity is the choke point.</summary>
+        private static List<Bridge> ChooseBridges(
+            CityPreset preset, HashSet<HexCoord> roadGeom, HashSet<HexCoord> riverWater)
+        {
+            var bridges = new List<Bridge>();
+            if (preset.RiverWidthHexes <= 0 || preset.BridgeCount <= 0) return bridges;
+
+            // Candidate hexes, discovered in sorted order.
+            var candidates = new List<HexCoord>();
+            foreach (var h in roadGeom)
+                if (riverWater.Contains(h)) candidates.Add(h);
+            candidates.Sort(CompareRQ);
+
+            var candidateSet = new HashSet<HexCoord>(candidates);
+            var seen = new HashSet<HexCoord>();
+            var components = new List<List<HexCoord>>();
+            foreach (var seedHex in candidates)
+            {
+                if (seen.Contains(seedHex)) continue;
+                var component = new List<HexCoord>();
+                var queue = new Queue<HexCoord>();
+                queue.Enqueue(seedHex);
+                seen.Add(seedHex);
+                while (queue.Count > 0)
+                {
+                    var hex = queue.Dequeue();
+                    component.Add(hex);
+                    for (var e = 0; e < 6; e++)
+                    {
+                        var n = hex.Neighbor((HexEdge)e);
+                        if (!candidateSet.Contains(n) || seen.Contains(n)) continue;
+                        seen.Add(n);
+                        queue.Enqueue(n);
+                    }
+                }
+                // A real crossing is short (roughly the river's width); a
+                // long component is a road drowned along the channel.
+                if (component.Count <= preset.RiverWidthHexes * 3)
+                {
+                    component.Sort(CompareRQ);
+                    components.Add(component);
+                }
+            }
+            if (components.Count == 0) return bridges;
+
+            // Order candidates along the river (west to east), then pick
+            // BridgeCount of them at even spacing.
+            components.Sort((a, b) =>
+            {
+                var ca = ColOf(a[0]);
+                var cb = ColOf(b[0]);
+                if (ca != cb) return ca.CompareTo(cb);
+                return CompareRQ(a[0], b[0]);
+            });
+
+            var want = Math.Min(preset.BridgeCount, components.Count);
+            for (var i = 0; i < want; i++)
+            {
+                var idx = (int)(((i + 0.5) * components.Count) / want);
+                bridges.Add(new Bridge(components[idx]));
+            }
+            return bridges;
+        }
+
+        /// <summary>Offset column of a hex (odd-r) -- the along-river
+        /// coordinate for spacing bridges.</summary>
+        private static int ColOf(HexCoord hex)
+        {
+            return hex.Q + (hex.R - (hex.R & 1)) / 2;
+        }
+
+        // ---- roads ------------------------------------------------------
 
         private static bool IsRoad(CityPreset preset, int col, int row, HexCoord hex, HexCoord center)
         {
@@ -99,9 +337,9 @@ namespace MadDr.CityGen
         // ---- blocks -----------------------------------------------------
 
         private static List<List<HexCoord>> FindBlocks(
-            HashSet<HexCoord> region, HashSet<HexCoord> roads, int width, int height)
+            HashSet<HexCoord> region, HashSet<HexCoord> blocked, int width, int height)
         {
-            var seen = new HashSet<HexCoord>(roads);
+            var seen = new HashSet<HexCoord>(blocked);
             var blocks = new List<List<HexCoord>>();
 
             // Seed scan in offset order (row, then col) == (R, Q) order,

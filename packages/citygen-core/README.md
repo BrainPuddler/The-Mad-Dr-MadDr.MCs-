@@ -11,19 +11,20 @@ in its `Packages/manifest.json`) and builds scenes, prefabs, and
 MonoBehaviours on top — nothing here ever will.
 
 **This is a growing slice, not the full track.** Implemented so far: the
-hex grid index, the attack-arc model, the deterministic RNG, and the
-procedural city generator ([docs/18](../../docs/18-city-battlefields.md)
-§2 — geometry and allocation; the skin/prop passes are renderer-side by
-design). Not yet started: destructible-building runtime state
-([docs/18](../../docs/18-city-battlefields.md) §3 — the tier stat table
-exists, damage staging doesn't), the engagement-zone LOD manager (§5),
-or the Mutator-service HTTP client (§6) — see
+hex grid index, the attack-arc model, the deterministic RNG, the
+procedural city generator, and a terrain layer (river, ponds, hills,
+destructible bridges — [docs/18](../../docs/18-city-battlefields.md) §2 /
+docs/04's water rule — geometry and allocation; the skin/prop passes are
+renderer-side by design). Not yet started: destructible-building runtime
+state ([docs/18](../../docs/18-city-battlefields.md) §3 — the tier stat
+table exists, damage staging doesn't), the engagement-zone LOD manager
+(§5), or the Mutator-service HTTP client (§6) — see
 [docs/18](../../docs/18-city-battlefields.md)'s Open questions for
 sequencing (Q14: this whole track doesn't block Phases 1–3, and Phase 1's
 own combat sandbox doesn't exist in this repo yet either).
 
 ```
-dotnet test Tests~/CityGenCore.Tests.csproj   # build + 68 tests
+dotnet test Tests~/CityGenCore.Tests.csproj   # build + 86 tests
 ```
 
 | Module | Contents |
@@ -31,16 +32,17 @@ dotnet test Tests~/CityGenCore.Tests.csproj   # build + 68 tests
 | `src/HexCoord.cs` | Axial hex coordinates: neighbors, exact distance, `Ring`/`Range` (aura/radius queries), odd-r offset-rectangle conversion (`FromOffset`), and the world-space (meters) conversion at `HexCoord.HexMeters = 20` ([docs/18](../../docs/18-city-battlefields.md) §1) |
 | `src/Facing.cs` | The attack-arc model — `Facing.ArcOf(attacker, defender, defenderFacing)` classifies Front/Flank/Rear ([docs/04](../../docs/04-combat-model.md) posMod) |
 | `src/Rng.cs` | A **bit-exact port** of `packages/genome-core/src/rng.ts`'s sfc32 RNG — not just "also deterministic," but proven to produce the identical output sequence for the same seed as the TypeScript reference (golden values captured from a live node process, `Tests~/RngTests.cs`). What makes docs/18 §2's "city generation is a pure function of (seed, preset, size)" hold across languages. |
-| `src/CityGenerator.cs` | The docs/18 §2 pipeline: seeded road network (Grid / MainStreet / Radial per preset) → block subdivision (connected components) → landmark allocation (emitter **xor** Community Hub per node, docs/02's 6–10 emitter cap, hubs ~1 per 2 km²) → building-footprint placement with tier downgrade. Integer/hex math throughout; every loop that matters walks an (R,Q)-sorted list, so output order is part of the determinism contract |
-| `src/CityPreset.cs` | The three authored presets as **data** (docs/18 §1 table): `village` 1 km radial, `small_town` 2 km Main-Street grid, `big_city` 5 km dense grid — pitch, density, tier mix, landmark archetype rosters |
-| `src/CityModel.cs`, `src/BuildingTier.cs` | The output model (roads, buildings, landmarks with emitter-aura-3 / Collection-Station-5 radii) and docs/18 §3's building tier table (300/2 · 600/4 · 1500/6 · 3000/8), verbatim |
+| `src/CityGenerator.cs` | The docs/18 §2 pipeline: seeded terrain (river/ponds/hills) → road network (Grid / MainStreet / Radial per preset) → block subdivision (connected components) → landmark allocation (emitter **xor** Community Hub per node, docs/02's 6–10 emitter cap, hubs ~1 per 2 km²) → building-footprint placement with tier downgrade. Integer/hex math throughout; every loop that matters walks an (R,Q)-sorted list, so output order is part of the determinism contract. The river is proven, not just plausible: `Tests~/TerrainTests.cs` flood-fills the map with all bridges standing (one connected walk) and again with every bridge destroyed (banks disconnect) — across 10 seeds, not one lucky one |
+| `src/CityPreset.cs` | The three authored presets as **data** (docs/18 §1 table): `village` 1 km radial, `small_town` 2 km Main-Street grid, `big_city` 5 km dense grid — pitch, density, tier mix, landmark archetype rosters, river width, bridge/pond/hill counts |
+| `src/CityModel.cs`, `src/BuildingTier.cs` | The output model (roads incl. bridge decks, water, ridges, buildings, landmarks with emitter-aura-3 / Collection-Station-5 radii, destructible `Bridge`s at the Large tier) and docs/18 §3's building tier table (300/2 · 600/4 · 1500/6 · 3000/8), verbatim |
 | `package.json`, `src/MadDr.CityGen.asmdef` | The UPM face of the package: Unity compiles `src/` from source as assembly `MadDr.CityGen` (`noEngineReferences: true`) |
 
 Sample composition at seed 42 (the sanity anchor — regenerate any time,
-same numbers forever): `village` 22% road / 32% built, small-heavy
-(522/105/12), plaza + church emitters + 1 hospital hub; `small_town` 48%
-built, 6 emitters + 2 hubs; `big_city` 63% built, large-heavy
-(6076/9308/3615), 10 emitters + 6 hubs cycling all three hub archetypes.
+same numbers forever): `village` 30% built, small-heavy (495/99/11),
+2 emitters + 1 hub, 1-hex stream with 2 bridges; `small_town` 46% built,
+6 emitters + 2 hubs, 2-hex river with 2 bridges; `big_city` 62% built,
+large-heavy (5979/9084/3592), 10 emitters + 6 hubs, 3-hex river with 3
+bridges.
 
 ## Dual-toolchain layout (why the tilde folders)
 
@@ -95,5 +97,6 @@ needs, and neither package's tests depend on the other compiling.
 - Not the match sim: this defines the *space* combat runs in (docs/18
   realizes docs/02–04's abstract hex grid in continuous 3D); resolving a
   fight is still [docs/04](../../docs/04-combat-model.md)'s job, unchanged.
-- Not city content: no procedural generator, no building catalog yet —
-  see the "first slice" note above.
+- Not a building catalog: buildings are tier/footprint data, not the
+  actual authored houses/hospitals/cathedrals a renderer would draw —
+  that's the skin pass, deliberately out of scope here.
