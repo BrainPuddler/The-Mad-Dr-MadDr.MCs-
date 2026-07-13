@@ -13,17 +13,35 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   `citygen-core` package reference works at all, the second draws a full
   generated city (roads/buildings/water/ridges/bridges) in the Scene view
   while the Editor isn't playing.
-- **`Assets/Scripts/RuntimeCityBuilder.cs`** — the actual payoff: drop it
-  on an empty GameObject, hit **Play**, and watch your bred monsters wander
-  a real city, not a gizmo preview. Builds the city as real primitive
-  GameObjects, then fetches your Menagerie and spawns one wandering
-  placeholder body per creature. See "Seeing your monsters" below.
+- **`Assets/Scripts/RuntimeCityBuilder.cs`** — the playable battlefield hub:
+  drop it on an empty GameObject, hit **Play**. Builds the city as real
+  geometry, fetches your Menagerie, spawns commanded monsters and
+  Citizens, wires the camera/orders/HUD, and owns live building damage
+  (rubble opens paths) plus the session harvest wallet.
+- **`Assets/Scripts/MonsterAgent.cs`** / **`MonsterBody.cs`** — one commanded
+  monster. The agent does A* waypoint navigation over the hex grid
+  (around buildings — unless the order IS the building), target locking
+  (attack a building until Destroyed; chase and eat a Citizen), with
+  speeds from the creature's own physiology (`roster-client`'s tested
+  `Locomotion` port). The body is a genome-driven articulated model
+  (plan → silhouette and leg count, bulk → scale, hand family → weapon
+  shape, brain tier → head) with **distance-driven stepping: planted
+  feet are world-locked and never slide** — a leg only swings when the
+  body's real displacement pulls its hip far enough from the planted
+  foot, and body bob is phased by distance traveled, not a clock.
+- **`Assets/Scripts/Citizen.cs`** — docs/19 client-side cosmetic crowd:
+  wanders the streets, flees monsters, edible (docs/20 yields: Blood 2 /
+  Bones 1 / Brains 1 into the session wallet).
+- **`Assets/Scripts/WaypointCommander.cs`** / **`SimpleCameraRig.cs`** /
+  **`HudStatus.cs`** — mouse orders (left-click select · right-click:
+  ground = waypoint, Shift queues; citizen = eat; building = attack),
+  WASD/Q/E/scroll camera, and the on-screen wallet/orders/help readout.
+  Input goes through the NEW Input System exclusively — this project's
+  `activeInputHandler` is Input System only, so the legacy `Input` class
+  would throw at runtime.
 - **`Assets/Scripts/RosterFetcher.cs`** — the roster fetch RuntimeCityBuilder
   drives: live HTTP fetch from `mutator-service`, local-disk cache
   fallback if the service is unreachable. Usable standalone too.
-- **`Assets/Scripts/MonsterAvatar.cs`** — one spawned creature: a
-  capsule sized by `body.bulk`, colored by body plan, wandering between
-  passable hexes (crossing water if and only if it's amphibious).
 
 ## Seeing your monsters running around the city
 
