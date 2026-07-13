@@ -32,8 +32,11 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
 (`site/main.js`'s hardcoded `MUTATOR_URL`) uses. **No local server needed**
 for the common case:
 
-1. Open [The Lab](https://brainpuddler.github.io/The-Mad-Dr-MadDr.MCs-/),
-   spawn a creature, and put it in your Menagerie.
+1. Open [The Lab](https://brainpuddler.github.io/The-Mad-Dr-MadDr.MCs-/)
+   and spawn a creature. **Then click "⭐ Save to stable" on it** — the
+   Stable *is* your Menagerie for v0.1 (there's no separate "pick your
+   active roster" screen yet); spawning alone only saves to your
+   browser, never to the account-level roster `RosterFetcher` reads.
 2. In the Lab's header, click **"🆔 Account ID"** — copies this browser's
    account ID (docs/07's dev-mode `x-account-id` stand-in for real auth;
    there's no cross-device login yet, so this is literally how a monster

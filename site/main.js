@@ -597,16 +597,35 @@ function doDelete() {
   saveLocal(); logEntry(`🗑️ ${c.name} cleared from the bench.`); render();
 }
 function isSaved(id) { return (local.stable ?? []).includes(id); }
+
+// The Stable IS the account's Menagerie (docs/07: "the active loadout,"
+// <=12 creatures) -- there's no separate "pick which of your saved
+// creatures are active" UI yet, so saving to the Stable simply *is*
+// putting a creature on the battlefield-reachable roster. Most-recent
+// 12 win if the Stable grows past the server's cap, so newly-saved
+// creatures always make it in rather than silently failing the PUT.
+// Fire-and-forget: the local save/render never waits on this, so a
+// slow or failed sync doesn't freeze the UI -- it just logs.
+async function syncMenagerie() {
+  try {
+    await api("PUT", "/menagerie", { creatureIds: (local.stable ?? []).slice(-12) });
+  } catch (e) {
+    logEntry(`⚠️ Couldn't sync the battlefield roster: ${e.message}`);
+  }
+}
+
 function doSaveStable() {
   const c = selected(); if (!c) return;
   if (isSaved(c.id)) return;
   local.stable = [...(local.stable ?? []), c.id];
   saveLocal(); logEntry(`⭐ ${c.name} saved to the stable.`); render();
+  syncMenagerie();
 }
 function doUnsaveStable(id) {
   local.stable = (local.stable ?? []).filter(x => x !== id);
   saveLocal();
   if (local.view === "stable") renderStable(); else render();
+  syncMenagerie();
 }
 
 // ── view switching: Lab ⇄ Stable ──────────────────────────────────────────────
