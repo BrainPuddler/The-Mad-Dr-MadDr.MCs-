@@ -2205,29 +2205,12 @@ function armDrop(mb, S, side, armR, scale, o, pg = [], N = null, capLen = Infini
     [armR*1.3, armR*1.2, armR*1.25], armCol, 0.3, 0, 8, o.skinFn);
   tube(mb, [S, ex, elbow, wrist], [armR*1.25, armR*1.05, Math.max(armR*0.8, foreR*0.9), foreR],
     armCol, 0.3, 0, 9, 1, null, swing, armGait);
+  // Bicep bulge removed (creator, 2026-07): even synced and correctly
+  // shaped as an elongated tube along the shoulder->elbow axis, it never
+  // blended cleanly into the main arm tube's surface -- a visible seam,
+  // not a muscle. Gated behind girth > 0.45 the whole time it existed,
+  // so it was never on every arm to begin with.
   mb.setGait(armGait(1));             // hands and weapons swing with the wrist
-  if (girth > 0.45) {
-    // An elongated tube ALONG the shoulder->elbow direction -- a real
-    // bicep's long axis -- not a ball, and its own animFn/gaitFn sample
-    // the SAME global t the main arm tube above used across this exact
-    // stretch (t=1/3 at ex, t=2/3 at elbow), so every point on the bulge
-    // moves with the tube surface underneath it. The previous version
-    // left mb's gait at armGait(1) -- the WRIST's phase, set on the line
-    // above and never overridden here -- while drawing at the elbow's
-    // position: the bulge swung on the wrist's motion instead of its
-    // own, which is exactly "floats to the front and back of the arm,
-    // not locked in sync."
-    const armT = (frac) => 1/3 + frac * (2/3 - 1/3);
-    const armPt = (frac) => [
-      ex[0] + (elbow[0]-ex[0])*frac, ex[1] + (elbow[1]-ex[1])*frac, ex[2] + (elbow[2]-ex[2])*frac,
-    ];
-    const bicepR = armR * (0.75 + 0.5*girth) * 1.18;   // creator: "too small, make them bigger by 18%"
-    tube(mb, [armPt(0.20), armPt(0.45), armPt(0.70)], [bicepR*0.55, bicepR, bicepR*0.55],
-      o.skinFn ? o.skin : CHITIN, 0.3, 0, 8, 3, null,
-      (t) => swing(armT(0.20 + t*0.50)),
-      (t) => armGait(armT(0.20 + t*0.50)));
-    mb.setGait(armGait(1));           // restore: hands/weapons still swing with the wrist
-  }
   mb.setAnim(swing(1));
   return wrist;
 }
