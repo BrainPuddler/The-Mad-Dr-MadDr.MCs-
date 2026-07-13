@@ -47,6 +47,16 @@ export const FAMILIES = {
         bounds: bounds({ taper: [0.5, 1.0] }),
         invariants: "a fleshy arm ending in a glowing lance emitter with a charge bulb",
     },
+    laser_array: {
+        homolog: "hand", origin: "biotech",
+        bounds: bounds({ count: [0.4, 1.0], curl: [0.0, 0.3] }),
+        invariants: "a fleshy arm bearing a rigid cluster of narrow crystalline emitters firing needle-thin beams",
+    },
+    photon_blaster: {
+        homolog: "hand", origin: "biotech",
+        bounds: bounds({ girth: [0.4, 1.0], ornament: [0.3, 1.0] }),
+        invariants: "a fleshy arm ending in a broad bioluminescent maw that pulses with stored photon charge",
+    },
     chain_blade: {
         homolog: "hand", origin: "tech",
         bounds: bounds({ curl: [0.0, 0.25] }),

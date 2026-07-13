@@ -69,7 +69,7 @@ The alien hive is the inverted command experiment. The **Queen** is a mastermind
 
 The price of the song is the singer. **Decapitation shock −0.85**: kill the Queen and every drone collapses to frenzy *at once* — no rally, no succession, just a field of feral animals. The hive is the faction that turns the command system's headline tactic ([16](16-brains-behavior-command.md)) into its entire win condition: against aliens, *the Queen is the Vat*.
 
-Their bodies answer the brief — **a mix of technology and physical alien flesh**: chitin legs, compound eyes, antennae (organic families), carrying **biotech**-origin parts like the `plasma_lance` — grown machines. Biotech's breeding rule is the alien advantage and the alien horror in one line:
+Their bodies answer the brief — **a mix of technology and physical alien flesh**: chitin legs, compound eyes, antennae (organic families), carrying **biotech**-origin weapon parts — grown machines, all `hand`-homolog, differentiated by canalized bounds so the three read as distinct silhouettes rather than palette swaps: the `plasma_lance` (tapered single emitter, a lance with a charge bulb), the `laser_array` (a rigid cluster of narrow crystalline emitters, needle-thin beams), and the `photon_blaster` (a broad bioluminescent maw pulsing with stored charge). Biotech's breeding rule is the alien advantage and the alien horror in one line:
 
 > **Biotech breeds like flesh.** Where the human rifle is inert in the genome, the plasma lance mutates, blends, and crossbreeds. Alien weapons *evolve*. (And if a player's Mutator ever ingests an alien genome fragment — [06](06-mutator-design.md) discovery — that's the late-game content faucet: stitched horrors with grown guns.)
 

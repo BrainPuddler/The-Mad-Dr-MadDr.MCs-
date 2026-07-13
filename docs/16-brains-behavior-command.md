@@ -37,6 +37,8 @@ A commander can hold subordinates whose summed **cost ≤ capacity**. So a Maste
 
 ## Megabrain Augmentation closes the capacity gap
 
+**This is the doctors' mind control** — the faction-defining fiction for a Mastermind-tier build, not a separate ability bolted on. A doctor's monster doesn't hijack an *enemy's* mind mid-fight (no such mechanic exists, or is planned); the horror is quieter and stranger: grow the brain big enough, feed it 100 harvested Brains, and it doesn't just lead its own platoon — it *possesses* it, forty bodies moving as extensions of one skull. Command/Capacity/Radius (this section) are the actual mechanics; "mind control" is what a 40-strong platoon obeying a single swollen brain *looks like* on the battlefield. No new formula, no new open question — a naming/fiction note, logged as such.
+
 The formula above has a real ceiling, worth stating in numbers rather than leaving implicit: max base Capacity (Mastermind, `command=1`) is `4 × (0.4+0.8×1) = 4.8`. Min subordinate Cost (`size=1, will=0`) is `1 × 0.3 = 0.3`. Max headcount under the *unmodified* formula is `4.8 / 0.3 = 16` — nowhere near a 40-creature platoon. The gap: 40 subordinates at minimum cost need `40 × 0.3 = 12.0` total capacity, **7.2 more than the base formula can ever produce.**
 
 [06-mutator-design.md](06-mutator-design.md)'s **Megabrain Augmentation** closes it — 100 harvested Brains, spent once, for a flat capacity bonus:

@@ -63,7 +63,7 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | **Local city** | The mid engagement-zone LOD tier (~1 km): buildings static, Citizens run as client-side crowd only ([18](18-city-battlefields.md)) |
 | **Lumen Cycle** | The 4-minute Day→Dusk→Night→Dawn match clock driving emitter output and affinity buffs ([03](03-mana-system.md)) |
 | **Mana** | The *energy* currency, earned only from emitters; pays reanimation surges and abilities. Distinct from components (*material*) ([03](03-mana-system.md)) |
-| **Megabrain Augmentation** | A Mastermind-only, one-time Mutator operation: 100 harvested Brains for a flat +7.2 Capacity bonus ([06](06-mutator-design.md), [16](16-brains-behavior-command.md)) |
+| **Megabrain Augmentation** | A Mastermind-only, one-time Mutator operation: 100 harvested Brains for a flat +7.2 Capacity bonus — the doctors' "mind control" fiction: one swollen brain possessing a 40-strong platoon ([06](06-mutator-design.md), [16](16-brains-behavior-command.md)) |
 | **Menagerie** | The ≤12 active monster designs you can reanimate in a match ([02](02-gameplay-overview.md)) |
 | **Moon dial** | The always-public HUD clock showing the current Lumen phase and the 10-second transition warning |
 | **Mutate** | The one-parent Mutator operator: biased random mutation, steered by fed components ([06](06-mutator-design.md)) |

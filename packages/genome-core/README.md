@@ -18,7 +18,7 @@ npm test        # build + 16 property/golden tests
 | Module | Contents |
 | --- | --- |
 | `src/genome.ts` | The v2 schema: part alleles (6 shared axes), body genes (plan + 4 axes), brain genes (tier + 5 behavioral axes), slots, lineage |
-| `src/catalog.ts` | 16 part families × 4 homolog classes × 3 origins (organic / tech / biotech), 4 body plans, canalized expression — the contract shared with the renderer |
+| `src/catalog.ts` | 26 part families (22 selectable + 4 vestigial stumps) × 4 homolog classes × 3 origins (organic / tech / biotech), 9 body plans (`isAmphibious` for crab/serpentine), canalized expression — the contract shared with the renderer |
 | `src/rng.ts` | Deterministic seeded RNG (sfc32) — the canonical randomness; `Math.random` is never used |
 | `src/operators.ts` | Mutate / Splice / Graft with the full rule set: homolog grammar, origin rules (tech inert, biotech breeds), component-feeding bias, plan/tier jumps, lineage recording |
 | `src/validate.ts` | Server-side viability validation ("failed experiment", never silent clamping) |
