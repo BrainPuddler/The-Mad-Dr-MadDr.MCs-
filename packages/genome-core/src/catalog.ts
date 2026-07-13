@@ -178,10 +178,14 @@ export const STUMP_OF: Record<SlotName, string> = {
 /** Body plans. "tetrapod" is the continuous plan family (posture spans
  * biped -> monkey-type -> quadruped, docs/15); the rest are discrete.
  * ignoresSlots: slots a plan does not express (genes ride along -- the
- * atavism). */
+ * atavism).
+ * amphibious: the plan crosses water hexes (docs/04 water rule, docs/18
+ * terrain) -- a property of the PLAN, like ignoresSlots, not a gene:
+ * you breed a crab, you get a swimmer. Absent = ground-bound. */
 export interface BodyPlan {
   readonly invariants: string;
   readonly ignoresSlots: readonly SlotName[];
+  readonly amphibious?: boolean;
 }
 
 export const BODY_PLANS: Readonly<Record<string, BodyPlan>> = {
@@ -196,6 +200,7 @@ export const BODY_PLANS: Readonly<Record<string, BodyPlan>> = {
   serpentine: {
     invariants: "one long tapering body coiling along the ground, head at the fore",
     ignoresSlots: ["leg"],
+    amphibious: true, // the sea serpent: slides into rivers as easily as over land
   },
   winged: {
     invariants: "a small body slung between two membrane wings, standing on legs",
@@ -204,6 +209,7 @@ export const BODY_PLANS: Readonly<Record<string, BodyPlan>> = {
   crab: {
     invariants: "a wide low shell body on a sideways stance, claws held forward",
     ignoresSlots: [],
+    amphibious: true, // shoreline-native: water is its highway, not its wall
   },
   arachnid: {
     invariants: "a hunched two-part body low to the ground, crowded with legs",
@@ -243,6 +249,13 @@ export function originOf(family: string): Origin {
 
 export function isVestigial(family: string): boolean {
   return FAMILIES[family]?.vestigial === true;
+}
+
+/** Whether a body plan crosses water hexes (docs/04 water rule; docs/18
+ * terrain). Unknown plans are ground-bound rather than an error -- this
+ * is a movement query the match sim calls in a hot path, not validation. */
+export function isAmphibious(plan: string): boolean {
+  return BODY_PLANS[plan]?.amphibious === true;
 }
 
 /** Families fitting a slot, filtered by origin. Mutation family-jumps stay

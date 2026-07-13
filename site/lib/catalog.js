@@ -166,6 +166,7 @@ export const BODY_PLANS = {
     serpentine: {
         invariants: "one long tapering body coiling along the ground, head at the fore",
         ignoresSlots: ["leg"],
+        amphibious: true, // the sea serpent: slides into rivers as easily as over land
     },
     winged: {
         invariants: "a small body slung between two membrane wings, standing on legs",
@@ -174,6 +175,7 @@ export const BODY_PLANS = {
     crab: {
         invariants: "a wide low shell body on a sideways stance, claws held forward",
         ignoresSlots: [],
+        amphibious: true, // shoreline-native: water is its highway, not its wall
     },
     arachnid: {
         invariants: "a hunched two-part body low to the ground, crowded with legs",
@@ -210,6 +212,12 @@ export function originOf(family) {
 }
 export function isVestigial(family) {
     return FAMILIES[family]?.vestigial === true;
+}
+/** Whether a body plan crosses water hexes (docs/04 water rule; docs/18
+ * terrain). Unknown plans are ground-bound rather than an error -- this
+ * is a movement query the match sim calls in a hot path, not validation. */
+export function isAmphibious(plan) {
+    return BODY_PLANS[plan]?.amphibious === true;
 }
 /** Families fitting a slot, filtered by origin. Mutation family-jumps stay
  * within the allele's own origin; random generation defaults to organic --
