@@ -503,6 +503,24 @@ async function doReset() {
   setView("lab");
 }
 
+// Lets a player find their own accountId (docs/07's dev-mode x-account-id
+// stand-in) to paste into the Unity RosterClient component -- the only
+// way, today, to see the same Menagerie on the battlefield as in the
+// Lab. Clipboard API needs a secure context (HTTPS or localhost); falls
+// back to a selectable prompt() anywhere else so this never just fails
+// silently.
+async function doCopyAccountId() {
+  const id = local.accountId;
+  try {
+    await navigator.clipboard.writeText(id);
+    logEntry(`🆔 Account ID copied: ${id} — paste into Unity's RosterClient component to see these monsters on the battlefield.`);
+  } catch {
+    prompt("Copy this Account ID into Unity's RosterClient component:", id);
+    logEntry("🆔 Account ID shown (clipboard unavailable in this context).");
+  }
+  render();
+}
+
 // ── factions ──────────────────────────────────────────────────────────────────
 // Same Mutator service, three houses. Each gets its own lab skin so you
 // always know whose bench you're standing at (docs/17 origins).
@@ -1094,6 +1112,7 @@ function showStableDetail(id) {
 // \u2500\u2500 boot \u2500\u2500
 document.getElementById("btn-spawn").addEventListener("click", doSpawn);
 document.getElementById("btn-reset").addEventListener("click", doReset);
+document.getElementById("btn-account").addEventListener("click", doCopyAccountId);
 document.getElementById("nav-lab").addEventListener("click", () => setView("lab"));
 document.getElementById("nav-chop").addEventListener("click", () => setView("chop"));
 document.getElementById("nav-stable").addEventListener("click", () => setView("stable"));

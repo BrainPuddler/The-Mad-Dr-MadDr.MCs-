@@ -1,0 +1,11 @@
+<Project>
+  <!-- Redirect MSBuild outputs from bin/obj to bin~/obj~, same reason as
+       packages/citygen-core's copy of this file: Unity imports everything
+       in a local file: package folder except tilde-suffixed paths, so a
+       stray dotnet build output must never land where Unity could import
+       it next to the compiled sources. -->
+  <PropertyGroup>
+    <BaseOutputPath>$(MSBuildProjectDirectory)/bin~/</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildProjectDirectory)/obj~/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>

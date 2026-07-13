@@ -1,0 +1,12 @@
+# dotnet build artifacts. Redirected to bin~/obj~ by Directory.Build.props
+# (Unity's importer skips tilde-suffixed paths); listed here too as a
+# belt-and-suspenders for any tooling that ignores the props file.
+bin/
+obj/
+bin~/
+obj~/
+
+# The root .gitignore blanket-ignores *.csproj (Unity's auto-generated IDE
+# project files). Nothing under this package is Unity -- these ARE the
+# hand-authored source defining the package, not generated cruft.
+!*.csproj

@@ -1,0 +1,8 @@
+{
+  "name": "com.maddr.roster-client",
+  "version": "0.1.0",
+  "displayName": "MadDr Roster Client",
+  "description": "Engine-agnostic JSON parsing for packages/mutator-service's Menagerie/creature/roster response shapes (docs/07) -- a dependency-free JSON parser plus typed DTOs, tested against real captured server responses. No networking, no file I/O: the Unity client does the actual HTTP fetch and local-disk cache, using this package only to turn response bodies into typed data.",
+  "unity": "6000.0",
+  "author": { "name": "MadDr.MCs" }
+}

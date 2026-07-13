@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MadDr.RosterClient</RootNamespace>
+    <AssemblyName>MadDr.RosterClient</AssemblyName>
+    <!-- Zero I/O, zero UnityEngine reference; same discipline as
+         packages/citygen-core (see its README's C# 9 section, which
+         this mirrors exactly: LangVersion pinned, ImplicitUsings off,
+         because Unity's asmdef compiler caps at C# 9 and ignores this
+         TargetFramework entirely). This package parses the exact JSON
+         shapes packages/mutator-service returns (docs/07); the actual
+         HTTP calls and local-disk caching are Unity-side (UnityWebRequest,
+         Application.persistentDataPath); I/O belongs at the engine
+         boundary, not here. -->
+  </PropertyGroup>
+
+</Project>

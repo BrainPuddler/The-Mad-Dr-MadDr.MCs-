@@ -53,6 +53,8 @@ On a city battlefield, this budget applies **per engagement zone**, not per map 
 
 On a city battlefield ([18-city-battlefields.md](18-city-battlefields.md)), the same handshake payload also carries the **city seed, style preset, and size** — both clients generate the identical map from the seed alone during the same loading screen, so the city itself is never transmitted.
 
+**Not to be confused with:** `unity-client/`'s `RosterFetcher` (a dev-time single-account roster fetch straight from the Mutator service, with a local-disk cache fallback, so a bred monster can actually be *seen* wandering a generated city — [18](18-city-battlefields.md)'s implementation note). It reuses the same `GET /menagerie` / `GET /creature/:id` account-facing endpoints this handshake's step 2 conceptually mirrors, but it is a single client talking directly to the Mutator service for local testing, not a match server fetching both players' signed rosters. No match server exists in this repo yet to do the real thing.
+
 ## Matchmaking
 
 - **MMR (Elo-family) + power-band check**: the Menagerie's summed genome power budget ([06](06-mutator-design.md) brain budget) must fall within the opponent's band. Matchmaking and Mutator balance interlock through this single number — a deliberately simple first system.

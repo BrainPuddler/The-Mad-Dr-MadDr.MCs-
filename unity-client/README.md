@@ -8,35 +8,67 @@ template, with Unity's default Mobile/PC render-pipeline asset split
 [docs/08](../docs/08-creature-visualization.md)/[09](../docs/09-multiplayer-architecture.md)).
 Contents are still the stock template (SampleScene, TutorialInfo) plus:
 
-- **`Assets/Scripts/HexGridGizmo.cs`** — a Scene-view smoke test for the
-  `com.maddr.citygen-core` package reference: drop it on any GameObject
-  and it draws the docs/18 hex grid (1 hex = 20 m) plus the 5-hex
-  Collection Station radius as gizmos. If it compiles and draws, the
-  package wiring works.
+- **`Assets/Scripts/HexGridGizmo.cs`** / **`CityGizmo.cs`** — Scene-view-only
+  smoke tests (gizmos, not real GameObjects): the first proves the
+  `citygen-core` package reference works at all, the second draws a full
+  generated city (roads/buildings/water/ridges/bridges) in the Scene view
+  while the Editor isn't playing.
+- **`Assets/Scripts/RuntimeCityBuilder.cs`** — the actual payoff: drop it
+  on an empty GameObject, hit **Play**, and watch your bred monsters wander
+  a real city, not a gizmo preview. Builds the city as real primitive
+  GameObjects, then fetches your Menagerie and spawns one wandering
+  placeholder body per creature. See "Seeing your monsters" below.
+- **`Assets/Scripts/RosterFetcher.cs`** — the roster fetch RuntimeCityBuilder
+  drives: live HTTP fetch from `mutator-service`, local-disk cache
+  fallback if the service is unreachable. Usable standalone too.
+- **`Assets/Scripts/MonsterAvatar.cs`** — one spawned creature: a
+  capsule sized by `body.bulk`, colored by body plan, wandering between
+  passable hexes (crossing water if and only if it's amphibious).
 
-## The citygen-core package reference
+## Seeing your monsters running around the city
+
+1. Start the Mutator service: `cd packages/mutator-service && npm start`
+   (defaults to `:8787`, matching `RuntimeCityBuilder`'s/`RosterFetcher`'s
+   default `baseUrl`).
+2. Open [The Lab](../site/) (or use `curl`), spawn a creature, and put it
+   in your Menagerie.
+3. In the Lab's header, click **"🆔 Account ID"** — copies this browser's
+   account ID (docs/07's dev-mode `x-account-id` stand-in for real auth;
+   there's no cross-device login yet, so this is literally how a monster
+   gets from the Lab to the battlefield today).
+4. In Unity: empty GameObject → add `RuntimeCityBuilder` → paste that ID
+   into its **Account Id** field → **Play**. First run has nothing to
+   fall back to if the service isn't reachable; once one live fetch
+   succeeds, a local cache exists for offline runs after that.
+
+## The citygen-core and roster-client package references
 
 [`packages/citygen-core`](../packages/citygen-core/) (engine-agnostic hex
-grid + attack-arc math, docs/18 §1 / docs/04 posMod) is referenced in
-`Packages/manifest.json` as a local package:
+grid + attack-arc math, docs/18 §1 / docs/04 posMod) and
+[`packages/roster-client`](../packages/roster-client/) (dependency-free
+JSON parsing for `mutator-service`'s response shapes, docs/07) are both
+referenced in `Packages/manifest.json` as local packages:
 
 ```
-"com.maddr.citygen-core": "file:../../packages/citygen-core"
+"com.maddr.citygen-core": "file:../../packages/citygen-core",
+"com.maddr.roster-client": "file:../../packages/roster-client"
 ```
 
 Notes for whoever opens the Editor:
 
-- **First open after pulling this**: Unity resolves the package, compiles
-  `MadDr.CityGen` from source (the `.asmdef` in its `src/`), and
-  **generates `.meta` files inside `packages/citygen-core/`** — local
-  `file:` packages are mutable, so Unity metadata lands in the package
-  folder itself. **Commit those `.meta` files when they appear**; they're
-  how asset identities stay stable.
-- The package's xunit tests live in `Tests~/` and its dotnet build
-  outputs go to `bin~`/`obj~` — tilde-suffixed folders are invisible to
-  Unity's importer by convention, which is what keeps the dotnet and
-  Unity toolchains from tripping over each other. Run the tests with
-  `dotnet test Tests~/CityGenCore.Tests.csproj` from the package folder.
+- **First open after pulling this**: Unity resolves both packages,
+  compiles `MadDr.CityGen`/`MadDr.RosterClient` from source (each has its
+  own `.asmdef`), and **generates `.meta` files inside both package
+  folders** — local `file:` packages are mutable, so Unity metadata lands
+  in the package folder itself. **Commit those `.meta` files when they
+  appear**; they're how asset identities stay stable.
+- Both packages' xunit tests live in their own `Tests~/` and their dotnet
+  build outputs go to `bin~`/`obj~` — tilde-suffixed folders are invisible
+  to Unity's importer by convention, which is what keeps the dotnet and
+  Unity toolchains from tripping over each other. Run citygen-core's with
+  `dotnet test Tests~/CityGenCore.Tests.csproj` and roster-client's with
+  `dotnet test Tests~/RosterClient.Tests.csproj`, each from its own
+  package folder.
 
 ## Two Editor settings to verify before heavy work
 
