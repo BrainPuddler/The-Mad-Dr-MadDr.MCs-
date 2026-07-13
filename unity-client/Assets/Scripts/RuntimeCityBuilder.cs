@@ -29,8 +29,8 @@ public class RuntimeCityBuilder : MonoBehaviour
     public PresetChoice preset = PresetChoice.Village;
 
     [Header("Roster")]
-    [Tooltip("Where mutator-service is running.")]
-    public string baseUrl = "http://localhost:8787";
+    [Tooltip("Where mutator-service is running. Defaults to the same deployed instance the Lab website uses -- see RosterFetcher's tooltip for the localhost alternative.")]
+    public string baseUrl = "https://maddr-mutator.onrender.com";
 
     [Tooltip("Paste this from the Lab website's \"Account ID\" header button.")]
     public string accountId = "";

@@ -33,8 +33,8 @@ using UnityEngine.Networking;
 /// </summary>
 public class RosterFetcher : MonoBehaviour
 {
-    [Tooltip("Where mutator-service is running. Matches `npm start` in packages/mutator-service.")]
-    public string baseUrl = "http://localhost:8787";
+    [Tooltip("Where mutator-service is running. Defaults to the same deployed instance the Lab website (site/main.js MUTATOR_URL) uses, so a creature spawned there is fetchable here with no local server needed. Point this at http://localhost:8787 instead only if you're also running `npm start` in packages/mutator-service locally -- and note the Lab website itself is hardcoded to the deployed URL, so a locally-run Lab still needs its own MUTATOR_URL edit to match.")]
+    public string baseUrl = "https://maddr-mutator.onrender.com";
 
     [Tooltip("Paste this from the Lab website's new \"Account ID\" header button to see the same monsters here.")]
     public string accountId = "";

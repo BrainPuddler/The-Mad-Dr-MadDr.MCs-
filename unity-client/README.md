@@ -27,19 +27,46 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
 
 ## Seeing your monsters running around the city
 
-1. Start the Mutator service: `cd packages/mutator-service && npm start`
-   (defaults to `:8787`, matching `RuntimeCityBuilder`'s/`RosterFetcher`'s
-   default `baseUrl`).
-2. Open [The Lab](../site/) (or use `curl`), spawn a creature, and put it
-   in your Menagerie.
-3. In the Lab's header, click **"🆔 Account ID"** — copies this browser's
+`RuntimeCityBuilder`/`RosterFetcher` default to `https://maddr-mutator.onrender.com`
+— the same deployed instance [The Lab](https://brainpuddler.github.io/The-Mad-Dr-MadDr.MCs-/)
+(`site/main.js`'s hardcoded `MUTATOR_URL`) uses. **No local server needed**
+for the common case:
+
+1. Open [The Lab](https://brainpuddler.github.io/The-Mad-Dr-MadDr.MCs-/),
+   spawn a creature, and put it in your Menagerie.
+2. In the Lab's header, click **"🆔 Account ID"** — copies this browser's
    account ID (docs/07's dev-mode `x-account-id` stand-in for real auth;
    there's no cross-device login yet, so this is literally how a monster
    gets from the Lab to the battlefield today).
-4. In Unity: empty GameObject → add `RuntimeCityBuilder` → paste that ID
+3. In Unity: empty GameObject → add `RuntimeCityBuilder` → paste that ID
    into its **Account Id** field → **Play**. First run has nothing to
    fall back to if the service isn't reachable; once one live fetch
    succeeds, a local cache exists for offline runs after that.
+
+**Two gotchas found testing this against the real deployed service:**
+
+- **Cold starts.** Free-tier hosting spins the service down after
+  inactivity; the first request after a while can take 30-60 s to wake
+  it, longer than `RosterFetcher`'s 8 s default `timeoutSeconds`. If the
+  Console shows a fallback-to-cache warning on the first try, just hit
+  Play again a minute later.
+- **A failed live fetch falls back to whatever's cached, which can be
+  stale or empty** (e.g. an earlier test against a different `baseUrl`
+  that genuinely had zero creatures). If Console says "0 creatures, from
+  local cache," that 0 is old news, not necessarily today's answer --
+  delete `Application.persistentDataPath`'s `roster_cache_*.json` (or
+  just retry until a `(..., live)` fetch succeeds) before concluding the
+  Menagerie is actually empty.
+
+**Running against a local Mutator service instead** (e.g. testing your
+own unpushed service changes): `cd packages/genome-core && npm install
+&& npm run build`, then `cd ../mutator-service && npm install && npm run
+build && npm start` (defaults to `:8787`), and change both
+`RuntimeCityBuilder`'s and `RosterFetcher`'s **Base Url** fields to
+`http://localhost:8787`. Note the *Lab website itself* is hardcoded to
+the deployed URL (`site/main.js`'s `MUTATOR_URL`), so a creature spawned
+there won't exist on your local service unless you also edit that
+constant and serve `site/` locally.
 
 ## The citygen-core and roster-client package references
 
