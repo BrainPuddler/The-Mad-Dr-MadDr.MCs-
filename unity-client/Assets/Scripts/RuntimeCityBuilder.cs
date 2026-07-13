@@ -131,7 +131,7 @@ public class RuntimeCityBuilder : MonoBehaviour
 
     private static Material NewMaterial(Color color)
     {
-        var mat = new Material(Shader.Find("Standard"));
+        var mat = new Material(ShaderUtil.FindRenderableShader());
         mat.color = color;
         return mat;
     }

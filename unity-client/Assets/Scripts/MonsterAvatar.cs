@@ -51,7 +51,7 @@ public class MonsterAvatar : MonoBehaviour
         var renderer = GetComponent<Renderer>();
         if (renderer != null)
         {
-            var mat = new Material(Shader.Find("Standard"));
+            var mat = new Material(ShaderUtil.FindRenderableShader());
             mat.color = ColorForPlan(plan, creature.Id);
             renderer.material = mat;
         }
