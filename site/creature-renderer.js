@@ -753,7 +753,7 @@ function robotChest(mb, ch, h, o) {
   const prevTex = mb.tex;
   if (ch.up) {
     mb.setTex(TEX_NONE);
-    const y = ch.y + 0.02, z = ch.z;
+    const y = ch.y + 0.1, z = ch.z;
     // same recessed plate / dial / gauge needle / lamp row / rivet ring,
     // rotated to face +y; "up the panel" now runs along -z (toward the head)
     ellipsoid(mb, [0, y, z], [ch.rx*0.5, 0.12, ch.rx*0.42], sh(METAL, 0.55), 0.7, 0, 12);
@@ -789,8 +789,8 @@ function alienChest(mb, ch, h, o) {
   const prevTex = mb.tex;
   if (ch.up) {
     // the sac cluster + translucent plate lie on the carapace top
-    const y = ch.y;
-    ellipsoid(mb, [0, y + 0.02, ch.z], [ch.rx*0.46, 0.14, ch.rx*0.5], sh(o.skin, 1.05), 0.5, 0, 12, o.skinFn);
+    const y = ch.y + 0.1;
+    ellipsoid(mb, [0, y, ch.z], [ch.rx*0.46, 0.14, ch.rx*0.5], sh(o.skin, 1.05), 0.5, 0, 12, o.skinFn);
     mb.setTex(TEX_NONE);
     const sacsUp = [[0,0.15],[ -0.24,-0.1],[0.24,-0.1],[0,-0.32]];
     for (const [sx, sz] of sacsUp) {
@@ -1443,8 +1443,12 @@ function planCrab(mb, o) {
   lathe(mb, levels, o.skin, 0.3, 0, 20, o.skinFn);
   // identity disk rides ON the carapace (a crab's back is its only
   // billboard), not at the shell's front edge where it crowded in under
-  // the fused head -- `up: true` flips the deco to face the sky
-  if (o.chestDeco) o.chestDeco(mb, { y: y0 + h*0.90, x: 0, z: -0.06*D, rx: W*0.55, rz: D*0.55, up: true }, h, o);
+  // the fused head -- `up: true` flips the deco to face the sky.
+  // Anchor Y must clear the shell's actual peak (the last `levels` entry,
+  // y0+h) -- 0.90h sat BELOW that apex and read as sunk into the dome;
+  // 1.05h sits clearly above it, mounted on top like a coin on a dome,
+  // not embedded in it.
+  if (o.chestDeco) o.chestDeco(mb, { y: y0 + h*1.05, x: 0, z: -0.08*D, rx: W*0.42, rz: D*0.42, up: true }, h, o);
   mb.setGait(GAIT0);
 
   // no true neck: the head fuses low and forward onto the shell edge
