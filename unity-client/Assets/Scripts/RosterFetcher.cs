@@ -109,6 +109,30 @@ public class RosterFetcher : MonoBehaviour
             }
         }
 
+        // A successful-but-EMPTY live roster must not clobber a good
+        // cache: the deployed store is in-memory and wipes on every
+        // service deploy (real persistence is docs/07's known next
+        // brick), so "server says 0, cache says N>0" today almost
+        // always means "the store was wiped since you stabled them,"
+        // not "you deleted your monsters." Fall back to the cache,
+        // loudly, and leave it intact -- the original code overwrote
+        // the backup with emptiness at exactly the moment it was
+        // needed. If the roster is GENUINELY empty (creature deleted in
+        // the Lab), re-stabling or clearing the cache file resolves it.
+        if (creatures.Count == 0)
+        {
+            var existing = ReadCache();
+            if (existing != null && existing.Creatures.Length > 0)
+            {
+                Debug.LogWarning("RosterFetcher: live roster is EMPTY but a non-empty local cache exists "
+                    + "(fetched " + existing.FetchedAtUtc + "). The deployed store is in-memory and wipes "
+                    + "on every service deploy -- using the cached roster. Re-save your creatures to the "
+                    + "stable in the Lab to restore them server-side.");
+                OnRosterReady?.Invoke(existing, true);
+                yield break;
+            }
+        }
+
         var cache = new RosterCache(accountId, menagerie, creatures.ToArray(), DateTime.UtcNow.ToString("o"));
         WriteCache(cache);
         OnRosterReady?.Invoke(cache, false);

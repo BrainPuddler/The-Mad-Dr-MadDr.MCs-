@@ -4,6 +4,18 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
+    # Only redeploy when the SERVICE actually changed. The store is
+    # in-memory (Postgres is the known next brick, docs/07), so every
+    # deploy wipes all creatures -- and without this filter, every push
+    # to main (Unity scripts, the Lab site, design docs) triggered a
+    # deploy and silently wiped whatever the creator had just spawned
+    # for testing. These paths mirror exactly what the Dockerfile COPYs.
+    buildFilter:
+      paths:
+        - packages/genome-core/**
+        - packages/mutator-service/**
+        - Dockerfile
+        - render.yaml
     envVars:
       - key: NODE_ENV
         value: production
