@@ -47,6 +47,7 @@ public class MonsterBody : MonoBehaviour
     private float _standHeight = 1.2f;
     private float _distTraveled;
     private float _hoverPhase;
+    private int _lastSwungGroup = 1; // so the very first step comes from group 0
 
     /// <summary>Fixed at Build time from the plan's leg count -- NOT
     /// derived from _legs.Count on the fly: the first version did that,
@@ -359,60 +360,126 @@ public class MonsterBody : MonoBehaviour
             return;
         }
 
+        // longer strides at higher speed (animals do this too) --
+        // reduces cadence pressure so alternation can keep up at a run
+        var strideEff = _stride * Mathf.Clamp(speed / 3f, 1f, 1.6f);
+
         // distance-phased body bob: peaks line up with footfalls
         if (_torso != null)
         {
-            var bobPhase = _distTraveled / Mathf.Max(_stride, 0.01f) * Mathf.PI * 2f;
+            var bobPhase = _distTraveled / Mathf.Max(strideEff, 0.01f) * Mathf.PI * 2f;
             _torso.localPosition = new Vector3(0f, BodyHeight + Mathf.Sin(bobPhase) * _legLen * 0.045f, 0f);
         }
 
         var dir = speed > 0.05f ? new Vector3(velocity.x, 0f, velocity.z) / speed : Vector3.zero;
-        var swingDur = _stride / Mathf.Max(speed, 0.8f) * 0.55f;
+        var swingDur = strideEff / Mathf.Max(speed, 0.8f) * 0.55f;
+        var trigger = strideEff * 0.5f;
 
-        // whose turn: only one alternation group may be airborne at once
-        var airborneGroup = -1;
-        foreach (var leg in _legs)
-            if (leg.Swinging) { airborneGroup = leg.Group; break; }
-
+        // -- pass 1: advance airborne swings; note whether any leg is up
+        var anyAirborne = false;
         foreach (var leg in _legs)
         {
-            var hipW = transform.TransformPoint(leg.HipLocal);
-            var restW = new Vector3(hipW.x, 0f, hipW.z);
-
-            if (leg.Swinging)
+            if (!leg.Swinging) continue;
+            leg.SwingT += dt / Mathf.Max(swingDur, 0.05f);
+            if (leg.SwingT >= 1f)
             {
-                leg.SwingT += dt / Mathf.Max(swingDur, 0.05f);
-                if (leg.SwingT >= 1f)
-                {
-                    leg.Swinging = false;
-                    leg.FootWorld = leg.SwingTo;   // plants EXACTLY at the target -- world-locked from here
-                }
-                else
-                {
-                    var t = leg.SwingT;
-                    var eased = t * t * (3f - 2f * t);
-                    var pos = Vector3.Lerp(leg.SwingFrom, leg.SwingTo, eased);
-                    pos.y = Mathf.Sin(t * Mathf.PI) * _stride * 0.22f;
-                    leg.FootWorld = pos;
-                }
+                leg.Swinging = false;
+                leg.FootWorld = leg.SwingTo;   // plants EXACTLY at the target -- world-locked from here
             }
-            else if (speed > 0.05f)
+            else
             {
-                // the no-skate trigger: only actual body displacement,
-                // measured hip-to-planted-foot, can start a step
-                var strain = restW + dir * (_stride * 0.2f) - leg.FootWorld;
-                var mayStep = airborneGroup == -1 || airborneGroup == leg.Group;
-                if (mayStep && strain.sqrMagnitude > _stride * 0.5f * (_stride * 0.5f))
-                {
-                    leg.Swinging = true;
-                    leg.SwingT = 0f;
-                    leg.SwingFrom = leg.FootWorld;
-                    leg.SwingTo = restW + dir * (_stride * 0.55f);
-                    airborneGroup = leg.Group;
-                }
+                var t = leg.SwingT;
+                var eased = t * t * (3f - 2f * t);
+                var pos = Vector3.Lerp(leg.SwingFrom, leg.SwingTo, eased);
+                pos.y = Mathf.Sin(t * Mathf.PI) * strideEff * 0.22f;
+                leg.FootWorld = pos;
+                anyAirborne = true;
+            }
+        }
+
+        // -- pass 2: TURN-TAKING group scheduler. The first version let
+        // any leg of the currently-airborne group launch the moment one
+        // landed, so a fast group could ping-pong among its own legs and
+        // STARVE the other group entirely -- its feet stayed planted
+        // forever (obeying the no-skate rule) while the body walked away,
+        // stretching those legs across the path like gum. Now: when all
+        // legs are down, the NEXT step strictly prefers the other group,
+        // and every strained leg of the chosen group swings together (a
+        // real trot pair / tripod beat) instead of one at a time.
+        if (!anyAirborne && speed > 0.05f)
+        {
+            var maxStrain0 = 0f;
+            var maxStrain1 = 0f;
+            foreach (var leg in _legs)
+            {
+                var hip = transform.TransformPoint(leg.HipLocal);
+                var strainVec = new Vector3(hip.x, 0f, hip.z) + dir * (strideEff * 0.2f) - leg.FootWorld;
+                strainVec.y = 0f;
+                var s = strainVec.magnitude;
+                if (leg.Group == 0) maxStrain0 = Mathf.Max(maxStrain0, s);
+                else maxStrain1 = Mathf.Max(maxStrain1, s);
             }
 
-            RenderLeg(leg, hipW);
+            var other = 1 - _lastSwungGroup;
+            var pick = -1;
+            if ((other == 0 ? maxStrain0 : maxStrain1) > trigger) pick = other;
+            else if ((_lastSwungGroup == 0 ? maxStrain0 : maxStrain1) > trigger) pick = _lastSwungGroup;
+
+            if (pick >= 0)
+            {
+                foreach (var leg in _legs)
+                {
+                    if (leg.Group != pick) continue;
+                    var hip = transform.TransformPoint(leg.HipLocal);
+                    var restW = new Vector3(hip.x, 0f, hip.z);
+                    var strainVec = restW + dir * (strideEff * 0.2f) - leg.FootWorld;
+                    strainVec.y = 0f;
+                    // the whole group steps together once ANY of it is
+                    // past the trigger; individual legs join in from a
+                    // lower bar so pairs land in unison
+                    if (strainVec.magnitude > trigger * 0.6f)
+                    {
+                        leg.Swinging = true;
+                        leg.SwingT = 0f;
+                        leg.SwingFrom = leg.FootWorld;
+                        leg.SwingTo = restW + dir * (strideEff * 0.55f);
+                    }
+                }
+                _lastSwungGroup = pick;
+            }
+        }
+
+        // -- pass 3: fail-safes that make gum GEOMETRICALLY impossible,
+        // whatever else the scheduler does. A leg stretched past 1.5x
+        // stride force-launches regardless of whose turn it is; past 3x
+        // (a teleport, or a bug this code hasn't met yet) it snap-plants
+        // instantly and warns -- visible recovery beats invisible taffy.
+        foreach (var leg in _legs)
+        {
+            if (leg.Swinging) continue;
+            var hip = transform.TransformPoint(leg.HipLocal);
+            var restW = new Vector3(hip.x, 0f, hip.z);
+            var lag = restW - leg.FootWorld;
+            lag.y = 0f;
+            if (lag.magnitude > strideEff * 3f)
+            {
+                leg.FootWorld = restW + dir * (strideEff * 0.3f);
+                Debug.LogWarning("MonsterBody gait fail-safe: snap-replanted a foot " + lag.magnitude
+                    + "m behind its hip on " + name + " (stride " + strideEff + "m).");
+            }
+            else if (lag.magnitude > strideEff * 1.5f)
+            {
+                leg.Swinging = true;
+                leg.SwingT = 0f;
+                leg.SwingFrom = leg.FootWorld;
+                leg.SwingTo = restW + dir * (strideEff * 0.55f);
+            }
+        }
+
+        // -- pass 4: render everything at its final position this frame
+        foreach (var leg in _legs)
+        {
+            RenderLeg(leg, transform.TransformPoint(leg.HipLocal));
         }
     }
 
