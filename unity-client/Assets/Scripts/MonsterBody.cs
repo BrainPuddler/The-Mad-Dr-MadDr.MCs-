@@ -44,10 +44,17 @@ public class MonsterBody : MonoBehaviour
     private float _legLen = 1.2f;
     private float _stride = 1.8f;
     private float _bulkScale = 1f;
+    private float _standHeight = 1.2f;
     private float _distTraveled;
     private float _hoverPhase;
 
-    public float BodyHeight { get { return _legs.Count > 0 ? _legLen : _bulkScale * 0.9f; } }
+    /// <summary>Fixed at Build time from the plan's leg count -- NOT
+    /// derived from _legs.Count on the fly: the first version did that,
+    /// and every read that happened before BuildLegs() ran (the torso's
+    /// own height, the first leg's hip) silently got the legless
+    /// fallback value. Order-dependent getters bite exactly once,
+    /// at init, where they're hardest to see.</summary>
+    public float BodyHeight { get { return _standHeight; } }
 
     public void Build(StoredGenomeDto creature)
     {
@@ -58,6 +65,7 @@ public class MonsterBody : MonoBehaviour
         var legGene = g.Slots.Leg.Params.Length > 0 ? (float)g.Slots.Leg.Params[0] : 0.5f;
         _legLen = Mathf.Lerp(0.9f, 2.2f, legGene) * Mathf.Lerp(0.8f, 1.3f, bulk);
         _stride = _legLen * 1.5f;
+        _standHeight = Locomotion.LegsFor(_plan) > 0 ? _legLen : _bulkScale * 0.9f;
 
         var skin = SkinColor(g.Body.Plan, creature.Id);
 
@@ -69,12 +77,65 @@ public class MonsterBody : MonoBehaviour
         BuildHead(g, skin);
         BuildWeapon(g.Slots.Hand.Family, skin);
         BuildLegs(g, skin);
+        SnapFeetToGround();
 
         // one collider on the root for selection raycasts; the parts
         // themselves stay collider-free (StripCollider on every primitive)
         var box = gameObject.AddComponent<BoxCollider>();
         box.center = new Vector3(0f, BodyHeight, 0f);
         box.size = new Vector3(_bulkScale * 2.2f, BodyHeight * 2f, _bulkScale * 2.6f);
+    }
+
+    /// <summary>Re-plants every foot (and the serpentine tail trail)
+    /// directly under the body at its CURRENT world position. Must be
+    /// called after any teleport -- planted feet are world-locked by
+    /// design (the no-skate rule), which means a teleport leaves them
+    /// behind at the old location and every leg renders as a huge
+    /// stretched line back to it. That's exactly what the first live
+    /// test showed: Build() ran while the monster still stood at the
+    /// world origin, THEN the agent teleported it to its home hex,
+    /// and all feet stayed obediently planted at (0,0,0).</summary>
+    public void SnapFeetToGround()
+    {
+        foreach (var leg in _legs)
+        {
+            var hipW = transform.TransformPoint(leg.HipLocal);
+            // small per-group stagger so the first steps alternate
+            // naturally instead of every leg triggering at once
+            var stagger = (leg.Group == 0 ? 1f : -1f) * _stride * 0.15f;
+            leg.FootWorld = new Vector3(hipW.x, 0f, hipW.z) + transform.forward * stagger;
+            leg.FootWorld = new Vector3(leg.FootWorld.x, 0f, leg.FootWorld.z);
+            leg.Swinging = false;
+            leg.SwingT = 0f;
+            RenderLeg(leg, hipW);
+        }
+        for (var i = 0; i < _tailTrail.Count; i++)
+        {
+            var p = transform.TransformPoint(new Vector3(0f, BodyHeight * 0.7f, -(i + 1) * _bulkScale * 0.8f));
+            _tailTrail[i] = p;
+            _tailSegments[i].position = p;
+        }
+        WarnIfFeetImplausible();
+    }
+
+    /// <summary>Loud failure beats silent spaghetti: if any planted foot
+    /// ends up implausibly far from its hip, say so in the Console with
+    /// numbers, instead of rendering kilometer-long legs and leaving the
+    /// creator to diagnose it from a screenshot.</summary>
+    private void WarnIfFeetImplausible()
+    {
+        foreach (var leg in _legs)
+        {
+            var hipW = transform.TransformPoint(leg.HipLocal);
+            var d = leg.FootWorld - new Vector3(hipW.x, 0f, hipW.z);
+            d.y = 0f;
+            if (d.magnitude > _stride * 2f)
+            {
+                Debug.LogWarning("MonsterBody gait sanity: a foot is " + d.magnitude
+                    + "m from its hip (stride " + _stride + "m) on " + name
+                    + " -- was the body teleported without SnapFeetToGround()?");
+            }
+        }
     }
 
     // ---- construction ------------------------------------------------------

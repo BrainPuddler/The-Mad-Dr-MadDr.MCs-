@@ -73,10 +73,14 @@ public class MonsterAgent : MonoBehaviour
         var plan = creature.Genome.Body.Plan;
         _amphibious = plan == "crab" || plan == "serpentine";
 
+        // Position BEFORE building the body: Build() plants feet as
+        // world-locked positions at the CURRENT transform (the no-skate
+        // rule) -- the original order built at the world origin and then
+        // teleported here, leaving every foot planted back at (0,0,0)
+        // and every leg rendered as a hundreds-of-meters line to it.
+        transform.position = _builder.WorldOf(homeHex);
         _body = gameObject.AddComponent<MonsterBody>();
         _body.Build(creature);
-
-        transform.position = _builder.WorldOf(homeHex);
 
         // selection ring: a flat disc at the feet, toggled by the commander
         var ring = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
