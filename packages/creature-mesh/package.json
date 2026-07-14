@@ -1,0 +1,8 @@
+{
+  "name": "com.maddr.creature-mesh",
+  "version": "0.1.0",
+  "displayName": "MadDr Creature Mesh",
+  "description": "Engine-agnostic port of the Lab renderer's creature geometry (site/creature-renderer.js, docs/08): the same lathe/tube/torus/curved-cone primitives and the same genome-driven body math, emitting plain mesh data (positions/normals/triangles chunked by material) that the Unity client turns into Meshes. Pass 1 covers the full geometry engine plus the tetrapod plan at high fidelity; remaining plans migrate incrementally. Dual-toolchain like citygen-core: dotnet-tested via Tests~, Unity-compiled via the asmdef.",
+  "unity": "6000.0",
+  "author": { "name": "MadDr.MCs" }
+}

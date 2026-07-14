@@ -23,9 +23,14 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   (around buildings — unless the order IS the building), target locking
   (attack a building until Destroyed; chase and eat a Citizen), with
   speeds from the creature's own physiology (`roster-client`'s tested
-  `Locomotion` port). The body is a genome-driven articulated model
-  (plan → silhouette and leg count, bulk → scale, hand family → weapon
-  shape, brain tier → head) with **distance-driven stepping: planted
+  `Locomotion` port). **Tetrapods now regenerate the Lab website's
+  actual body from DNA** via `packages/creature-mesh` +
+  `LabMeshBuilder.cs` — torso, brass belt, franken face, brain-tier
+  heads (mastermind's brain under glass), tail, and every
+  hand/sensor/eye part family, same geometry the site renders; the
+  other 8 plans keep the simplified silhouette (plan → shape and leg
+  count, bulk → scale, hand family → weapon, brain tier → head) until
+  their port pass. All plans keep **distance-driven stepping: planted
   feet are world-locked and never slide** — a leg only swings when the
   body's real displacement pulls its hip far enough from the planted
   foot, and body bob is phased by distance traveled, not a clock.
@@ -89,34 +94,38 @@ the deployed URL (`site/main.js`'s `MUTATOR_URL`), so a creature spawned
 there won't exist on your local service unless you also edit that
 constant and serve `site/` locally.
 
-## The citygen-core and roster-client package references
+## The citygen-core, roster-client, and creature-mesh package references
 
 [`packages/citygen-core`](../packages/citygen-core/) (engine-agnostic hex
-grid + attack-arc math, docs/18 §1 / docs/04 posMod) and
+grid + attack-arc math, docs/18 §1 / docs/04 posMod),
 [`packages/roster-client`](../packages/roster-client/) (dependency-free
-JSON parsing for `mutator-service`'s response shapes, docs/07) are both
-referenced in `Packages/manifest.json` as local packages:
+JSON parsing for `mutator-service`'s response shapes, docs/07), and
+[`packages/creature-mesh`](../packages/creature-mesh/) (the docs/08 Lab
+renderer port that regenerates a creature's real body from its genome)
+are referenced in `Packages/manifest.json` as local packages:
 
 ```
 "com.maddr.citygen-core": "file:../../packages/citygen-core",
+"com.maddr.creature-mesh": "file:../../packages/creature-mesh",
 "com.maddr.roster-client": "file:../../packages/roster-client"
 ```
 
 Notes for whoever opens the Editor:
 
-- **First open after pulling this**: Unity resolves both packages,
-  compiles `MadDr.CityGen`/`MadDr.RosterClient` from source (each has its
-  own `.asmdef`), and **generates `.meta` files inside both package
-  folders** — local `file:` packages are mutable, so Unity metadata lands
-  in the package folder itself. **Commit those `.meta` files when they
-  appear**; they're how asset identities stay stable.
-- Both packages' xunit tests live in their own `Tests~/` and their dotnet
+- **First open after pulling this**: Unity resolves these packages,
+  compiles `MadDr.CityGen`/`MadDr.RosterClient`/`MadDr.CreatureMesh`
+  from source (each has its own `.asmdef`), and **generates `.meta`
+  files inside the package folders** — local `file:` packages are
+  mutable, so Unity metadata lands in the package folder itself.
+  **Commit those `.meta` files when they appear**; they're how asset
+  identities stay stable.
+- Each package's xunit tests live in its own `Tests~/` and its dotnet
   build outputs go to `bin~`/`obj~` — tilde-suffixed folders are invisible
   to Unity's importer by convention, which is what keeps the dotnet and
-  Unity toolchains from tripping over each other. Run citygen-core's with
-  `dotnet test Tests~/CityGenCore.Tests.csproj` and roster-client's with
-  `dotnet test Tests~/RosterClient.Tests.csproj`, each from its own
-  package folder.
+  Unity toolchains from tripping over each other. From each package
+  folder: `dotnet test Tests~/CityGenCore.Tests.csproj`,
+  `dotnet test Tests~/RosterClient.Tests.csproj`,
+  `dotnet test Tests~/CreatureMesh.Tests.csproj`.
 
 ## Two Editor settings to verify before heavy work
 

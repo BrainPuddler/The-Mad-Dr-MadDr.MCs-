@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MadDr.CreatureMesh</RootNamespace>
+    <AssemblyName>MadDr.CreatureMesh</AssemblyName>
+    <!-- Zero UnityEngine reference; same C# 9 / no-implicit-usings pin as
+         citygen-core (Unity's asmdef compiler constraint, see that
+         package's README). Consumes GenomeDto from roster-client. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../roster-client/src/RosterClient.csproj" />
+  </ItemGroup>
+
+</Project>

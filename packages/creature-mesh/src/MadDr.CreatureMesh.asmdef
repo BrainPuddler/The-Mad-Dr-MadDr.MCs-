@@ -1,0 +1,16 @@
+{
+    "name": "MadDr.CreatureMesh",
+    "rootNamespace": "MadDr.CreatureMesh",
+    "references": [
+        "MadDr.RosterClient"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

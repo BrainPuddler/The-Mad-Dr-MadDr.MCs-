@@ -1,13 +1,17 @@
 using System.Collections.Generic;
+using MadDr.CreatureMesh;
 using MadDr.RosterClient;
 using UnityEngine;
 
 /// <summary>
-/// A genome-driven articulated body with distance-driven stepping --
-/// replaces the wandering capsule. NOT the Lab renderer's full stitched
-/// B-movie look (that's ~3500 lines of custom WebGL; porting it is its
-/// own project, docs/08): this is the same genome shaping a simplified
-/// silhouette -- plan picks the body shape and leg count, bulk scales
+/// A genome-driven articulated body with distance-driven stepping.
+/// Tetrapods now regenerate the Lab renderer's actual stitched b-movie
+/// body from DNA (packages/creature-mesh, the docs/08 port): torso
+/// lathe, bolted brass belt, franken face, tier-ladder heads including
+/// the mastermind's brain under glass, and every hand/sensor/eye part
+/// family -- with the legs still owned by the gait rig below. The other
+/// eight plans keep the simplified silhouette until their own port
+/// pass: plan picks the body shape and leg count, bulk scales
 /// everything, the hand family renders as a recognizable weapon, brain
 /// tier sizes the head.
 ///
@@ -77,10 +81,27 @@ public class MonsterBody : MonoBehaviour
         _torso.SetParent(transform, false);
         _torso.localPosition = new Vector3(0f, BodyHeight, 0f);
 
-        BuildTorso(skin, bulk);
-        BuildHead(g, skin);
-        BuildWeapon(g.Slots.Hand.Family, skin);
-        BuildLegs(g, skin);
+        // the real Lab body, regenerated from DNA (tetrapod pass 1; other
+        // plans return null and keep the placeholder silhouette)
+        var lab = CreatureBuilder.Build(g);
+        if (lab != null && lab.Leg != null)
+        {
+            // lab units -> world units so the mesh's own leg length lands
+            // exactly on the rig's; the mesh is authored ground-up at y=0,
+            // so it hangs at -BodyHeight under the bobbing torso node and
+            // rides the same gait bob as everything else
+            var s = _legLen / (float)lab.Leg.Len;
+            LabMeshBuilder.Attach(lab, _torso, new Vector3(0f, -BodyHeight, 0f), s);
+            skin = new Color((float)lab.Skin.R / 255f, (float)lab.Skin.G / 255f, (float)lab.Skin.B / 255f);
+            BuildLegsFromSocket(lab, s, skin);
+        }
+        else
+        {
+            BuildTorso(skin, bulk);
+            BuildHead(g, skin);
+            BuildWeapon(g.Slots.Hand.Family, skin);
+            BuildLegs(g, skin);
+        }
         SnapFeetToGround();
 
         // one collider on the root for selection raycasts; the parts
@@ -322,9 +343,42 @@ public class MonsterBody : MonoBehaviour
             }
         }
 
-        // average horizontal hip distance from the body axis -- converts
-        // a yaw rate into the meters/sec the feet must cover to keep up
-        // with a turn (beetle turning: rotation is footwork too)
+        ComputeAvgHipRadius();
+    }
+
+    /// <summary>Legs for a Lab-mesh body: one mirrored pair mounted at the
+    /// socket frame the creature builder returned (the same hip position
+    /// the website's biped uses), scaled into world units. The mesh bakes
+    /// everything above the hips; the rig owns everything below so the
+    /// no-skate gait contract keeps holding.</summary>
+    private void BuildLegsFromSocket(CreatureMeshResult lab, float s, Color skin)
+    {
+        var p = lab.Leg.P;
+        var legCol = Shade(skin, 0.85f);
+        for (var side = -1; side <= 1; side += 2)
+        {
+            var leg = new Leg
+            {
+                HipLocal = new Vector3(side * (float)p.X * s, (float)p.Y * s, (float)p.Z * s),
+                Group = side > 0 ? 0 : 1,   // biped alternation
+                Upper = Segment(legCol),
+                Lower = Segment(Shade(legCol, 0.9f)),
+                Foot = Part(PrimitiveType.Sphere, transform, Vector3.zero,
+                    Vector3.one * 0.28f * _bulkScale, Shade(legCol, 0.7f)),
+            };
+            leg.FootWorld = transform.TransformPoint(new Vector3(leg.HipLocal.x, 0f, leg.HipLocal.z));
+            leg.FootWorld = new Vector3(leg.FootWorld.x, 0f, leg.FootWorld.z);
+            _legs.Add(leg);
+        }
+        ComputeAvgHipRadius();
+    }
+
+    /// <summary>Average horizontal hip distance from the body axis --
+    /// converts a yaw rate into the meters/sec the feet actually must
+    /// cover to keep up with a turn (beetle turning: rotation is
+    /// footwork too).</summary>
+    private void ComputeAvgHipRadius()
+    {
         var sum = 0f;
         foreach (var leg in _legs)
             sum += new Vector3(leg.HipLocal.x, 0f, leg.HipLocal.z).magnitude;

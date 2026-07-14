@@ -1,0 +1,10 @@
+# dotnet build artifacts, redirected to tilde dirs (Unity-invisible) by
+# Directory.Build.props; plain names kept as belt-and-suspenders.
+bin/
+obj/
+bin~/
+obj~/
+
+# The root .gitignore blanket-ignores *.csproj (Unity's auto-generated IDE
+# files). These ARE the hand-authored source defining the package.
+!*.csproj

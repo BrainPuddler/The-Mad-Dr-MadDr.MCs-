@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "com.maddr.citygen-core": "file:../../packages/citygen-core",
+    "com.maddr.creature-mesh": "file:../../packages/creature-mesh",
     "com.maddr.roster-client": "file:../../packages/roster-client",
     "com.unity.ai.navigation": "2.0.12",
     "com.unity.collab-proxy": "2.12.4",
