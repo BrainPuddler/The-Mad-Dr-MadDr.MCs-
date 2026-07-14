@@ -46,6 +46,10 @@ public class MonsterBody : MonoBehaviour
     private float _bulkScale = 1f;
     private float _standHeight = 1.2f;
     private float _distTraveled;
+    private float _gaitDist;       // linear + rotational displacement -- what feet actually have to cover
+    private float _lastYaw;
+    private bool _yawInitialized;
+    private float _avgHipRadius = 1f;
     private float _hoverPhase;
 
     /// <summary>Fixed at Build time from the plan's leg count -- NOT
@@ -317,6 +321,14 @@ public class MonsterBody : MonoBehaviour
                 _legs.Add(leg);
             }
         }
+
+        // average horizontal hip distance from the body axis -- converts
+        // a yaw rate into the meters/sec the feet must cover to keep up
+        // with a turn (beetle turning: rotation is footwork too)
+        var sum = 0f;
+        foreach (var leg in _legs)
+            sum += new Vector3(leg.HipLocal.x, 0f, leg.HipLocal.z).magnitude;
+        _avgHipRadius = _legs.Count > 0 ? Mathf.Max(0.3f, sum / _legs.Count) : 1f;
     }
 
     private Transform Segment(Color color)
@@ -363,43 +375,62 @@ public class MonsterBody : MonoBehaviour
         // reduces cadence pressure so alternation can keep up at a run
         var strideEff = _stride * Mathf.Clamp(speed / 3f, 1f, 1.6f);
 
-        // distance-phased body bob: peaks line up with footfalls
+        // BEETLE TURNING (gait v4, verified in a standalone sim at 6
+        // speed/turn combos including rotate-in-place before porting).
+        // v3's phase clock advanced only with LINEAR distance -- but a
+        // turn sweeps the hips sideways, generating foot strain while
+        // the clock (and therefore the other group's step window) barely
+        // moved: legs stretched until the fail-safe fired, exactly the
+        // "turning is problematic, legs get all stretchy" report. Insects
+        // treat rotation as footwork: (a) the gait clock now advances
+        // with linear PLUS rotational displacement (|yaw rate| x average
+        // hip radius = the meters/sec the feet actually must cover), and
+        // (b) each leg leads its step along its OWN rest-point velocity
+        // (body velocity + rotational velocity at that hip) -- outside
+        // legs automatically take long arcs, inside legs short ones,
+        // which IS how beetles corner.
+        var yaw = Mathf.Atan2(transform.forward.x, transform.forward.z);
+        if (!_yawInitialized) { _lastYaw = yaw; _yawInitialized = true; }
+        var dYaw = yaw - _lastYaw;
+        while (dYaw > Mathf.PI) dYaw -= 2f * Mathf.PI;
+        while (dYaw < -Mathf.PI) dYaw += 2f * Mathf.PI;
+        _lastYaw = yaw;
+        var yawRate = dYaw / Mathf.Max(dt, 0.0001f);
+
+        var effSpeed = speed + Mathf.Abs(yawRate) * _avgHipRadius;
+        _gaitDist += effSpeed * dt;
+        var phase = (_gaitDist / Mathf.Max(strideEff, 0.01f)) % 1f;
+
+        // gait-phased body bob: peaks line up with footfalls, including
+        // the footfalls a turn-in-place produces
         if (_torso != null)
         {
-            var bobPhase = _distTraveled / Mathf.Max(strideEff, 0.01f) * Mathf.PI * 2f;
+            var bobPhase = _gaitDist / Mathf.Max(strideEff, 0.01f) * Mathf.PI * 2f;
             _torso.localPosition = new Vector3(0f, BodyHeight + Mathf.Sin(bobPhase) * _legLen * 0.045f, 0f);
         }
 
-        var dir = speed > 0.05f ? new Vector3(velocity.x, 0f, velocity.z) / speed : Vector3.zero;
-
-        // DISTANCE-PHASED STEP WINDOWS (third scheduler, verified in a
-        // standalone sim at 5 speed/turning combos before porting).
-        // History: v1's "only the airborne group may launch" starved one
-        // group outright (gum). v2's "all-legs-down turn-taking barrier"
-        // was better but deadlock-prone: one out-of-turn fail-safe launch
-        // held the barrier closed, other legs then also hit the fail-safe
-        // threshold, and stepping degenerated into fail-safe-only at
-        // 1.5x-stride stretch -- the residual "sticking, but less."
-        // v3 has NO barrier and NO turn bookkeeping to corrupt: a phase
-        // clock driven by DISTANCE TRAVELED (the creator's own spec,
-        // literally) gives group 0 the [0,0.5) half of each stride and
-        // group 1 the [0.5,1) half. A leg steps when its window is open
-        // and its foot is measurably behind -- windows guarantee every
-        // group gets a slot every stride, so starvation is structurally
-        // impossible rather than scheduled away.
-        var phase = (_distTraveled / Mathf.Max(strideEff, 0.01f)) % 1f;
+        var flatVel = new Vector3(velocity.x, 0f, velocity.z);
+        var bodyPos = transform.position;
 
         foreach (var leg in _legs)
         {
             var hipW = transform.TransformPoint(leg.HipLocal);
             var restW = new Vector3(hipW.x, 0f, hipW.z);
 
+            // this leg's rest-point velocity: translation + rotation's
+            // contribution at this hip (v_rot = yawRate * (r.z, 0, -r.x))
+            var rx = hipW.x - bodyPos.x;
+            var rz = hipW.z - bodyPos.z;
+            var restVel = flatVel + new Vector3(yawRate * rz, 0f, -yawRate * rx);
+            var lead = restVel.sqrMagnitude > 0.0001f ? restVel.normalized
+                : new Vector3(transform.forward.x, 0f, transform.forward.z).normalized;
+
             if (leg.Swinging)
             {
-                // swing progress advances with DISTANCE too (a swing
-                // occupies half a stride of travel), min-clamped so a
-                // swing still settles if the body stops mid-step
-                leg.SwingT += Mathf.Max(speed, 1f) * dt / (strideEff * 0.5f);
+                // swing progress advances with gait displacement too (a
+                // swing occupies half a stride of travel), min-clamped so
+                // a swing still settles if the body stops mid-step
+                leg.SwingT += Mathf.Max(effSpeed, 1f) * dt / (strideEff * 0.5f);
                 if (leg.SwingT >= 1f)
                 {
                     leg.Swinging = false;
@@ -417,9 +448,9 @@ public class MonsterBody : MonoBehaviour
                 continue;
             }
 
-            if (speed > 0.05f)
+            if (effSpeed > 0.05f)
             {
-                var strainVec = restW + dir * (strideEff * 0.2f) - leg.FootWorld;
+                var strainVec = restW + lead * (strideEff * 0.2f) - leg.FootWorld;
                 strainVec.y = 0f;
                 var windowOpen = leg.Group == 0 ? phase < 0.5f : phase >= 0.5f;
 
@@ -428,7 +459,7 @@ public class MonsterBody : MonoBehaviour
                     leg.Swinging = true;
                     leg.SwingT = 0f;
                     leg.SwingFrom = leg.FootWorld;
-                    leg.SwingTo = restW + dir * (strideEff * 0.5f);
+                    leg.SwingTo = restW + lead * (strideEff * 0.5f);
                     RenderLeg(leg, hipW);
                     continue;
                 }
@@ -444,7 +475,7 @@ public class MonsterBody : MonoBehaviour
             lag.y = 0f;
             if (lag.magnitude > strideEff * 3f)
             {
-                leg.FootWorld = restW + dir * (strideEff * 0.3f);
+                leg.FootWorld = restW + lead * (strideEff * 0.3f);
                 Debug.LogWarning("MonsterBody gait fail-safe: snap-replanted a foot " + lag.magnitude
                     + "m behind its hip on " + name + " (stride " + strideEff + "m).");
             }
@@ -453,7 +484,7 @@ public class MonsterBody : MonoBehaviour
                 leg.Swinging = true;
                 leg.SwingT = 0f;
                 leg.SwingFrom = leg.FootWorld;
-                leg.SwingTo = restW + dir * (strideEff * 0.5f);
+                leg.SwingTo = restW + lead * (strideEff * 0.5f);
             }
 
             RenderLeg(leg, hipW);
