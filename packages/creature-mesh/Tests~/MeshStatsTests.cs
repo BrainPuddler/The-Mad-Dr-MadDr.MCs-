@@ -33,4 +33,32 @@ public class MeshStatsTests
         Assert.InRange(tris, 2000, 40000);
         Assert.InRange(r.Chunks.Count, 5, 64);
     }
+
+    [Theory]
+    [InlineData("tetrapod")]
+    [InlineData("blob")]
+    [InlineData("serpentine")]
+    [InlineData("winged")]
+    [InlineData("crab")]
+    [InlineData("arachnid")]
+    [InlineData("avian")]
+    [InlineData("treant")]
+    [InlineData("floater")]
+    public void EveryPlanStaysNearTheLabsBudget(string plan)
+    {
+        var g = new GenomeDto(2, "stats-" + plan, new string[0],
+            new BodyGenesDto(plan, new[] { 0.5, 0.5, 0.5, 0.5 }),
+            new BrainGenesDto("average", new[] { 0.5, 0.5, 0.5, 0.5, 0.5 }),
+            new HeartGenesDto("steady", new[] { 0.5, 0.5, 0.5, 0.5, 0.5, 0.5 }),
+            new SlotsDto(
+                new PartAlleleDto("claw_hand", new[] { 0.5, 0.5, 0.5, 0.5, 0.5, 0.5 }, null),
+                new PartAlleleDto("antenna", new[] { 0.5, 0.5, 0.5, 0.5, 0.5, 0.5 }, null),
+                new PartAlleleDto("bug_eyes", new[] { 0.5, 0.5, 0.5, 0.5, 0.5, 0.5 }, null),
+                new PartAlleleDto("hoofed_leg", new[] { 0.5, 0.5, 0.5, 0.5, 0.5, 0.5 }, null)));
+        var r = CreatureBuilder.Build(g);
+        var tris = 0;
+        foreach (var c in r.Chunks) tris += c.Triangles.Count / 3;
+        _out.WriteLine($"{plan}: chunks={r.Chunks.Count} tris={tris} topY={r.TopY:F2} leg={(r.Leg == null ? "none" : r.Leg.Len.ToString("F2"))}");
+        Assert.InRange(tris, 1000, 40000);
+    }
 }

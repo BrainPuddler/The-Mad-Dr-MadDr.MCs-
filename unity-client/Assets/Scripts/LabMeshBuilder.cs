@@ -18,11 +18,21 @@ public static class LabMeshBuilder
     /// so callers can strip or restyle it later.</summary>
     public static Transform Attach(CreatureMeshResult lab, Transform parent, Vector3 localPos, float scale)
     {
-        var holder = new GameObject("LabBody").transform;
-        holder.SetParent(parent, false);
+        var holder = AttachChunks(lab.Chunks, parent, "LabBody", scale);
         holder.localPosition = localPos;
+        return holder;
+    }
+
+    /// <summary>Same conversion for a raw chunk list -- leg-kit pieces
+    /// (hip hardware, upper/lower segments, feet) that the gait rig
+    /// positions itself.</summary>
+    public static Transform AttachChunks(System.Collections.Generic.IReadOnlyList<MeshChunk> chunks,
+        Transform parent, string name, float scale)
+    {
+        var holder = new GameObject(name).transform;
+        holder.SetParent(parent, false);
         holder.localScale = Vector3.one * scale;
-        foreach (var chunk in lab.Chunks)
+        foreach (var chunk in chunks)
         {
             if (chunk.Triangles.Count == 0) continue;
             var go = new GameObject("Chunk");

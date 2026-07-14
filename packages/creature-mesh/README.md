@@ -8,29 +8,43 @@ the website shows, as plain vertex/normal/triangle data bucketed by
 material, ready for `unity-client`'s `LabMeshBuilder` to turn into
 Unity meshes. Zero `UnityEngine` reference, zero I/O.
 
-## Pass-1 scope (deliberate)
+## Scope (pass 2: all plans + dressed legs)
 
 - **Full geometry engine**: ellipsoid, parallel-transport tube, torus,
   lathe, curved cone, limb-joint hardware — 1:1 with the JS, double
   precision, same constants.
-- **Tetrapod plan at full fidelity**: torso lathe (pear→gorilla
-  profiles), bolted brass belt pelvis, neck, all four brain-tier heads
-  (dim / average / gifted / **mastermind's exposed brain under a
-  riveted glass dome**), franken face (brow, jaw, tusks, heart-tier
-  neck bolts — titan bolts glow), tail gene, and every hand (10),
-  sensor (4), and eye (5) part family, honoring graft-hue,
-  dormant-sensor, and headless rules.
-- **Legs are NOT baked into the mesh.** `CreatureMeshResult.Leg`
-  returns the socket frame (position/normal/length/family); the Unity
-  gait rig mounts its no-skate legs there. That contract is why feet
-  never slide.
-- The other 8 body plans return `null` from `CreatureBuilder.Build`
-  and keep their placeholder silhouettes until their own pass.
+- **All nine body plans at full fidelity**: tetrapod (pear→gorilla
+  torso, deltoids, stitch seam), blob (translucent gelatin over
+  visible heart chambers / stomach / coiled gut, skirt, boils),
+  serpentine (ground coil, S-neck, cobra hood at high girth, downward
+  fangs, forked tongue — keeps its own skull at every brain tier, like
+  the Lab), winged (double-sided bat-wing membranes + bone/finger
+  rig, devil-spade tail), crab (low carapace, fused head, capped
+  chelipeds), arachnid (cephalothorax + abdomen + waist pinch, stubby
+  pedipalps), avian (forward-leaning raptor profile, long neck),
+  treant (bark trunk + five ground roots), floater (gunmetal drone
+  hull, stabilizer fins, glowing thruster ring, cockpit head).
+  Shared machinery everywhere it's shared in the JS: bolted brass belt
+  pelvis, four brain-tier heads (**mastermind's brain under a riveted
+  glass dome**), franken face with heart-tier neck bolts, tail gene,
+  and every hand (10), sensor (4), and eye (5) part family, honoring
+  graft-hue, dormant-sensor, headless, `tiny`, and arm-reach-cap
+  rules. Unknown plans fall back to tetrapod, same as the JS.
+- **Legs are NOT baked into the mesh** — `CreatureMeshResult.Leg`
+  returns the socket frame and the Unity gait rig mounts its no-skate
+  legs there (null on blob/serpentine/treant/floater, which ignore the
+  leg slot). **`LegKit`** supplies the family's real geometry for the
+  rig: hip joint hardware, tapered upper/lower segments authored on
+  the rig's y∈[−1,+1] convention (proximal radius at −1), and
+  family feet — hoof, talon fan (side-mirrored in data, never by
+  negative scale), insect needle point, piston strut, jet nozzle,
+  tendril tip, ring-stitched stump.
 
 Dropped relative to the JS (future passes): per-vertex color gradients
 (each material chunk is flat-colored), texture tiling, blink/gaze/
 breath animation channels, glow halos, faction kits (robot/alien
-re-skins), the LOD detail dial.
+re-skins), piston_leg's tank-tread variant (its spider-strut mode is
+used for the walking rig), the LOD detail dial.
 
 `Builder.FixWinding()` runs at the end of every build: Unity
 single-sides materials where the Lab's shader is two-sided, so any

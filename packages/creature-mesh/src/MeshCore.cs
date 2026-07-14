@@ -417,6 +417,12 @@ namespace MadDr.CreatureMesh
         public static readonly Col LASER_N = new Col(130, 220, 255);
         public static readonly Col PHOTON_N = new Col(255, 235, 175);
         public static readonly Col ICHOR_N = new Col(150, 235, 190);
+        public static readonly Col TONGUE = new Col(198, 62, 92);
+        // planBlob's visible organs
+        public static readonly Col HEARTC_L = new Col(205, 35, 50);   // oxygenated left
+        public static readonly Col HEARTC_R = new Col(150, 45, 62);   // darker deoxygenated right
+        public static readonly Col STOMACHC = new Col(214, 172, 92);
+        public static readonly Col GUTC = new Col(188, 116, 132);
 
         private static readonly Col[] SkinAnchors =
         {

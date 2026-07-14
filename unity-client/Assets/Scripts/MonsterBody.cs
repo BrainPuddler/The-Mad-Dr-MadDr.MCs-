@@ -5,15 +5,16 @@ using UnityEngine;
 
 /// <summary>
 /// A genome-driven articulated body with distance-driven stepping.
-/// Tetrapods now regenerate the Lab renderer's actual stitched b-movie
-/// body from DNA (packages/creature-mesh, the docs/08 port): torso
-/// lathe, bolted brass belt, franken face, tier-ladder heads including
-/// the mastermind's brain under glass, and every hand/sensor/eye part
-/// family -- with the legs still owned by the gait rig below. The other
-/// eight plans keep the simplified silhouette until their own port
-/// pass: plan picks the body shape and leg count, bulk scales
-/// everything, the hand family renders as a recognizable weapon, brain
-/// tier sizes the head.
+/// ALL nine body plans regenerate the Lab renderer's actual stitched
+/// b-movie body from DNA (packages/creature-mesh, the docs/08 port):
+/// torso lathes, bolted brass belts, franken faces, tier-ladder heads
+/// including the mastermind's brain under glass, wings, cobra hoods,
+/// see-through blob organs, and every hand/sensor/eye part family.
+/// Legs stay owned by the gait rig below, but dressed in the family's
+/// real geometry via LegKit (tapered flesh/chitin/piston segments,
+/// hoofs, talon fans, brass hip hardware) -- no more stick cylinders.
+/// The primitive-based builders remain only as a fallback should the
+/// mesh build ever fail.
 ///
 /// THE GAIT RULE (creator direction, 2026-07): no skating, ever.
 /// Planted feet are stored as WORLD positions and never move while
@@ -38,6 +39,7 @@ public class MonsterBody : MonoBehaviour
         public Transform Upper;
         public Transform Lower;
         public Transform Foot;
+        public float DressScale;  // >0: LegKit mesh segments (x/z keep this scale); 0: primitive cylinders
     }
 
     private readonly List<Leg> _legs = new List<Leg>();
@@ -81,19 +83,21 @@ public class MonsterBody : MonoBehaviour
         _torso.SetParent(transform, false);
         _torso.localPosition = new Vector3(0f, BodyHeight, 0f);
 
-        // the real Lab body, regenerated from DNA (tetrapod pass 1; other
-        // plans return null and keep the placeholder silhouette)
+        // the real Lab body, regenerated from DNA -- every plan now.
+        // Legged plans scale so the mesh's own leg length lands exactly
+        // on the rig's; legless plans (blob/serpentine/treant/floater
+        // ignore the leg slot) scale by overall height instead. The mesh
+        // is authored ground-up at y=0, so it hangs at -BodyHeight under
+        // the bobbing torso node and rides the same gait bob (and blob
+        // squash, and floater hover) as everything else.
         var lab = CreatureBuilder.Build(g);
-        if (lab != null && lab.Leg != null)
+        if (lab != null)
         {
-            // lab units -> world units so the mesh's own leg length lands
-            // exactly on the rig's; the mesh is authored ground-up at y=0,
-            // so it hangs at -BodyHeight under the bobbing torso node and
-            // rides the same gait bob as everything else
-            var s = _legLen / (float)lab.Leg.Len;
+            var s = lab.Leg != null
+                ? _legLen / (float)lab.Leg.Len
+                : Mathf.Lerp(2.4f, 4.6f, bulk) / Mathf.Max(0.1f, (float)lab.TopY);
             LabMeshBuilder.Attach(lab, _torso, new Vector3(0f, -BodyHeight, 0f), s);
-            skin = new Color((float)lab.Skin.R / 255f, (float)lab.Skin.G / 255f, (float)lab.Skin.B / 255f);
-            BuildLegsFromSocket(lab, s, skin);
+            if (lab.Leg != null) BuildLegsFromSocket(lab, s);
         }
         else
         {
@@ -346,29 +350,59 @@ public class MonsterBody : MonoBehaviour
         ComputeAvgHipRadius();
     }
 
-    /// <summary>Legs for a Lab-mesh body: one mirrored pair mounted at the
-    /// socket frame the creature builder returned (the same hip position
-    /// the website's biped uses), scaled into world units. The mesh bakes
-    /// everything above the hips; the rig owns everything below so the
-    /// no-skate gait contract keeps holding.</summary>
-    private void BuildLegsFromSocket(CreatureMeshResult lab, float s, Color skin)
+    /// <summary>Legs for a Lab-mesh body: mounted at the socket frame the
+    /// creature builder returned, scaled into world units, and DRESSED in
+    /// the leg family's real geometry (LegKit) instead of stick
+    /// cylinders. Pair count follows the family the way the Lab does:
+    /// insect struts come 2-3 pairs, piston spider mode 2, everything
+    /// else one mirrored pair. The mesh bakes everything above the hips;
+    /// the rig owns everything below so the no-skate contract holds.</summary>
+    private void BuildLegsFromSocket(CreatureMeshResult lab, float s)
     {
-        var p = lab.Leg.P;
-        var legCol = Shade(skin, 0.85f);
-        for (var side = -1; side <= 1; side += 2)
+        var sock = lab.Leg;
+        var p = sock.P;
+        var count = sock.Params.Length > 4 ? (float)sock.Params[4] : 0.5f;
+
+        float[] zOffsets;
+        if (sock.Family == "insect_leg")
         {
-            var leg = new Leg
+            var pairs = count >= 0.5f ? 3 : 2;
+            zOffsets = new float[pairs];
+            for (var i = 0; i < pairs; i++)
+                zOffsets[i] = (i / (pairs - 1f) - 0.5f) * 2.6f;   // front reaches, rear rakes
+        }
+        else if (sock.Family == "piston_leg")
+        {
+            zOffsets = new[] { -0.99f, 0.99f };                   // spider-strut quad
+        }
+        else
+        {
+            zOffsets = new[] { 0f };
+        }
+
+        for (var pi = 0; pi < zOffsets.Length; pi++)
+        {
+            for (var side = -1; side <= 1; side += 2)
             {
-                HipLocal = new Vector3(side * (float)p.X * s, (float)p.Y * s, (float)p.Z * s),
-                Group = side > 0 ? 0 : 1,   // biped alternation
-                Upper = Segment(legCol),
-                Lower = Segment(Shade(legCol, 0.9f)),
-                Foot = Part(PrimitiveType.Sphere, transform, Vector3.zero,
-                    Vector3.one * 0.28f * _bulkScale, Shade(legCol, 0.7f)),
-            };
-            leg.FootWorld = transform.TransformPoint(new Vector3(leg.HipLocal.x, 0f, leg.HipLocal.z));
-            leg.FootWorld = new Vector3(leg.FootWorld.x, 0f, leg.FootWorld.z);
-            _legs.Add(leg);
+                var kit = LegKit.Build(sock.Family, sock.Params, lab.Skin, side);
+                var leg = new Leg
+                {
+                    HipLocal = new Vector3(side * (float)p.X * s, (float)p.Y * s,
+                        ((float)p.Z + zOffsets[pi]) * s),
+                    Group = (pi + (side > 0 ? 0 : 1)) % 2,   // diagonal/tripod alternation
+                    Upper = LabMeshBuilder.AttachChunks(kit.Upper, transform, "LegUpper", s),
+                    Lower = LabMeshBuilder.AttachChunks(kit.Lower, transform, "LegLower", s),
+                    Foot = LabMeshBuilder.AttachChunks(kit.Foot, transform, "LegFoot", s),
+                    DressScale = s,
+                };
+                // hip hardware (brass brace, joint ball) sits fixed at the
+                // socket; the segments below it articulate
+                var hip = LabMeshBuilder.AttachChunks(kit.Hip, transform, "LegHip", s);
+                hip.localPosition = leg.HipLocal;
+                leg.FootWorld = transform.TransformPoint(new Vector3(leg.HipLocal.x, 0f, leg.HipLocal.z));
+                leg.FootWorld = new Vector3(leg.FootWorld.x, 0f, leg.FootWorld.z);
+                _legs.Add(leg);
+            }
         }
         ComputeAvgHipRadius();
     }
@@ -558,6 +592,22 @@ public class MonsterBody : MonoBehaviour
         var sideDir = (transform.right * Mathf.Sign(leg.HipLocal.x) * 0.55f + transform.forward * 0.45f).normalized;
         var knee = (hipW + foot) * 0.5f + sideDir * bendAmt;
 
+        if (leg.DressScale > 0f)
+        {
+            // LegKit segments: radius is baked into the mesh (lab units),
+            // so x/z hold the lab->world scale and only y stretches to the
+            // live joint distance
+            SetBetweenDressed(leg.Upper, hipW, knee, leg.DressScale);
+            SetBetweenDressed(leg.Lower, knee, foot, leg.DressScale);
+            // feet are authored ground-origin, +z forward: plant exactly at
+            // the world-locked foot point, yawed with the body
+            leg.Foot.position = foot;
+            var fwd = new Vector3(transform.forward.x, 0f, transform.forward.z);
+            if (fwd.sqrMagnitude > 0.0001f)
+                leg.Foot.rotation = Quaternion.LookRotation(fwd.normalized, Vector3.up);
+            return;
+        }
+
         SetBetween(leg.Upper, hipW, knee, 0.12f * _bulkScale);
         SetBetween(leg.Lower, knee, foot, 0.09f * _bulkScale);
         leg.Foot.position = foot + Vector3.up * 0.1f;
@@ -570,6 +620,19 @@ public class MonsterBody : MonoBehaviour
         t.position = (a + b) * 0.5f;
         if (len > 0.001f) t.rotation = Quaternion.FromToRotation(Vector3.up, span);
         t.localScale = new Vector3(radius, len * 0.5f, radius); // unity cylinder is 2 units tall at scale 1
+    }
+
+    /// <summary>SetBetween for LegKit meshes: same midpoint/rotation
+    /// convention (local -1 lands on `a`, +1 on `b` -- the kit authors
+    /// its proximal radius at -1 to match), but x/z keep the fixed
+    /// lab-to-world scale instead of becoming the radius.</summary>
+    private static void SetBetweenDressed(Transform t, Vector3 a, Vector3 b, float xz)
+    {
+        var span = b - a;
+        var len = span.magnitude;
+        t.position = (a + b) * 0.5f;
+        if (len > 0.001f) t.rotation = Quaternion.FromToRotation(Vector3.up, span);
+        t.localScale = new Vector3(xz, len * 0.5f, xz);
     }
 
     private void UpdateLeglessLocomotion(Vector3 velocity, float speed, float dt)

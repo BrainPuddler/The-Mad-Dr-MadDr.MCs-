@@ -8,7 +8,8 @@ namespace MadDr.CreatureMesh
     /// outward normal in creature space (feet on y=0), mirrored across x.
     /// Legs are the one part family NOT baked into the mesh -- Unity's rig
     /// animates them as transforms so the no-skating contract
-    /// (MonsterBody's distance-phased gait) keeps working.</summary>
+    /// (MonsterBody's distance-phased gait) keeps working. LegKit supplies
+    /// the family's real geometry for the rig's segments.</summary>
     public sealed class LegSocketInfo
     {
         public Vec3 P;
@@ -21,7 +22,8 @@ namespace MadDr.CreatureMesh
     /// <summary>Everything Unity needs to regenerate a Lab creature from
     /// its DNA: the material-bucketed mesh chunks (torso, head, face,
     /// arms, weapons, eyes -- the works) plus the leg sockets for the gait
-    /// rig and framing heights.</summary>
+    /// rig and framing heights. Leg is null on plans that ignore the leg
+    /// slot (blob, serpentine, treant, floater -- silent genes).</summary>
     public sealed class CreatureMeshResult
     {
         public IReadOnlyList<MeshChunk> Chunks = new List<MeshChunk>();
@@ -32,23 +34,61 @@ namespace MadDr.CreatureMesh
     }
 
     /// <summary>Port of the Lab's creature assembly
-    /// (site/creature-renderer.js, docs/08) -- pass 1: the tetrapod plan
-    /// at full fidelity with the Mad-Doctor faction kit. The other eight
-    /// plans return null and keep their placeholder bodies until their
-    /// own pass. Deliberately dropped from the JS: per-vertex color
-    /// gradients (skinColorFn -> flat base color per chunk), texture
-    /// tiling, anim/gait/blink vertex channels (Unity animates via
-    /// transforms), and mb.glow() light halos.</summary>
+    /// (site/creature-renderer.js, docs/08) -- all nine body plans, Mad
+    /// Doctor faction kit. Deliberately dropped from the JS: per-vertex
+    /// color gradients (skinColorFn -> flat base color per chunk),
+    /// texture tiling, anim/gait/blink vertex channels (Unity animates
+    /// via transforms), and mb.glow() light halos.</summary>
     public static class CreatureBuilder
     {
-        public static CreatureMeshResult? Build(GenomeDto genome)
+        /// <summary>Unknown plans fall back to tetrapod, same as the JS
+        /// (`builders[plan] ?? planTetrapod`), so this never returns null
+        /// for a well-formed genome.</summary>
+        public static CreatureMeshResult Build(GenomeDto genome)
         {
-            if (genome.Body.Plan != "tetrapod") return null;
-            return BuildTetrapod(genome);
+            var mb = new Builder();
+            var o = MakeCtx(genome);
+            Sockets s;
+            switch (genome.Body.Plan)
+            {
+                case "blob": s = PlanBlob(mb, o); break;
+                case "serpentine": s = PlanSerpentine(mb, o); break;
+                case "winged": s = PlanWinged(mb, o); break;
+                case "crab": s = PlanCrab(mb, o); break;
+                case "arachnid": s = PlanArachnid(mb, o); break;
+                case "avian": s = PlanAvian(mb, o); break;
+                case "treant": s = PlanTreant(mb, o); break;
+                case "floater": s = PlanFloater(mb, o); break;
+                default: s = PlanTetrapod(mb, o); break;
+            }
+
+            if (s.Leg != null)
+            {
+                s.Leg.Family = genome.Slots.Leg.Family;
+                s.Leg.Params = genome.Slots.Leg.Params;
+            }
+
+            if (s.Hand != null) BuildSlot(mb, "hand", genome.Slots.Hand, s.Hand, o);
+            if (!o.Headless)
+            {
+                if (s.Sensor != null) BuildSlot(mb, "sensor", genome.Slots.Sensor, s.Sensor, o);
+                if (s.Eye != null) BuildSlot(mb, "eye", genome.Slots.Eye, s.Eye, o);
+            }
+
+            mb.FixWinding();
+
+            return new CreatureMeshResult
+            {
+                Chunks = mb.Chunks,
+                Skin = o.Skin,
+                TopY = s.TopY,
+                WaistY = s.WaistY,
+                Leg = s.Leg,
+            };
         }
 
         // gene context for one creature -- the slice of the JS `o` object
-        // the maddr tetrapod path actually reads
+        // the maddr paths actually read
         private sealed class Ctx
         {
             public Col Skin;
@@ -56,11 +96,22 @@ namespace MadDr.CreatureMesh
             public double Bulk;
             public double Limb;
             public double Tail;
+            public double HeadScale;
             public int HeartLevel;
             public double LegLen;
             public string? LegFam;
             public string BrainTier = "average";
             public bool Headless;
+        }
+
+        private sealed class Sockets
+        {
+            public Sock? Hand;
+            public Sock? Sensor;
+            public Sock? Eye;
+            public LegSocketInfo? Leg;
+            public double TopY;
+            public double WaistY;
         }
 
         private struct Head
@@ -92,10 +143,19 @@ namespace MadDr.CreatureMesh
             }
         }
 
-        public static CreatureMeshResult BuildTetrapod(GenomeDto g)
+        private static double HeadScaleOf(string tier)
         {
-            var mb = new Builder();
+            switch (tier)
+            {
+                case "dim": return 0;
+                case "gifted": return 0.3;
+                case "mastermind": return 0.75;
+                default: return 0.15;
+            }
+        }
 
+        private static Ctx MakeCtx(GenomeDto g)
+        {
             var vigor = P(g.Heart.Params, 0, 0.5);
             var hue = P(g.Body.Params, 0, 0.5);
             var o = new Ctx
@@ -105,12 +165,14 @@ namespace MadDr.CreatureMesh
                 Bulk = P(g.Body.Params, 1, 0.5),
                 Limb = P(g.Body.Params, 2, 0.5),
                 Tail = P(g.Body.Params, 3, 0.5),
+                HeadScale = HeadScaleOf(g.Brain.Tier),
                 HeartLevel = HeartLevelOf(g.Heart.Tier),
                 BrainTier = g.Brain.Tier,
                 Headless = g.Slots.Sensor.Family == "sensor_stub" && g.Slots.Eye.Family == "eye_socket",
             };
 
-            // leg genes set stance height (stumps slump low)
+            // leg genes set stance height (stumps slump low); plans that
+            // ignore the leg slot never read this
             var legAl = g.Slots.Leg;
             o.LegFam = legAl.Family;
             var legLenGene = P(legAl.Params, 0, 0.5);
@@ -123,92 +185,605 @@ namespace MadDr.CreatureMesh
                 case "tendril_leg": o.LegLen = Clamp(1.1 + 0.9 * legLenGene, 1.1, 2.0); break;
                 default: o.LegLen = Clamp(2.4 + 1.2 * legLenGene, 2.4, 3.6); break;
             }
+            return o;
+        }
 
-            // ---- planTetrapod, minus the leg slot (gait rig owns legs) ----
+        private static readonly double[] Sides = { 1, -1 };
+
+        // ---- body plans ------------------------------------------------------
+
+        private static Sockets PlanTetrapod(Builder mb, Ctx o)
+        {
             var b = o.Limb;                       // the limb axis IS the build axis here
-            var W = 1.9 + 1.0 * o.Bulk;           // human-ish width, not beach-ball
+            var w = 1.9 + 1.0 * o.Bulk;           // human-ish width, not beach-ball
             var h = 3.1 + 0.7 * o.Bulk;
             var waistY = o.LegLen + 1.15;         // lower torso lives below the belt
             var y0 = waistY - 0.15;
-            var levels = TorsoLevels(b, W, h, y0, 0.5);
+            var levels = TorsoLevels(b, w, h, y0, 0.5);
 
             Prims.Lathe(mb, levels, o.Skin, 0.28, 0, 18);
             var shl = levels[3];
             if (b > 0.5)                          // brute deltoid caps
                 foreach (var s in Sides)
                     Prims.Ellipsoid(mb, new Vec3(s * shl.Rx * 0.85, shl.Y + 0.15, shl.Z),
-                        new Vec3(W * 0.48 * b, W * 0.42 * b, W * 0.44 * b), o.Skin, 0.28, 0, 10);
+                        new Vec3(w * 0.48 * b, w * 0.42 * b, w * 0.44 * b), o.Skin, 0.28, 0, 10);
             var ch = levels[2];
             StitchSeam(mb, ch.Y - h * 0.12, ch.Rx, ch.Rz, ch.Z);
             BuildPelvis(mb, o, levels[0].Rx, waistY);
 
-            // an actual neck between the shoulders and the skull (maddr:
-            // fleshy column)
+            // an actual neck between the shoulders and the skull
             var neckTop = y0 + h + 0.55;
-            var neckR = W * 0.32;
-            Prims.Tube(mb,
-                new[] { new Vec3(0, y0 + h - 0.3, levels[4].Z * 0.7), new Vec3(0, neckTop, levels[4].Z * 0.8) },
-                new[] { neckR, neckR * 0.86 }, Col.Sh(o.Skin, 0.95), 0.28, 0, 10);
+            BuildNeck(mb, o, y0 + h - 0.3, neckTop, levels[4].Z * 0.7, levels[4].Z * 0.8, w * 0.32);
 
             var head = BuildHead(mb, o, neckTop - 0.2, levels[4].Z);
             if (!o.Headless) FrankenDetails(mb, head.HC, head.HR, o.HeartLevel, o);
 
             AddTail(mb, o, o.LegLen + 0.55, -levels[0].Rx * 0.75, false);
 
-            // socket frames: position + the body's outward surface normal there
             var slope = (levels[2].Rx - levels[4].Rx) / Math.Max(0.4, levels[4].Y - levels[2].Y);
             var sensP = new Vec3(head.HR.X * 0.52, head.TopY, head.HC.Z - 0.1);
             var eyeP = new Vec3(0, head.HC.Y + head.HR.Y * 0.20, head.HC.Z + head.HR.Z * 0.62);
-
-            var handSock = new Sock
+            return new Sockets
             {
-                P = new Vec3(shl.Rx * 0.92 + (b > 0.5 ? W * 0.28 * b : 0), shl.Y, shl.Z + 0.15),
-                Nrm = new Vec3(1, slope * 0.5, 0.15).Norm(),
-                Mirror = true,
-            };
-            var sensSock = new Sock
-            {
-                P = sensP,
-                Nrm = Prims.EllipN(sensP, head.HC, head.HR),
-                Mirror = true,
-            };
-            var eyeSock = new Sock
-            {
-                P = eyeP,
-                Nrm = Prims.EllipN(eyeP, head.HC, head.HR),
-                Mirror = false,
-                FaceR = head.HR.X,
-            };
-
-            BuildSlot(mb, "hand", g.Slots.Hand, handSock, o);
-            if (!o.Headless)
-            {
-                BuildSlot(mb, "sensor", g.Slots.Sensor, sensSock, o);
-                BuildSlot(mb, "eye", g.Slots.Eye, eyeSock, o);
-            }
-
-            mb.FixWinding();
-
-            return new CreatureMeshResult
-            {
-                Chunks = mb.Chunks,
-                Skin = o.Skin,
-                TopY = o.Headless ? neckTop : head.TopY,
-                WaistY = waistY,
+                Hand = new Sock
+                {
+                    P = new Vec3(shl.Rx * 0.92 + (b > 0.5 ? w * 0.28 * b : 0), shl.Y, shl.Z + 0.15),
+                    Nrm = new Vec3(1, slope * 0.5, 0.15).Norm(),
+                    Mirror = true,
+                },
+                Sensor = HeadSock(sensP, head, true),
+                Eye = EyeSock(eyeP, head),
                 Leg = new LegSocketInfo
                 {
                     P = new Vec3(Math.Max(0.7, levels[0].Rx * 0.58), o.LegLen, 0),
                     Nrm = new Vec3(0.3, -1, 0).Norm(),
                     Len = o.LegLen,
-                    Family = legAl.Family,
-                    Params = legAl.Params,
                 },
+                TopY = o.Headless ? neckTop : head.TopY,
+                WaistY = waistY,
             };
         }
 
-        private static readonly double[] Sides = { 1, -1 };
+        private static Sockets PlanBlob(Builder mb, Ctx o)
+        {
+            // limb gene sets the pour: 0 = wide flat puddle, 1 = tall
+            // gelatin tower. Blobs never get a leg socket at all.
+            var tall = o.Limb;
+            var dr = (3.0 + 1.3 * o.Bulk) * (1.15 - 0.40 * tall);
+            var dR = new Vec3(dr, (2.5 + 1.0 * o.Bulk) * (0.62 + 1.05 * tall), dr);
+            var dC = new Vec3(0, dR.Y * 0.9, 0);
 
-        // ---- torso ---------------------------------------------------------
+            // Organs first: the outer mass draws translucent, so whatever
+            // should show through must already be in the mesh (draw-order
+            // rule, docs/08 -- Unity's transparent queue draws after
+            // opaques, which lands the same way).
+            var hs = Math.Min(dR.X, Math.Min(dR.Y, dR.Z)) * 0.20;
+            var hb = new Vec3(dR.X * 0.12, dC.Y + dR.Y * 0.20, dR.Z * 0.16);
+
+            // the large main chamber -- the base everything else sits on
+            Prims.Lathe(mb, new[]
+            {
+                new Prims.LatheLevel(hb.Y - hs * 0.55, hb.X, hb.Z, hs * 0.16, hs * 0.14),
+                new Prims.LatheLevel(hb.Y + hs * 0.25, hb.X, hb.Z, hs * 0.68, hs * 0.60),
+                new Prims.LatheLevel(hb.Y + hs * 0.80, hb.X, hb.Z, hs * 0.60, hs * 0.52),
+            }, Palette.HEARTC_L, 0.55, 0, 6);
+
+            // left and right ventricles, side by side on top
+            var topChY = hb.Y + hs * 0.80;
+            var vSide = hs * 0.36;
+            Prims.Lathe(mb, new[]
+            {
+                new Prims.LatheLevel(topChY + hs * 0.02, hb.X - vSide, hb.Z, hs * 0.30, hs * 0.27),
+                new Prims.LatheLevel(topChY + hs * 0.50, hb.X - vSide, hb.Z, hs * 0.46, hs * 0.40),
+            }, Palette.HEARTC_L, 0.55, 0, 6);
+            Prims.Lathe(mb, new[]
+            {
+                new Prims.LatheLevel(topChY + hs * 0.02, hb.X + vSide, hb.Z, hs * 0.26, hs * 0.23),
+                new Prims.LatheLevel(topChY + hs * 0.46, hb.X + vSide, hb.Z, hs * 0.40, hs * 0.34),
+            }, Palette.HEARTC_R, 0.55, 0, 5);
+
+            // the stomach: a fleshy sac slung mid-body
+            Prims.Ellipsoid(mb, new Vec3(-dR.X * 0.10, dC.Y - dR.Y * 0.05, dR.Z * 0.08),
+                new Vec3(dR.X * 0.30, dR.Y * 0.24, dR.Z * 0.28), Palette.STOMACHC, 0.4, 0, 10);
+
+            // the digestive tract: coiled through the lower half
+            var gutPath = new List<Vec3>();
+            var gutR = new List<double>();
+            const int nSeg = 12;
+            for (var i = 0; i <= nSeg; i++)
+            {
+                var t = (double)i / nSeg;
+                var ang = t * Math.PI * 3.4;
+                var rad = dR.X * (0.42 - 0.20 * t);
+                gutPath.Add(new Vec3(
+                    Math.Cos(ang) * rad,
+                    dC.Y - dR.Y * 0.4 + t * dR.Y * 0.45,
+                    Math.Sin(ang) * rad * (dR.Z / dR.X)));
+                gutR.Add(dR.X * 0.055 * (1 - 0.25 * Math.Sin(t * 8)));
+            }
+            Prims.Tube(mb, gutPath, gutR, Palette.GUTC, 0.35, 0, 8, 3);
+
+            // the mass itself: translucent gelatin, organs showing through
+            mb.SetAlpha(0.55);
+            Prims.Ellipsoid(mb, dC, dR, o.Skin, 0.34, 0, 18);
+            // the flattened base: full puddle at limb=0, gone by limb~0.87
+            var skirtK = Math.Max(0, 1 - tall * 1.15);
+            if (skirtK > 0.03)
+                Prims.Ellipsoid(mb, new Vec3(0, 0.62, 0),
+                    new Vec3(dr * 1.14 * skirtK, 0.85 * skirtK, dr * 1.14 * skirtK),
+                    Col.Sh(o.Skin, 0.92), 0.3, 0, 12);
+            mb.SetAlpha(1);
+
+            // surface boils: opaque flecks on the translucent hide
+            for (var a = 0; a < 6; a++)
+            {
+                var th = a * 1.047 + 0.4;
+                Prims.Ellipsoid(mb, new Vec3(Math.Cos(th) * dr * 0.9, 1.1 + a % 3 * 0.5, Math.Sin(th) * dr * 0.9),
+                    new Vec3(0.5, 0.42, 0.5), Col.Sh(o.Skin, 0.88), 0.4, 0, 6);
+            }
+
+            var handP = new Vec3(dr * 0.92, dC.Y + 0.4, 0);
+            var sensP = new Vec3(dr * 0.5, dC.Y + dR.Y * 0.85, 0);
+            var eyeP = new Vec3(0, dC.Y + dR.Y * 0.35, dR.Z * 0.9);
+            return new Sockets
+            {
+                Hand = new Sock { P = handP, Nrm = Prims.EllipN(handP, dC, dR), Mirror = true },
+                Sensor = new Sock { P = sensP, Nrm = Prims.EllipN(sensP, dC, dR), Mirror = true },
+                Eye = new Sock { P = eyeP, Nrm = Prims.EllipN(eyeP, dC, dR), Mirror = false, FaceR = dr * 0.8 },
+                TopY = dC.Y + dR.Y,
+                WaistY = dC.Y,
+            };
+        }
+
+        private static Sockets PlanSerpentine(Builder mb, Ctx o)
+        {
+            var girth = o.Bulk;
+            var baseR = 0.95 + 0.7 * girth;
+            var headY = 6.6 + 2.6 * o.Limb;
+            var path = new List<Vec3>();
+            var radii = new List<double>();
+            const int n = 30;
+            for (var k = 0; k <= n; k++)
+            {                                            // ground coil
+                var t = (double)k / n;
+                var ang = t * Math.PI * 2 * 1.6 + 0.8;
+                var r = 2.75 - 1.35 * t;
+                path.Add(new Vec3(Math.Cos(ang) * r, 0.55 + t * 2.0, Math.Sin(ang) * r * 0.8));
+                radii.Add(baseR * Clamp(t * 6, 0.16, 1));
+            }
+            var neckBase = path[path.Count - 1];
+            for (var m = 1; m <= 10; m++)
+            {                                            // rising S-neck
+                var s = (double)m / 10;
+                path.Add(new Vec3(
+                    neckBase.X * (1 - s) + Math.Sin(s * Math.PI) * 0.7,
+                    neckBase.Y + s * (headY - neckBase.Y),
+                    neckBase.Z * (1 - s) + s * 1.1));
+                radii.Add(baseR * (1 - 0.42 * s));
+            }
+            Prims.Tube(mb, path, radii, o.Skin, 0.3, 0, 12, 3);
+
+            // the snake builds its OWN head (never buildHead) -- brain tier
+            // only scales it, so even a mastermind serpent keeps a skull
+            var hC = new Vec3(0.35, headY + 0.9, 1.25);
+            var hR = new Vec3(1.5 + 0.4 * o.HeadScale, 1.3 + 0.4 * o.HeadScale, 1.7);
+            Prims.Ellipsoid(mb, hC, hR, o.Skin, 0.3, 0, 14);
+            if (girth > 0.55)                            // cobra hood
+                Prims.Ellipsoid(mb, new Vec3(hC.X, hC.Y - 0.2, hC.Z - 0.7),
+                    new Vec3(hR.X * 1.75, hR.Y * 1.5, 0.5), Col.Sh(o.Skin, 0.9), 0.28, 0, 12);
+            // fangs point DOWN on a serpent
+            var mz = hC.Z + hR.Z * 0.8;
+            Prims.Ellipsoid(mb, new Vec3(hC.X, hC.Y - hR.Y * 0.4, mz),
+                new Vec3(hR.X * 0.4, 0.16, 0.2), Palette.MOUTHC, 0.15, 0, 8);
+            foreach (var s in Sides)
+                Prims.CurvedCone(mb, new Vec3(hC.X + s * hR.X * 0.3, hC.Y - hR.Y * 0.42, mz),
+                    new Vec3(0, -1, 0.1), 0.6, 0.13, new Vec3(0, 0, 0.04), Palette.CLAW, 0.6);
+            // forked tongue, parked just inside the mouth
+            foreach (var s in Sides)
+                Prims.Tube(mb, new[]
+                {
+                    new Vec3(hC.X, hC.Y - hR.Y * 0.38, mz - 0.55),
+                    new Vec3(hC.X + s * 0.05, hC.Y - hR.Y * 0.40, mz - 0.15),
+                    new Vec3(hC.X + s * 0.22, hC.Y - hR.Y * 0.34, mz + 0.25),
+                }, new[] { 0.09, 0.07, 0.02 }, Palette.TONGUE, 0.6, 0, 5);
+
+            var sSensP = new Vec3(hC.X + 0.5, hC.Y + hR.Y * 0.8, hC.Z - 0.3);
+            var sEyeP = new Vec3(hC.X, hC.Y + hR.Y * 0.25, hC.Z + hR.Z * 0.85);
+            var fakeHead = new Head { HC = hC, HR = hR, TopY = hC.Y + hR.Y };
+            return new Sockets
+            {
+                Hand = new Sock
+                {
+                    P = new Vec3(hC.X + 1.0, headY - 1.3, 0.9),
+                    Nrm = new Vec3(1, 0.1, 0.35).Norm(),
+                    Mirror = true,
+                    Tiny = true,
+                },
+                Sensor = new Sock { P = sSensP, Nrm = Prims.EllipN(sSensP, hC, hR), Mirror = false },
+                Eye = EyeSock(sEyeP, fakeHead),
+                TopY = hC.Y + hR.Y,
+                WaistY = headY * 0.4,
+            };
+        }
+
+        private static Sockets PlanWinged(Builder mb, Ctx o)
+        {
+            var b = o.Bulk * 0.85;               // bulk sets the build: imp vs gargoyle
+            var w = 1.5 + 0.8 * o.Bulk;
+            var h = 2.8 + 0.6 * o.Bulk;
+            var waistY = o.LegLen + 0.95;
+            var y0 = waistY - 0.12;
+            var levels = TorsoLevels(b, w, h, y0, 0.4);
+
+            Prims.Lathe(mb, levels, o.Skin, 0.28, 0, 14);
+            BuildPelvis(mb, o, levels[0].Rx, waistY);
+            var neckTop = y0 + h + 0.45;
+            BuildNeck(mb, o, y0 + h - 0.25, neckTop, levels[4].Z * 0.7, levels[4].Z * 0.8, w * 0.3);
+            var head = BuildHead(mb, o, neckTop - 0.2, levels[4].Z);
+            if (!o.Headless) FrankenDetails(mb, head.HC, head.HR, o.HeartLevel, o);
+
+            AddTail(mb, o, o.LegLen + 0.5, -levels[0].Rx * 0.75, true);   // devil spade
+
+            // bat wings, rooted at the BACK shoulders and sweeping out and
+            // behind (membrane double-sided here: Unity culls back faces
+            // where the Lab shader two-sided them)
+            var span = 4.6 + 3.6 * o.Limb;
+            var shY = levels[3].Y;
+            var rootZ = levels[3].Z - levels[3].Rz * 0.8;
+            var spine = Col.Lp(o.Skin, new Col(52, 40, 80), 0.45);
+            var wingCol = Col.Sh(Col.Lp(o.Skin, spine, 0.25), 0.95);
+            foreach (var s in Sides)
+            {
+                const int nU = 9, nV = 3;
+                var lead = new Vec3[nU + 1];
+                for (var iu = 0; iu <= nU; iu++)
+                {
+                    var u = (double)iu / nU;
+                    lead[iu] = new Vec3(
+                        s * (0.9 + u * span),
+                        shY + Math.Sin(u * Math.PI * 0.85) * 2.5 - u * u * 1.6,
+                        rootZ - u * 0.85);
+                }
+                // hoop around the wing bone right at its root
+                Prims.LimbJoint(mb, lead[0], lead[1] - lead[0], 0.34);
+
+                // membrane: emitted twice (front + back sheet) so it reads
+                // from both sides under single-sided URP materials
+                foreach (var flip in new[] { 1.0, -1.0 })
+                {
+                    var chunk = mb.Begin(wingCol, 0.2, 0);
+                    var grid = new int[nU + 1][];
+                    for (var iu = 0; iu <= nU; iu++)
+                    {
+                        var u = (double)iu / nU;
+                        var l = lead[iu];
+                        var chord = (2.5 * (1 - 0.5 * u) + 0.5) * (1 + 0.10 * Math.Sin(u * Math.PI * 3));
+                        grid[iu] = new int[nV + 1];
+                        for (var iv = 0; iv <= nV; iv++)
+                        {
+                            var v = (double)iv / nV;
+                            grid[iu][iv] = mb.Vert(chunk,
+                                new Vec3(l.X, l.Y - v * chord, l.Z + v * 0.3),
+                                new Vec3(0, 0.25 * flip, 0.97 * flip));
+                        }
+                    }
+                    for (var iu = 0; iu < nU; iu++)
+                        for (var iv = 0; iv < nV; iv++)
+                            mb.Quad(chunk, grid[iu][iv], grid[iu][iv + 1], grid[iu + 1][iv + 1], grid[iu + 1][iv]);
+                }
+
+                var boneR = new double[lead.Length];
+                for (var i = 0; i < lead.Length; i++) boneR[i] = 0.24 * (1 - (double)i / lead.Length) + 0.08;
+                Prims.Tube(mb, lead, boneR, Palette.BONDK, 0.35, 0, 7, 3);
+                foreach (var fu in new[] { 0.45, 0.75 })
+                {
+                    var k = (int)Math.Round(fu * nU);
+                    var a = lead[k];
+                    var chord = 2.5 * (1 - 0.5 * fu) + 0.5;
+                    Prims.Tube(mb, new[] { a, new Vec3(a.X, a.Y - chord, a.Z + 0.3) },
+                        new[] { 0.12, 0.05 }, Palette.BONDK, 0.3, 0, 6);
+                }
+            }
+
+            var sensP = new Vec3(head.HR.X * 0.5, head.TopY, head.HC.Z - 0.1);
+            var eyeP = new Vec3(0, head.HC.Y + head.HR.Y * 0.2, head.HC.Z + head.HR.Z * 0.62);
+            return new Sockets
+            {
+                Hand = new Sock
+                {
+                    P = new Vec3(levels[2].Rx * 0.95, levels[2].Y + 0.2, levels[2].Z + 0.3),
+                    Nrm = new Vec3(1, 0.1, 0.3).Norm(),
+                    Mirror = true,
+                    Tiny = true,
+                },
+                Sensor = HeadSock(sensP, head, true),
+                Eye = EyeSock(eyeP, head),
+                Leg = new LegSocketInfo
+                {
+                    P = new Vec3(Math.Max(0.8, levels[0].Rx * 0.5), o.LegLen, 0),
+                    Nrm = new Vec3(0.28, -1, 0).Norm(),
+                    Len = o.LegLen,
+                },
+                TopY = o.Headless ? neckTop : head.TopY,
+                WaistY = waistY,
+            };
+        }
+
+        private static Sockets PlanCrab(Builder mb, Ctx o)
+        {
+            var w = 3.0 + 1.6 * o.Bulk;
+            var d = 2.2 + 1.0 * o.Bulk;
+            var h = 1.7 + 0.5 * o.Bulk;
+            var y0 = Math.Max(0.5, o.LegLen * 0.7);
+            // wide, low, flat-topped shell -- a carapace, not a torso
+            var levels = new[]
+            {
+                new Prims.LatheLevel(y0, 0, 0, w * 0.72, d * 0.72),
+                new Prims.LatheLevel(y0 + h * 0.35, 0, 0.05 * d, w * 0.96, d * 0.96),
+                new Prims.LatheLevel(y0 + h * 0.62, 0, 0.02 * d, w * 1.00, d * 1.00),
+                new Prims.LatheLevel(y0 + h * 0.88, 0, -0.05 * d, w * 0.70, d * 0.72),
+                new Prims.LatheLevel(y0 + h, 0, -0.10 * d, w * 0.30, d * 0.42),
+            };
+            Prims.Lathe(mb, levels, o.Skin, 0.3, 0, 20);
+
+            // no true neck: the head fuses low and forward onto the shell edge
+            var head = BuildHead(mb, o, y0 + h * 0.55, levels[1].Rz * 0.85);
+            if (!o.Headless) FrankenDetails(mb, head.HC, head.HR, o.HeartLevel, o);
+
+            AddTail(mb, o, y0 + h * 0.3, -levels[0].Rz * 0.9, false);
+
+            var shl = levels[2];
+            var sensP = new Vec3(head.HR.X * 0.5, head.TopY, head.HC.Z - 0.1);
+            var eyeP = new Vec3(0, head.HC.Y + head.HR.Y * 0.25, head.HC.Z + head.HR.Z * 0.7);
+            return new Sockets
+            {
+                // chelipeds: carried out in FRONT of the carapace, by the
+                // mouth -- short, slender, reach-capped so the claw never
+                // out-lengths the legs or dips into the ground
+                Hand = new Sock
+                {
+                    P = new Vec3(shl.Rx * 0.30, y0 + h * 0.42, head.HC.Z + head.HR.Z * 0.55),
+                    Nrm = new Vec3(0.4, -0.15, 1).Norm(),
+                    Mirror = true,
+                    Tiny = true,
+                    ArmCapLen = Math.Max(0.9, o.LegLen * 0.82),
+                },
+                Sensor = HeadSock(sensP, head, true),
+                Eye = new Sock
+                {
+                    P = eyeP,
+                    Nrm = Prims.EllipN(eyeP, head.HC, head.HR),
+                    Mirror = false,
+                    FaceR = head.HR.X,
+                },
+                Leg = new LegSocketInfo
+                {
+                    P = new Vec3(shl.Rx * 0.85, o.LegLen, -shl.Rz * 0.15),
+                    Nrm = new Vec3(1, -0.7, 0).Norm(),
+                    Len = o.LegLen,
+                },
+                TopY = Math.Max(y0 + h, o.Headless ? 0 : head.TopY),
+                WaistY = y0 + h * 0.5,
+            };
+        }
+
+        private static Sockets PlanArachnid(Builder mb, Ctx o)
+        {
+            // two-part body: a smaller cephalothorax forward, a bulbous
+            // abdomen behind
+            var ar = 1.5 + 0.9 * o.Bulk;
+            var cr = 0.9 + 0.4 * o.Bulk;
+            var y0 = Math.Max(0.6, o.LegLen * 0.75);
+            var aC = new Vec3(0, y0 + ar * 0.7, -ar * 0.5);
+            var cC = new Vec3(0, y0 + cr * 0.85, cr * 0.9);
+            Prims.Ellipsoid(mb, aC, new Vec3(ar, ar * 0.82, ar * 1.15), o.Skin, 0.32, 0, 18);
+            Prims.Ellipsoid(mb, cC, new Vec3(cr, cr * 0.92, cr * 1.05), o.Skin, 0.32, 0, 16);
+            Prims.Ellipsoid(mb, new Vec3(0, (aC.Y + cC.Y) * 0.5 - 0.1, (aC.Z + cC.Z) * 0.5),
+                new Vec3(cr * 0.5, cr * 0.4, cr * 0.5), Col.Sh(o.Skin, 0.85), 0.3, 0, 10);   // waist pinch
+
+            var head = BuildHead(mb, o, cC.Y + cr * 0.5, cC.Z + cr * 0.6);
+            if (!o.Headless) FrankenDetails(mb, head.HC, head.HR, o.HeartLevel, o);
+
+            var sensP = new Vec3(head.HR.X * 0.5, head.TopY, head.HC.Z - 0.1);
+            var eyeP = new Vec3(0, head.HC.Y + head.HR.Y * 0.2, head.HC.Z + head.HR.Z * 0.65);
+            return new Sockets
+            {
+                // pedipalps: stubby front appendages flanking the mouth,
+                // never reaching past the legs
+                Hand = new Sock
+                {
+                    P = new Vec3(cr * 0.35, cC.Y + 0.15, cC.Z + cr * 0.75),
+                    Nrm = new Vec3(0.45, -0.1, 1).Norm(),
+                    Mirror = true,
+                    Tiny = true,
+                    ArmCapLen = Math.Max(0.8, o.LegLen * 0.65),
+                },
+                Sensor = HeadSock(sensP, head, true),
+                Eye = EyeSock(eyeP, head),
+                Leg = new LegSocketInfo
+                {
+                    P = new Vec3(cr * 0.9, o.LegLen, cC.Z * 0.3),
+                    Nrm = new Vec3(0.6, -1, 0.1).Norm(),
+                    Len = o.LegLen,
+                },
+                TopY = Math.Max(aC.Y + ar * 0.82, o.Headless ? 0 : head.TopY),
+                WaistY = y0,
+            };
+        }
+
+        private static Sockets PlanAvian(Builder mb, Ctx o)
+        {
+            var w = 1.4 + 0.7 * o.Bulk;
+            var h = 3.4 + 0.8 * o.Bulk;
+            var waistY = o.LegLen + 0.9;
+            var y0 = waistY - 0.1;
+            // forward-leaning raptor-runner silhouette: narrow tail-end,
+            // deep chest, leans forward as it rises
+            var levels = new[]
+            {
+                new Prims.LatheLevel(y0, 0, -h * 0.15, w * 0.55, w * 0.7),
+                new Prims.LatheLevel(y0 + h * 0.3, 0, -h * 0.05, w * 0.9, w * 1.0),
+                new Prims.LatheLevel(y0 + h * 0.6, 0, h * 0.1, w * 1.05, w * 1.1),
+                new Prims.LatheLevel(y0 + h * 0.85, 0, h * 0.28, w * 0.65, w * 0.75),
+                new Prims.LatheLevel(y0 + h, 0, h * 0.4, w * 0.32, w * 0.42),
+            };
+            Prims.Lathe(mb, levels, o.Skin, 0.28, 0, 16);
+            var ch = levels[2];
+            BuildPelvis(mb, o, levels[0].Rx, waistY);
+
+            var neckTop = y0 + h + 1.1;    // a long neck -- the archetype's signature
+            BuildNeck(mb, o, y0 + h + 0.1, neckTop, levels[4].Z, levels[4].Z + 0.9, w * 0.22);
+
+            var head = BuildHead(mb, o, neckTop - 0.15, levels[4].Z + 0.9);
+            if (!o.Headless) FrankenDetails(mb, head.HC, head.HR, o.HeartLevel, o);
+
+            AddTail(mb, o, y0 + h * 0.15, -levels[0].Rz * 0.8, false);
+
+            var sensP = new Vec3(head.HR.X * 0.52, head.TopY, head.HC.Z - 0.1);
+            var eyeP = new Vec3(0, head.HC.Y + head.HR.Y * 0.2, head.HC.Z + head.HR.Z * 0.62);
+            return new Sockets
+            {
+                Hand = new Sock
+                {
+                    P = new Vec3(ch.Rx * 0.85, ch.Y + 0.2, ch.Z + 0.2),
+                    Nrm = new Vec3(1, 0.1, 0.3).Norm(),
+                    Mirror = true,
+                    Tiny = true,
+                },
+                Sensor = HeadSock(sensP, head, true),
+                Eye = EyeSock(eyeP, head),
+                Leg = new LegSocketInfo
+                {
+                    P = new Vec3(Math.Max(0.6, levels[0].Rx * 0.55), o.LegLen, levels[0].Z * 0.3),
+                    Nrm = new Vec3(0.25, -1, 0).Norm(),
+                    Len = o.LegLen,
+                },
+                TopY = o.Headless ? neckTop : head.TopY,
+                WaistY = waistY,
+            };
+        }
+
+        private static Sockets PlanTreant(Builder mb, Ctx o)
+        {
+            var w = 2.0 + 1.3 * o.Bulk;
+            var h = 4.2 + 1.0 * o.Bulk;
+            const double y0 = 0.3;   // rooted low; the plan ignores 'leg'
+            // a thick columnar trunk, widest at the base, tapering gently up
+            var levels = new[]
+            {
+                new Prims.LatheLevel(y0, 0, 0, w * 1.15, w * 1.15),
+                new Prims.LatheLevel(y0 + h * 0.15, 0, 0, w * 0.85, w * 0.85),
+                new Prims.LatheLevel(y0 + h * 0.55, 0, 0, w * 0.62, w * 0.62),
+                new Prims.LatheLevel(y0 + h * 0.85, 0, 0, w * 0.5, w * 0.5),
+                new Prims.LatheLevel(y0 + h, 0, 0, w * 0.36, w * 0.36),
+            };
+            Prims.Lathe(mb, levels, o.Skin, 0.22, 0, 16);
+
+            // gnarled roots flaring from the base, standing in for legs/feet
+            const int nRoots = 5;
+            for (var i = 0; i < nRoots; i++)
+            {
+                var a = (double)i / nRoots * Math.PI * 2;
+                var basePt = new Vec3(Math.Cos(a) * levels[0].Rx * 0.7, y0 + 0.5, Math.Sin(a) * levels[0].Rx * 0.7);
+                var tip = new Vec3(Math.Cos(a) * levels[0].Rx * 1.7, 0, Math.Sin(a) * levels[0].Rx * 1.7);
+                Prims.Tube(mb, new[] { basePt, tip }, new[] { 0.35 + 0.1 * o.Bulk, 0.08 },
+                    Col.Sh(o.Skin, 0.8), 0.2, 0, 6, 3);
+            }
+
+            var head = BuildHead(mb, o, y0 + h - 0.3, 0);
+            if (!o.Headless) FrankenDetails(mb, head.HC, head.HR, o.HeartLevel, o);
+
+            var sensP = new Vec3(head.HR.X * 0.52, head.TopY, head.HC.Z - 0.1);
+            var eyeP = new Vec3(0, head.HC.Y + head.HR.Y * 0.2, head.HC.Z + head.HR.Z * 0.62);
+            return new Sockets
+            {
+                Hand = new Sock
+                {
+                    P = new Vec3(levels[3].Rx * 0.9, levels[3].Y, levels[3].Z + 0.15),
+                    Nrm = new Vec3(1, 0.3, 0.15).Norm(),
+                    Mirror = true,
+                },
+                Sensor = HeadSock(sensP, head, true),
+                Eye = EyeSock(eyeP, head),
+                TopY = o.Headless ? y0 + h : head.TopY,
+                WaistY = y0 + h * 0.5,
+            };
+        }
+
+        private static Sockets PlanFloater(Builder mb, Ctx o)
+        {
+            // a lean drone-pod hull: spindled front-to-back for a fast,
+            // agile silhouette. Hovers -- the plan ignores 'leg'.
+            var w = 1.4 + 0.7 * o.Bulk;
+            var h = 3.6 + 0.85 * o.Bulk;
+            const double y0 = 0.9;
+            var levels = new[]
+            {
+                new Prims.LatheLevel(y0, 0, 0, w * 0.20, w * 0.20),              // tapered nose cone
+                new Prims.LatheLevel(y0 + h * 0.16, 0, 0.02 * w, w * 0.62, w * 0.62),   // thruster collar
+                new Prims.LatheLevel(y0 + h * 0.5, 0, 0.05 * w, w * 0.80, w * 0.80),    // fuselage waist
+                new Prims.LatheLevel(y0 + h * 0.82, 0, 0.02 * w, w * 0.42, w * 0.42),   // canopy neck
+                new Prims.LatheLevel(y0 + h, 0, 0, w * 0.18, w * 0.18),
+            };
+            // hull tints toward gunmetal -- a chassis, not skin -- while
+            // still taking a cut of the creature's own pigment
+            Prims.Lathe(mb, levels, Col.Lp(Palette.METAL, o.Skin, 0.4), 0.55, 0, 18);
+
+            // stabilizer fins ringing the thruster collar, and a glowing
+            // thruster ring underneath
+            var collar = levels[1];
+            const int nFin = 5;
+            for (var i = 0; i < nFin; i++)
+            {
+                var a = (double)i / nFin * Math.PI * 2;
+                var basePt = new Vec3(Math.Cos(a) * collar.Rx * 0.95, collar.Y, Math.Sin(a) * collar.Rx * 0.95);
+                var tip = new Vec3(Math.Cos(a) * collar.Rx * 2.15, collar.Y - 0.6 - 0.25 * o.Bulk, Math.Sin(a) * collar.Rx * 2.15);
+                Prims.Tube(mb, new[] { basePt, tip }, new[] { 0.2, 0.05 }, Palette.METAL, 0.85, 0, 6, 1);
+            }
+            Prims.Ellipsoid(mb, new Vec3(0, y0 - 0.1, 0), new Vec3(w * 0.42, 0.1, w * 0.42),
+                Palette.GLOW, 0.4, 0.9, 12);
+
+            // the head pokes out through the canopy neck like a cockpit
+            var head = BuildHead(mb, o, y0 + h - 0.2, 0);
+            if (!o.Headless) FrankenDetails(mb, head.HC, head.HR, o.HeartLevel, o);
+
+            var sensP = new Vec3(head.HR.X * 0.5, head.TopY, head.HC.Z - 0.1);
+            var eyeP = new Vec3(0, head.HC.Y + head.HR.Y * 0.15, head.HC.Z + head.HR.Z * 0.6);
+            return new Sockets
+            {
+                // short arms high on the hull -- a full-length armDrop
+                // would hang past the fins and read as legs
+                Hand = new Sock
+                {
+                    P = new Vec3(levels[3].Rx * 0.8, levels[3].Y, levels[3].Z + 0.1),
+                    Nrm = new Vec3(1, 0, 0.3).Norm(),
+                    Mirror = true,
+                    Tiny = true,
+                },
+                Sensor = HeadSock(sensP, head, true),
+                Eye = new Sock
+                {
+                    P = eyeP,
+                    Nrm = Prims.EllipN(eyeP, head.HC, head.HR),
+                    Mirror = false,
+                    FaceR = head.HR.X,
+                },
+                TopY = o.Headless ? y0 + h : head.TopY,
+                WaistY = y0 + h * 0.5,
+            };
+        }
+
+        private static Sock HeadSock(Vec3 p, Head head, bool mirror)
+        {
+            return new Sock { P = p, Nrm = Prims.EllipN(p, head.HC, head.HR), Mirror = mirror };
+        }
+
+        private static Sock EyeSock(Vec3 p, Head head)
+        {
+            return new Sock { P = p, Nrm = Prims.EllipN(p, head.HC, head.HR), Mirror = false, FaceR = head.HR.X };
+        }
+
+        // ---- torso -----------------------------------------------------------
 
         /// <summary>Torso profiles: build 0 = pear (bottom-heavy egg),
         /// 1 = gorilla (triangular -- huge chest and shoulders over narrow
@@ -232,6 +807,14 @@ namespace MadDr.CreatureMesh
                     rx * (i == 2 ? 0.82 + 0.30 * build : 0.80));   // deep gorilla chest
             }
             return lv;
+        }
+
+        /// <summary>Mad-Doctor neck: a fleshy column (robot piston and
+        /// alien stalk variants come with the faction-kit pass).</summary>
+        private static void BuildNeck(Builder mb, Ctx o, double y0, double y1, double z0, double z1, double r)
+        {
+            Prims.Tube(mb, new[] { new Vec3(0, y0, z0), new Vec3(0, y1, z1) },
+                new[] { r, r * 0.86 }, Col.Sh(o.Skin, 0.95), 0.28, 0, 10);
         }
 
         private static void StitchSeam(Builder mb, double y0, double rx, double rz, double zc)
@@ -295,7 +878,7 @@ namespace MadDr.CreatureMesh
             }
         }
 
-        // ---- head ----------------------------------------------------------
+        // ---- head ------------------------------------------------------------
 
         /// <summary>The head ladder: dim = pinhead sunk in the shoulders,
         /// average = standard, gifted = tall egghead dome, mastermind =
@@ -418,7 +1001,8 @@ namespace MadDr.CreatureMesh
         }
 
         /// <summary>Tail from the tail gene (below 0.35 there is none): a
-        /// tapered whip out the lower back, curling up.</summary>
+        /// tapered whip out the lower back, curling up. Winged plans cap
+        /// it with a devil spade.</summary>
         private static void AddTail(Builder mb, Ctx o, double baseY, double baseZ, bool spade)
         {
             if (o.Tail < 0.35) return;
@@ -442,14 +1026,16 @@ namespace MadDr.CreatureMesh
                     Col.Sh(o.Skin, 0.7), 0.4);
         }
 
-        // ---- parts ---------------------------------------------------------
+        // ---- parts -----------------------------------------------------------
 
         private sealed class Sock
         {
             public Vec3 P;
             public Vec3 Nrm;
             public bool Mirror;
+            public bool Tiny;
             public double FaceR;
+            public double ArmCapLen = double.PositiveInfinity;
         }
 
         private static void BuildSlot(Builder mb, string slot, PartAlleleDto al, Sock sock, Ctx o)
@@ -482,7 +1068,8 @@ namespace MadDr.CreatureMesh
             var count = P(pg, 4, 0.5);
             var orn = P(pg, 5, 0.5);
             var s = new Vec3(side * sock.P.X, sock.P.Y, sock.P.Z);
-            const double scale = 1;   // tetrapod sockets are never `tiny`
+            var scale = sock.Tiny ? 0.62 : 1.0;
+            var capLen = sock.ArmCapLen;
             // the rig: parts leave the body along the surface normal at the
             // socket, so nothing buries into a chest on extreme morphs
             var n = new Vec3(side * sock.Nrm.X, sock.Nrm.Y, sock.Nrm.Z).Norm();
@@ -493,7 +1080,7 @@ namespace MadDr.CreatureMesh
                 case "claw_hand":
                 {
                     var armR = (0.42 + 0.4 * girth) * scale;
-                    var wrist = ArmDrop(mb, s, side, armR, scale, skin, pg, n);
+                    var wrist = ArmDrop(mb, s, side, armR, scale, skin, pg, n, capLen);
                     Prims.Ellipsoid(mb, wrist, new Vec3(armR * 1.35, armR * 1.15, armR * 1.35), skin, 0.3, 0, 8);
                     var nClaw = (int)Clamp(2 + Math.Round(count * 3), 2, 5);
                     for (var i = 0; i < nClaw; i++)
@@ -509,7 +1096,7 @@ namespace MadDr.CreatureMesh
                 case "pincer":
                 {
                     var armR = (0.5 + 0.4 * girth) * scale;
-                    var wrist = ArmDrop(mb, s, side, armR, scale, skin, pg, n);
+                    var wrist = ArmDrop(mb, s, side, armR, scale, skin, pg, n, capLen);
                     var jl = (1.1 + 1.5 * len) * scale;
                     Prims.CurvedCone(mb, wrist, new Vec3(side * 0.15, -0.25, 0.9), jl, armR * 0.75,
                         new Vec3(0, -(0.4 + curl * 0.8), 0.3), Palette.CLAW, 0.5);
@@ -542,7 +1129,7 @@ namespace MadDr.CreatureMesh
                 }
                 case "rifle_arm":
                 {
-                    var wrist = ArmDrop(mb, s, side, 0.42 * scale, scale, skin, pg, n);
+                    var wrist = ArmDrop(mb, s, side, 0.42 * scale, scale, skin, pg, n, capLen);
                     // rounded receiver, no boxes -- a toy gun, not a brick
                     Prims.Ellipsoid(mb, new Vec3(wrist.X, wrist.Y + 0.05, wrist.Z + 0.3),
                         new Vec3(0.5, 0.42, 1.0), Palette.METAL, 0.7, 0, 10);
@@ -573,7 +1160,7 @@ namespace MadDr.CreatureMesh
                 }
                 case "plasma_lance":
                 {
-                    var wrist = ArmDrop(mb, s, side, 0.5 * scale, scale, Palette.CHITIN, pg, n);
+                    var wrist = ArmDrop(mb, s, side, 0.5 * scale, scale, Palette.CHITIN, pg, n, capLen);
                     var lanceL = (1.6 + 1.6 * len) * scale;
                     Prims.Ellipsoid(mb, wrist, new Vec3(0.55, 0.5, 0.55), Palette.CHITIN, 0.4, 0, 8);
                     Prims.Tube(mb,
@@ -593,7 +1180,7 @@ namespace MadDr.CreatureMesh
                 {
                     // a motor housing at the wrist driving a guide bar with a
                     // looping chain of blade links
-                    var wrist = ArmDrop(mb, s, side, 0.4 * scale, scale, skin, pg, n);
+                    var wrist = ArmDrop(mb, s, side, 0.4 * scale, scale, skin, pg, n, capLen);
                     Prims.Ellipsoid(mb, wrist, new Vec3(0.36, 0.4, 0.5), Palette.METAL, 0.7, 0, 8);
                     var barLen = (1.6 + 1.8 * len) * scale;
                     var barTip = new Vec3(wrist.X, wrist.Y + barLen * 0.15, wrist.Z + barLen);
@@ -616,7 +1203,7 @@ namespace MadDr.CreatureMesh
                 {
                     // a fleshy arm ending in a bulbous pod venting glowing
                     // spore motes -- the biotech counterpart to plasma_lance
-                    var wrist = ArmDrop(mb, s, side, 0.46 * scale, scale, Palette.CHITIN, pg, n);
+                    var wrist = ArmDrop(mb, s, side, 0.46 * scale, scale, Palette.CHITIN, pg, n, capLen);
                     var podR = (0.5 + 0.5 * girth) * scale;
                     Prims.Ellipsoid(mb, wrist, new Vec3(podR, podR * 1.1, podR),
                         Col.Lp(Palette.CHITIN, Palette.ICHOR, 0.3), 0.45, 0, 10);
@@ -638,7 +1225,7 @@ namespace MadDr.CreatureMesh
                 case "laser_array":
                 {
                     // a fleshy arm bearing a rigid fan of crystalline emitters
-                    var wrist = ArmDrop(mb, s, side, 0.44 * scale, scale, Palette.CHITIN, pg, n);
+                    var wrist = ArmDrop(mb, s, side, 0.44 * scale, scale, Palette.CHITIN, pg, n, capLen);
                     var mountR = (0.4 + 0.3 * girth) * scale;
                     Prims.Ellipsoid(mb, wrist, new Vec3(mountR, mountR * 0.9, mountR), Palette.CHITIN, 0.4, 0, 8);
                     var nEmit = (int)Clamp(3 + Math.Round(count * 4), 3, 7);
@@ -657,7 +1244,7 @@ namespace MadDr.CreatureMesh
                 case "photon_blaster":
                 {
                     // a fleshy arm ending in a broad bioluminescent maw
-                    var wrist = ArmDrop(mb, s, side, 0.5 * scale, scale, Palette.CHITIN, pg, n);
+                    var wrist = ArmDrop(mb, s, side, 0.5 * scale, scale, Palette.CHITIN, pg, n, capLen);
                     var podR = (0.55 + 0.55 * girth) * scale;
                     Prims.Ellipsoid(mb, wrist, new Vec3(podR, podR * 0.95, podR * 1.1),
                         Col.Lp(Palette.CHITIN, Palette.PHOTON_N, 0.15), 0.45, 0, 10);
@@ -800,15 +1387,17 @@ namespace MadDr.CreatureMesh
         /// returns the wrist position. Shaped by the hand part's own genes:
         /// length -> arm length, curl -> elbow bend, taper -> forearm mass,
         /// girth -> bicep bulge. The upper arm exits along the socket
-        /// normal so the limb clears the torso before gravity takes it.</summary>
+        /// normal so the limb clears the torso before gravity takes it.
+        /// capLen bounds the reach for plans where a long arm would be
+        /// wrong (a crab dragging its claws).</summary>
         private static Vec3 ArmDrop(Builder mb, Vec3 s, double side, double armR, double scale,
-            Col armCol, double[] pg, Vec3 n)
+            Col armCol, double[] pg, Vec3 n, double capLen)
         {
             var len = P(pg, 0, 0.5);
             var girth = P(pg, 1, 0.5);
             var taper = P(pg, 2, 0.5);
             var curl = P(pg, 3, 0.5);
-            var armLen = (2.5 + 2.0 * len) * scale;
+            var armLen = Math.Min((2.5 + 2.0 * len) * scale, capLen);
             var bend = 0.35 + curl * 0.75;
             var ex = s + n * ((armR * 1.6 + 0.25) * scale);
             var elbow = new Vec3(ex.X + side * 0.2 * scale, ex.Y - armLen * 0.44, ex.Z + 0.08);
@@ -838,7 +1427,7 @@ namespace MadDr.CreatureMesh
                     new Vec3(r * 1.07, r * (0.42 + 0.34 * hood), r * 1.03), skin, 0.3, 0, 8);
         }
 
-        private static void RingStitch(Builder mb, Vec3 c, double r)
+        internal static void RingStitch(Builder mb, Vec3 c, double r)
         {
             var pts = new List<Vec3>();
             for (var i = 0; i <= 12; i++)

@@ -44,12 +44,191 @@ public class CreatureBuilderTests
         return n;
     }
 
-    [Fact]
-    public void NonTetrapodPlansReturnNull()
+    public static readonly TheoryData<string> AllPlans = new()
     {
-        Assert.Null(CreatureBuilder.Build(Genome(plan: "blob")));
-        Assert.Null(CreatureBuilder.Build(Genome(plan: "crab")));
-        Assert.NotNull(CreatureBuilder.Build(Genome()));
+        "tetrapod", "blob", "serpentine", "winged", "crab", "arachnid", "avian", "treant", "floater",
+    };
+
+    [Theory]
+    [MemberData(nameof(AllPlans))]
+    public void EveryPlanBuildsValidGeometry(string plan)
+    {
+        var r = CreatureBuilder.Build(Genome(plan: plan));
+        Assert.True(TotalTris(r) > 500, $"{plan} built almost nothing");
+        foreach (var c in r.Chunks)
+        {
+            Assert.Equal(0, c.Positions.Count % 3);
+            Assert.Equal(c.Positions.Count, c.Normals.Count);
+            foreach (var idx in c.Triangles) Assert.InRange(idx, 0, c.VertexCount - 1);
+            foreach (var v in c.Positions) Assert.True(double.IsFinite(v));
+        }
+        Assert.True(r.TopY > 0);
+    }
+
+    [Fact]
+    public void UnknownPlanFallsBackToTetrapod()
+    {
+        var weird = CreatureBuilder.Build(Genome(plan: "chimera-nonsense"));
+        var tetra = CreatureBuilder.Build(Genome(plan: "tetrapod"));
+        Assert.Equal(TotalTris(tetra), TotalTris(weird));
+    }
+
+    [Fact]
+    public void LegSocketsOnlyOnLeggedPlans()
+    {
+        foreach (var plan in new[] { "tetrapod", "winged", "crab", "arachnid", "avian" })
+            Assert.NotNull(CreatureBuilder.Build(Genome(plan: plan)).Leg);
+        foreach (var plan in new[] { "blob", "serpentine", "treant", "floater" })
+            Assert.Null(CreatureBuilder.Build(Genome(plan: plan)).Leg);
+    }
+
+    [Fact]
+    public void BlobHasTranslucentMassOverOpaqueOrgans()
+    {
+        var r = CreatureBuilder.Build(Genome(plan: "blob"));
+        Assert.True(HasColor(r, Palette.HEARTC_L));
+        Assert.True(HasColor(r, Palette.STOMACHC));
+        Assert.True(HasColor(r, Palette.GUTC));
+        var foundMass = false;
+        foreach (var c in r.Chunks)
+            if (c.Alpha > 0.5 && c.Alpha < 0.6) foundMass = true;
+        Assert.True(foundMass, "blob mass must be the 0.55-alpha gelatin");
+    }
+
+    [Fact]
+    public void SerpentineHasForkedTongueAndDownwardFangs()
+    {
+        var r = CreatureBuilder.Build(Genome(plan: "serpentine"));
+        Assert.True(HasColor(r, Palette.TONGUE));
+        Assert.True(HasColor(r, Palette.CLAW));    // fangs
+        Assert.True(HasColor(r, Palette.MOUTHC));
+        // the serpent keeps its own skull -- no franken jaw geometry means
+        // no brain-under-glass either, even at mastermind
+        var mm = CreatureBuilder.Build(Genome(plan: "serpentine", brainTier: "mastermind"));
+        Assert.False(HasColor(mm, Palette.BRAINC));
+    }
+
+    [Fact]
+    public void SerpentineCobraHoodNeedsGirth()
+    {
+        var slim = CreatureBuilder.Build(Genome(plan: "serpentine", bodyParams: new[] { 0.5, 0.3, 0.5, 0.5 }));
+        var girthy = CreatureBuilder.Build(Genome(plan: "serpentine", bodyParams: new[] { 0.5, 0.8, 0.5, 0.5 }));
+        Assert.True(TotalTris(girthy) > TotalTris(slim));
+    }
+
+    [Fact]
+    public void WingedGrowsDoubleSidedWingsAndSpadeTail()
+    {
+        var r = CreatureBuilder.Build(Genome(plan: "winged", bodyParams: new[] { 0.5, 0.5, 0.5, 0.9 }));
+        Assert.True(HasColor(r, Palette.BONDK));   // wing bones + fingers
+        // wing membranes emit front AND back sheets: without them Unity's
+        // backface culling deletes the wing from one side entirely
+        var membraneVerts = 0;
+        foreach (var c in r.Chunks)
+        {
+            for (var i = 0; i < c.VertexCount; i++)
+            {
+                // membrane normals are the soft fake (0, +-0.25, +-0.97)
+                var ny = c.Normals[i * 3 + 1];
+                var nz = c.Normals[i * 3 + 2];
+                if (System.Math.Abs(System.Math.Abs(nz) - 0.968) < 0.01 &&
+                    System.Math.Abs(System.Math.Abs(ny) - 0.25) < 0.02)
+                    membraneVerts++;
+            }
+        }
+        Assert.True(membraneVerts >= 2 * 2 * 10 * 4, $"expected two full membrane sheets per wing, saw {membraneVerts} verts");
+    }
+
+    [Fact]
+    public void FloaterIsAMachineWithAThrusterRing()
+    {
+        var r = CreatureBuilder.Build(Genome(plan: "floater"));
+        Assert.True(HasColor(r, Palette.GLOW));    // thruster ring
+        Assert.True(HasColor(r, Palette.METAL));   // fins
+    }
+
+    [Fact]
+    public void TreantIsRootedAndFullArmed()
+    {
+        var r = CreatureBuilder.Build(Genome(plan: "treant"));
+        Assert.Null(r.Leg);
+        Assert.True(HasColor(r, Palette.CLAW));    // full-scale claw_hand arms
+        double minY = double.MaxValue;
+        foreach (var c in r.Chunks)
+            for (var i = 1; i < c.Positions.Count; i += 3)
+                if (c.Positions[i] < minY) minY = c.Positions[i];
+        Assert.True(minY < 0.1, "treant roots must reach the ground");
+    }
+
+    [Theory]
+    [InlineData("hoofed_leg")]
+    [InlineData("talon_leg")]
+    [InlineData("insect_leg")]
+    [InlineData("piston_leg")]
+    [InlineData("jet_leg")]
+    [InlineData("tendril_leg")]
+    [InlineData("leg_stump")]
+    public void LegKitBuildsAllFamilies(string family)
+    {
+        foreach (var side in new[] { 1.0, -1.0 })
+        {
+            var kit = LegKit.Build(family, Mid(), new Col(150, 120, 100), side);
+            var tris = 0;
+            foreach (var chunks in new[] { kit.Hip, kit.Upper, kit.Lower, kit.Foot })
+                foreach (var c in chunks)
+                {
+                    tris += c.Triangles.Count / 3;
+                    foreach (var idx in c.Triangles) Assert.InRange(idx, 0, c.VertexCount - 1);
+                }
+            Assert.True(tris > 50, $"{family} kit nearly empty");
+            Assert.True(kit.Upper.Count > 0 && kit.Lower.Count > 0);
+        }
+    }
+
+    [Fact]
+    public void LegKitSegmentsSpanTheRigConvention()
+    {
+        // upper/lower must span y in [-1, +1] (Unity cylinder convention)
+        // or the rig's length-scaling stretches them wrong
+        var kit = LegKit.Build("hoofed_leg", Mid(), new Col(150, 120, 100), 1);
+        foreach (var c in kit.Upper)
+        {
+            double minY = double.MaxValue, maxY = double.MinValue;
+            for (var i = 1; i < c.Positions.Count; i += 3)
+            {
+                minY = System.Math.Min(minY, c.Positions[i]);
+                maxY = System.Math.Max(maxY, c.Positions[i]);
+            }
+            Assert.Equal(-1, minY, 2);
+            Assert.Equal(1, maxY, 2);
+        }
+    }
+
+    [Fact]
+    public void TalonClawsMirrorWithSide()
+    {
+        // an EXTREME count so the fan is odd-numbered and asymmetric per
+        // side; compare bounding boxes (parameterization-independent --
+        // the tube's ring seam rotates with the mirrored frame, so raw
+        // vertex sums are not comparable between sides)
+        var pg = Mid(); pg[4] = 1.0;
+        var right = LegKit.Build("talon_leg", pg, new Col(150, 120, 100), 1);
+        var left = LegKit.Build("talon_leg", pg, new Col(150, 120, 100), -1);
+        static (double min, double max) XBounds(System.Collections.Generic.IReadOnlyList<MeshChunk> chunks)
+        {
+            double min = double.MaxValue, max = double.MinValue;
+            foreach (var c in chunks)
+                for (var i = 0; i < c.Positions.Count; i += 3)
+                {
+                    min = System.Math.Min(min, c.Positions[i]);
+                    max = System.Math.Max(max, c.Positions[i]);
+                }
+            return (min, max);
+        }
+        var r = XBounds(right.Foot);
+        var l = XBounds(left.Foot);
+        Assert.Equal(r.max, -l.min, 6);
+        Assert.Equal(r.min, -l.max, 6);
     }
 
     [Fact]

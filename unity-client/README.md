@@ -23,17 +23,18 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   (around buildings — unless the order IS the building), target locking
   (attack a building until Destroyed; chase and eat a Citizen), with
   speeds from the creature's own physiology (`roster-client`'s tested
-  `Locomotion` port). **Tetrapods now regenerate the Lab website's
-  actual body from DNA** via `packages/creature-mesh` +
-  `LabMeshBuilder.cs` — torso, brass belt, franken face, brain-tier
-  heads (mastermind's brain under glass), tail, and every
-  hand/sensor/eye part family, same geometry the site renders; the
-  other 8 plans keep the simplified silhouette (plan → shape and leg
-  count, bulk → scale, hand family → weapon, brain tier → head) until
-  their port pass. All plans keep **distance-driven stepping: planted
-  feet are world-locked and never slide** — a leg only swings when the
-  body's real displacement pulls its hip far enough from the planted
-  foot, and body bob is phased by distance traveled, not a clock.
+  `Locomotion` port). **All nine body plans regenerate the Lab
+  website's actual body from DNA** via `packages/creature-mesh` +
+  `LabMeshBuilder.cs` — torso lathes, brass belts, franken faces,
+  brain-tier heads (mastermind's brain under glass), bat wings, cobra
+  hoods, see-through blob organs, and every hand/sensor/eye part
+  family, same geometry the site renders. Legged plans keep
+  **distance-driven stepping: planted feet are world-locked and never
+  slide** — a leg only swings when the body's real displacement pulls
+  its hip far enough from the planted foot, and body bob is phased by
+  distance traveled, not a clock — with the rig's legs dressed in the
+  family's real geometry (`LegKit`: hoofs, talon fans, chitin struts,
+  piston struts, brass hip joints) instead of stick cylinders.
 - **`Assets/Scripts/Citizen.cs`** — docs/19 client-side cosmetic crowd:
   wanders the streets, flees monsters, edible (docs/20 yields: Blood 2 /
   Bones 1 / Brains 1 into the session wallet).
