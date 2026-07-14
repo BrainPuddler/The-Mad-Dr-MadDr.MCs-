@@ -47,7 +47,6 @@ public class MonsterBody : MonoBehaviour
     private float _standHeight = 1.2f;
     private float _distTraveled;
     private float _hoverPhase;
-    private int _lastSwungGroup = 1; // so the very first step comes from group 0
 
     /// <summary>Fixed at Build time from the plan's leg count -- NOT
     /// derived from _legs.Count on the fly: the first version did that,
@@ -372,93 +371,75 @@ public class MonsterBody : MonoBehaviour
         }
 
         var dir = speed > 0.05f ? new Vector3(velocity.x, 0f, velocity.z) / speed : Vector3.zero;
-        var swingDur = strideEff / Mathf.Max(speed, 0.8f) * 0.55f;
-        var trigger = strideEff * 0.5f;
 
-        // -- pass 1: advance airborne swings; note whether any leg is up
-        var anyAirborne = false;
+        // DISTANCE-PHASED STEP WINDOWS (third scheduler, verified in a
+        // standalone sim at 5 speed/turning combos before porting).
+        // History: v1's "only the airborne group may launch" starved one
+        // group outright (gum). v2's "all-legs-down turn-taking barrier"
+        // was better but deadlock-prone: one out-of-turn fail-safe launch
+        // held the barrier closed, other legs then also hit the fail-safe
+        // threshold, and stepping degenerated into fail-safe-only at
+        // 1.5x-stride stretch -- the residual "sticking, but less."
+        // v3 has NO barrier and NO turn bookkeeping to corrupt: a phase
+        // clock driven by DISTANCE TRAVELED (the creator's own spec,
+        // literally) gives group 0 the [0,0.5) half of each stride and
+        // group 1 the [0.5,1) half. A leg steps when its window is open
+        // and its foot is measurably behind -- windows guarantee every
+        // group gets a slot every stride, so starvation is structurally
+        // impossible rather than scheduled away.
+        var phase = (_distTraveled / Mathf.Max(strideEff, 0.01f)) % 1f;
+
         foreach (var leg in _legs)
         {
-            if (!leg.Swinging) continue;
-            leg.SwingT += dt / Mathf.Max(swingDur, 0.05f);
-            if (leg.SwingT >= 1f)
-            {
-                leg.Swinging = false;
-                leg.FootWorld = leg.SwingTo;   // plants EXACTLY at the target -- world-locked from here
-            }
-            else
-            {
-                var t = leg.SwingT;
-                var eased = t * t * (3f - 2f * t);
-                var pos = Vector3.Lerp(leg.SwingFrom, leg.SwingTo, eased);
-                pos.y = Mathf.Sin(t * Mathf.PI) * strideEff * 0.22f;
-                leg.FootWorld = pos;
-                anyAirborne = true;
-            }
-        }
+            var hipW = transform.TransformPoint(leg.HipLocal);
+            var restW = new Vector3(hipW.x, 0f, hipW.z);
 
-        // -- pass 2: TURN-TAKING group scheduler. The first version let
-        // any leg of the currently-airborne group launch the moment one
-        // landed, so a fast group could ping-pong among its own legs and
-        // STARVE the other group entirely -- its feet stayed planted
-        // forever (obeying the no-skate rule) while the body walked away,
-        // stretching those legs across the path like gum. Now: when all
-        // legs are down, the NEXT step strictly prefers the other group,
-        // and every strained leg of the chosen group swings together (a
-        // real trot pair / tripod beat) instead of one at a time.
-        if (!anyAirborne && speed > 0.05f)
-        {
-            var maxStrain0 = 0f;
-            var maxStrain1 = 0f;
-            foreach (var leg in _legs)
+            if (leg.Swinging)
             {
-                var hip = transform.TransformPoint(leg.HipLocal);
-                var strainVec = new Vector3(hip.x, 0f, hip.z) + dir * (strideEff * 0.2f) - leg.FootWorld;
-                strainVec.y = 0f;
-                var s = strainVec.magnitude;
-                if (leg.Group == 0) maxStrain0 = Mathf.Max(maxStrain0, s);
-                else maxStrain1 = Mathf.Max(maxStrain1, s);
-            }
-
-            var other = 1 - _lastSwungGroup;
-            var pick = -1;
-            if ((other == 0 ? maxStrain0 : maxStrain1) > trigger) pick = other;
-            else if ((_lastSwungGroup == 0 ? maxStrain0 : maxStrain1) > trigger) pick = _lastSwungGroup;
-
-            if (pick >= 0)
-            {
-                foreach (var leg in _legs)
+                // swing progress advances with DISTANCE too (a swing
+                // occupies half a stride of travel), min-clamped so a
+                // swing still settles if the body stops mid-step
+                leg.SwingT += Mathf.Max(speed, 1f) * dt / (strideEff * 0.5f);
+                if (leg.SwingT >= 1f)
                 {
-                    if (leg.Group != pick) continue;
-                    var hip = transform.TransformPoint(leg.HipLocal);
-                    var restW = new Vector3(hip.x, 0f, hip.z);
-                    var strainVec = restW + dir * (strideEff * 0.2f) - leg.FootWorld;
-                    strainVec.y = 0f;
-                    // the whole group steps together once ANY of it is
-                    // past the trigger; individual legs join in from a
-                    // lower bar so pairs land in unison
-                    if (strainVec.magnitude > trigger * 0.6f)
-                    {
-                        leg.Swinging = true;
-                        leg.SwingT = 0f;
-                        leg.SwingFrom = leg.FootWorld;
-                        leg.SwingTo = restW + dir * (strideEff * 0.55f);
-                    }
+                    leg.Swinging = false;
+                    leg.FootWorld = leg.SwingTo;   // plants EXACTLY at the target -- world-locked from here
                 }
-                _lastSwungGroup = pick;
+                else
+                {
+                    var t = leg.SwingT;
+                    var eased = t * t * (3f - 2f * t);
+                    var pos = Vector3.Lerp(leg.SwingFrom, leg.SwingTo, eased);
+                    pos.y = Mathf.Sin(t * Mathf.PI) * strideEff * 0.22f;
+                    leg.FootWorld = pos;
+                }
+                RenderLeg(leg, hipW);
+                continue;
             }
-        }
 
-        // -- pass 3: fail-safes that make gum GEOMETRICALLY impossible,
-        // whatever else the scheduler does. A leg stretched past 1.5x
-        // stride force-launches regardless of whose turn it is; past 3x
-        // (a teleport, or a bug this code hasn't met yet) it snap-plants
-        // instantly and warns -- visible recovery beats invisible taffy.
-        foreach (var leg in _legs)
-        {
-            if (leg.Swinging) continue;
-            var hip = transform.TransformPoint(leg.HipLocal);
-            var restW = new Vector3(hip.x, 0f, hip.z);
+            if (speed > 0.05f)
+            {
+                var strainVec = restW + dir * (strideEff * 0.2f) - leg.FootWorld;
+                strainVec.y = 0f;
+                var windowOpen = leg.Group == 0 ? phase < 0.5f : phase >= 0.5f;
+
+                if (windowOpen && strainVec.magnitude > strideEff * 0.15f)
+                {
+                    leg.Swinging = true;
+                    leg.SwingT = 0f;
+                    leg.SwingFrom = leg.FootWorld;
+                    leg.SwingTo = restW + dir * (strideEff * 0.5f);
+                    RenderLeg(leg, hipW);
+                    continue;
+                }
+            }
+
+            // fail-safes, kept as the backstop that makes gum
+            // GEOMETRICALLY impossible whatever the scheduler does: a
+            // leg stretched past 1.5x stride force-launches out of
+            // window; past 3x (a teleport, or a bug this code hasn't
+            // met yet) it snap-replants instantly and warns -- visible
+            // recovery beats invisible taffy.
             var lag = restW - leg.FootWorld;
             lag.y = 0f;
             if (lag.magnitude > strideEff * 3f)
@@ -472,14 +453,10 @@ public class MonsterBody : MonoBehaviour
                 leg.Swinging = true;
                 leg.SwingT = 0f;
                 leg.SwingFrom = leg.FootWorld;
-                leg.SwingTo = restW + dir * (strideEff * 0.55f);
+                leg.SwingTo = restW + dir * (strideEff * 0.5f);
             }
-        }
 
-        // -- pass 4: render everything at its final position this frame
-        foreach (var leg in _legs)
-        {
-            RenderLeg(leg, transform.TransformPoint(leg.HipLocal));
+            RenderLeg(leg, hipW);
         }
     }
 
