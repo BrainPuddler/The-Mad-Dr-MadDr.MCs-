@@ -38,6 +38,18 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
 - **`Assets/Scripts/Citizen.cs`** — docs/19 client-side cosmetic crowd:
   wanders the streets, flees monsters, edible (docs/20 yields: Blood 2 /
   Bones 1 / Brains 1 into the session wallet).
+- **Combat** (`UnitCombat.cs` / `WeaponFx.cs` / `Projectile.cs` /
+  `Tank.cs` / `HealthBars.cs`) — every unit has health and a weapon
+  derived from its genome (`roster-client`'s tested `Combat.Profile`):
+  laser arrays fire instant cyan beams, photon/plasma blasters lob slow
+  phaser bolts, rifles spit fast bullets, claws/blades strike in melee.
+  A few enemy **tanks** spawn at the city edge to fight — half carry a
+  flamethrower (a short fire cone), half a 75mm cannon — and roll in
+  toward the nearest monster; monsters auto-retaliate and auto-engage,
+  or you can right-click a tank to order the group onto it. Units in
+  battle show a floating **health bar**. Nothing walks through anything
+  else: overlapping units are pushed apart each frame (citizens
+  excepted — they're prey). Tune `tankCount` on `RuntimeCityBuilder`.
 - **`Assets/Scripts/WaypointCommander.cs`** / **`SimpleCameraRig.cs`** /
   **`HudStatus.cs`** — mouse orders (left-click select · right-click:
   ground = waypoint, Shift queues; citizen = eat; building = attack),

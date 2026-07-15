@@ -126,6 +126,13 @@ public class WaypointCommander : MonoBehaviour
         var hit = RaycastCursor(cam, mouse);
         if (!hit.HasValue || hit.Value.collider == null) return;
 
+        var enemy = hit.Value.collider.GetComponentInParent<Tank>();
+        if (enemy != null && enemy.Combat != null)
+        {
+            foreach (var a in _selected) a.OrderAttackUnit(enemy.Combat);
+            return;
+        }
+
         var citizen = hit.Value.collider.GetComponentInParent<Citizen>();
         if (citizen != null)
         {

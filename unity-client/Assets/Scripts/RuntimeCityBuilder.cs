@@ -37,6 +37,9 @@ public class RuntimeCityBuilder : MonoBehaviour
     [Tooltip("How many Citizens wander the streets near the spawn area (docs/19; client-side cosmetic crowd).")]
     public int citizenCount = 24;
 
+    [Tooltip("How many enemy tanks spawn near the city edge to fight the monsters (a combat test harness; half carry flamethrowers).")]
+    public int tankCount = 4;
+
     // live state
     private CityModel _city;
     private BattlefieldState _battlefield;
@@ -51,6 +54,8 @@ public class RuntimeCityBuilder : MonoBehaviour
     private readonly Dictionary<Building, List<GameObject>> _cubesByBuilding = new Dictionary<Building, List<GameObject>>();
     private readonly List<MonsterAgent> _monsters = new List<MonsterAgent>();
     private readonly List<Citizen> _citizens = new List<Citizen>();
+    private readonly List<Tank> _tanks = new List<Tank>();
+    private readonly List<UnitCombat> _combatants = new List<UnitCombat>();
 
     public CityModel City { get { return _city; } }
     public int CityVersion { get { return _cityVersion; } }
@@ -58,6 +63,10 @@ public class RuntimeCityBuilder : MonoBehaviour
     public int WalletBones { get; private set; }
     public int WalletBrains { get; private set; }
     public int CitizensEaten { get; private set; }
+
+    /// <summary>Every fighting unit -- monsters and tanks. The health-bar
+    /// HUD, enemy targeting, and no-overlap separation all read this.</summary>
+    public IReadOnlyList<UnitCombat> Combatants { get { return _combatants; } }
 
     private void Start()
     {
@@ -70,6 +79,7 @@ public class RuntimeCityBuilder : MonoBehaviour
         BuildBuildings();
         BuildBridges();
         SpawnCitizens();
+        SpawnTanks();
 
         // camera: frame the spawn area so Play starts looking at the action
         var cam = Camera.main;
@@ -87,6 +97,10 @@ public class RuntimeCityBuilder : MonoBehaviour
         var hud = gameObject.GetComponent<HudStatus>();
         if (hud == null) hud = gameObject.AddComponent<HudStatus>();
         hud.Init(this, commander);
+
+        var bars = gameObject.GetComponent<HealthBars>();
+        if (bars == null) bars = gameObject.AddComponent<HealthBars>();
+        bars.Init(this);
 
         _roster = gameObject.GetComponent<RosterFetcher>();
         if (_roster == null) _roster = gameObject.AddComponent<RosterFetcher>();
@@ -430,7 +444,98 @@ public class RuntimeCityBuilder : MonoBehaviour
             var agent = root.AddComponent<MonsterAgent>();
             agent.Init(this, creature, home);
             _monsters.Add(agent);
+            if (agent.Fighter != null) _combatants.Add(agent.Fighter);
         }
+    }
+
+    /// <summary>Enemy tanks at the city edge -- the combat test dummies.
+    /// Half carry a flamethrower, half a cannon; they roll in toward the
+    /// nearest monster and open fire.</summary>
+    private void SpawnTanks()
+    {
+        if (tankCount <= 0) return;
+        var center = _city.CenterHex;
+        var blocked = BlockedFor(false);
+
+        var candidates = new List<HexCoord>();
+        var maxD = 0;
+        foreach (var hex in center.Range(28))
+        {
+            if (!_city.Contains(hex) || blocked.Contains(hex)) continue;
+            var d = hex.DistanceTo(center);
+            if (d > maxD) maxD = d;
+            candidates.Add(hex);
+        }
+        if (candidates.Count == 0) return;
+
+        // prefer the outer ring so tanks advance inward toward the roster
+        var ring = new List<HexCoord>();
+        foreach (var hex in candidates)
+            if (hex.DistanceTo(center) >= maxD - 3) ring.Add(hex);
+        if (ring.Count == 0) ring = candidates;
+
+        var host = new GameObject("Tanks").transform;
+        host.SetParent(transform, false);
+        for (var i = 0; i < tankCount; i++)
+        {
+            var spot = ring[(i * 7 + 3) % ring.Count];   // spread around the ring, deterministically
+            var go = new GameObject("Tank_" + i);
+            go.transform.SetParent(host, false);
+            go.transform.position = WorldOf(spot);
+            var tank = go.AddComponent<Tank>();
+            tank.Init(this, i % 2 == 1);   // alternate cannon / flamethrower
+            _tanks.Add(tank);
+            if (tank.Combat != null) _combatants.Add(tank.Combat);
+        }
+    }
+
+    /// <summary>Nearest living combatant of the OPPOSING faction within
+    /// range -- how a tank finds a monster and a monster finds a tank.</summary>
+    public UnitCombat NearestEnemyOf(UnitCombat self, float range)
+    {
+        if (self == null) return null;
+        UnitCombat best = null;
+        var bestSq = range * range;
+        var p = self.transform.position;
+        foreach (var c in _combatants)
+        {
+            if (c == null || !c.Alive || c.Faction == self.Faction) continue;
+            var d = c.transform.position - p;
+            d.y = 0f;
+            if (d.sqrMagnitude < bestSq) { bestSq = d.sqrMagnitude; best = c; }
+        }
+        return best;
+    }
+
+    /// <summary>Soft body separation so units never stand inside each other
+    /// ("creatures should NOT walk through each other"). Each unit pushes
+    /// HALF the overlap; the neighbor pushes its own half next frame, so a
+    /// pair settles exactly touching. Citizens are excluded on purpose --
+    /// they're prey, and monsters must be able to reach them.</summary>
+    public void ApplySeparation(UnitCombat self)
+    {
+        if (self == null) return;
+        var p = self.transform.position;
+        var moved = false;
+        foreach (var c in _combatants)
+        {
+            if (c == null || c == self || !c.Alive) continue;
+            var d = p - c.transform.position;
+            d.y = 0f;
+            var minDist = self.Radius + c.Radius;
+            var dist = d.magnitude;
+            if (dist < minDist && dist > 1e-3f)
+            {
+                p += d / dist * ((minDist - dist) * 0.5f);
+                moved = true;
+            }
+        }
+        if (moved) self.transform.position = new Vector3(p.x, self.transform.position.y, p.z);
+    }
+
+    public void OnCombatantDied(UnitCombat c)
+    {
+        if (c != null) _combatants.Remove(c);
     }
 
     private void HandleRosterFailed(string reason)

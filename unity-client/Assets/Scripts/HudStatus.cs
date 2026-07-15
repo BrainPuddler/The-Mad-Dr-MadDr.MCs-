@@ -33,13 +33,14 @@ public class HudStatus : MonoBehaviour
         else if (selected != null)
         {
             Line(ref y, "▶ " + selected.DisplayName + " — " + selected.OrderDescription);
+            Line(ref y, "   " + selected.CombatDescription);
             Line(ref y, "   " + selected.SpeedDescription);
         }
         else
         {
             Line(ref y, "Left-click a monster · left-drag box-select · double-click all of a type (Shift adds)");
         }
-        Line(ref y, "Right-click orders the group: ground = waypoint (Shift queues) · citizen = eat · building = attack");
+        Line(ref y, "Right-click orders the group: ground = waypoint (Shift queues) · citizen = eat · tank/building = attack");
         Line(ref y, "Camera: WASD pan · Q/E rotate · scroll zoom · middle-drag / screen-edge scroll");
         Line(ref y, "G: jump to the unit nearest the cursor");
     }
