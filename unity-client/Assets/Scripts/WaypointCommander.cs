@@ -147,13 +147,44 @@ public class WaypointCommander : MonoBehaviour
             return;
         }
 
-        // ground: a waypoint for the whole group. Shift queues.
+        // ground: a waypoint for the whole group. Shift queues. A group
+        // spreads into a formation around the spot (one hex each) instead
+        // of stacking on the exact point.
         var hex = _builder.HexAt(hit.Value.point);
         if (_builder.City.Contains(hex))
         {
             var shift = keyboard != null && keyboard.leftShiftKey.isPressed;
-            foreach (var a in _selected) a.OrderMove(hex, shift);
+            if (_selected.Count == 1)
+                _selected[0].OrderMove(hex, shift);
+            else
+                AssignFormation(_builder.FormationHexes(hex, _selected.Count), shift);
             _builder.SpawnWaypointMarker(_builder.WorldOf(hex));
+        }
+    }
+
+    /// <summary>Hand out formation slots to the selected group,
+    /// nearest-slot-to-nearest-unit, so units mostly walk straight to
+    /// their spot instead of crossing paths.</summary>
+    private void AssignFormation(System.Collections.Generic.List<MadDr.CityGen.HexCoord> slots, bool queue)
+    {
+        var remaining = new System.Collections.Generic.List<MonsterAgent>(_selected);
+        foreach (var slot in slots)
+        {
+            if (remaining.Count == 0) break;
+            var slotW = _builder.WorldOf(slot);
+            var best = -1;
+            var bestSq = float.MaxValue;
+            for (var i = 0; i < remaining.Count; i++)
+            {
+                if (remaining[i] == null) continue;
+                var d = remaining[i].transform.position - slotW;
+                d.y = 0f;
+                if (d.sqrMagnitude < bestSq) { bestSq = d.sqrMagnitude; best = i; }
+            }
+            if (best < 0) break;
+            var unit = remaining[best];
+            remaining.RemoveAt(best);
+            unit.OrderMove(slot, queue);
         }
     }
 

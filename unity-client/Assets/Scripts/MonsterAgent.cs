@@ -412,11 +412,14 @@ public class MonsterAgent : MonoBehaviour
         }
 
         var dir = to / dist;
+        // arc around a unit sitting ahead so a faster creature overtakes a
+        // slower one instead of piling into its back (no-op when clear)
+        var steer = _builder != null && _fighter != null ? _builder.AvoidanceDir(_fighter, dir) : dir;
         transform.rotation = Quaternion.Slerp(transform.rotation,
-            Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
+            Quaternion.LookRotation(steer, Vector3.up), dt * 5f);
         var step = Mathf.Min(speed * dt, dist);
-        transform.position += dir * step;
-        return dir * speed;
+        transform.position += steer * step;
+        return steer * speed;
     }
 
     private List<Vector3> ComputePath(HexCoord goal)

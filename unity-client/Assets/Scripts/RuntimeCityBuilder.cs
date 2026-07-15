@@ -538,6 +538,74 @@ public class RuntimeCityBuilder : MonoBehaviour
         if (c != null) _combatants.Remove(c);
     }
 
+    /// <summary>Local collision-avoidance steer: perturb a unit's desired
+    /// direction to arc AROUND any unit sitting in front of it, so a
+    /// faster creature overtakes a slower one instead of shoving into its
+    /// back. Only things roughly ahead (within a forward cone) and close
+    /// count; the unit with clear space ahead (the one in front) isn't
+    /// deflected, so the asymmetry -- faster-from-behind goes around --
+    /// falls out of the geometry. Returns a NORMALIZED direction; equals
+    /// the input when nothing blocks.</summary>
+    public Vector3 AvoidanceDir(UnitCombat self, Vector3 desiredDir)
+    {
+        if (self == null) return desiredDir;
+        var fwd = new Vector3(desiredDir.x, 0f, desiredDir.z);
+        if (fwd.sqrMagnitude < 1e-4f) return desiredDir;
+        fwd = fwd.normalized;
+        var right = new Vector3(fwd.z, 0f, -fwd.x);   // fwd rotated -90 about up
+        var pos = self.transform.position;
+
+        var avoid = Vector3.zero;
+        foreach (var c in _combatants)
+        {
+            if (c == null || c == self || !c.Alive) continue;
+            var to = c.transform.position - pos;
+            to.y = 0f;
+            var dist = to.magnitude;
+            var reach = self.Radius + c.Radius + 4f;   // lookahead
+            if (dist < 1e-3f || dist > reach) continue;
+            var ahead = Vector3.Dot(to / dist, fwd);
+            if (ahead < 0.35f) continue;                // only things ~in front
+
+            // steer to the side away from the blocker (dead-ahead breaks to
+            // the left deterministically)
+            var onRight = Vector3.Dot(to, right);
+            var side = onRight > 0f ? -1f : 1f;
+            var strength = (reach - dist) / reach * ahead;
+            avoid += right * (side * strength);
+        }
+
+        if (avoid.sqrMagnitude < 1e-6f) return desiredDir;
+        return (fwd + avoid * 1.2f).normalized;
+    }
+
+    /// <summary>Distinct passable hexes clustered around `center`,
+    /// nearest-first -- one parking slot per unit so a group ordered to a
+    /// spot spreads out around it (each on its own hex, ~a hex apart)
+    /// instead of stacking on one point. Pads with the center hex if the
+    /// area is too hemmed-in to seat everyone.</summary>
+    public List<HexCoord> FormationHexes(HexCoord center, int count)
+    {
+        var result = new List<HexCoord>();
+        if (count <= 0) return result;
+        var blocked = BlockedFor(false);
+
+        var pool = new List<HexCoord>();
+        var radius = 1;
+        while (pool.Count < count && radius <= 6)
+        {
+            pool.Clear();
+            foreach (var hex in center.Range(radius))
+                if (_city.Contains(hex) && !blocked.Contains(hex)) pool.Add(hex);
+            radius++;
+        }
+        pool.Sort((a, b) => center.DistanceTo(a).CompareTo(center.DistanceTo(b)));
+
+        for (var i = 0; i < count; i++)
+            result.Add(i < pool.Count ? pool[i] : center);
+        return result;
+    }
+
     private void HandleRosterFailed(string reason)
     {
         Debug.LogWarning("RuntimeCityBuilder: could not load a roster (" + reason + "). "
