@@ -39,6 +39,15 @@ Unity meshes. Zero `UnityEngine` reference, zero I/O.
   family feet — hoof, talon fan (side-mirrored in data, never by
   negative scale), insect needle point, piston strut, jet nozzle,
   tendril tip, ring-stitched stump.
+- **Wings are NOT baked into the mesh either** (winged plan only, same
+  reasoning as legs) — `CreatureMeshResult.Wing` returns a
+  `WingSocketInfo` with each side's full membrane/bone/finger/joint
+  geometry as its OWN chunk set, authored **root-relative** (the
+  shoulder joint sits at local origin) so Unity can parent it at the
+  root's world position and rotate the whole thing as a rigid hinge —
+  the flap — with zero per-frame vertex work. `RootL`/`RootR` mirror
+  across x; each side's `side=±1` is baked into its own geometry (not a
+  negative Unity scale, which would flip winding).
 
 Dropped relative to the JS (future passes): per-vertex color gradients
 (each material chunk is flat-colored), texture tiling, blink/gaze/

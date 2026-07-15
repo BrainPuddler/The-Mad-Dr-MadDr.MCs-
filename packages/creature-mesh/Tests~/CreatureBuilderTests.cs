@@ -31,7 +31,12 @@ public class CreatureBuilderTests
 
     private static bool HasColor(CreatureMeshResult r, Col c)
     {
-        foreach (var chunk in r.Chunks)
+        return HasColorIn(r.Chunks, c);
+    }
+
+    private static bool HasColorIn(System.Collections.Generic.IReadOnlyList<MeshChunk> chunks, Col c)
+    {
+        foreach (var chunk in chunks)
             if ((int)chunk.Color.R == (int)c.R && (int)chunk.Color.G == (int)c.G && (int)chunk.Color.B == (int)c.B)
                 return true;
         return false;
@@ -39,9 +44,49 @@ public class CreatureBuilderTests
 
     private static int TotalTris(CreatureMeshResult r)
     {
+        return TotalTrisIn(r.Chunks);
+    }
+
+    private static int TotalTrisIn(System.Collections.Generic.IReadOnlyList<MeshChunk> chunks)
+    {
         var n = 0;
-        foreach (var chunk in r.Chunks) n += chunk.Triangles.Count / 3;
+        foreach (var chunk in chunks) n += chunk.Triangles.Count / 3;
         return n;
+    }
+
+    private static int MembraneVertsIn(System.Collections.Generic.IReadOnlyList<MeshChunk> chunks)
+    {
+        var count = 0;
+        foreach (var c in chunks)
+            for (var i = 0; i < c.VertexCount; i++)
+            {
+                // membrane normals are the soft fake (0, +-0.25, +-0.97)
+                var ny = c.Normals[i * 3 + 1];
+                var nz = c.Normals[i * 3 + 2];
+                if (System.Math.Abs(System.Math.Abs(nz) - 0.968) < 0.01 &&
+                    System.Math.Abs(System.Math.Abs(ny) - 0.25) < 0.02)
+                    count++;
+            }
+        return count;
+    }
+
+    private static void AssertWindingAgreesWithNormals(System.Collections.Generic.IReadOnlyList<MeshChunk> chunks)
+    {
+        foreach (var c in chunks)
+        {
+            for (var t = 0; t < c.Triangles.Count; t += 3)
+            {
+                int i0 = c.Triangles[t] * 3, i1 = c.Triangles[t + 1] * 3, i2 = c.Triangles[t + 2] * 3;
+                var e1 = new Vec3(c.Positions[i1] - c.Positions[i0], c.Positions[i1 + 1] - c.Positions[i0 + 1], c.Positions[i1 + 2] - c.Positions[i0 + 2]);
+                var e2 = new Vec3(c.Positions[i2] - c.Positions[i0], c.Positions[i2 + 1] - c.Positions[i0 + 1], c.Positions[i2 + 2] - c.Positions[i0 + 2]);
+                var g = Vec3.Cross(e1, e2);
+                var n = new Vec3(
+                    c.Normals[i0] + c.Normals[i1] + c.Normals[i2],
+                    c.Normals[i0 + 1] + c.Normals[i1 + 1] + c.Normals[i2 + 1],
+                    c.Normals[i0 + 2] + c.Normals[i1 + 2] + c.Normals[i2 + 2]);
+                Assert.True(Vec3.Dot(g, n) >= 0, "triangle wound against its normals");
+            }
+        }
     }
 
     public static readonly TheoryData<string> AllPlans = new()
@@ -119,24 +164,79 @@ public class CreatureBuilderTests
     [Fact]
     public void WingedGrowsDoubleSidedWingsAndSpadeTail()
     {
-        var r = CreatureBuilder.Build(Genome(plan: "winged", bodyParams: new[] { 0.5, 0.5, 0.5, 0.9 }));
-        Assert.True(HasColor(r, Palette.BONDK));   // wing bones + fingers
-        // wing membranes emit front AND back sheets: without them Unity's
-        // backface culling deletes the wing from one side entirely
-        var membraneVerts = 0;
-        foreach (var c in r.Chunks)
+        var withTail = CreatureBuilder.Build(Genome(plan: "winged", bodyParams: new[] { 0.5, 0.5, 0.5, 0.9 }));
+        var noTail = CreatureBuilder.Build(Genome(plan: "winged", bodyParams: new[] { 0.5, 0.5, 0.5, 0.2 }));
+        Assert.True(TotalTris(withTail) > TotalTris(noTail), "high tail gene should add the devil-spade tail's geometry");
+
+        var r = withTail;
+        Assert.NotNull(r.Wing);
+        // wing bones + fingers live in each side's own chunk set --
+        // wings are NOT baked into the main body mesh (like legs), so
+        // Unity can pose the whole thing as a live hinge to flap
+        Assert.True(HasColorIn(r.Wing!.Left, Palette.BONDK));
+        Assert.True(HasColorIn(r.Wing.Right, Palette.BONDK));
+
+        // wing membranes emit front AND back sheets (2 flips x 10 x 4 grid
+        // verts per wing): without them Unity's backface culling deletes
+        // the wing from one side entirely
+        Assert.True(MembraneVertsIn(r.Wing.Left) >= 2 * 10 * 4,
+            $"expected two full membrane sheets on the left wing, saw {MembraneVertsIn(r.Wing.Left)} verts");
+        Assert.True(MembraneVertsIn(r.Wing.Right) >= 2 * 10 * 4,
+            $"expected two full membrane sheets on the right wing, saw {MembraneVertsIn(r.Wing.Right)} verts");
+    }
+
+    [Fact]
+    public void WingSocketOnlyExistsForWinged()
+    {
+        Assert.NotNull(CreatureBuilder.Build(Genome(plan: "winged")).Wing);
+        foreach (var plan in new[] { "tetrapod", "blob", "serpentine", "crab", "arachnid", "avian", "treant", "floater" })
+            Assert.Null(CreatureBuilder.Build(Genome(plan: plan)).Wing);
+    }
+
+    [Fact]
+    public void WingGeometryIsRootRelativeAndMirrored()
+    {
+        var r = CreatureBuilder.Build(Genome(plan: "winged"))!;
+        var wing = r.Wing!;
+
+        // root-relative: every vertex sits near the shoulder joint, not
+        // out at the root's absolute creature-space position (which is
+        // several units from the origin) -- if extraction forgot to
+        // subtract root, these bounds would be offset by roughly rootL/R
+        double MaxAbs(System.Collections.Generic.IReadOnlyList<MeshChunk> chunks)
         {
-            for (var i = 0; i < c.VertexCount; i++)
-            {
-                // membrane normals are the soft fake (0, +-0.25, +-0.97)
-                var ny = c.Normals[i * 3 + 1];
-                var nz = c.Normals[i * 3 + 2];
-                if (System.Math.Abs(System.Math.Abs(nz) - 0.968) < 0.01 &&
-                    System.Math.Abs(System.Math.Abs(ny) - 0.25) < 0.02)
-                    membraneVerts++;
-            }
+            double max = 0;
+            foreach (var c in chunks)
+                for (var i = 0; i < c.Positions.Count; i++)
+                    max = System.Math.Max(max, System.Math.Abs(c.Positions[i]));
+            return max;
         }
-        Assert.True(membraneVerts >= 2 * 2 * 10 * 4, $"expected two full membrane sheets per wing, saw {membraneVerts} verts");
+        var span = MaxAbs(wing.Left);
+        Assert.True(span < 15, $"wing geometry should be root-relative (small offsets), saw a coordinate up to {span}");
+        Assert.True(span > 0.5, "wing geometry collapsed to the origin");
+
+        // left and right roots mirror across x
+        Assert.Equal(wing.RootL.X, -wing.RootR.X, 6);
+        Assert.Equal(wing.RootL.Y, wing.RootR.Y, 6);
+        Assert.Equal(wing.RootL.Z, wing.RootR.Z, 6);
+    }
+
+    [Fact]
+    public void WingChunksAreValidAndCorrectlyWound()
+    {
+        var r = CreatureBuilder.Build(Genome(plan: "winged", brainTier: "mastermind", heartTier: "titan"));
+        foreach (var chunks in new[] { r.Wing!.Left, r.Wing.Right })
+        {
+            Assert.True(TotalTrisIn(chunks) > 0);
+            foreach (var c in chunks)
+            {
+                Assert.Equal(0, c.Positions.Count % 3);
+                Assert.Equal(c.Positions.Count, c.Normals.Count);
+                foreach (var idx in c.Triangles) Assert.InRange(idx, 0, c.VertexCount - 1);
+                foreach (var v in c.Positions) Assert.True(double.IsFinite(v));
+            }
+            AssertWindingAgreesWithNormals(chunks);
+        }
     }
 
     [Fact]

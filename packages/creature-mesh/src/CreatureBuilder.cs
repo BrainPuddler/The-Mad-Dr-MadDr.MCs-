@@ -19,15 +19,31 @@ namespace MadDr.CreatureMesh
         public double[] Params = new double[0];
     }
 
+    /// <summary>Where each bat wing hinges -- the other part NOT baked
+    /// into the main mesh (alongside legs), for the same reason: Unity
+    /// needs to pose it as a live transform, this time to flap. Left/
+    /// Right are each a full, independent chunk set, root-relative (the
+    /// shoulder joint sits at local origin) so Unity can rotate the whole
+    /// wing around that point without any per-frame vertex work.</summary>
+    public sealed class WingSocketInfo
+    {
+        public Vec3 RootL;
+        public Vec3 RootR;
+        public IReadOnlyList<MeshChunk> Left = new List<MeshChunk>();
+        public IReadOnlyList<MeshChunk> Right = new List<MeshChunk>();
+    }
+
     /// <summary>Everything Unity needs to regenerate a Lab creature from
     /// its DNA: the material-bucketed mesh chunks (torso, head, face,
     /// arms, weapons, eyes -- the works) plus the leg sockets for the gait
     /// rig and framing heights. Leg is null on plans that ignore the leg
-    /// slot (blob, serpentine, treant, floater -- silent genes).</summary>
+    /// slot (blob, serpentine, treant, floater -- silent genes). Wing is
+    /// non-null only for "winged".</summary>
     public sealed class CreatureMeshResult
     {
         public IReadOnlyList<MeshChunk> Chunks = new List<MeshChunk>();
         public LegSocketInfo? Leg;
+        public WingSocketInfo? Wing;
         public Col Skin;
         public double TopY;
         public double WaistY;
@@ -84,6 +100,7 @@ namespace MadDr.CreatureMesh
                 TopY = s.TopY,
                 WaistY = s.WaistY,
                 Leg = s.Leg,
+                Wing = s.Wing,
             };
         }
 
@@ -110,6 +127,7 @@ namespace MadDr.CreatureMesh
             public Sock? Sensor;
             public Sock? Eye;
             public LegSocketInfo? Leg;
+            public WingSocketInfo? Wing;
             public double TopY;
             public double WaistY;
         }
@@ -425,65 +443,20 @@ namespace MadDr.CreatureMesh
             AddTail(mb, o, o.LegLen + 0.5, -levels[0].Rx * 0.75, true);   // devil spade
 
             // bat wings, rooted at the BACK shoulders and sweeping out and
-            // behind (membrane double-sided here: Unity culls back faces
-            // where the Lab shader two-sided them)
+            // behind. NOT baked into the main mesh (like legs) -- each side
+            // is its own root-relative chunk set so Unity can hinge it at
+            // the shoulder and flap it, rather than a static pose.
             var span = 4.6 + 3.6 * o.Limb;
             var shY = levels[3].Y;
             var rootZ = levels[3].Z - levels[3].Rz * 0.8;
-            var spine = Col.Lp(o.Skin, new Col(52, 40, 80), 0.45);
-            var wingCol = Col.Sh(Col.Lp(o.Skin, spine, 0.25), 0.95);
-            foreach (var s in Sides)
-            {
-                const int nU = 9, nV = 3;
-                var lead = new Vec3[nU + 1];
-                for (var iu = 0; iu <= nU; iu++)
-                {
-                    var u = (double)iu / nU;
-                    lead[iu] = new Vec3(
-                        s * (0.9 + u * span),
-                        shY + Math.Sin(u * Math.PI * 0.85) * 2.5 - u * u * 1.6,
-                        rootZ - u * 0.85);
-                }
-                // hoop around the wing bone right at its root
-                Prims.LimbJoint(mb, lead[0], lead[1] - lead[0], 0.34);
-
-                // membrane: emitted twice (front + back sheet) so it reads
-                // from both sides under single-sided URP materials
-                foreach (var flip in new[] { 1.0, -1.0 })
-                {
-                    var chunk = mb.Begin(wingCol, 0.2, 0);
-                    var grid = new int[nU + 1][];
-                    for (var iu = 0; iu <= nU; iu++)
-                    {
-                        var u = (double)iu / nU;
-                        var l = lead[iu];
-                        var chord = (2.5 * (1 - 0.5 * u) + 0.5) * (1 + 0.10 * Math.Sin(u * Math.PI * 3));
-                        grid[iu] = new int[nV + 1];
-                        for (var iv = 0; iv <= nV; iv++)
-                        {
-                            var v = (double)iv / nV;
-                            grid[iu][iv] = mb.Vert(chunk,
-                                new Vec3(l.X, l.Y - v * chord, l.Z + v * 0.3),
-                                new Vec3(0, 0.25 * flip, 0.97 * flip));
-                        }
-                    }
-                    for (var iu = 0; iu < nU; iu++)
-                        for (var iv = 0; iv < nV; iv++)
-                            mb.Quad(chunk, grid[iu][iv], grid[iu][iv + 1], grid[iu + 1][iv + 1], grid[iu + 1][iv]);
-                }
-
-                var boneR = new double[lead.Length];
-                for (var i = 0; i < lead.Length; i++) boneR[i] = 0.24 * (1 - (double)i / lead.Length) + 0.08;
-                Prims.Tube(mb, lead, boneR, Palette.BONDK, 0.35, 0, 7, 3);
-                foreach (var fu in new[] { 0.45, 0.75 })
-                {
-                    var k = (int)Math.Round(fu * nU);
-                    var a = lead[k];
-                    var chord = 2.5 * (1 - 0.5 * fu) + 0.5;
-                    Prims.Tube(mb, new[] { a, new Vec3(a.X, a.Y - chord, a.Z + 0.3) },
-                        new[] { 0.12, 0.05 }, Palette.BONDK, 0.3, 0, 6);
-                }
-            }
+            var rootL = new Vec3(0.9, shY, rootZ);
+            var rootR = new Vec3(-0.9, shY, rootZ);
+            var wingL = new Builder();
+            var wingR = new Builder();
+            BuildWingInto(wingL, o, rootL, span, 1);
+            BuildWingInto(wingR, o, rootR, span, -1);
+            wingL.FixWinding();
+            wingR.FixWinding();
 
             var sensP = new Vec3(head.HR.X * 0.5, head.TopY, head.HC.Z - 0.1);
             var eyeP = new Vec3(0, head.HC.Y + head.HR.Y * 0.2, head.HC.Z + head.HR.Z * 0.62);
@@ -504,9 +477,84 @@ namespace MadDr.CreatureMesh
                     Nrm = new Vec3(0.28, -1, 0).Norm(),
                     Len = o.LegLen,
                 },
+                Wing = new WingSocketInfo
+                {
+                    RootL = rootL,
+                    RootR = rootR,
+                    Left = wingL.Chunks,
+                    Right = wingR.Chunks,
+                },
                 TopY = o.Headless ? neckTop : head.TopY,
                 WaistY = waistY,
             };
+        }
+
+        /// <summary>One bat wing (membrane + bone + fingers + the shoulder
+        /// joint hoop), built ROOT-RELATIVE: every vertex is emitted as an
+        /// offset from `root` rather than in absolute creature-space, so
+        /// the resulting chunk set can be parented in Unity at `root`'s
+        /// world position and rotated there as a rigid hinge to flap --
+        /// the same NOT-baked-into-the-main-mesh treatment as legs, for
+        /// the same reason (a live transform, not a static pose).
+        /// Geometry is otherwise unchanged from the original single-mesh
+        /// version: same span/droop/chord formulas, same double-sided
+        /// membrane (Unity culls back faces where the Lab shader two-
+        /// sided them), same bone-and-finger strut.</summary>
+        private static void BuildWingInto(Builder wb, Ctx o, Vec3 root, double span, double side)
+        {
+            const int nU = 9, nV = 3;
+            var lead = new Vec3[nU + 1];
+            for (var iu = 0; iu <= nU; iu++)
+            {
+                var u = (double)iu / nU;
+                var world = new Vec3(
+                    side * (0.9 + u * span),
+                    root.Y + Math.Sin(u * Math.PI * 0.85) * 2.5 - u * u * 1.6,
+                    root.Z - u * 0.85);
+                lead[iu] = world - root;
+            }
+            // hoop around the wing bone right at its root
+            Prims.LimbJoint(wb, lead[0], lead[1] - lead[0], 0.34);
+
+            var spine = Col.Lp(o.Skin, new Col(52, 40, 80), 0.45);
+            var wingCol = Col.Sh(Col.Lp(o.Skin, spine, 0.25), 0.95);
+
+            // membrane: emitted twice (front + back sheet) so it reads
+            // from both sides under single-sided URP materials
+            foreach (var flip in new[] { 1.0, -1.0 })
+            {
+                var chunk = wb.Begin(wingCol, 0.2, 0);
+                var grid = new int[nU + 1][];
+                for (var iu = 0; iu <= nU; iu++)
+                {
+                    var u = (double)iu / nU;
+                    var l = lead[iu];
+                    var chord = (2.5 * (1 - 0.5 * u) + 0.5) * (1 + 0.10 * Math.Sin(u * Math.PI * 3));
+                    grid[iu] = new int[nV + 1];
+                    for (var iv = 0; iv <= nV; iv++)
+                    {
+                        var v = (double)iv / nV;
+                        grid[iu][iv] = wb.Vert(chunk,
+                            new Vec3(l.X, l.Y - v * chord, l.Z + v * 0.3),
+                            new Vec3(0, 0.25 * flip, 0.97 * flip));
+                    }
+                }
+                for (var iu = 0; iu < nU; iu++)
+                    for (var iv = 0; iv < nV; iv++)
+                        wb.Quad(chunk, grid[iu][iv], grid[iu][iv + 1], grid[iu + 1][iv + 1], grid[iu + 1][iv]);
+            }
+
+            var boneR = new double[lead.Length];
+            for (var i = 0; i < lead.Length; i++) boneR[i] = 0.24 * (1 - (double)i / lead.Length) + 0.08;
+            Prims.Tube(wb, lead, boneR, Palette.BONDK, 0.35, 0, 7, 3);
+            foreach (var fu in new[] { 0.45, 0.75 })
+            {
+                var k = (int)Math.Round(fu * nU);
+                var a = lead[k];
+                var chord = 2.5 * (1 - 0.5 * fu) + 0.5;
+                Prims.Tube(wb, new[] { a, new Vec3(a.X, a.Y - chord, a.Z + 0.3) },
+                    new[] { 0.12, 0.05 }, Palette.BONDK, 0.3, 0, 6);
+            }
         }
 
         private static Sockets PlanCrab(Builder mb, Ctx o)

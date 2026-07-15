@@ -44,7 +44,12 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   `MonsterBody.SetFlying` smoothly lifts torso and legs together to
   altitude and tucks the legs mid-air; a unit that flew to its target
   stays airborne to fight (an aerial attack) and only lands once its
-  order is fully done.
+  order is fully done. **Wings actually flap** — bat-style, fast
+  powerful beats while still climbing or descending, a slower cruise
+  beat once holding altitude, folded to rest once grounded — since
+  `packages/creature-mesh` returns each wing as its own root-relative
+  socket (not baked into the static body mesh, same treatment as legs)
+  that `MonsterBody.BuildWings`/`UpdateWingFlap` mount and hinge live.
 - **`Assets/Scripts/Citizen.cs`** — docs/19 client-side cosmetic crowd:
   wanders the streets, flees monsters, edible (docs/20 yields: Blood 2 /
   Bones 1 / Brains 1 into the session wallet).

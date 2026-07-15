@@ -33,9 +33,15 @@ using UnityEngine;
 /// (SnapFeetToGround) the instant it touches down. This is purely a
 /// visual/height concern -- MonsterAgent's flight decision and pathing
 /// live entirely on its side; this class just makes the airborne state
-/// LOOK like flight. No wing-flap animation (the mesh's wings are baked
-/// into the same static chunk as the rest of the body, not a separately
-/// posable transform, docs/08 port scope) -- deferred, logged in docs/12.
+/// LOOK like flight.
+///
+/// WING FLAP (creator direction, 2026-07): a winged creature's wings are
+/// no longer baked into the static body mesh -- packages/creature-mesh
+/// returns them as a separate, root-relative WingSocketInfo (the same
+/// treatment as legs, for the same reason), which BuildWings mounts as
+/// two hinge Transforms Unity can actually rotate. UpdateWingFlap beats
+/// them: fast while still climbing or descending, a slower cruise beat
+/// once holding altitude, folded to rest once grounded.
 /// </summary>
 public class MonsterBody : MonoBehaviour
 {
@@ -78,6 +84,21 @@ public class MonsterBody : MonoBehaviour
     private float _flightLift;     // actual animated lift, MoveTowards-eased toward _flying's target
     private float _flightTargetLift;
     private const float FlightLiftAirborneThreshold = 0.5f;   // above this, legs are considered "in the air"
+
+    // wing flap (winged plan only): a hinge transform per side, posed
+    // ROOT-RELATIVE geometry parented under it (packages/creature-mesh's
+    // WingSocketInfo) rather than baked into the static body mesh, so it
+    // can actually rotate. Faster beats while climbing/descending, a
+    // slower cruise beat once holding altitude -- creator direction,
+    // 2026-07: "faster to get off the ground and land, slower once
+    // they're thoroughly airborne."
+    private Transform _wingPivotL;
+    private Transform _wingPivotR;
+    private float _wingFlapPhase;
+    private const float WingFlapHzTakeoff = 2.3f;
+    private const float WingFlapHzCruise = 0.9f;
+    private const float WingFlapAmpTakeoff = 42f;   // degrees
+    private const float WingFlapAmpCruise = 22f;    // degrees, a lighter cruise beat
 
     /// <summary>Fixed at Build time from the plan's leg count -- NOT
     /// derived from _legs.Count on the fly: the first version did that,
@@ -129,6 +150,7 @@ public class MonsterBody : MonoBehaviour
                 : Mathf.Lerp(2.4f, 4.6f, bulk) / Mathf.Max(0.1f, (float)lab.TopY);
             LabMeshBuilder.Attach(lab, _torso, new Vector3(0f, -BodyHeight, 0f), s);
             if (lab.Leg != null) BuildLegsFromSocket(lab, s);
+            if (lab.Wing != null) BuildWings(lab.Wing, s);
         }
         else
         {
@@ -464,6 +486,29 @@ public class MonsterBody : MonoBehaviour
         _avgHipRadius = _legs.Count > 0 ? Mathf.Max(0.3f, sum / _legs.Count) : 1f;
     }
 
+    /// <summary>Mounts each wing's root-relative geometry (packages/
+    /// creature-mesh's WingSocketInfo) under its own hinge Transform, at
+    /// the shoulder joint's actual position on the body -- the SAME
+    /// lab-to-world transform the main body mesh holder uses (scale by
+    /// `s`, then the shared -BodyHeight offset), so the pivot lines up
+    /// with where the wing root actually sits on the rendered body.
+    /// UpdateLocomotion rotates these pivots to flap; nothing else here
+    /// needs to touch them again after Build.</summary>
+    private void BuildWings(WingSocketInfo wing, float s)
+    {
+        var offset = new Vector3(0f, -BodyHeight, 0f);
+
+        _wingPivotL = new GameObject("WingPivotL").transform;
+        _wingPivotL.SetParent(_torso, false);
+        _wingPivotL.localPosition = new Vector3((float)wing.RootL.X, (float)wing.RootL.Y, (float)wing.RootL.Z) * s + offset;
+        LabMeshBuilder.AttachChunks(wing.Left, _wingPivotL, "WingMeshL", s);
+
+        _wingPivotR = new GameObject("WingPivotR").transform;
+        _wingPivotR.SetParent(_torso, false);
+        _wingPivotR.localPosition = new Vector3((float)wing.RootR.X, (float)wing.RootR.Y, (float)wing.RootR.Z) * s + offset;
+        LabMeshBuilder.AttachChunks(wing.Right, _wingPivotR, "WingMeshR", s);
+    }
+
     private Transform Segment(Color color)
     {
         var t = Part(PrimitiveType.Cylinder, transform, Vector3.zero, Vector3.one, color);
@@ -512,6 +557,8 @@ public class MonsterBody : MonoBehaviour
             // click-to-select must track what's actually on screen
             if (_selectionCollider != null)
                 _selectionCollider.center = new Vector3(0f, BodyHeight + _flightLift, 0f);
+
+            UpdateWingFlap(dt);
         }
 
         if (_legs.Count == 0)
@@ -662,6 +709,38 @@ public class MonsterBody : MonoBehaviour
 
             RenderLeg(leg, hipW);
         }
+    }
+
+    /// <summary>Bat-style flap: fast, powerful beats while still climbing
+    /// or descending (_flightLift hasn't reached its cruise target yet),
+    /// a slower, lighter beat once actually holding altitude. Rest pose
+    /// (identity) once grounded -- the wing's own authored droop already
+    /// reads as folded, no extra "fold" rotation needed. Left/right rotate
+    /// with OPPOSITE signs around their own local Z: the geometry itself
+    /// is mirrored (built with side=+-1 baked in, packages/creature-mesh),
+    /// so the same-sign local rotation on both sides would swing them in
+    /// opposite senses -- the sign flip is what makes them beat together.</summary>
+    private void UpdateWingFlap(float dt)
+    {
+        if (_wingPivotL == null || _wingPivotR == null) return;
+
+        var flapping = _flying || _flightLift > FlightLiftAirborneThreshold;
+        if (!flapping)
+        {
+            _wingPivotL.localRotation = Quaternion.identity;
+            _wingPivotR.localRotation = Quaternion.identity;
+            return;
+        }
+
+        var liftFrac = _flightTargetLift > 0.01f ? _flightLift / _flightTargetLift : 0f;
+        var atCruise = _flying && liftFrac > 0.97f;   // holding altitude, not still climbing/descending
+        var hz = atCruise ? WingFlapHzCruise : WingFlapHzTakeoff;
+        var amp = atCruise ? WingFlapAmpCruise : WingFlapAmpTakeoff;
+
+        _wingFlapPhase += dt * hz * Mathf.PI * 2f;
+        var angle = Mathf.Sin(_wingFlapPhase) * amp;
+        _wingPivotL.localRotation = Quaternion.Euler(0f, 0f, angle);
+        _wingPivotR.localRotation = Quaternion.Euler(0f, 0f, -angle);
     }
 
     private void RenderLeg(Leg leg, Vector3 hipW)
