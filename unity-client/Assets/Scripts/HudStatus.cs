@@ -34,7 +34,8 @@ public class HudStatus : MonoBehaviour
             Line(ref y, "Left-click a monster to select it.");
         }
         Line(ref y, "Right-click: ground = waypoint (Shift queues) · citizen = eat · building = attack");
-        Line(ref y, "Camera: WASD pan · Q/E rotate · scroll zoom");
+        Line(ref y, "Camera: WASD pan · Q/E rotate · scroll zoom · middle-drag / screen-edge scroll");
+        Line(ref y, "G: jump to the unit nearest the cursor");
     }
 
     private static void Line(ref float y, string text)

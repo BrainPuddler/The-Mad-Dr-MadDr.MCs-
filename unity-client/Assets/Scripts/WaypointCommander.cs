@@ -12,6 +12,9 @@ using UnityEngine.InputSystem;
 ///                   on a citizen  -> target-lock: chase and eat it
 ///                   on a building -> target-lock: walk to it and attack
 ///                   on the ground -> waypoint (hold Shift to queue)
+///   G           : glide the camera to the monster nearest the cursor
+///                 (the camera rig owns the actual pan; this just finds
+///                  the unit -- it has the monster list, the rig doesn't)
 /// </summary>
 public class WaypointCommander : MonoBehaviour
 {
@@ -31,6 +34,10 @@ public class WaypointCommander : MonoBehaviour
         if (mouse == null || _builder == null) return;
         var cam = Camera.main;
         if (cam == null) return;
+
+        var keyboard = Keyboard.current;
+        if (keyboard != null && keyboard.gKey.wasPressedThisFrame)
+            JumpToNearestUnit(cam, mouse);
 
         if (mouse.leftButton.wasPressedThisFrame)
         {
@@ -77,6 +84,40 @@ public class WaypointCommander : MonoBehaviour
                 _builder.SpawnWaypointMarker(_builder.WorldOf(hex));
             }
         }
+    }
+
+    /// <summary>G-key: find the monster closest to whatever the cursor is
+    /// over and glide the camera to it. "Over" is the physics hit under the
+    /// cursor when there is one (a unit, a building, the ground), falling
+    /// back to the y=0 ground plane the ray crosses, then to the camera
+    /// itself if the ray never dips below the horizon.</summary>
+    private void JumpToNearestUnit(Camera cam, Mouse mouse)
+    {
+        var rig = cam.GetComponent<SimpleCameraRig>();
+        if (rig == null) return;
+
+        Vector3 aim;
+        var hit = RaycastCursor(cam, mouse);
+        if (hit.HasValue) aim = hit.Value.point;
+        else if (!GroundUnderCursor(cam, mouse, out aim)) aim = cam.transform.position;
+
+        // 1e6 is an effectively-unbounded search radius (the city is a few
+        // hundred units across); NearestMonsterTo compares squared, which
+        // stays well within float range.
+        var nearest = _builder.NearestMonsterTo(aim, 1e6f);
+        if (nearest != null) rig.FocusOn(nearest.transform.position);
+    }
+
+    private static bool GroundUnderCursor(Camera cam, Mouse mouse, out Vector3 world)
+    {
+        world = Vector3.zero;
+        var pos = mouse.position.ReadValue();
+        var ray = cam.ScreenPointToRay(new Vector3(pos.x, pos.y, 0f));
+        if (Mathf.Abs(ray.direction.y) < 1e-5f) return false;
+        var t = -ray.origin.y / ray.direction.y;
+        if (t <= 0f) return false;
+        world = ray.origin + ray.direction * t;
+        return true;
     }
 
     private RaycastHit? RaycastCursor(Camera cam, Mouse mouse)
