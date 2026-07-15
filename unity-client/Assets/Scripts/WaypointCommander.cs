@@ -158,8 +158,9 @@ public class WaypointCommander : MonoBehaviour
         }
 
         // ground: a waypoint for the whole group. Shift queues. A group
-        // spreads into a formation around the spot (one hex each) instead
-        // of stacking on the exact point.
+        // spreads into a formation around the spot (one hex each) while
+        // WALKING, then creeps in close together once everyone's stopped
+        // (see OrderMove's settleTarget -- MonsterAgent.TickSettle).
         var hex = _builder.HexAt(hit.Value.point);
         if (_builder.City.Contains(hex))
         {
@@ -167,15 +168,19 @@ public class WaypointCommander : MonoBehaviour
             if (_selected.Count == 1)
                 _selected[0].OrderMove(hex, shift);
             else
-                AssignFormation(_builder.FormationHexes(hex, _selected.Count), shift);
+                AssignFormation(_builder.FormationHexes(hex, _selected.Count), shift, hit.Value.point);
             _builder.SpawnWaypointMarker(_builder.WorldOf(hex));
         }
     }
 
     /// <summary>Hand out formation slots to the selected group,
     /// nearest-slot-to-nearest-unit, so units mostly walk straight to
-    /// their spot instead of crossing paths.</summary>
-    private void AssignFormation(System.Collections.Generic.List<MadDr.CityGen.HexCoord> slots, bool queue)
+    /// their spot instead of crossing paths. `clusterPoint` is where each
+    /// unit creeps toward once it arrives and stops -- the fix for a
+    /// stopped group looking too spread out (FormationHexes only
+    /// guarantees WALKING doesn't collide, a full hex apart).</summary>
+    private void AssignFormation(System.Collections.Generic.List<MadDr.CityGen.HexCoord> slots, bool queue,
+        Vector3 clusterPoint)
     {
         var remaining = new System.Collections.Generic.List<MonsterAgent>(_selected);
         foreach (var slot in slots)
@@ -194,7 +199,7 @@ public class WaypointCommander : MonoBehaviour
             if (best < 0) break;
             var unit = remaining[best];
             remaining.RemoveAt(best);
-            unit.OrderMove(slot, queue);
+            unit.OrderMove(slot, queue, clusterPoint);
         }
     }
 

@@ -32,6 +32,7 @@ public class MonsterAgent : MonoBehaviour
     private Building _targetBuilding;
     private Citizen _targetCitizen;
     private UnitCombat _targetUnit;
+    private Vector3? _settleTarget;   // shared cluster point to creep toward once idle (group moves only)
 
     private List<Vector3> _path;      // world-space nodes for the current leg
     private int _pathIndex;
@@ -143,10 +144,23 @@ public class MonsterAgent : MonoBehaviour
 
     public void OrderMove(HexCoord hex, bool queue)
     {
+        OrderMove(hex, queue, null);
+    }
+
+    /// <summary>Move order that also remembers a shared cluster point to
+    /// creep toward once this unit finishes pathing to `hex` and goes
+    /// idle -- the commander's group-move formation uses this so a group
+    /// ends up packed close together once stopped instead of parked a
+    /// full hex apart (FormationHexes only guarantees distinct WALKING
+    /// slots, not a tight rest formation). Single-unit moves pass null
+    /// and never drift after arriving.</summary>
+    public void OrderMove(HexCoord hex, bool queue, Vector3? settleTarget)
+    {
         ClearTargets();
         if (!queue) { _waypoints.Clear(); _path = null; }
         _waypoints.Enqueue(hex);
         _order = OrderKind.Move;
+        _settleTarget = settleTarget;
     }
 
     public void OrderAttack(Building building)
@@ -185,6 +199,7 @@ public class MonsterAgent : MonoBehaviour
         _targetBuilding = null;
         _targetCitizen = null;
         _targetUnit = null;
+        _settleTarget = null;   // any fresh order cancels a pending group-settle creep
     }
 
     // ---- per-frame ----------------------------------------------------------
@@ -210,6 +225,7 @@ public class MonsterAgent : MonoBehaviour
             case OrderKind.AttackBuilding: velocity = TickAttack(dt); break;
             case OrderKind.AttackUnit: velocity = TickAttackUnit(dt); break;
             case OrderKind.EatCitizen: velocity = TickEat(dt); break;
+            case OrderKind.Idle: velocity = TickSettle(dt); break;
         }
 
         if (_body != null) _body.UpdateLocomotion(velocity, dt);
@@ -236,6 +252,47 @@ public class MonsterAgent : MonoBehaviour
         }
         RecomputeIfCityChanged();
         return FollowPath(dt, RunOrWalkSpeed());
+    }
+
+    private const float SettleSpeed = 1.3f;    // a slow shuffle, not a march
+    private const float SettleArriveDist = 0.6f;
+
+    /// <summary>Idle creep toward a shared group-move cluster point
+    /// (see OrderMove's settleTarget overload). ApplySeparation -- already
+    /// called unconditionally every frame below -- stops the creep the
+    /// moment neighbors are touching, so the group packs down from its
+    /// loose one-hex-apart walking spacing to combined-radius spacing once
+    /// everyone's stopped, without any unit ever overlapping another.
+    ///
+    /// Terrain-aware on purpose ("must be cognizant of buildings and
+    /// natural features"): each step is checked against the SAME blocked-
+    /// hex set pathfinding uses (buildings, water) before committing, so a
+    /// unit settling toward the group never clips into one -- it just
+    /// stops dead at the boundary and gives up the creep for good.</summary>
+    private Vector3 TickSettle(float dt)
+    {
+        if (!_settleTarget.HasValue || _builder == null) return Vector3.zero;
+        var target = _settleTarget.Value;
+        var to = target - transform.position;
+        to.y = 0f;
+        var dist = to.magnitude;
+        if (dist < SettleArriveDist) { _settleTarget = null; return Vector3.zero; }
+
+        var dir = to / dist;
+        var step = Mathf.Min(SettleSpeed * dt, dist);
+        var next = transform.position + dir * step;
+
+        var hex = _builder.HexAt(next);
+        if (!_builder.City.Contains(hex) || _builder.BlockedFor(_amphibious).Contains(hex))
+        {
+            _settleTarget = null;   // a building or water is in the way -- stop right here
+            return Vector3.zero;
+        }
+
+        transform.rotation = Quaternion.Slerp(transform.rotation,
+            Quaternion.LookRotation(dir, Vector3.up), dt * 4f);
+        transform.position = next;
+        return dir * SettleSpeed;
     }
 
     private Vector3 TickAttack(float dt)
