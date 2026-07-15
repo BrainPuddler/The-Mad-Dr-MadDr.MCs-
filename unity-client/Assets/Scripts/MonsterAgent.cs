@@ -284,15 +284,20 @@ public class MonsterAgent : MonoBehaviour
         return FollowPath(dt, RunOrWalkSpeed());
     }
 
-    private const float SettleSpeed = 1.3f;    // a slow shuffle, not a march
     private const float SettleArriveDist = 0.6f;
 
     /// <summary>Idle creep toward a shared group-move cluster point
     /// (see OrderMove's settleTarget overload). ApplySeparation -- already
-    /// called unconditionally every frame below -- stops the creep the
-    /// moment neighbors are touching, so the group packs down from its
-    /// loose one-hex-apart walking spacing to combined-radius spacing once
-    /// everyone's stopped, without any unit ever overlapping another.
+    /// called unconditionally every frame below -- stops the creep once
+    /// SeparationGap of daylight opens up, so the group packs down from
+    /// its loose one-hex-apart walking spacing to a close (but never
+    /// overlapping) rest formation once everyone's stopped.
+    ///
+    /// Speed is the creature's own physiology (a fraction of its walk
+    /// speed, with a floor) rather than one flat "slow shuffle" constant
+    /// for every creature -- creator direction, 2026-07: settling read as
+    /// "extremely slow" at the old fixed 1.3 m/s regardless of how fast
+    /// the creature actually walks.
     ///
     /// Terrain-aware on purpose ("must be cognizant of buildings and
     /// natural features"): each step is checked against the SAME blocked-
@@ -308,8 +313,9 @@ public class MonsterAgent : MonoBehaviour
         var dist = to.magnitude;
         if (dist < SettleArriveDist) { _settleTarget = null; return Vector3.zero; }
 
+        var settleSpeed = Mathf.Max(3.5f, (float)_profile.WalkMetersPerSecond(_builder.speedDisplayMultiplier) * 0.9f);
         var dir = to / dist;
-        var step = Mathf.Min(SettleSpeed * dt, dist);
+        var step = Mathf.Min(settleSpeed * dt, dist);
         var next = transform.position + dir * step;
 
         var hex = _builder.HexAt(next);
@@ -322,7 +328,7 @@ public class MonsterAgent : MonoBehaviour
         transform.rotation = Quaternion.Slerp(transform.rotation,
             Quaternion.LookRotation(dir, Vector3.up), dt * 4f);
         transform.position = next;
-        return dir * SettleSpeed;
+        return dir * settleSpeed;
     }
 
     private Vector3 TickAttack(float dt)

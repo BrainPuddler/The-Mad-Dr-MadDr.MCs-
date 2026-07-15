@@ -507,10 +507,19 @@ public class RuntimeCityBuilder : MonoBehaviour
         return best;
     }
 
+    /// <summary>How much clear space stays between two units' bodies once
+    /// separation stops pushing -- creator direction, 2026-07: "settled
+    /// units are still too close together, at least 1 meter apart" (the
+    /// original "settles exactly touching" design read as bodies stacked
+    /// with zero gap, worst right after a group creeps in via TickSettle).</summary>
+    private const float SeparationGap = 1f;
+
     /// <summary>Soft body separation so units never stand inside each other
-    /// ("creatures should NOT walk through each other"). Each unit pushes
-    /// HALF the overlap; the neighbor pushes its own half next frame, so a
-    /// pair settles exactly touching. Citizens are excluded on purpose --
+    /// ("creatures should NOT walk through each other"), with at least
+    /// SeparationGap of daylight between their bodies once it stops
+    /// pushing. Each unit pushes HALF the overlap; the neighbor pushes
+    /// its own half next frame, so a pair settles at exactly Radius +
+    /// Radius + SeparationGap apart. Citizens are excluded on purpose --
     /// they're prey, and monsters must be able to reach them.</summary>
     public void ApplySeparation(UnitCombat self)
     {
@@ -522,7 +531,7 @@ public class RuntimeCityBuilder : MonoBehaviour
             if (c == null || c == self || !c.Alive) continue;
             var d = p - c.transform.position;
             d.y = 0f;
-            var minDist = self.Radius + c.Radius;
+            var minDist = self.Radius + c.Radius + SeparationGap;
             var dist = d.magnitude;
             if (dist < minDist && dist > 1e-3f)
             {
