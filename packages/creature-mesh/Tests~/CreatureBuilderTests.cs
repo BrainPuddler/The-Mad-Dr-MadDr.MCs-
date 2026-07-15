@@ -204,6 +204,18 @@ public class CreatureBuilderTests
         }
     }
 
+    private static (double min, double max) FootXBounds(System.Collections.Generic.IReadOnlyList<MeshChunk> chunks)
+    {
+        double min = double.MaxValue, max = double.MinValue;
+        foreach (var c in chunks)
+            for (var i = 0; i < c.Positions.Count; i += 3)
+            {
+                min = System.Math.Min(min, c.Positions[i]);
+                max = System.Math.Max(max, c.Positions[i]);
+            }
+        return (min, max);
+    }
+
     [Fact]
     public void TalonClawsMirrorWithSide()
     {
@@ -214,19 +226,27 @@ public class CreatureBuilderTests
         var pg = Mid(); pg[4] = 1.0;
         var right = LegKit.Build("talon_leg", pg, new Col(150, 120, 100), 1);
         var left = LegKit.Build("talon_leg", pg, new Col(150, 120, 100), -1);
-        static (double min, double max) XBounds(System.Collections.Generic.IReadOnlyList<MeshChunk> chunks)
-        {
-            double min = double.MaxValue, max = double.MinValue;
-            foreach (var c in chunks)
-                for (var i = 0; i < c.Positions.Count; i += 3)
-                {
-                    min = System.Math.Min(min, c.Positions[i]);
-                    max = System.Math.Max(max, c.Positions[i]);
-                }
-            return (min, max);
-        }
-        var r = XBounds(right.Foot);
-        var l = XBounds(left.Foot);
+        var r = FootXBounds(right.Foot);
+        var l = FootXBounds(left.Foot);
+        Assert.Equal(r.max, -l.min, 6);
+        Assert.Equal(r.min, -l.max, 6);
+    }
+
+    [Fact]
+    public void TendrilFootSplaysOutwardAndMirrors()
+    {
+        // the reported "left leg facing the wrong way": the pseudopod tip
+        // must lean OFF the midline (not point dead ahead) and mirror
+        // left/right, so it follows each leg's outward knee-bend
+        var right = LegKit.Build("tendril_leg", Mid(), new Col(150, 120, 100), 1);
+        var left = LegKit.Build("tendril_leg", Mid(), new Col(150, 120, 100), -1);
+        var r = FootXBounds(right.Foot);
+        var l = FootXBounds(left.Foot);
+        // right foot reaches to +x (body-right), left foot to -x -- a
+        // forward-only tip would sit symmetric about x=0 on both, so this
+        // also proves the splay actually exists
+        Assert.True(r.max > 0.15, $"right tendril tip should reach body-right, got max x {r.max}");
+        Assert.True(l.min < -0.15, $"left tendril tip should reach body-left, got min x {l.min}");
         Assert.Equal(r.max, -l.min, 6);
         Assert.Equal(r.min, -l.max, 6);
     }

@@ -54,7 +54,7 @@ namespace MadDr.CreatureMesh
                 case "insect_leg": return Insect(girth, skin, side);
                 case "piston_leg": return Piston(side);
                 case "jet_leg": return Jet(girth);
-                case "tendril_leg": return Tendril(girth, skin);
+                case "tendril_leg": return Tendril(girth, skin, side);
                 case "leg_stump": return Stump();
                 default: return Hoofed(girth, skin);   // hoofed_leg + anything unknown
             }
@@ -179,12 +179,19 @@ namespace MadDr.CreatureMesh
             return Collect(hip, upper, lower, foot);
         }
 
-        /// <summary>Boneless muscular pseudopod, hip-to-ground.</summary>
-        private static LegKitResult Tendril(double girth, Col skin)
+        /// <summary>Boneless muscular pseudopod, hip-to-ground. `side`
+        /// mirrors it: the tip curls OUTWARD-and-forward so it follows the
+        /// leg's outward lean (the knee bends outward per side) instead of
+        /// pointing dead ahead on both legs -- a forward-only tip on an
+        /// outward-leaning left leg reads as "facing the wrong way." After
+        /// the rig's LookRotation(body-forward) a local +x maps to the
+        /// body's right, so side (+1 right / -1 left) splays each foot away
+        /// from the midline, matching the Lab's socket-normal splay.</summary>
+        private static LegKitResult Tendril(double girth, Col skin, double side)
         {
             var r = 0.22 + 0.12 * girth;
             var hip = new Builder();
-            Prims.LimbJoint(hip, new Vec3(0, 0, 0), new Vec3(0, -1, 0), r * 1.15);
+            Prims.LimbJoint(hip, new Vec3(0, 0, 0), new Vec3(side * 0.35, -1, 0.2), r * 1.15);
             Prims.Ellipsoid(hip, new Vec3(0, 0.15, 0), new Vec3(r * 1.3, r * 1.2, r * 1.3), skin, 0.3, 0, 8);
 
             var upper = new Builder();
@@ -193,8 +200,8 @@ namespace MadDr.CreatureMesh
             Segment(lower, r * 0.75, r * 0.35, skin, 0.32);
 
             var foot = new Builder();
-            Prims.CurvedCone(foot, new Vec3(0, 0.3, 0), new Vec3(0, -0.6, 0.8), 0.5, r * 0.5,
-                new Vec3(0, 0, 0.1), Col.Sh(skin, 0.95), 0.32);
+            Prims.CurvedCone(foot, new Vec3(0, 0.3, 0), new Vec3(side * 0.5, -0.6, 0.6), 0.6, r * 0.5,
+                new Vec3(side * 0.15, 0, 0.1), Col.Sh(skin, 0.95), 0.32);
             return Collect(hip, upper, lower, foot);
         }
 
