@@ -122,6 +122,12 @@ export function createApp(service: MutatorService): ReturnType<typeof createServ
   add("POST", "/cannibalize", (c) =>
     service.cannibalize(c.accountId, c.body.idempotencyKey, { genomeId: c.body.genomeId }),
   );
+  add("POST", "/restore", (c) =>
+    service.restore(c.accountId, c.body.idempotencyKey, {
+      genome: c.body.genome,
+      signature: c.body.signature,
+    }),
+  );
 
   // reads
   add("GET", "/creatures", (c) =>

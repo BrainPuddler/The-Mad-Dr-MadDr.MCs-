@@ -120,6 +120,38 @@ test("POST /cannibalize retires a genome, credits Bones, and rejects loading it 
   }
 });
 
+test("POST /restore brings a creature back after a simulated server wipe", async () => {
+  const { base, close } = await startServer();
+  try {
+    const spawn = await (await fetch(`${base}/spawn`, {
+      method: "POST", headers: ACC, body: JSON.stringify({ idempotencyKey: "rs-spawn" }),
+    })).json();
+    const before = await (await fetch(`${base}/creature/${spawn.genomeId}`, { headers: ACC })).json();
+
+    // a rejected restore first: tampering with the genome breaks the signature
+    const tampered = { ...before.genome, body: { ...before.genome.body, params: [1, 1, 1, 1] } };
+    const rejected = await (await fetch(`${base}/restore`, {
+      method: "POST", headers: ACC,
+      body: JSON.stringify({ idempotencyKey: "rs-bad", genome: tampered, signature: before.signature }),
+    })).json();
+    assert.equal(rejected.status, "failed_experiment");
+
+    // the real thing: restoring the untouched {genome, signature} pair --
+    // this is exactly what the Lab's localStorage backup replays
+    const restored = await (await fetch(`${base}/restore`, {
+      method: "POST", headers: ACC,
+      body: JSON.stringify({ idempotencyKey: "rs-good", genome: before.genome, signature: before.signature }),
+    })).json();
+    assert.equal(restored.status, "completed");
+    assert.equal(restored.genomeId, spawn.genomeId, "restored under its original id");
+
+    const read = await fetch(`${base}/creature/${spawn.genomeId}`, { headers: ACC });
+    assert.equal(read.status, 200);
+  } finally {
+    await close();
+  }
+});
+
 test("/health and /version are public -- no x-account-id needed", async () => {
   const { base, close } = await startServer();
   try {

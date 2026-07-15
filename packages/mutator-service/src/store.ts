@@ -29,7 +29,8 @@ export type OpType =
   | "harvestHeart"
   | "sewPart"
   | "sewHeart"
-  | "cannibalize";
+  | "cannibalize"
+  | "restore";
 
 export type OpStatus = "completed" | "failed_experiment";
 

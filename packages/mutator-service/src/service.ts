@@ -37,7 +37,7 @@ import {
 } from "@maddr/genome-core";
 
 import { genId, newServerSeed } from "./ids.js";
-import { signGenome } from "./sign.js";
+import { signGenome, verifyGenome } from "./sign.js";
 import { COSTS, canAfford, debit, refund, type Cost } from "./economy.js";
 import {
   type InventoryItem,
@@ -409,6 +409,74 @@ export class MutatorService {
         };
       },
     );
+  }
+
+  // ---- restore: client-side backup safety net (docs/12 decision log) -------
+
+  /** Re-insert a genome the CLIENT already holds a valid, server-issued
+   * signature for -- recovery from the in-memory store's data loss on
+   * every process restart (Render free-tier idle spin-down, or a
+   * redeploy). The Lab caches full {genome, signature} pairs for every
+   * Stable creature in the browser's localStorage as a backup; when a
+   * sync finds the server has lost one, it calls this to bring it back.
+   *
+   * The signature check IS the anti-cheat gate here (the same invariant
+   * `spawn`/`mutate`/etc. protect: "clients submit requests, never
+   * genomes"): only the server ever holds SIGNING_KEY, so only a genome
+   * this server itself minted at some point can carry a signature that
+   * verifies. A hand-crafted "everything maxed out" genome fails
+   * verification and is refused -- this can only resurrect a row that
+   * legitimately existed, never mint a new one for free.
+   *
+   * Deliberately bypasses the shared `mint()` helper: mint() always
+   * stamps a BRAND NEW id, but a restore should bring the creature back
+   * under its ORIGINAL id (the one the signature itself commits to,
+   * embedded in genome.creatureId) so the client's already-cached Stable
+   * list and Menagerie references keep working without a remap. */
+  restore(
+    accountId: string,
+    idempotencyKey: string,
+    args: { genome: Genome; signature: string },
+  ): OperationRecord {
+    return this.perform(accountId, idempotencyKey, "restore", { blood: 0 }, () => {
+      if (!verifyGenome(args.genome, args.signature, this.cfg.signingKey)) {
+        return {
+          status: "failed_experiment",
+          refundOnFail: true,
+          extra: { errors: ["signature does not match: not a genome this server ever issued"] },
+        };
+      }
+      const id = args.genome.creatureId;
+      if (!id) {
+        return { status: "failed_experiment", refundOnFail: true, extra: { errors: ["genome has no creatureId"] } };
+      }
+      const already = this.store.getGenome(id);
+      if (already) {
+        // never actually lost (or a duplicate restore) -- report success
+        // without re-inserting, so the client's flow doesn't need to
+        // special-case "was it already there?"
+        return {
+          status: "completed",
+          extra: { genomeId: already.id, genome: already.genome, signature: already.signature, alreadyPresent: true },
+        };
+      }
+      const stored: StoredGenome = {
+        id,
+        accountId,
+        genome: args.genome,
+        signature: args.signature,
+        createdAt: new Date().toISOString(),
+      };
+      this.store.putGenome(stored);
+      this.store.discover(
+        accountId,
+        SLOT_NAMES.map((s) => args.genome.slots[s].family),
+      );
+      return {
+        status: "completed",
+        extra: { genomeId: stored.id, genome: stored.genome, signature: stored.signature },
+      };
+    });
   }
 
   // ---- reads ---------------------------------------------------------------

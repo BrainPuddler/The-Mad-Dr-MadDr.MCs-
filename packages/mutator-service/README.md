@@ -9,7 +9,7 @@ over a pluggable store, **zero runtime dependencies** (Node's built-in
 
 ```
 npm install      # links @maddr/genome-core (build it first) + dev deps
-npm test         # build + 16 tests (service logic + live HTTP)
+npm test         # build + 28 tests (service logic + live HTTP)
 npm start        # boot on :8787 with the in-memory store
 ```
 
@@ -36,6 +36,7 @@ npm start        # boot on :8787 with the in-memory store
 | POST | `/graft` | Deterministic slot set (lab control valve) |
 | POST | `/harvest/part` · `/harvest/heart` | Cut a part/heart off → tray item; donor stumped/corpse |
 | POST | `/sew/part` · `/sew/heart` | Graft a tray item on, gated by the heart (survived / limb_rejected / patient_died) |
+| POST | `/restore` | Re-insert a `{genome, signature}` pair the caller already holds a valid signature for — the client-side backup safety net, see below |
 | GET | `/creatures` · `/creature/:id` · `/creature/:id/lineage` | Read genomes / ancestor tree |
 | GET·PUT | `/menagerie` | The ≤12 loadout |
 | GET | `/wallet` · `/tray` · `/catalog` | Components / harvested items / discovered families |
@@ -53,6 +54,33 @@ graft **survives**; on `limb_rejected` or `patient_died` the item stays in
 the tray, still usable, and most of the operating fee is refunded. A
 successful `/sew/heart` hands the patient's **old heart** back to the tray
 — the natural way to recycle a heart up a lineage.
+
+## Data loss on restart, and the client-side backup that papers over it
+
+`InMemoryStore` is exactly what it sounds like: every genome lives only
+in this process's RAM. **Any restart loses everything** — a redeploy, or
+(more often, in practice) Render's free tier spinning the service down
+after ~15 minutes idle and starting a brand-new process on the next
+request. Re-polling the server can't fix this: the data isn't stale,
+it's gone.
+
+The Lab (`site/main.js`) mitigates this client-side: every creature it
+saves to the Stable also gets its full `{genome, signature}` pair cached
+in this browser's `localStorage`. When a sync finds the server missing
+one the Stable list still names, it replays the cached pair through
+`POST /restore`. The signature IS the security boundary here — `restore`
+only accepts a `{genome, signature}` pair that verifies against
+`SIGNING_KEY` (`verifyGenome`, `src/sign.ts`), and only the server ever
+holds that key, so this can't be turned into "mint any hand-crafted
+genome for free." It can only resurrect a row that legitimately existed
+at some point, under its **original id** (not a fresh one — see
+`MutatorService.restore`'s doc comment for why it deliberately bypasses
+the shared `mint()` helper).
+
+This is a genuine safety net, not a substitute for real persistence: it
+only covers what a given browser actually had cached, and does nothing
+for the operation log, wallet, or tray. **Postgres is still the real
+fix** — see below.
 
 ## Swapping in Postgres
 

@@ -11,6 +11,15 @@ typed energy upkeep (blood/fuel/ichor), brain behavior, lineage.
 - Specimens persist in the browser's localStorage. This is a test
   harness — the real persistent, anti-cheat lab is
   [`packages/mutator-service`](../packages/mutator-service/).
+- **The Stable backs itself up.** `mutator-service`'s store is in-memory
+  only — a restart (Render's free tier spins the service down after idle
+  time, same effect as a redeploy) loses every genome it held. This
+  browser caches a signed `{genome, signature}` pair for every Stable
+  creature and automatically replays it through `POST /restore` on the
+  next sync if the server comes back empty — see
+  [`packages/mutator-service/README.md`](../packages/mutator-service/README.md#data-loss-on-restart-and-the-client-side-backup-that-papers-over-it).
+  It only covers what this specific browser had cached, though — real
+  persistence (Postgres) is still the actual fix, and still pending.
 
 ## Run locally
 

@@ -52,6 +52,11 @@ const LOCAL_KEY   = "maddr-lab-v2";
 let local = (() => {
   try { return JSON.parse(localStorage.getItem(LOCAL_KEY)); } catch { return null; }
 })() ?? newLocal();
+// migration: stableBackup didn't exist before this browser's save --
+// backfill it so every direct `local.stableBackup[id]` access below is
+// safe without needing `?? {}` at every call site (newLocal() covers
+// brand-new installs; returning users load their OLD saved shape as-is).
+local.stableBackup = local.stableBackup ?? {};
 
 function newLocal() {
   return {
@@ -59,12 +64,21 @@ function newLocal() {
     selectedId: null, faction: "maddr", stable: [], hidden: [], factionOf: {}, view: "lab",
     specimenOf: {}, currentGenomeOf: {}, locationOf: {}, originItem: {},
     originSpecimen: {},
+    // { [genomeId]: { genome, signature } } for every creature currently
+    // in the stable -- this browser's own backup of its Menagerie. The
+    // Mutator's store is in-memory only (docs/07); it loses every genome
+    // on every restart (a Render free-tier idle spin-down counts), and
+    // no amount of re-polling brings back data that's genuinely gone
+    // server-side. This cache is what restoreMissingStable() replays
+    // through POST /restore to bring the Stable back (docs/12 decision
+    // log, "why is the stable cleared out when I rerun").
+    stableBackup: {},
   };
 }
 function saveLocal() { localStorage.setItem(LOCAL_KEY, JSON.stringify(local)); }
 
 // ── server state (in-memory, refreshed via sync()) ───────────────────────────
-let creatures = [];   // [{ id, name, alive, genome }]
+let creatures = [];   // [{ id, name, alive, genome, signature }]
 let tray      = [];   // [{ itemId, item, from }]
 let blood     = 500;
 
@@ -161,7 +175,11 @@ async function sync() {
       name: nameOf(sg.id),
       alive: !deadSet.has(sg.id),
       genome: sg.genome,
+      signature: sg.signature,
     }));
+
+  backupStable();
+  await restoreMissingStable();
 
   tray = (trayRes.items ?? []).map(inv => ({
     itemId: inv.itemId,
@@ -176,6 +194,65 @@ async function sync() {
   if (local.view === "stable") renderStable();
   else if (local.view === "chop") renderChop();
   else render();
+}
+
+// ── stable backup / restore (client-side safety net) ────────────────────────
+// The Mutator's store is in-memory only; a restart (a Render free-tier
+// idle spin-down counts, same as a redeploy) loses every genome it held.
+// The Stable's ID *list* survives fine in localStorage -- it's the
+// genomes those IDs point at that vanish, so re-polling the server can
+// never bring them back on its own; there's nothing left there to poll
+// for. This browser's own copy is the only thing that can.
+function backupStable() {
+  for (const id of local.stable ?? []) {
+    const c = byId(id);
+    // an unsigned entry (shouldn't happen from real server data, but
+    // cheap to guard) could never pass the server's restore check anyway
+    if (c && c.signature) local.stableBackup[id] = { genome: c.genome, signature: c.signature };
+  }
+  saveLocal();
+}
+
+// Anything the Stable list still names but the server no longer has --
+// replay this browser's own backup through POST /restore, which the
+// server accepts ONLY because the signature proves it's a genome the
+// server itself minted at some point (never an arbitrary client-crafted
+// one -- the same anti-cheat guarantee spawn/mutate/etc. already lean
+// on). A creature this browser never got the chance to back up (or
+// whose backup lived only in localStorage that's since been cleared) is
+// genuinely unrecoverable; it's just left out, same as today.
+async function restoreMissingStable() {
+  const missing = (local.stable ?? []).filter(id => !byId(id) && local.stableBackup?.[id]);
+  if (missing.length === 0) return;
+
+  let restored = 0;
+  for (const id of missing) {
+    const backup = local.stableBackup[id];
+    try {
+      const r = await api("POST", "/restore", {
+        idempotencyKey: `restore-${local.accountId}-${id}`,
+        genome: backup.genome,
+        signature: backup.signature,
+      });
+      if (r.status === "completed" && r.genome) {
+        creatures.push({
+          id: r.genomeId,
+          name: nameOf(r.genomeId),
+          alive: !(local.deadSet ?? []).includes(r.genomeId),
+          genome: r.genome,
+          signature: r.signature,
+        });
+        restored++;
+      }
+    } catch (e) {
+      // server unreachable, or a genuinely corrupted backup -- leave
+      // this one out rather than spamming a warning on every sync
+    }
+  }
+  if (restored > 0) {
+    logEntry(`♻️ Restored ${restored} creature${restored === 1 ? "" : "s"} to the stable after a server restart.`);
+    syncMenagerie();   // the server's Menagerie itself was wiped too
+  }
 }
 
 // ── operations ────────────────────────────────────────────────────────────────
@@ -600,6 +677,7 @@ function deleteEverywhere(id, name) {
   local.hidden = [...new Set([...(local.hidden ?? []), id])];
   const wasStabled = isSaved(id);
   local.stable = (local.stable ?? []).filter(x => x !== id);
+  delete local.stableBackup[id];   // a deliberate delete must not come back on the next restart
   if (local.selectedId === id) local.selectedId = null;
   saveLocal();
   logEntry(`🗑️ ${name} deleted${wasStabled ? " (and pulled off the battlefield roster)" : ""}.`);
@@ -638,11 +716,16 @@ function doSaveStable() {
   const c = selected(); if (!c) return;
   if (isSaved(c.id)) return;
   local.stable = [...(local.stable ?? []), c.id];
+  // snapshot the backup right now rather than waiting for the next
+  // sync() -- otherwise a server restart landing before any further
+  // operation would catch this creature with no backup to restore from
+  if (c.signature) local.stableBackup[c.id] = { genome: c.genome, signature: c.signature };
   saveLocal(); logEntry(`⭐ ${c.name} saved to the stable.`); render();
   syncMenagerie();
 }
 function doUnsaveStable(id) {
   local.stable = (local.stable ?? []).filter(x => x !== id);
+  delete local.stableBackup[id];
   saveLocal();
   if (local.view === "stable") renderStable(); else render();
   syncMenagerie();

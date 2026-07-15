@@ -187,6 +187,59 @@ test("heart transplant: a bigger heart is consumed and the old one returns to th
   assert.equal((tray[0]!.item as any).tier, "faint");
 });
 
+// ---- restore: client-side backup safety net -----------------------------
+
+test("restore brings a genome back under its ORIGINAL id after the store is wiped", () => {
+  const { svc } = fresh();
+  const id = spawn(svc);
+  const backup = svc.getCreature(ACC, id); // what the client would have cached
+
+  // simulate the in-memory store getting wiped (a Render restart) by
+  // moving to a brand-new store/service, same signing key
+  const wiped = new InMemoryStore();
+  const svc2 = new MutatorService(wiped, CFG);
+  assert.throws(() => svc2.getCreature(ACC, id), (e: any) => e.status === 404);
+
+  const r: any = svc2.restore(ACC, key(), { genome: backup.genome, signature: backup.signature });
+  assert.equal(r.status, "completed");
+  assert.equal(r.result.genomeId, id, "same id -- the client's Stable/Menagerie references still work");
+  const restored = svc2.getCreature(ACC, id);
+  assert.deepEqual(restored.genome, backup.genome);
+  assert.equal(restored.signature, backup.signature);
+});
+
+test("restore refuses a hand-crafted genome with no valid signature (anti-cheat)", () => {
+  const { svc } = fresh();
+  const forged = makeGenome(bigHeart());
+  const withId = { ...forged, creatureId: "cr-forged" };
+  const r: any = svc.restore(ACC, key(), { genome: withId, signature: "not-a-real-signature" });
+  assert.equal(r.status, "failed_experiment");
+  assert.ok(r.result.errors[0].includes("signature"));
+  assert.throws(() => svc.getCreature(ACC, "cr-forged"), (e: any) => e.status === 404);
+});
+
+test("restore is a no-op (not an error) when the genome was never actually lost", () => {
+  const { svc } = fresh();
+  const id = spawn(svc);
+  const stored = svc.getCreature(ACC, id);
+  const r: any = svc.restore(ACC, key(), { genome: stored.genome, signature: stored.signature });
+  assert.equal(r.status, "completed");
+  assert.equal(r.result.alreadyPresent, true);
+  assert.equal(r.result.genomeId, id);
+});
+
+test("restore is idempotent under a replayed key", () => {
+  const { svc } = fresh();
+  const id = spawn(svc);
+  const backup = svc.getCreature(ACC, id);
+  const wiped = new InMemoryStore();
+  const svc2 = new MutatorService(wiped, CFG);
+  const k = key();
+  const r1: any = svc2.restore(ACC, k, { genome: backup.genome, signature: backup.signature });
+  const r2: any = svc2.restore(ACC, k, { genome: backup.genome, signature: backup.signature });
+  assert.deepEqual(r1.result, r2.result);
+});
+
 // ---- menagerie + roster ------------------------------------------------------
 
 // ---- cannibalize ---------------------------------------------------------
