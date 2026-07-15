@@ -41,6 +41,10 @@ public class MonsterAgent : MonoBehaviour
     public string DisplayName { get; private set; } = "";
     public bool Selected { get; private set; }
 
+    /// <summary>The creature's body plan -- the "type" for SC2-style
+    /// double-click "select all of this type on screen."</summary>
+    public string BodyPlan { get { return _creature.Genome.Body.Plan; } }
+
     public string OrderDescription
     {
         get

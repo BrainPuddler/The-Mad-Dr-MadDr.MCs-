@@ -352,6 +352,10 @@ public class RuntimeCityBuilder : MonoBehaviour
         }
     }
 
+    /// <summary>Every spawned monster -- the commander walks this for
+    /// box-select and double-click select-all-of-type.</summary>
+    public IReadOnlyList<MonsterAgent> Monsters { get { return _monsters; } }
+
     public MonsterAgent NearestMonsterTo(Vector3 position, float within)
     {
         MonsterAgent best = null;
