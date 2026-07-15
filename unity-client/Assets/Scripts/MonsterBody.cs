@@ -24,6 +24,18 @@ using UnityEngine;
 /// LocomotionProfile (physiology), and the body bob is phased by
 /// DISTANCE TRAVELED, not wall-clock time, so motion always matches
 /// ground covered by construction rather than by tuning.
+///
+/// FLIGHT (winged plan only, creator direction 2026-07): SetFlying(true)
+/// smoothly lifts the whole body -- torso AND every leg hip together, so
+/// nothing floats free of its legs -- to a flight altitude, tucking the
+/// legs into a folded mid-air pose instead of trying to plant a ground
+/// step. SetFlying(false) eases back down and replants properly
+/// (SnapFeetToGround) the instant it touches down. This is purely a
+/// visual/height concern -- MonsterAgent's flight decision and pathing
+/// live entirely on its side; this class just makes the airborne state
+/// LOOK like flight. No wing-flap animation (the mesh's wings are baked
+/// into the same static chunk as the rest of the body, not a separately
+/// posable transform, docs/08 port scope) -- deferred, logged in docs/12.
 /// </summary>
 public class MonsterBody : MonoBehaviour
 {
@@ -57,6 +69,15 @@ public class MonsterBody : MonoBehaviour
     private bool _yawInitialized;
     private float _avgHipRadius = 1f;
     private float _hoverPhase;
+    private float _flightBobPhase;
+    private BoxCollider _selectionCollider;
+
+    // ---- flight (winged plan only) ------------------------------------------
+    private bool _canFly;
+    private bool _flying;          // MonsterAgent's current intent
+    private float _flightLift;     // actual animated lift, MoveTowards-eased toward _flying's target
+    private float _flightTargetLift;
+    private const float FlightLiftAirborneThreshold = 0.5f;   // above this, legs are considered "in the air"
 
     /// <summary>Fixed at Build time from the plan's leg count -- NOT
     /// derived from _legs.Count on the fly: the first version did that,
@@ -65,6 +86,10 @@ public class MonsterBody : MonoBehaviour
     /// fallback value. Order-dependent getters bite exactly once,
     /// at init, where they're hardest to see.</summary>
     public float BodyHeight { get { return _standHeight; } }
+
+    /// <summary>True only for the winged plan -- SetFlying is a no-op
+    /// for everything else.</summary>
+    public bool CanFly { get { return _canFly; } }
 
     public void Build(StoredGenomeDto creature)
     {
@@ -76,6 +101,12 @@ public class MonsterBody : MonoBehaviour
         _legLen = Mathf.Lerp(0.9f, 2.2f, legGene) * Mathf.Lerp(0.8f, 1.3f, bulk);
         _stride = _legLen * 1.5f;
         _standHeight = Locomotion.LegsFor(_plan) > 0 ? _legLen : _bulkScale * 0.9f;
+        _canFly = _plan == "winged";
+        // clears most building roofs (BuildingTier: small 6 / medium 12
+        // / large 30 / landmark 40) without needing to track real
+        // per-building height -- altitude is cosmetic only, since the
+        // agent's pathing already keeps flight out of building footprints
+        _flightTargetLift = Mathf.Max(14f, BodyHeight * 2.5f);
 
         var skin = SkinColor(g.Body.Plan, creature.Id);
 
@@ -109,10 +140,14 @@ public class MonsterBody : MonoBehaviour
         SnapFeetToGround();
 
         // one collider on the root for selection raycasts; the parts
-        // themselves stay collider-free (StripCollider on every primitive)
-        var box = gameObject.AddComponent<BoxCollider>();
-        box.center = new Vector3(0f, BodyHeight, 0f);
-        box.size = new Vector3(_bulkScale * 2.2f, BodyHeight * 2f, _bulkScale * 2.6f);
+        // themselves stay collider-free (StripCollider on every primitive).
+        // Kept as a field so UpdateLocomotion can slide it up with the
+        // body while flying -- otherwise a flying unit's clickable box
+        // stays pinned at ground height while the model floats up above
+        // it, and clicking what you SEE stops working.
+        _selectionCollider = gameObject.AddComponent<BoxCollider>();
+        _selectionCollider.center = new Vector3(0f, BodyHeight, 0f);
+        _selectionCollider.size = new Vector3(_bulkScale * 2.2f, BodyHeight * 2f, _bulkScale * 2.6f);
     }
 
     /// <summary>Re-plants every foot (and the serpentine tail trail)
@@ -165,6 +200,16 @@ public class MonsterBody : MonoBehaviour
                     + " -- was the body teleported without SnapFeetToGround()?");
             }
         }
+    }
+
+    /// <summary>MonsterAgent's flight intent (SetFlying(true) to take
+    /// off, SetFlying(false) to land). No-op on a plan that can't fly.
+    /// The actual lift animates smoothly in UpdateLocomotion rather than
+    /// snapping -- see _flightLift.</summary>
+    public void SetFlying(bool flying)
+    {
+        if (!_canFly) return;
+        _flying = flying;
     }
 
     // ---- construction ------------------------------------------------------
@@ -453,6 +498,22 @@ public class MonsterBody : MonoBehaviour
         var speed = new Vector3(velocity.x, 0f, velocity.z).magnitude;
         _distTraveled += speed * dt;
 
+        if (_canFly)
+        {
+            var wasAirborne = _flightLift > FlightLiftAirborneThreshold;
+            var targetLift = _flying ? _flightTargetLift : 0f;
+            // ~1.4s for a full lift-off or landing, whatever _flightTargetLift is
+            _flightLift = Mathf.MoveTowards(_flightLift, targetLift, (_flightTargetLift / 1.4f) * dt);
+            if (wasAirborne && !_flying && _flightLift <= FlightLiftAirborneThreshold)
+            {
+                _flightLift = 0f;
+                SnapFeetToGround();   // just touched down -- replant properly, not a stale mid-air tuck
+            }
+            // click-to-select must track what's actually on screen
+            if (_selectionCollider != null)
+                _selectionCollider.center = new Vector3(0f, BodyHeight + _flightLift, 0f);
+        }
+
         if (_legs.Count == 0)
         {
             UpdateLeglessLocomotion(velocity, speed, dt);
@@ -494,7 +555,17 @@ public class MonsterBody : MonoBehaviour
         if (_torso != null)
         {
             var bobPhase = _gaitDist / Mathf.Max(strideEff, 0.01f) * Mathf.PI * 2f;
-            _torso.localPosition = new Vector3(0f, BodyHeight + Mathf.Sin(bobPhase) * _legLen * 0.045f, 0f);
+            // airborne gets its OWN wall-clock bob layered on top -- like
+            // the floater's hover, there's no footfall to sync a
+            // distance-driven bob to once truly off the ground
+            var flightBob = 0f;
+            if (_flightLift > FlightLiftAirborneThreshold)
+            {
+                _flightBobPhase += dt * 3.2f;
+                flightBob = Mathf.Sin(_flightBobPhase) * 0.3f;
+            }
+            _torso.localPosition = new Vector3(0f,
+                BodyHeight + Mathf.Sin(bobPhase) * _legLen * 0.045f + _flightLift + flightBob, 0f);
         }
 
         var flatVel = new Vector3(velocity.x, 0f, velocity.z);
@@ -502,7 +573,21 @@ public class MonsterBody : MonoBehaviour
 
         foreach (var leg in _legs)
         {
-            var hipW = transform.TransformPoint(leg.HipLocal);
+            var hipW = transform.TransformPoint(leg.HipLocal) + Vector3.up * _flightLift;
+
+            if (_flightLift > FlightLiftAirborneThreshold)
+            {
+                // airborne: fold the leg up rather than reaching for a
+                // ground contact that isn't there. FootWorld is scratch
+                // here -- SnapFeetToGround() re-derives it from scratch
+                // the moment this creature actually lands.
+                var tucked = hipW - Vector3.up * (_legLen * 0.55f) + transform.forward * (_legLen * 0.35f);
+                leg.FootWorld = tucked;
+                leg.Swinging = false;
+                RenderLeg(leg, hipW);
+                continue;
+            }
+
             var restW = new Vector3(hipW.x, 0f, hipW.z);
 
             // this leg's rest-point velocity: translation + rotation's

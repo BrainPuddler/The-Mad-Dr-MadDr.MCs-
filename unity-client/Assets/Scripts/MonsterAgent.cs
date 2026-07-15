@@ -15,6 +15,19 @@ using UnityEngine;
 /// Movement is kinematic along hex-center path nodes; MonsterBody turns
 /// the resulting real velocity into footsteps (no skating -- see its
 /// header).
+///
+/// WINGED FLIGHT (creator direction, 2026-07): a winged creature can
+/// walk OR fly to a destination, deciding per order at path-compute time
+/// (DecideFlight) -- "far" (the straight-line hex distance clears a
+/// threshold) or "high up" (no ground route exists, or the ground route
+/// is a heavy detour around buildings/water compared to flying it
+/// direct). Flying still runs the SAME A* over the SAME hex grid, just
+/// with the amphibious-style blocked set (buildings block, water
+/// doesn't) -- "same navigation rules apply as walking, no going through
+/// buildings" is the explicit rule, so this is never a straight-line
+/// ignore-everything flight. A unit that flew to its target stays
+/// airborne while it fights (an aerial attack) instead of landing first;
+/// it only lands once its order is fully done (GoIdle).
 /// </summary>
 public class MonsterAgent : MonoBehaviour
 {
@@ -26,6 +39,8 @@ public class MonsterAgent : MonoBehaviour
     private UnitCombat _fighter;
     private LocomotionProfile _profile;
     private bool _amphibious;
+    private bool _canFly;
+    private bool _flying;   // current order's mode -- decided once per path-compute, see DecideFlight
 
     private OrderKind _order = OrderKind.Idle;
     private readonly Queue<HexCoord> _waypoints = new Queue<HexCoord>();
@@ -57,10 +72,12 @@ public class MonsterAgent : MonoBehaviour
     {
         get
         {
+            var air = _flying ? " (airborne)" : "";
             switch (_order)
             {
-                case OrderKind.Move: return "moving (" + (_waypoints.Count + (_path != null ? 1 : 0)) + " waypoint leg(s))";
-                case OrderKind.AttackBuilding: return "ATTACKING " + (_targetBuilding != null ? _targetBuilding.Tier.ToString() : "?") + " building";
+                case OrderKind.Move: return "moving" + air + " (" + (_waypoints.Count + (_path != null ? 1 : 0)) + " waypoint leg(s))";
+                case OrderKind.AttackBuilding: return "ATTACKING" + air + " " + (_targetBuilding != null ? _targetBuilding.Tier.ToString() : "?") + " building";
+                case OrderKind.AttackUnit: return "ATTACKING" + air + " a unit";
                 case OrderKind.EatCitizen: return "hunting a citizen";
                 default: return "idle";
             }
@@ -95,6 +112,7 @@ public class MonsterAgent : MonoBehaviour
         _profile = Locomotion.Profile(creature.Genome);
         var plan = creature.Genome.Body.Plan;
         _amphibious = plan == "crab" || plan == "serpentine";
+        _canFly = plan == "winged";
 
         // Position BEFORE building the body: Build() plants feet as
         // world-locked positions at the CURRENT transform (the no-skate
@@ -202,6 +220,18 @@ public class MonsterAgent : MonoBehaviour
         _settleTarget = null;   // any fresh order cancels a pending group-settle creep
     }
 
+    /// <summary>The single place _order becomes Idle. Flight is only ever
+    /// for transit/aerial-attack, never for standing around -- landing
+    /// here (rather than scattered across every early-return) means a
+    /// winged unit always comes down once its order is genuinely done,
+    /// whether that's a normal arrival, an unreachable path, a destroyed
+    /// target, or death mid-order.</summary>
+    private void GoIdle()
+    {
+        _order = OrderKind.Idle;
+        if (_flying) { _flying = false; if (_body != null) _body.SetFlying(false); }
+    }
+
     // ---- per-frame ----------------------------------------------------------
 
     private void Update()
@@ -245,10 +275,10 @@ public class MonsterAgent : MonoBehaviour
     {
         if (_path == null)
         {
-            if (_waypoints.Count == 0) { _order = OrderKind.Idle; return Vector3.zero; }
+            if (_waypoints.Count == 0) { GoIdle(); return Vector3.zero; }
             var goal = _waypoints.Dequeue();
             _path = ComputePath(goal);
-            if (_path == null) { _order = OrderKind.Idle; return Vector3.zero; } // unreachable: stop rather than pretend
+            if (_path == null) { GoIdle(); return Vector3.zero; } // unreachable: stop rather than pretend
         }
         RecomputeIfCityChanged();
         return FollowPath(dt, RunOrWalkSpeed());
@@ -283,7 +313,7 @@ public class MonsterAgent : MonoBehaviour
         var next = transform.position + dir * step;
 
         var hex = _builder.HexAt(next);
-        if (!_builder.City.Contains(hex) || _builder.BlockedFor(_amphibious).Contains(hex))
+        if (!_builder.City.Contains(hex) || Blocked().Contains(hex))
         {
             _settleTarget = null;   // a building or water is in the way -- stop right here
             return Vector3.zero;
@@ -297,12 +327,20 @@ public class MonsterAgent : MonoBehaviour
 
     private Vector3 TickAttack(float dt)
     {
-        if (_targetBuilding == null) { _order = OrderKind.Idle; return Vector3.zero; }
-        if (_builder.IsDestroyed(_targetBuilding)) { _targetBuilding = null; _order = OrderKind.Idle; return Vector3.zero; }
+        if (_targetBuilding == null) { GoIdle(); return Vector3.zero; }
+        if (_builder.IsDestroyed(_targetBuilding)) { _targetBuilding = null; GoIdle(); return Vector3.zero; }
 
         var armed = _fighter != null && _fighter.Weapon != null && _fighter.Weapon.CanAttack;
-        // ranged monsters stop and shoot from weapon range; melee/unarmed
-        // close to a bash distance (~1.5 hex)
+        // "ground units without projectile weapons must be near the
+        // building to attack it" (creator direction, 2026-07): a weapon
+        // with real reach (Beam/Bolt/Bullet/Spore -- WeaponFor's Range)
+        // fights from that range; Melee weapons carry a tiny Range by
+        // construction (6-9m, WeaponFor) and an unarmed stump gets a
+        // flat bash distance -- both land inside the Mathf.Max(6f, ...)
+        // floor, so "no projectile weapon" already collapses to "must be
+        // adjacent" without a separate WeaponKind check here. Flying
+        // doesn't change this range at all -- an aerial attacker just
+        // fights from the same XZ distance while staying airborne.
         var reach = armed ? Mathf.Max(6f, (float)_fighter.Weapon.Range) : 32f;
         var bp = NearestFootprintPoint(_targetBuilding);
         var flat = bp - transform.position;
@@ -339,7 +377,7 @@ public class MonsterAgent : MonoBehaviour
         if (_path == null)
         {
             _path = ComputeApproachPath(_targetBuilding);
-            if (_path == null) { _order = OrderKind.Idle; return Vector3.zero; }
+            if (_path == null) { GoIdle(); return Vector3.zero; }
         }
         RecomputeIfCityChanged();
         return FollowPath(dt, RunOrWalkSpeed());
@@ -347,7 +385,7 @@ public class MonsterAgent : MonoBehaviour
 
     private Vector3 TickAttackUnit(float dt)
     {
-        if (_targetUnit == null || !_targetUnit.Alive) { _targetUnit = null; _order = OrderKind.Idle; return Vector3.zero; }
+        if (_targetUnit == null || !_targetUnit.Alive) { _targetUnit = null; GoIdle(); return Vector3.zero; }
         var w = _fighter.Weapon;
         var to = _targetUnit.AimPoint - transform.position;
         to.y = 0f;
@@ -399,7 +437,7 @@ public class MonsterAgent : MonoBehaviour
 
     private void OnDied()
     {
-        _order = OrderKind.Idle;
+        GoIdle();
         _targetUnit = null;
         _targetBuilding = null;
         _targetCitizen = null;
@@ -411,7 +449,7 @@ public class MonsterAgent : MonoBehaviour
 
     private Vector3 TickEat(float dt)
     {
-        if (_targetCitizen == null) { _order = OrderKind.Idle; return Vector3.zero; }
+        if (_targetCitizen == null) { GoIdle(); return Vector3.zero; }
 
         var toTarget = _targetCitizen.transform.position - transform.position;
         toTarget.y = 0f;
@@ -419,7 +457,7 @@ public class MonsterAgent : MonoBehaviour
         {
             _builder.OnCitizenEaten(_targetCitizen);
             _targetCitizen = null;
-            _order = OrderKind.Idle;
+            GoIdle();
             _path = null;
             return Vector3.zero;
         }
@@ -479,10 +517,53 @@ public class MonsterAgent : MonoBehaviour
         return steer * speed;
     }
 
+    private const int FarHexThreshold = 5;      // ~100m straight-line (20m hex) counts as "far"
+    private const float DetourFactor = 1.8f;    // ground route this much longer than a straight line = "high up" territory
+
+    /// <summary>Decide walk vs fly for a winged unit's NEXT path, per the
+    /// creator's rule: "if the distance is far or high up." Non-flyers
+    /// always return false. "Far" is a straight-line hex-distance
+    /// threshold; "high up" is inferred from the ground route itself --
+    /// unreachable on foot at all (a river with no bridge), or a route
+    /// so much longer than a straight line that it's clearly detouring
+    /// hard around buildings/water -- exactly the situations flying over
+    /// is the obviously better call. This costs one extra A* run (the
+    /// ground-only check), but only once per path-compute, never per
+    /// frame.</summary>
+    private bool DecideFlight(HexCoord start, HexCoord goal)
+    {
+        if (!_canFly) return false;
+        var straight = start.DistanceTo(goal);
+        if (straight == 0) return false;
+        if (straight >= FarHexThreshold) return true;
+        var groundPath = HexPathfinder.FindPath(start, goal, _builder.City, _builder.BlockedFor(false));
+        if (groundPath == null) return true;   // no ground route at all
+        return groundPath.Count > straight * DetourFactor;
+    }
+
+    /// <summary>The blocked set for whatever this unit is doing RIGHT
+    /// NOW: flying uses the same rule as an amphibious plan (only
+    /// buildings block -- water doesn't), regardless of the creature's
+    /// own amphibious flag, since that's exactly what "no going through
+    /// buildings" plus free passage over everything else means for a
+    /// flyer. Grounded movement keeps the creature's normal ground/
+    /// amphibious rule.</summary>
+    private HashSet<HexCoord> Blocked()
+    {
+        return _builder.BlockedFor(_flying || _amphibious);
+    }
+
+    private void SetFlyingFor(HexCoord start, HexCoord goal)
+    {
+        _flying = DecideFlight(start, goal);
+        if (_body != null) _body.SetFlying(_flying);
+    }
+
     private List<Vector3> ComputePath(HexCoord goal)
     {
         var start = _builder.HexAt(transform.position);
-        var hexPath = HexPathfinder.FindPath(start, goal, _builder.City, _builder.BlockedFor(_amphibious));
+        SetFlyingFor(start, goal);
+        var hexPath = HexPathfinder.FindPath(start, goal, _builder.City, Blocked());
         _pathGoalHex = goal;
         return ToWorldPath(hexPath);
     }
@@ -490,7 +571,12 @@ public class MonsterAgent : MonoBehaviour
     private List<Vector3> ComputeApproachPath(Building building)
     {
         var start = _builder.HexAt(transform.position);
-        var hexPath = HexPathfinder.FindPathToBuilding(start, building.Footprint, _builder.City, _builder.BlockedFor(_amphibious));
+        // the fly/walk call needs ONE representative target hex; the
+        // closest footprint hex to home is a fine proxy -- the actual
+        // approach hex FindPathToBuilding lands on is picked below, from
+        // the SAME (now-decided) blocked set
+        SetFlyingFor(start, _builder.HexAt(NearestFootprintPoint(building)));
+        var hexPath = HexPathfinder.FindPathToBuilding(start, building.Footprint, _builder.City, Blocked());
         if (hexPath != null && hexPath.Count > 0) _pathGoalHex = hexPath[hexPath.Count - 1];
         return ToWorldPath(hexPath);
     }
@@ -514,18 +600,5 @@ public class MonsterAgent : MonoBehaviour
             _path = ComputeApproachPath(_targetBuilding);
         else
             _path = ComputePath(_pathGoalHex);
-    }
-
-    private bool InRangeOfBuilding(Building building)
-    {
-        var pos = transform.position;
-        foreach (var hex in building.Footprint)
-        {
-            var w = _builder.WorldOf(hex);
-            var d = w - pos;
-            d.y = 0f;
-            if (d.magnitude < 32f) return true; // ~1.5 hexes: adjacent-and-swinging
-        }
-        return false;
     }
 }

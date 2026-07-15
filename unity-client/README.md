@@ -35,6 +35,16 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   distance traveled, not a clock — with the rig's legs dressed in the
   family's real geometry (`LegKit`: hoofs, talon fans, chitin struts,
   piston struts, brass hip joints) instead of stick cylinders.
+  **Winged units can walk or fly**, decided per order — "far" (a
+  straight-line hex-distance threshold) or "high up" (no ground route
+  at all, or a heavy detour around buildings/water) tips it into flight
+  (`MonsterAgent.DecideFlight`). Flying still runs the SAME A* over the
+  SAME hex grid, just with the amphibious-style blocked set (buildings
+  block, water doesn't) — never a straight-line ignore-everything hop.
+  `MonsterBody.SetFlying` smoothly lifts torso and legs together to
+  altitude and tucks the legs mid-air; a unit that flew to its target
+  stays airborne to fight (an aerial attack) and only lands once its
+  order is fully done.
 - **`Assets/Scripts/Citizen.cs`** — docs/19 client-side cosmetic crowd:
   wanders the streets, flees monsters, edible (docs/20 yields: Blood 2 /
   Bones 1 / Brains 1 into the session wallet).
