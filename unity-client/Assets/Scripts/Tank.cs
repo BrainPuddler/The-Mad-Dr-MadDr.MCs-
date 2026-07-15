@@ -1,3 +1,4 @@
+using MadDr.CityGen;
 using MadDr.RosterClient;
 using UnityEngine;
 
@@ -5,10 +6,14 @@ using UnityEngine;
 /// A 1950s human-faction tank -- the test dummy that fights the monsters.
 /// Drives toward the nearest monster, faces it, and opens up once it's in
 /// range; half of them carry a flamethrower (because it's cool), the rest
-/// a 75mm cannon. Simple straight-line steering (no A* -- these are combat
-/// targets, not navigators) plus the shared no-overlap separation. Has a
-/// UnitCombat like everything else, so monsters can target and kill it and
-/// it shows a health bar.
+/// a 75mm cannon. Straight-line steering toward the target (no A* -- these
+/// are combat targets, not navigators), but with a lightweight look-ahead
+/// deflection so it never actually drives ONTO a building hex (creator
+/// direction, 2026-07: "tanks can NOT spawn within building" -- spawn
+/// placement was already building-aware; a tank driving straight through
+/// one mid-chase is what that actually looked like in play). Plus the
+/// shared no-overlap separation. Has a UnitCombat like everything else, so
+/// monsters can target and kill it and it shows a health bar.
 /// </summary>
 public class Tank : MonoBehaviour
 {
@@ -49,12 +54,39 @@ public class Tank : MonoBehaviour
 
             var range = (float)_combat.Weapon.Range;
             if (dist > range * 0.85f)
-                transform.position += dir * _speed * dt;   // close the distance
+            {
+                var steer = SteerAroundBuildings(dir);
+                if (steer.sqrMagnitude > 0.0001f) transform.position += steer * _speed * dt;
+                // boxed in on every probed direction: hold position and
+                // keep shooting range-checked as normal next frame rather
+                // than ramming the one building in the way
+            }
             else
                 _combat.TryFire(target, _muzzle != null ? _muzzle.position : transform.position + Vector3.up * 1.4f);
         }
 
         _builder.ApplySeparation(_combat);
+    }
+
+    // deflection angles tried in order: straight first (the common case,
+    // nothing in the way), then widening zig-zags each side -- a cheap
+    // stand-in for real pathfinding that still guarantees the tank never
+    // commits to a step that lands it on a building hex
+    private static readonly float[] DeflectAngles = { 0f, 25f, -25f, 50f, -50f, 75f, -75f, 100f, -100f };
+    private const float ProbeDistance = 6f;
+
+    private Vector3 SteerAroundBuildings(Vector3 desiredDir)
+    {
+        if (_builder == null || _builder.City == null) return desiredDir;
+        var blocked = _builder.BlockedFor(false);
+        foreach (var angle in DeflectAngles)
+        {
+            var candidate = Quaternion.Euler(0f, angle, 0f) * desiredDir;
+            var probe = transform.position + candidate * ProbeDistance;
+            var hex = _builder.HexAt(probe);
+            if (_builder.City.Contains(hex) && !blocked.Contains(hex)) return candidate.normalized;
+        }
+        return Vector3.zero;   // hemmed in on every side -- hold rather than drive into the only building left
     }
 
     private void OnDied()

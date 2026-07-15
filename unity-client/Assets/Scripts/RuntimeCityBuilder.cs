@@ -457,11 +457,20 @@ public class RuntimeCityBuilder : MonoBehaviour
         var center = _city.CenterHex;
         var blocked = BlockedFor(false);
 
+        // require the hex AND every immediate neighbor to be clear, not
+        // just the hex itself -- a tank spawned right against a building's
+        // edge has nowhere to go if ApplySeparation (another tank landing
+        // on the same crowded ring slot) shoves it sideways, and the only
+        // free direction happens to be into that wall
         var candidates = new List<HexCoord>();
         var maxD = 0;
         foreach (var hex in center.Range(28))
         {
             if (!_city.Contains(hex) || blocked.Contains(hex)) continue;
+            var clear = true;
+            foreach (var n in hex.Neighbors())
+                if (blocked.Contains(n)) { clear = false; break; }
+            if (!clear) continue;
             var d = hex.DistanceTo(center);
             if (d > maxD) maxD = d;
             candidates.Add(hex);
