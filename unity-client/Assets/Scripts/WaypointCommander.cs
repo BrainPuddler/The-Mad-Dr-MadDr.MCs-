@@ -15,8 +15,8 @@ using UnityEngine.InputSystem;
 ///   Shift + left (any of : add to the current selection instead of
 ///     the above)           replacing it (double-click adds all of type)
 ///   Right click          : order the WHOLE selection --
-///                            on a citizen  -> chase and eat it
-///                            on a building -> walk to it and attack
+///   (or Ctrl + left click,  on a citizen  -> chase and eat it
+///    trackpad support)      on a building -> walk to it and attack
 ///                            on the ground -> waypoint (Shift queues)
 ///   G                    : glide the camera to the unit nearest the cursor
 /// </summary>
@@ -58,15 +58,23 @@ public class WaypointCommander : MonoBehaviour
         if (keyboard != null && keyboard.gKey.wasPressedThisFrame)
             JumpToNearestUnit(cam, mouse);
 
-        HandleSelection(cam, mouse, keyboard);
-        HandleOrders(cam, mouse, keyboard);
+        // trackpad support: Ctrl+left-click stands in for a right click
+        // (mirrors macOS's own Control-click-for-secondary-click
+        // convention, but works the same on any OS/pointer that lacks a
+        // real right button).
+        var ctrlHeld = keyboard != null && (keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed);
+
+        HandleSelection(cam, mouse, keyboard, ctrlHeld);
+        HandleOrders(cam, mouse, keyboard, ctrlHeld);
     }
 
     // ---- selection (left button) --------------------------------------------
 
-    private void HandleSelection(Camera cam, Mouse mouse, Keyboard keyboard)
+    private void HandleSelection(Camera cam, Mouse mouse, Keyboard keyboard, bool ctrlHeld)
     {
-        if (mouse.leftButton.wasPressedThisFrame)
+        // Ctrl+left is claimed by the right-click stand-in above -- never
+        // let it start a selection click/drag too.
+        if (mouse.leftButton.wasPressedThisFrame && !ctrlHeld)
         {
             _leftDown = true;
             _dragStart = mouse.position.ReadValue();
@@ -115,11 +123,13 @@ public class WaypointCommander : MonoBehaviour
         }
     }
 
-    // ---- orders (right button) ----------------------------------------------
+    // ---- orders (right button, or Ctrl+left for trackpads) ------------------
 
-    private void HandleOrders(Camera cam, Mouse mouse, Keyboard keyboard)
+    private void HandleOrders(Camera cam, Mouse mouse, Keyboard keyboard, bool ctrlHeld)
     {
-        if (!mouse.rightButton.wasPressedThisFrame) return;
+        var ordered = mouse.rightButton.wasPressedThisFrame
+            || (ctrlHeld && mouse.leftButton.wasPressedThisFrame);
+        if (!ordered) return;
         PruneSelection();
         if (_selected.Count == 0) return;
 
