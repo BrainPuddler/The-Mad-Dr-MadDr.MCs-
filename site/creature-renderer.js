@@ -2126,7 +2126,12 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       for (let i = 1; i <= 8; i++) {
         const t = i / 8;
         path.push([
-          hip[0] + N[0]*t*0.6 + Math.sin(t*Math.PI*(1+curl*1.4))*curl*0.6,
+          // both the outward lean (N[0], already side-mirrored) AND the
+          // curl wiggle must mirror per side -- without `side` on the sin
+          // term the wiggle bent both legs the same absolute way, so the
+          // left foot curled back across the midline ("facing the wrong
+          // way") while the right splayed out
+          hip[0] + N[0]*t*0.6 + side * Math.sin(t*Math.PI*(1+curl*1.4))*curl*0.6,
           hip[1] - t*(sock.len+0.4),
           hip[2] + N[2]*t*0.6 + 0.3*t,
         ]);
