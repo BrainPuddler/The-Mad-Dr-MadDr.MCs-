@@ -162,16 +162,22 @@ visual tuning constants are isolated for one-line Editor adjustment.
 ## 6. Next 10 world upgrades (after this pass)
 
 Batch 2 (2026-07, see docs/12 decision log) shipped items 1, 2, 3, 5, 7,
-8, and 10. Deferred: 4 (needs Editor eyes for lighting), 6 (not scoped
-this batch), 9 (a full standalone traffic feature).
+8, and 10. Batch 3 (2026-07) shipped the remaining three: 4, 6, and 9 --
+the docs/21 SS6 list is now fully closed.
 
 1. ~~Bridge dressing: trusses, piers into the riverbed, road continuity.~~ **Done** (`BridgeDresser.cs`).
 2. ~~Knock-downable street furniture (poles/cars react to monster steps).~~ **Done** (`KnockableProp.cs`).
 3. ~~Damage smoke/fire plumes on Damaged buildings; dust puff on collapse.~~ **Done** (`DamageFx.cs`).
-4. Neon night mode: emissive signage pass + dusk lighting preset.
+4. ~~Neon night mode: emissive signage pass + dusk lighting preset.~~ **Done** (`NightMode.cs` + `NeonRegistry.cs`; press N).
 5. ~~Rubble piles with silhouette (not just crushed cubes).~~ **Done** (`RubbleDresser.cs`).
-6. Railyard/industrial district dressing keyed to `rail_depot`.
+6. ~~Railyard/industrial district dressing keyed to `rail_depot`.~~ **Done** (`BuildingDresser.DressIndustrial` + `RoadDresser` rail siding).
 7. ~~Billboard art: period-poster quads ("ATOMIC COLA", movie one-sheets).~~ **Done** (`BuildingDresser.DressPoster` + `RoadDresser` roadside boards).
 8. ~~Miniature-set border: table edge / painted-backdrop skybox ring.~~ **Done** (`RuntimeCityBuilder.BuildTableEdge`).
-9. Citizen vehicles that drive road hexes and flee (docs/19 traffic).
+9. ~~Citizen vehicles that drive road hexes and flee (docs/19 traffic).~~ **Done** (`TrafficCar.cs`).
 10. ~~Per-district palettes (downtown vs suburbs) from road-graph radius.~~ **Done** (massing tint only; dressing-level palette bias still open).
+
+All ten items are now either fully done or, for item 10, done at the
+scope originally committed (massing tint; a future pass could extend the
+bias into BuildingDresser's window/wall material choices). A fresh
+next-upgrades list, if wanted, belongs in a new docs/12 entry rather than
+extending this one further.

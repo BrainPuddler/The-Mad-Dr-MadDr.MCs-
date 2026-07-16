@@ -35,7 +35,9 @@ public static class BuildingDresser
         if (emissive > 0.01f)
         {
             mat.EnableKeyword("_EMISSION");
-            mat.SetColor("_EmissionColor", new Color(r, g, b) * emissive);
+            var baseEmission = new Color(r, g, b) * emissive;
+            mat.SetColor("_EmissionColor", baseEmission);
+            NeonRegistry.Register(mat, baseEmission);
         }
         Cache[key] = mat;
         return mat;
@@ -68,9 +70,13 @@ public static class BuildingDresser
     /// footprint hex into `cubes` (the damage pipeline's list). The
     /// FIRST hex is the "primary": it carries the rooftop kit and
     /// signage; secondary hexes of multi-hex buildings get facade work
-    /// only, so a 3-hex office doesn't sprout 3 water towers.</summary>
+    /// only, so a 3-hex office doesn't sprout 3 water towers. `industrial`
+    /// (docs/21 batch 2, item 6) re-skins Small/Medium tiers as warehouse
+    /// stock inside a rail_depot landmark's radius -- Large/Landmark keep
+    /// their usual look, since a factory reads fine as a stepped office
+    /// shell and the depot itself already carries the archetype set piece.</summary>
     public static void Dress(RuntimeCityBuilder builder, Building building, float height,
-        List<GameObject> cubes, Transform parent)
+        List<GameObject> cubes, Transform parent, bool industrial = false)
     {
         var footprint = building.Footprint;
         for (var i = 0; i < footprint.Count; i++)
@@ -92,10 +98,12 @@ public static class BuildingDresser
                     DressOffice(builder, holder.transform, height, h, primary);
                     break;
                 case BuildingTier.Medium:
-                    DressApartment(builder, holder.transform, height, h, primary);
+                    if (industrial) DressIndustrial(builder, holder.transform, height, h, primary);
+                    else DressApartment(builder, holder.transform, height, h, primary);
                     break;
                 default:
-                    DressSmall(builder, holder.transform, height, h, primary);
+                    if (industrial) DressIndustrial(builder, holder.transform, height, h, primary);
+                    else DressSmall(builder, holder.transform, height, h, primary);
                     break;
             }
         }
@@ -153,6 +161,35 @@ public static class BuildingDresser
                 }
                 break;
             }
+        }
+    }
+
+    // ---- railyard/industrial re-skin (docs/21 batch 2, item 6) -----------------
+
+    private static Material Corrugated() { return M(0.46f, 0.44f, 0.42f); }
+
+    private static void DressIndustrial(RuntimeCityBuilder b, Transform t, float height, int h, bool primary)
+    {
+        var basePos = t.position;
+        // flat corrugated roof band + a loading dock canopy out front --
+        // reads as a warehouse from RTS height, not a walk-up
+        b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 0.3f),
+            new Vector3(19f, 0.5f, 19f), Corrugated(), t);
+        b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 2.4f, Half * 1.1f),
+            new Vector3(9f, 3.2f, 2.2f), RustRed(), t);
+        b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(-6f, 1.6f, 9.6f),
+            new Vector3(0.35f, 1.6f, 0.35f), Concrete(), t);
+        b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(6f, 1.6f, 9.6f),
+            new Vector3(0.35f, 1.6f, 0.35f), Concrete(), t);
+
+        if (primary)
+        {
+            // smokestack + roof vents -- the industrial silhouette
+            b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(-5f, height + 4.5f, -4f),
+                new Vector3(0.9f, 4.5f, 0.9f), Concrete(), t);
+            for (var i = 0; i < 2; i++)
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(3f + i * 3f, height + 0.9f, 3f),
+                    new Vector3(1.3f, 1.1f, 1.3f), Corrugated(), t);
         }
     }
 

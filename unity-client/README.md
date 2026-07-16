@@ -106,6 +106,19 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   standing in for road-graph radius); and a wooden table rim plus a
   flat-color backdrop ring frame the whole map so it reads as a
   diorama on a table rather than trailing into the void at its edge.
+  **Batch 3** (`NightMode.cs` / `NeonRegistry.cs` / `TrafficCar.cs`,
+  finishing the docs/21 SS6 list): press **N** to ease the whole city
+  from day to a dusk lighting preset (a code-created directional light
+  and ambient/fog colors, since this environment has no Editor to
+  hand-place one) while every registered neon material -- signage,
+  bulbs, billboard art -- brightens to actually read as neon against
+  the dim. Buildings within a `rail_depot` landmark's radius re-skin as
+  warehouses (corrugated roofs, loading docks, a smokestack) and nearby
+  straight road hexes grow a parallel rail siding, tying the depot into
+  a small industrial district. `trafficCarCount` cars drive the road
+  network hex-to-hex and flee like Citizens when a monster gets close,
+  peeling off toward whichever reachable hex is farthest from the
+  threat.
 - **Combat** (`UnitCombat.cs` / `WeaponFx.cs` / `Projectile.cs` /
   `Tank.cs` / `HealthBars.cs`) — every unit has health and a weapon
   derived from its genome (`roster-client`'s tested `Combat.Profile`):

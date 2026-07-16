@@ -34,7 +34,9 @@ public static class RoadDresser
         if (emissive > 0.01f)
         {
             mat.EnableKeyword("_EMISSION");
-            mat.SetColor("_EmissionColor", new Color(r, g, b) * emissive);
+            var baseEmission = new Color(r, g, b) * emissive;
+            mat.SetColor("_EmissionColor", baseEmission);
+            NeonRegistry.Register(mat, baseEmission);
         }
         Cache[key] = mat;
         return mat;
@@ -71,7 +73,9 @@ public static class RoadDresser
         }
     }
 
-    public static void Build(RuntimeCityBuilder builder, CityModel city, Transform parent)
+    public const int RailyardRadius = 4;
+
+    public static void Build(RuntimeCityBuilder builder, CityModel city, Transform parent, HexCoord? railyardCenter = null)
     {
         var host = new GameObject("Roads").transform;
         host.SetParent(parent, false);
@@ -95,6 +99,35 @@ public static class RoadDresser
             }
 
             DressHex(builder, hex, center, connectors, host);
+
+            // railyard siding (docs/21 batch 2, item 6): a parallel rail
+            // track alongside straight road hexes near a rail_depot
+            // landmark, tying the depot into a small industrial district
+            if (railyardCenter.HasValue && connectors.Count == 2 && hex.DistanceTo(railyardCenter.Value) <= RailyardRadius)
+                DressRailSiding(builder, center, connectors[0].dir, host);
+        }
+    }
+
+    private static Material RailSteel() { return M(0.32f, 0.33f, 0.35f); }
+    private static Material Tie() { return M(0.28f, 0.2f, 0.13f); }
+
+    private static void DressRailSiding(RuntimeCityBuilder b, Vector3 center, Vector3 dir, Transform host)
+    {
+        var perp = new Vector3(dir.z, 0f, -dir.x);
+        var rot = Quaternion.LookRotation(dir, Vector3.up);
+        var trackCenter = center + perp * 6.5f;
+
+        foreach (var rail in new[] { 0.35f, -0.35f })
+        {
+            var bar = b.SpawnPrim(PrimitiveType.Cube, trackCenter + perp * rail + Vector3.up * 0.12f,
+                new Vector3(0.12f, 0.12f, (float)HexCoord.HexMeters), RailSteel(), host);
+            bar.transform.rotation = rot;
+        }
+        for (var i = -2; i <= 2; i++)
+        {
+            var tie = b.SpawnPrim(PrimitiveType.Cube, trackCenter + dir * (i * 3.6f) + Vector3.up * 0.05f,
+                new Vector3(1.4f, 0.08f, 0.35f), Tie(), host);
+            tie.transform.rotation = rot;
         }
     }
 

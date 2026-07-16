@@ -40,11 +40,16 @@ public class RuntimeCityBuilder : MonoBehaviour
     [Tooltip("How many enemy tanks spawn near the city edge to fight the monsters (a combat test harness; half carry flamethrowers).")]
     public int tankCount = 4;
 
+    [Tooltip("How many cars drive the road network (docs/19 traffic) -- they flee monsters like Citizens do.")]
+    public int trafficCarCount = 10;
+
     // live state
     private CityModel _city;
     private BattlefieldState _battlefield;
     private Vector3 _origin;
     private TerrainField _terrain;
+    private HexCoord? _railyardCenter;
+    private HashSet<HexCoord> _roadNetwork;
     private RosterFetcher _roster;
     private int _cityVersion;
     private HashSet<HexCoord> _blockedGroundCache;
@@ -76,6 +81,8 @@ public class RuntimeCityBuilder : MonoBehaviour
         _city = CityGenerator.Generate(unchecked((uint)seed), ResolvePreset());
         _battlefield = BattlefieldState.FreshFrom(_city);
         _terrain = new TerrainField(_city, _origin, unchecked((uint)seed));
+        foreach (var lm in _city.Landmarks)
+            if (lm.Archetype == "rail_depot") { _railyardCenter = lm.Site; break; }
 
         BuildGround();
         BuildTableEdge();
@@ -84,6 +91,9 @@ public class RuntimeCityBuilder : MonoBehaviour
         BuildBridges();
         SpawnCitizens();
         SpawnTanks();
+        SpawnTraffic();
+
+        if (GetComponent<NightMode>() == null) gameObject.AddComponent<NightMode>();
 
         // camera: frame the spawn area so Play starts looking at the action
         var cam = Camera.main;
@@ -402,8 +412,9 @@ public class RuntimeCityBuilder : MonoBehaviour
         ScatterVegetation(terrain);
 
         // roads: the connected 1950s street network (RoadDresser draws
-        // pads + connector strips + sidewalks + furniture)
-        RoadDresser.Build(this, _city, terrain);
+        // pads + connector strips + sidewalks + furniture + railyard
+        // siding near a rail_depot landmark, if this preset has one)
+        RoadDresser.Build(this, _city, terrain, _railyardCenter);
     }
 
     /// <summary>Model-railroad vegetation, deterministically scattered:
@@ -500,6 +511,8 @@ public class RuntimeCityBuilder : MonoBehaviour
         {
             var height = HeightForTier(building.Tier);
             var suburb = building.Footprint[0].DistanceTo(_city.CenterHex) > districtRadius * 0.55f;
+            var industrial = _railyardCenter.HasValue
+                && building.Footprint[0].DistanceTo(_railyardCenter.Value) <= RoadDresser.RailyardRadius;
             Material mat;
             switch (building.Tier)
             {
@@ -520,7 +533,7 @@ public class RuntimeCityBuilder : MonoBehaviour
             // the same cubes list, so the damage pipeline below crushes
             // and tints the water towers/signs/fire escapes along with
             // the massing they belong to
-            BuildingDresser.Dress(this, building, height, cubes, buildings);
+            BuildingDresser.Dress(this, building, height, cubes, buildings, industrial);
             _cubesByBuilding[building] = cubes;
         }
     }
@@ -796,6 +809,48 @@ public class RuntimeCityBuilder : MonoBehaviour
             tank.Init(this, i % 2 == 1);   // alternate cannon / flamethrower
             _tanks.Add(tank);
             if (tank.Combat != null) _combatants.Add(tank.Combat);
+        }
+    }
+
+    /// <summary>Road hexes plus every bridge deck hex, unioned once --
+    /// the network TrafficCar drives and RoadDresser's connector math
+    /// already computes per-hex; cached since the road layout never
+    /// changes after generation (only buildings take damage).</summary>
+    public HashSet<HexCoord> RoadNetworkHexes()
+    {
+        if (_roadNetwork == null)
+        {
+            _roadNetwork = new HashSet<HexCoord>(_city.Roads);
+            foreach (var bridge in _city.Bridges)
+                foreach (var hex in bridge.Footprint) _roadNetwork.Add(hex);
+        }
+        return _roadNetwork;
+    }
+
+    /// <summary>Docs/19 traffic (docs/21 batch 2, item 9): cars that
+    /// drive the road network and flee monsters like Citizens do.
+    /// Colliderless -- cosmetic crowd, not an order target or an
+    /// obstacle.</summary>
+    private void SpawnTraffic()
+    {
+        if (trafficCarCount <= 0) return;
+        var network = RoadNetworkHexes();
+        var hexes = new List<HexCoord>(network);
+        if (hexes.Count == 0) return;
+
+        var host = new GameObject("Traffic").transform;
+        host.SetParent(transform, false);
+        for (var i = 0; i < trafficCarCount; i++)
+        {
+            var start = hexes[(i * 37 + 5) % hexes.Count];
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = "TrafficCar_" + i;
+            go.transform.SetParent(host, false);
+            var collider = go.GetComponent<Collider>();
+            if (collider != null) Object.Destroy(collider);
+            var car = go.AddComponent<TrafficCar>();
+            var hue = (i * 53 % 100) / 100f;
+            car.Init(this, network, start, Color.HSVToRGB(hue, 0.4f, 0.75f));
         }
     }
 
