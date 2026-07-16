@@ -91,6 +91,21 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   lane dashes, crosswalks, streetlights, telephone poles, hydrants,
   and pastel tail-finned parked cars — all colliderless, all hashed
   from the city seed (same seed = same city, dressed identically).
+  **Batch 2** (`BridgeDresser.cs` / `KnockableProp.cs` / `DamageFx.cs` /
+  `RubbleDresser.cs`): bridges get guardrails, a through-truss arch over
+  water spans, and piers dropping to the carved riverbed depth; poles,
+  hydrants, trash cans, and parked cars are **knockable** (a monster or
+  tank walking through one tips it over, a timed tween, no physics
+  engine); Damaged buildings breathe a slow smoke plume and a collapse
+  fires a one-shot dust burst; destroyed buildings scatter tumbled
+  rubble chunks over the crushed pancake instead of one flat slab;
+  office billboards and occasional roadside boards carry period-poster
+  color-block art (soda bullseyes, movie one-sheets, headline bands);
+  buildings tint warmer/residential toward the outskirts and
+  cooler/institutional near downtown (hex-distance from `CenterHex`
+  standing in for road-graph radius); and a wooden table rim plus a
+  flat-color backdrop ring frame the whole map so it reads as a
+  diorama on a table rather than trailing into the void at its edge.
 - **Combat** (`UnitCombat.cs` / `WeaponFx.cs` / `Projectile.cs` /
   `Tank.cs` / `HealthBars.cs`) — every unit has health and a weapon
   derived from its genome (`roster-client`'s tested `Combat.Profile`):

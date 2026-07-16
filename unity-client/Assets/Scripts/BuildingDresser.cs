@@ -224,9 +224,50 @@ public static class BuildingDresser
             b.SpawnPrim(PrimitiveType.Sphere, basePos + Vector3.up * (height + 14.4f),
                 new Vector3(0.9f, 0.9f, 0.9f), NeonRed(), t);
             Rooftop(b, t, basePos, height, h);
-            // side billboard frame
-            b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(Half * 1.08f, height * 0.7f, 0f),
-                new Vector3(0.4f, 6f, 10f), SignWhite(), t);
+            // side billboard frame + period ad art
+            var boardCenter = basePos + new Vector3(Half * 1.08f, height * 0.7f, 0f);
+            b.SpawnPrim(PrimitiveType.Cube, boardCenter, new Vector3(0.4f, 6f, 10f), SignWhite(), t);
+            DressPoster(b, t, boardCenter, h);
+        }
+    }
+
+    // ---- billboard art: period-poster stripes on the office billboard --------
+
+    private static Material AdRed() { return M(0.82f, 0.18f, 0.16f); }
+    private static Material AdBlue() { return M(0.22f, 0.35f, 0.6f); }
+
+    /// <summary>Fakes period ad graphics with flat color blocks -- no
+    /// texture pipeline here, so the "ATOMIC COLA" bullseye and the movie
+    /// one-sheet are read purely through primitive silhouette and color,
+    /// same discipline as the rest of the primitive-kit dressing.</summary>
+    private static void DressPoster(RuntimeCityBuilder b, Transform t, Vector3 boardCenter, int h)
+    {
+        switch (h % 3)
+        {
+            case 0:   // soda bullseye: a red disc over a mustard band
+            {
+                var disc = b.SpawnPrim(PrimitiveType.Cylinder, boardCenter + new Vector3(0.45f, 1.2f, 0f),
+                    new Vector3(2.4f, 0.06f, 2.4f), AdRed(), t);
+                disc.transform.rotation = Quaternion.Euler(0f, 0f, 90f);
+                b.SpawnPrim(PrimitiveType.Cube, boardCenter + new Vector3(0.45f, -1.8f, 0f),
+                    new Vector3(0.1f, 1f, 8.5f), Mustard(), t);
+                break;
+            }
+            case 1:   // movie one-sheet: stacked teal/mustard color blocks
+            {
+                for (var i = 0; i < 3; i++)
+                    b.SpawnPrim(PrimitiveType.Cube, boardCenter + new Vector3(0.45f, 2f - i * 1.8f, 0f),
+                        new Vector3(0.08f, 1.5f, 8.6f), i % 2 == 0 ? NeonTeal() : Mustard(), t);
+                break;
+            }
+            default:  // headline bands: bold red over concrete gray
+            {
+                b.SpawnPrim(PrimitiveType.Cube, boardCenter + new Vector3(0.45f, 1f, 0f),
+                    new Vector3(0.08f, 1.2f, 9f), AdRed(), t);
+                b.SpawnPrim(PrimitiveType.Cube, boardCenter + new Vector3(0.45f, -1.2f, 0f),
+                    new Vector3(0.08f, 0.8f, 9f), AdBlue(), t);
+                break;
+            }
         }
     }
 

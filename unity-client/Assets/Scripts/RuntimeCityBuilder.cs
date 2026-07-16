@@ -53,6 +53,7 @@ public class RuntimeCityBuilder : MonoBehaviour
 
     private readonly Dictionary<Collider, Building> _buildingByCollider = new Dictionary<Collider, Building>();
     private readonly Dictionary<Building, List<GameObject>> _cubesByBuilding = new Dictionary<Building, List<GameObject>>();
+    private Transform _buildingsHost;
     private readonly List<MonsterAgent> _monsters = new List<MonsterAgent>();
     private readonly List<Citizen> _citizens = new List<Citizen>();
     private readonly List<Tank> _tanks = new List<Tank>();
@@ -77,6 +78,7 @@ public class RuntimeCityBuilder : MonoBehaviour
         _terrain = new TerrainField(_city, _origin, unchecked((uint)seed));
 
         BuildGround();
+        BuildTableEdge();
         BuildTerrainAndRoads();
         BuildBuildings();
         BuildBridges();
@@ -330,6 +332,59 @@ public class RuntimeCityBuilder : MonoBehaviour
             }
     }
 
+    /// <summary>The miniature-set border (docs/21 batch 2, item 8): a
+    /// raised wooden table rim just past the sculpted terrain, and a
+    /// painted flat-color backdrop ring further out, so the map reads as
+    /// a diorama on a table rather than trailing off into the void at its
+    /// edge. Purely decorative -- outside every gameplay hex range.</summary>
+    private void BuildTableEdge()
+    {
+        var host = new GameObject("TableEdge").transform;
+        host.SetParent(transform, false);
+
+        var hexM = (float)HexCoord.HexMeters;
+        var mapW = _city.WidthHexes * hexM * 1.15f;
+        var mapH = _city.HeightHexes * hexM * 1.15f;
+        var center = WorldOf(_city.CenterHex);
+        var wood = NewMaterial(new Color(0.36f, 0.24f, 0.14f));
+        var sky = NewMaterial(new Color(0.62f, 0.75f, 0.86f));
+
+        const float rimThickness = 6f;
+        const float rimHeight = 1.6f;
+        var rimY = rimHeight * 0.5f;
+        var outerW = mapW + rimThickness * 2f;
+        var outerH = mapH + rimThickness * 2f;
+
+        SpawnEdgeBar(host, wood, new Vector3(center.x, rimY, center.z - mapH / 2f - rimThickness / 2f), new Vector3(outerW, rimHeight, rimThickness));
+        SpawnEdgeBar(host, wood, new Vector3(center.x, rimY, center.z + mapH / 2f + rimThickness / 2f), new Vector3(outerW, rimHeight, rimThickness));
+        SpawnEdgeBar(host, wood, new Vector3(center.x - mapW / 2f - rimThickness / 2f, rimY, center.z), new Vector3(rimThickness, rimHeight, mapH));
+        SpawnEdgeBar(host, wood, new Vector3(center.x + mapW / 2f + rimThickness / 2f, rimY, center.z), new Vector3(rimThickness, rimHeight, mapH));
+
+        // painted backdrop: tall inward-facing walls well past the rim, a
+        // flat "sky" standing in for a skybox so the table doesn't trail
+        // off into empty space at the RTS camera's typical framing
+        const float backdropHeight = 140f;
+        const float backdropDistance = 60f;
+        var by = backdropHeight * 0.5f;
+        var bw = outerW + backdropDistance * 2f;
+        var bh = outerH + backdropDistance * 2f;
+        SpawnEdgeBar(host, sky, new Vector3(center.x, by, center.z - bh / 2f), new Vector3(bw, backdropHeight, 1f));
+        SpawnEdgeBar(host, sky, new Vector3(center.x, by, center.z + bh / 2f), new Vector3(bw, backdropHeight, 1f));
+        SpawnEdgeBar(host, sky, new Vector3(center.x - bw / 2f, by, center.z), new Vector3(1f, backdropHeight, bh));
+        SpawnEdgeBar(host, sky, new Vector3(center.x + bw / 2f, by, center.z), new Vector3(1f, backdropHeight, bh));
+    }
+
+    private static void SpawnEdgeBar(Transform parent, Material mat, Vector3 pos, Vector3 scale)
+    {
+        var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        cube.transform.SetParent(parent, false);
+        cube.transform.position = pos;
+        cube.transform.localScale = scale;
+        cube.GetComponent<Renderer>().sharedMaterial = mat;
+        var collider = cube.GetComponent<Collider>();
+        if (collider != null) Object.Destroy(collider);
+    }
+
     private void BuildTerrainAndRoads()
     {
         var terrain = new GameObject("Terrain").transform;
@@ -426,22 +481,32 @@ public class RuntimeCityBuilder : MonoBehaviour
     {
         var buildings = new GameObject("Buildings").transform;
         buildings.SetParent(transform, false);
+        _buildingsHost = buildings;
 
-        var small = NewMaterial(new Color(0.75f, 0.75f, 0.75f));
-        var medium = NewMaterial(new Color(0.55f, 0.55f, 0.8f));
+        // downtown vs suburb massing tint (docs/21 batch 2, item 10): a
+        // building's hex distance from CenterHex stands in for road-graph
+        // radius (the generator seeds density outward from the same
+        // center) -- close in reads cooler/institutional, the outskirts
+        // read warmer/residential
+        var districtRadius = Mathf.Max(1, (_city.WidthHexes + _city.HeightHexes) / 4);
+        var smallDowntown = NewMaterial(new Color(0.72f, 0.72f, 0.74f));
+        var smallSuburb = NewMaterial(new Color(0.83f, 0.78f, 0.64f));
+        var mediumDowntown = NewMaterial(new Color(0.5f, 0.52f, 0.62f));
+        var mediumSuburb = NewMaterial(new Color(0.72f, 0.6f, 0.48f));
         var large = NewMaterial(new Color(0.35f, 0.35f, 0.7f));
         var landmark = NewMaterial(new Color(0.9f, 0.75f, 0.2f));
 
         foreach (var building in _city.Buildings)
         {
             var height = HeightForTier(building.Tier);
+            var suburb = building.Footprint[0].DistanceTo(_city.CenterHex) > districtRadius * 0.55f;
             Material mat;
             switch (building.Tier)
             {
-                case BuildingTier.Medium: mat = medium; break;
+                case BuildingTier.Medium: mat = suburb ? mediumSuburb : mediumDowntown; break;
                 case BuildingTier.Large: mat = large; break;
                 case BuildingTier.Landmark: mat = landmark; break;
-                default: mat = small; break;
+                default: mat = suburb ? smallSuburb : smallDowntown; break;
             }
             var cubes = new List<GameObject>();
             foreach (var hex in building.Footprint)
@@ -462,11 +527,10 @@ public class RuntimeCityBuilder : MonoBehaviour
 
     private void BuildBridges()
     {
-        var bridges = new GameObject("Bridges").transform;
-        bridges.SetParent(transform, false);
-        var mat = NewMaterial(new Color(0.5f, 0.33f, 0.15f));
-        foreach (var bridge in _city.Bridges)
-            foreach (var hex in bridge.Footprint) SpawnCube(hex, 0.6f, 1.2f, mat, bridges, false);
+        // trestle piers, guardrails, through-truss arches (docs/21 batch 2,
+        // item 1) -- colliderless, same as the flat deck it replaces;
+        // BridgeDresser makes its own "Bridges" host under `transform`
+        BridgeDresser.Build(this, _city, transform);
     }
 
     private GameObject SpawnCube(HexCoord hex, float y, float height, Material mat, Transform parent, bool keepCollider)
@@ -545,6 +609,13 @@ public class RuntimeCityBuilder : MonoBehaviour
                     Object.Destroy(collider); // rubble: clicks fall through to the ground
                 }
             }
+            // tumbled chunks over the pancake (docs/21 batch 2, item 5) and
+            // a one-shot dust puff burst for the collapse beat (item 3)
+            if (_buildingsHost != null)
+            {
+                RubbleDresser.Scatter(this, building, rubbleMat, _buildingsHost);
+                DamageFx.DustBurst(WorldOf(building.Footprint[0]), _buildingsHost);
+            }
             _cityVersion++;
             Debug.Log("Building destroyed -- rubble is now walkable.");
         }
@@ -564,6 +635,9 @@ public class RuntimeCityBuilder : MonoBehaviour
                     renderer.sharedMaterial = mat;
                 }
             }
+            // a lazy smoke plume for as long as the building stands damaged
+            // (docs/21 batch 2, item 3)
+            if (cubes.Count > 0) DamageFx.AttachSmoke(cubes[0].transform, BuildingHeight(building));
         }
     }
 

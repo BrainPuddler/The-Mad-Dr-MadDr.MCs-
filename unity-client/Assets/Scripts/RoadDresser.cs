@@ -50,6 +50,7 @@ public static class RoadDresser
     private static Material HydrantRed() { return M(0.75f, 0.15f, 0.12f); }
     private static Material CanGray() { return M(0.4f, 0.42f, 0.44f); }
     private static Material ChromeTrim() { return M(0.8f, 0.82f, 0.85f); }
+    private static Material AdRed() { return M(0.82f, 0.18f, 0.16f); }
 
     private static readonly Color[] CarPastels =
     {
@@ -162,41 +163,83 @@ public static class RoadDresser
         // pole or hydrant or trash can on the sidewalk line
         var sideSign = (h >> 3) % 2 == 0 ? 1f : -1f;
         var propSpot = center + side * (sideSign * 6.2f) + axis * (((h >> 5) % 7) - 3f);
-        switch ((h >> 8) % 5)
+        switch ((h >> 8) % 6)
         {
             case 0:   // streetlight: pole, arm reaching back over the road, warm bulb
             {
+                var holder = KnockHolder(propSpot, host);
                 b.SpawnPrim(PrimitiveType.Cylinder, propSpot + Vector3.up * 2.4f,
-                    new Vector3(0.16f, 2.4f, 0.16f), PoleMetal(), host);
+                    new Vector3(0.16f, 2.4f, 0.16f), PoleMetal(), holder);
                 var arm = b.SpawnPrim(PrimitiveType.Cube,
                     propSpot + Vector3.up * 4.7f - side * (sideSign * 1.2f),
-                    new Vector3(0.14f, 0.14f, 2.4f), PoleMetal(), host);
+                    new Vector3(0.14f, 0.14f, 2.4f), PoleMetal(), holder);
                 arm.transform.rotation = Quaternion.LookRotation(-side * sideSign, Vector3.up);
                 b.SpawnPrim(PrimitiveType.Sphere, propSpot + Vector3.up * 4.55f - side * (sideSign * 2.2f),
-                    new Vector3(0.5f, 0.35f, 0.5f), Bulb(), host);
+                    new Vector3(0.5f, 0.35f, 0.5f), Bulb(), holder);
+                MakeKnockable(b, holder.gameObject, 1.6f);
                 break;
             }
             case 1:   // telephone pole with crossarm
             {
+                var holder = KnockHolder(propSpot, host);
                 b.SpawnPrim(PrimitiveType.Cylinder, propSpot + Vector3.up * 2.9f,
-                    new Vector3(0.18f, 2.9f, 0.18f), PoleWood(), host);
+                    new Vector3(0.18f, 2.9f, 0.18f), PoleWood(), holder);
                 var arm = b.SpawnPrim(PrimitiveType.Cube, propSpot + Vector3.up * 5.2f,
-                    new Vector3(2.6f, 0.15f, 0.15f), PoleWood(), host);
+                    new Vector3(2.6f, 0.15f, 0.15f), PoleWood(), holder);
                 arm.transform.rotation = Quaternion.Euler(0f, connectors[0].angle, 0f);
+                MakeKnockable(b, holder.gameObject, 1.6f);
                 break;
             }
             case 2:   // fire hydrant
+            {
+                var holder = KnockHolder(propSpot, host);
                 b.SpawnPrim(PrimitiveType.Cylinder, propSpot + Vector3.up * 0.4f,
-                    new Vector3(0.35f, 0.4f, 0.35f), HydrantRed(), host);
+                    new Vector3(0.35f, 0.4f, 0.35f), HydrantRed(), holder);
                 b.SpawnPrim(PrimitiveType.Sphere, propSpot + Vector3.up * 0.85f,
-                    new Vector3(0.4f, 0.25f, 0.4f), HydrantRed(), host);
+                    new Vector3(0.4f, 0.25f, 0.4f), HydrantRed(), holder);
+                MakeKnockable(b, holder.gameObject, 1.3f);
                 break;
+            }
             case 3:   // trash can
-                b.SpawnPrim(PrimitiveType.Cylinder, propSpot + Vector3.up * 0.55f,
+            {
+                var can = b.SpawnPrim(PrimitiveType.Cylinder, propSpot + Vector3.up * 0.55f,
                     new Vector3(0.45f, 0.55f, 0.45f), CanGray(), host);
+                MakeKnockable(b, can, 1.2f);
                 break;
-            // case 4: nothing -- empty sidewalk is a look too
+            }
+            case 4:   // roadside billboard on double stilts, period ad art
+            {
+                var boardCenter = propSpot + Vector3.up * 5.2f;
+                b.SpawnPrim(PrimitiveType.Cylinder, propSpot + Vector3.up * 2.6f - side * (sideSign * 0.9f),
+                    new Vector3(0.25f, 2.6f, 0.25f), PoleMetal(), host);
+                b.SpawnPrim(PrimitiveType.Cylinder, propSpot + Vector3.up * 2.6f + side * (sideSign * 0.9f),
+                    new Vector3(0.25f, 2.6f, 0.25f), PoleMetal(), host);
+                var board = b.SpawnPrim(PrimitiveType.Cube, boardCenter, new Vector3(6.5f, 3.2f, 0.3f), CrossPaint(), host);
+                board.transform.rotation = Quaternion.Euler(0f, connectors[0].angle, 0f);
+                var stripe = b.SpawnPrim(PrimitiveType.Cube, boardCenter + Vector3.up * 0.2f,
+                    new Vector3(5.6f, 1f, 0.35f), h % 2 == 0 ? AdRed() : LanePaint(), host);
+                stripe.transform.rotation = board.transform.rotation;
+                break;
+            }
+            // case 5: nothing -- empty sidewalk is a look too
         }
+    }
+
+    /// <summary>A colliderless origin transform a multi-piece prop's
+    /// primitives parent under, so KnockableProp can tip the whole
+    /// assembly as one rigid unit instead of its parts falling apart
+    /// independently.</summary>
+    private static Transform KnockHolder(Vector3 at, Transform host)
+    {
+        var holder = new GameObject("Knockable").transform;
+        holder.SetParent(host, false);
+        holder.position = at;
+        return holder;
+    }
+
+    private static void MakeKnockable(RuntimeCityBuilder b, GameObject go, float radius)
+    {
+        go.AddComponent<KnockableProp>().Init(b, radius);
     }
 
     /// <summary>A 1950s parked car: pastel slab body, cabin, chrome
@@ -207,24 +250,26 @@ public static class RoadDresser
         var body = M(CarPastels[h % CarPastels.Length].r, CarPastels[h % CarPastels.Length].g,
             CarPastels[h % CarPastels.Length].b);
         var rot = Quaternion.Euler(0f, angle, 0f);
+        var holder = KnockHolder(at, host);
 
         var chassis = b.SpawnPrim(PrimitiveType.Cube, at + Vector3.up * 0.75f,
-            new Vector3(2.2f, 0.8f, 5.2f), body, host);
+            new Vector3(2.2f, 0.8f, 5.2f), body, holder);
         chassis.transform.rotation = rot;
         var cabin = b.SpawnPrim(PrimitiveType.Cube, at + Vector3.up * 1.5f + rot * new Vector3(0f, 0f, -0.3f),
-            new Vector3(1.9f, 0.7f, 2.4f), body, host);
+            new Vector3(1.9f, 0.7f, 2.4f), body, holder);
         cabin.transform.rotation = rot;
         foreach (var end in new[] { 2.7f, -2.7f })
         {
             var bumper = b.SpawnPrim(PrimitiveType.Cube, at + Vector3.up * 0.5f + rot * new Vector3(0f, 0f, end),
-                new Vector3(2.3f, 0.25f, 0.3f), ChromeTrim(), host);
+                new Vector3(2.3f, 0.25f, 0.3f), ChromeTrim(), holder);
             bumper.transform.rotation = rot;
         }
         foreach (var fx in new[] { 0.95f, -0.95f })
         {
             var fin = b.SpawnPrim(PrimitiveType.Cube, at + Vector3.up * 1.35f + rot * new Vector3(fx, 0f, -2.3f),
-                new Vector3(0.15f, 0.5f, 1.1f), body, host);
+                new Vector3(0.15f, 0.5f, 1.1f), body, holder);
             fin.transform.rotation = rot;
         }
+        MakeKnockable(b, holder.gameObject, 2.6f);
     }
 }

@@ -1,0 +1,126 @@
+using System.Collections.Generic;
+using MadDr.CityGen;
+using UnityEngine;
+
+/// <summary>
+/// Bridge dressing (docs/21 batch 2, item 1): guardrails along the deck
+/// edges, a through-truss arch over water spans, and piers dropping into
+/// the riverbed -- replaces the old flat brown deck slab with something
+/// that reads as a built crossing, not a plank. Colliderless, like the
+/// deck it dresses (bridges were never click targets); the bridge
+/// footprint hex set stays the sole pathing truth, untouched.
+/// </summary>
+public static class BridgeDresser
+{
+    private static readonly Dictionary<int, Material> Cache = new Dictionary<int, Material>();
+
+    private static Material M(float r, float g, float b)
+    {
+        var key = ((int)(r * 255) << 16) | ((int)(g * 255) << 8) | (int)(b * 255);
+        Material mat;
+        if (Cache.TryGetValue(key, out mat) && mat != null) return mat;
+        mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(r, g, b);
+        Cache[key] = mat;
+        return mat;
+    }
+
+    private static Material Deck() { return M(0.42f, 0.3f, 0.18f); }
+    private static Material Truss() { return M(0.32f, 0.22f, 0.12f); }
+    private static Material Pier() { return M(0.5f, 0.49f, 0.46f); }
+    private static Material Rail() { return M(0.28f, 0.2f, 0.11f); }
+
+    private const float DeckY = 0.6f;
+    private const float DeckHeight = 1.2f;
+    private const float DeckHalfWidth = 9f; // matches the massing cube's hexSize*0.9 footprint
+
+    private static int Hash(HexCoord hex, int salt)
+    {
+        unchecked
+        {
+            var h = hex.Q * 374761393 + hex.R * 668265263 + salt * 974711;
+            h = (h ^ (h >> 13)) * 1274126177;
+            return h & 0x7FFFFFFF;
+        }
+    }
+
+    public static void Build(RuntimeCityBuilder builder, CityModel city, Transform parent)
+    {
+        var host = new GameObject("Bridges").transform;
+        host.SetParent(parent, false);
+
+        var water = new HashSet<HexCoord>(city.Water);
+
+        foreach (var bridge in city.Bridges)
+        {
+            var span = new HashSet<HexCoord>(bridge.Footprint);
+            foreach (var hex in bridge.Footprint)
+            {
+                var center = builder.WorldOf(hex);
+                builder.SpawnPrim(PrimitiveType.Cube, center + Vector3.up * DeckY,
+                    new Vector3((float)HexCoord.HexMeters * 0.9f, DeckHeight, (float)HexCoord.HexMeters * 0.9f),
+                    Deck(), host);
+
+                // span direction: toward whichever neighbor is also part of
+                // THIS bridge's footprint (the deck's long axis)
+                var dir = Vector3.forward;
+                var found = false;
+                foreach (var n in hex.Neighbors())
+                {
+                    if (!span.Contains(n)) continue;
+                    var to = builder.WorldOf(n) - center;
+                    to.y = 0f;
+                    if (to.sqrMagnitude < 1e-4f) continue;
+                    dir = to.normalized;
+                    found = true;
+                    break;
+                }
+                var facing = found ? dir : Vector3.forward;
+                var perp = new Vector3(facing.z, 0f, -facing.x);
+                var deckRot = Quaternion.LookRotation(facing, Vector3.up);
+
+                foreach (var side in new[] { 1f, -1f })
+                {
+                    var rail = builder.SpawnPrim(PrimitiveType.Cube,
+                        center + perp * (side * DeckHalfWidth * 0.92f) + Vector3.up * (DeckY + DeckHeight * 0.5f + 0.4f),
+                        new Vector3(0.3f, 0.8f, (float)HexCoord.HexMeters * 0.95f), Rail(), host);
+                    rail.transform.rotation = deckRot;
+                }
+
+                // through-truss arch over water crossings only -- approach/
+                // embankment hexes of the same bridge stay open
+                var isWater = false;
+                foreach (var n in hex.Neighbors())
+                    if (water.Contains(n)) { isWater = true; break; }
+
+                if (isWater)
+                {
+                    foreach (var side in new[] { 1f, -1f })
+                    {
+                        var beamBase = center + perp * (side * DeckHalfWidth * 0.9f) + Vector3.up * (DeckY + 0.4f);
+                        var beam = builder.SpawnPrim(PrimitiveType.Cube,
+                            beamBase + Vector3.up * 2.6f, new Vector3(0.4f, 5.4f, 0.4f), Truss(), host);
+                        beam.transform.rotation = Quaternion.LookRotation(perp, Vector3.up) * Quaternion.Euler(0f, 0f, side * 18f);
+                    }
+                    var topChord = builder.SpawnPrim(PrimitiveType.Cube,
+                        center + Vector3.up * (DeckY + 5.1f), new Vector3(DeckHalfWidth * 1.9f, 0.4f, 1.4f), Truss(), host);
+                    topChord.transform.rotation = deckRot;
+
+                    // piers: drop from under the deck to the carved riverbed
+                    // depth -- TerrainField flat-locks bridge hexes to y=0,
+                    // but the water it crosses is still bedded at
+                    // WaterBedDepth, so real foundations reach that far down
+                    var pierTop = DeckY - DeckHeight * 0.5f;
+                    var pierBottom = TerrainField.WaterBedDepth - 0.6f;
+                    var pierHeight = pierTop - pierBottom;
+                    foreach (var side in new[] { 0.55f, -0.55f })
+                    {
+                        builder.SpawnPrim(PrimitiveType.Cylinder,
+                            center + perp * (side * DeckHalfWidth * 0.6f) + Vector3.up * (pierBottom + pierHeight * 0.5f),
+                            new Vector3(0.9f, pierHeight * 0.5f, 0.9f), Pier(), host);
+                    }
+                }
+            }
+        }
+    }
+}
