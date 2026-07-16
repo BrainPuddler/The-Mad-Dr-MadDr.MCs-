@@ -141,8 +141,13 @@ public class MonsterAgent : MonoBehaviour
         // rule) -- the original order built at the world origin and then
         // teleported here, leaving every foot planted back at (0,0,0)
         // and every leg rendered as a hundreds-of-meters line to it.
-        transform.position = _builder.WorldOf(homeHex);
+        var home = _builder.WorldOf(homeHex);
+        home.y = _builder.GroundHeightAt(home);   // spawn ON the sculpted terrain, not at sea level
+        transform.position = home;
         _body = gameObject.AddComponent<MonsterBody>();
+        // feet must plant on the slope under each foot, not a flat y=0
+        // plane -- the body samples the same terrain the world renders
+        _body.GroundSampler = p => _builder.GroundHeightAt(p);
         _body.Build(creature);
         if (_canFly) { _flightLowAlt = _body.LowFlightAltitude; _flightHighAlt = _body.HighFlightAltitude; }
 
@@ -323,6 +328,18 @@ public class MonsterAgent : MonoBehaviour
             case OrderKind.EatCitizen: velocity = TickEat(dt); break;
             case OrderKind.Perch: velocity = TickPerch(dt); break;
             case OrderKind.Idle: velocity = TickSettle(dt); break;
+        }
+
+        // terrain-follow: the movement ticks steer in XZ; the sculpted
+        // ground supplies Y (docs/21). Flat-locked plots keep this 0 near
+        // every building, so flight/perch math is untouched; flyers'
+        // base follows the terrain too (lift rides on top of it).
+        if (_builder != null)
+        {
+            var pos = transform.position;
+            var gy = _builder.GroundHeightAt(pos);
+            if (!Mathf.Approximately(pos.y, gy))
+                transform.position = new Vector3(pos.x, gy, pos.z);
         }
 
         // clear-path-to-descend: the tallest thing directly below the

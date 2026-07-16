@@ -103,6 +103,20 @@ public class MonsterBody : MonoBehaviour
     private float _flightHighLift; // clears EVERYTHING (large/landmark tier too), for "climb over it" legs
     private float _groundY;        // the surface under this creature: 0 at street level, a roof height when perched on a building
     private float _descentFloor;   // minimum altitude the body may ease DOWN to right now (a building directly below) -- MonsterAgent pushes it every frame from SurfaceHeightAt
+
+    /// <summary>World terrain height at an XZ position (docs/21 sculpted
+    /// ground) -- set by MonsterAgent before Build so feet plant on the
+    /// slope under each foot instead of a flat plane. Null (tests, plans
+    /// without an agent) means flat ground, the old behavior. The
+    /// creature's OWN transform.y already carries the terrain under its
+    /// center (agent terrain-follow); this sampler is only for points
+    /// AWAY from the center: individual foot plants.</summary>
+    public System.Func<Vector3, float> GroundSampler;
+
+    private float TerrainAt(Vector3 p)
+    {
+        return GroundSampler != null ? GroundSampler(p) : 0f;
+    }
     private const float FlightLiftAirborneThreshold = 0.5f;   // this far above _groundY, legs are considered "in the air"
 
     /// <summary>True while the body is meaningfully off its standing
@@ -253,8 +267,12 @@ public class MonsterBody : MonoBehaviour
             // small per-group stagger so the first steps alternate
             // naturally instead of every leg triggering at once
             var stagger = (leg.Group == 0 ? 1f : -1f) * _stride * 0.15f;
-            leg.FootWorld = new Vector3(hipW.x, _groundY, hipW.z) + transform.forward * stagger;
-            leg.FootWorld = new Vector3(leg.FootWorld.x, _groundY, leg.FootWorld.z);
+            leg.FootWorld = new Vector3(hipW.x, 0f, hipW.z) + transform.forward * stagger;
+            // the foot plants on the terrain under ITS OWN xz (a slope's
+            // downhill foot sits lower than the uphill one) plus any
+            // perch offset -- building plots are terrain-flat, so the
+            // two never both apply (docs/21 flat-lock rule)
+            leg.FootWorld = new Vector3(leg.FootWorld.x, TerrainAt(leg.FootWorld) + _groundY, leg.FootWorld.z);
             leg.Swinging = false;
             leg.SwingT = 0f;
             if (leg.Hip != null) leg.Hip.localPosition = leg.HipLocal + Vector3.up * _groundY;
@@ -777,9 +795,10 @@ public class MonsterBody : MonoBehaviour
                 continue;
             }
 
-            // feet plant on the STANDING SURFACE -- street level normally,
-            // a roof plane while perched on a building
-            var restW = new Vector3(hipW.x, _groundY, hipW.z);
+            // feet plant on the STANDING SURFACE -- the sculpted terrain
+            // under this hip (docs/21), plus the rooftop-perch offset
+            var restW = new Vector3(hipW.x, 0f, hipW.z);
+            restW.y = TerrainAt(restW) + _groundY;
 
             // this leg's rest-point velocity: translation + rotation's
             // contribution at this hip (v_rot = yawRate * (r.z, 0, -r.x))
@@ -805,7 +824,10 @@ public class MonsterBody : MonoBehaviour
                     var t = leg.SwingT;
                     var eased = t * t * (3f - 2f * t);
                     var pos = Vector3.Lerp(leg.SwingFrom, leg.SwingTo, eased);
-                    pos.y = _groundY + Mathf.Sin(t * Mathf.PI) * strideEff * 0.22f;
+                    // arc between the two plants' own surface heights --
+                    // a downhill step starts high and lands low
+                    pos.y = Mathf.Lerp(leg.SwingFrom.y, leg.SwingTo.y, eased)
+                        + Mathf.Sin(t * Mathf.PI) * strideEff * 0.22f;
                     leg.FootWorld = pos;
                 }
                 RenderLeg(leg, hipW);

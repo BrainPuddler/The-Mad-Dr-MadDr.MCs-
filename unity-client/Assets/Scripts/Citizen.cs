@@ -87,6 +87,10 @@ public class Citizen : MonoBehaviour
         if (dist < 0.05f) return;
         var dir = to / dist;
         transform.position += dir * Mathf.Min(speed * dt, dist);
+        // terrain-follow the sculpted ground (docs/21), keeping the
+        // capsule's own 0.9 body offset above it
+        var p = transform.position;
+        transform.position = new Vector3(p.x, _builder.GroundHeightAt(p) + 0.9f, p.z);
         transform.rotation = Quaternion.Slerp(transform.rotation,
             Quaternion.LookRotation(dir, Vector3.up), dt * 6f);
     }

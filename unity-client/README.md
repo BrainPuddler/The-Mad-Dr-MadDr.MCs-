@@ -71,6 +71,26 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
 - **`Assets/Scripts/Citizen.cs`** — docs/19 client-side cosmetic crowd:
   wanders the streets, flees monsters, edible (docs/20 yields: Blood 2 /
   Bones 1 / Brains 1 into the session wallet).
+- **The miniature-set world** (`TerrainField.cs` / `BuildingDresser.cs` /
+  `RoadDresser.cs`, docs/21) — the battlefield renders as a 1950s
+  monster-movie miniature. Deterministic sculpted terrain (the
+  generator's own ridge hexes become rolling high-ground mounds, rivers
+  and ponds get carved beds with visible banks and sunken translucent
+  water, open ground rolls gently) with the **flat-lock rule**: ground
+  under every building plot, road, and bridge stays exactly y=0, so
+  roof heights, flight tiers, perch/descent math, and rubble never
+  drift. Units terrain-follow (`GroundHeightAt`), and `MonsterBody`
+  plants each foot on the slope under it via a ground sampler.
+  Buildings get era dressing parented into the damage pipeline
+  (crushes/tints with the massing): suburban gables, gas-station
+  canopies, diner chrome, brick walk-ups with fire escapes, stepped
+  deco offices, archetype-aware landmarks (spired churches, columned
+  town halls, a marquee'd movie palace), and rooftop water towers /
+  antennas / vents. Roads are hub-and-spoke tiles (corners/T's/
+  crossroads emerge from hex adjacency, seamlessly) with sidewalks,
+  lane dashes, crosswalks, streetlights, telephone poles, hydrants,
+  and pastel tail-finned parked cars — all colliderless, all hashed
+  from the city seed (same seed = same city, dressed identically).
 - **Combat** (`UnitCombat.cs` / `WeaponFx.cs` / `Projectile.cs` /
   `Tank.cs` / `HealthBars.cs`) — every unit has health and a weapon
   derived from its genome (`roster-client`'s tested `Combat.Profile`):

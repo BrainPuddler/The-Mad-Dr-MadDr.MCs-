@@ -66,6 +66,12 @@ public class Tank : MonoBehaviour
         }
 
         _builder.ApplySeparation(_combat);
+
+        // terrain-follow the sculpted ground (docs/21): treads on the
+        // hill, not floating over the valley
+        var p = transform.position;
+        var gy = _builder.GroundHeightAt(p);
+        if (!Mathf.Approximately(p.y, gy)) transform.position = new Vector3(p.x, gy, p.z);
     }
 
     // deflection angles tried in order: straight first (the common case,

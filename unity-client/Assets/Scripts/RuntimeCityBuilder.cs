@@ -44,6 +44,7 @@ public class RuntimeCityBuilder : MonoBehaviour
     private CityModel _city;
     private BattlefieldState _battlefield;
     private Vector3 _origin;
+    private TerrainField _terrain;
     private RosterFetcher _roster;
     private int _cityVersion;
     private HashSet<HexCoord> _blockedGroundCache;
@@ -73,6 +74,7 @@ public class RuntimeCityBuilder : MonoBehaviour
         _origin = transform.position;
         _city = CityGenerator.Generate(unchecked((uint)seed), ResolvePreset());
         _battlefield = BattlefieldState.FreshFrom(_city);
+        _terrain = new TerrainField(_city, _origin, unchecked((uint)seed));
 
         BuildGround();
         BuildTerrainAndRoads();
@@ -230,27 +232,102 @@ public class RuntimeCityBuilder : MonoBehaviour
         return _roofCache.TryGetValue(HexAt(worldPos), out height) ? height : 0f;
     }
 
+    // ---- terrain ---------------------------------------------------------------
+
+    /// <summary>Ground elevation at a world position -- the sculpted
+    /// miniature-set surface (docs/21): 0 under every building plot,
+    /// road, and bridge (the flat-lock rule that keeps roof heights and
+    /// flight math intact), rolling on open ground, mounded on the
+    /// generator's ridge hexes, carved below zero in river/pond beds.
+    /// Units terrain-follow this each frame.</summary>
+    public float GroundHeightAt(Vector3 world)
+    {
+        return _terrain != null ? _terrain.HeightAt(world) : 0f;
+    }
+
     // ---- static city geometry --------------------------------------------------
 
     private void BuildGround()
     {
+        // The CLICK surface stays a flat invisible plane at y=0 (ground
+        // right-clicks, docs/21 accepted tradeoff: <=3m hills skew a
+        // click by well under half a hex). The VISIBLE ground is the
+        // sculpted mesh below.
         var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
-        ground.name = "Ground";
+        ground.name = "GroundClickPlane";
         ground.transform.SetParent(transform, false);
         var center = WorldOf(_city.CenterHex);
-        ground.transform.position = new Vector3(center.x, -0.05f, center.z);
+        ground.transform.position = new Vector3(center.x, 0f, center.z);
         // a unity plane is 10x10 at scale 1; cover the map with margin
         var w = _city.WidthHexes * (float)HexCoord.HexMeters / 10f * 1.3f;
         var h = _city.HeightHexes * (float)HexCoord.HexMeters / 10f * 1.3f;
         ground.transform.localScale = new Vector3(w, 1f, h);
-        var renderer = ground.GetComponent<Renderer>();
-        if (renderer != null)
-        {
-            var mat = new Material(ShaderUtil.FindRenderableShader());
-            mat.color = new Color(0.42f, 0.47f, 0.36f);
-            renderer.sharedMaterial = mat;
-        }
-        // keep the plane's collider: it's what ground right-clicks hit
+        var planeRenderer = ground.GetComponent<Renderer>();
+        if (planeRenderer != null) Object.Destroy(planeRenderer);
+
+        BuildTerrainMesh();
+    }
+
+    /// <summary>The sculpted miniature-table surface: chunked grid meshes
+    /// sampling TerrainField. Resolution auto-scales so big maps stay
+    /// within a sane vertex budget (docs/21: BigCity trades detail for
+    /// scale). One shared material -- SRP-batcher friendly.</summary>
+    private void BuildTerrainMesh()
+    {
+        var parent = new GameObject("TerrainMesh").transform;
+        parent.SetParent(transform, false);
+        var grass = NewMaterial(new Color(0.42f, 0.47f, 0.36f));
+
+        var hexM = (float)HexCoord.HexMeters;
+        var mapW = _city.WidthHexes * hexM * 1.15f;
+        var mapH = _city.HeightHexes * hexM * 1.15f;
+        var center = WorldOf(_city.CenterHex);
+        var minX = center.x - mapW / 2f;
+        var minZ = center.z - mapH / 2f;
+
+        // quad edge: fine enough to show hex-scale banks on the normal
+        // presets, coarsening on huge maps to hold the vertex budget
+        var quad = Mathf.Max(hexM / 3f, Mathf.Max(mapW, mapH) / 220f);
+        const int chunkQuads = 48;
+        var chunkSize = chunkQuads * quad;
+        var chunksX = Mathf.CeilToInt(mapW / chunkSize);
+        var chunksZ = Mathf.CeilToInt(mapH / chunkSize);
+
+        for (var cz = 0; cz < chunksZ; cz++)
+            for (var cx = 0; cx < chunksX; cx++)
+            {
+                var go = new GameObject("Chunk_" + cx + "_" + cz);
+                go.transform.SetParent(parent, false);
+                var mesh = new Mesh();
+                var verts = new Vector3[(chunkQuads + 1) * (chunkQuads + 1)];
+                var tris = new int[chunkQuads * chunkQuads * 6];
+                var ox = minX + cx * chunkSize;
+                var oz = minZ + cz * chunkSize;
+                for (var j = 0; j <= chunkQuads; j++)
+                    for (var i = 0; i <= chunkQuads; i++)
+                    {
+                        var p = new Vector3(ox + i * quad, 0f, oz + j * quad);
+                        p.y = _terrain.HeightAt(p);
+                        verts[j * (chunkQuads + 1) + i] = p;
+                    }
+                var t = 0;
+                for (var j = 0; j < chunkQuads; j++)
+                    for (var i = 0; i < chunkQuads; i++)
+                    {
+                        var v0 = j * (chunkQuads + 1) + i;
+                        var v1 = v0 + 1;
+                        var v2 = v0 + chunkQuads + 1;
+                        var v3 = v2 + 1;
+                        tris[t++] = v0; tris[t++] = v2; tris[t++] = v1;
+                        tris[t++] = v1; tris[t++] = v2; tris[t++] = v3;
+                    }
+                mesh.vertices = verts;
+                mesh.triangles = tris;
+                mesh.RecalculateNormals();
+                mesh.RecalculateBounds();
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                go.AddComponent<MeshRenderer>().sharedMaterial = grass;
+            }
     }
 
     private void BuildTerrainAndRoads()
@@ -258,14 +335,91 @@ public class RuntimeCityBuilder : MonoBehaviour
         var terrain = new GameObject("Terrain").transform;
         terrain.SetParent(transform, false);
 
-        var waterMat = NewMaterial(new Color(0.15f, 0.3f, 0.9f));
-        foreach (var hex in _city.Water) SpawnCube(hex, -0.4f, 0.8f, waterMat, terrain, false);
+        // water: a thin translucent surface SUNK INTO the carved bed
+        // (TerrainField digs the bed; the banks rise visibly above this
+        // slab) -- physically-placed water, not a painted-on blue block
+        var waterMat = NewMaterial(new Color(0.16f, 0.42f, 0.5f, 0.62f));
+        LabMeshBuilder.MakeTransparent(waterMat);
+        foreach (var hex in _city.Water) SpawnCube(hex, -0.5f, 0.14f, waterMat, terrain, false);
 
-        var ridgeMat = NewMaterial(new Color(0.35f, 0.55f, 0.25f));
-        foreach (var hex in _city.Ridges) SpawnCube(hex, 1.5f, 3f, ridgeMat, terrain, false);
+        // ridges are now SCULPTED by the terrain mesh; what they get here
+        // is the miniature-set read: model-railroad puffball trees
+        ScatterVegetation(terrain);
 
-        var roadMat = NewMaterial(new Color(0.15f, 0.15f, 0.15f));
-        foreach (var hex in _city.Roads) SpawnCube(hex, 0.1f, 0.2f, roadMat, terrain, false);
+        // roads: the connected 1950s street network (RoadDresser draws
+        // pads + connector strips + sidewalks + furniture)
+        RoadDresser.Build(this, _city, terrain);
+    }
+
+    /// <summary>Model-railroad vegetation, deterministically scattered:
+    /// tree clusters on ridge hexes (the high ground should read green
+    /// and bumpy from the RTS camera), single trees rarely on open
+    /// grass, bushes hugging pond/river shores.</summary>
+    private void ScatterVegetation(Transform parent)
+    {
+        var trunk = NewMaterial(new Color(0.36f, 0.27f, 0.18f));
+        var canopy = NewMaterial(new Color(0.30f, 0.44f, 0.22f));
+        var bush = NewMaterial(new Color(0.36f, 0.5f, 0.28f));
+
+        var water = new HashSet<HexCoord>(_city.Water);
+        var blocked = BlockedFor(false);
+
+        foreach (var hex in _city.Ridges)
+        {
+            var n = 2 + Mod(hex.Q * 31 + hex.R * 17, 2);
+            for (var i = 0; i < n; i++)
+                SpawnTree(hex, i, trunk, canopy, parent);
+        }
+
+        foreach (var hex in _city.Water)
+        {
+            // shore bushes: on the LAND neighbors of water hexes
+            foreach (var nb in hex.Neighbors())
+            {
+                if (!_city.Contains(nb) || water.Contains(nb) || blocked.Contains(nb)) continue;
+                if (Mod(nb.Q * 53 + nb.R * 29, 7) != 0) continue;
+                var w = WorldOf(nb);
+                var off = new Vector3(Mod(nb.Q * 13 + nb.R * 7, 9) - 4f, 0f, Mod(nb.Q * 5 + nb.R * 23, 9) - 4f);
+                var p = w + off;
+                p.y = GroundHeightAt(p);
+                var b = SpawnPrim(PrimitiveType.Sphere, p + Vector3.up * 0.5f,
+                    new Vector3(1.6f, 1.0f, 1.6f), bush, parent);
+                b.name = "Bush";
+            }
+        }
+    }
+
+    private void SpawnTree(HexCoord hex, int index, Material trunk, Material canopy, Transform parent)
+    {
+        var w = WorldOf(hex);
+        var off = new Vector3(Mod(hex.Q * 19 + hex.R * 7 + index * 41, 13) - 6f, 0f,
+            Mod(hex.Q * 3 + hex.R * 31 + index * 17, 13) - 6f);
+        var baseP = w + off;
+        baseP.y = GroundHeightAt(baseP);
+        var height = 2.4f + Mod(hex.Q + hex.R + index, 3) * 0.7f;
+        SpawnPrim(PrimitiveType.Cylinder, baseP + Vector3.up * (height * 0.25f),
+            new Vector3(0.35f, height * 0.25f, 0.35f), trunk, parent).name = "Trunk";
+        SpawnPrim(PrimitiveType.Sphere, baseP + Vector3.up * (height * 0.75f),
+            new Vector3(height * 0.7f, height * 0.62f, height * 0.7f), canopy, parent).name = "Canopy";
+    }
+
+    /// <summary>Colliderless styled primitive -- the dresser workhorse.</summary>
+    public GameObject SpawnPrim(PrimitiveType type, Vector3 position, Vector3 scale, Material mat, Transform parent)
+    {
+        var go = GameObject.CreatePrimitive(type);
+        go.transform.SetParent(parent, false);
+        go.transform.position = position;
+        go.transform.localScale = scale;
+        var collider = go.GetComponent<Collider>();
+        if (collider != null) Object.Destroy(collider);
+        var renderer = go.GetComponent<Renderer>();
+        if (renderer != null) renderer.sharedMaterial = mat;
+        return go;
+    }
+
+    private static int Mod(int x, int m)
+    {
+        return ((x % m) + m) % m;
     }
 
     private void BuildBuildings()
@@ -297,6 +451,11 @@ public class RuntimeCityBuilder : MonoBehaviour
                 var collider = cube.GetComponent<Collider>();
                 if (collider != null) _buildingByCollider[collider] = building;
             }
+            // 1950s dressing (docs/21 Phase 3): holders are REGISTERED in
+            // the same cubes list, so the damage pipeline below crushes
+            // and tints the water towers/signs/fire escapes along with
+            // the massing they belong to
+            BuildingDresser.Dress(this, building, height, cubes, buildings);
             _cubesByBuilding[building] = cubes;
         }
     }
@@ -365,20 +524,20 @@ public class RuntimeCityBuilder : MonoBehaviour
         if (next.Stage == DamageStage.Destroyed)
         {
             // docs/18 SS3: collapse to walkable rubble; its hexes leave
-            // the pathing index -- flag agents to re-path
+            // the pathing index -- flag agents to re-path. The cubes list
+            // includes the 1950s dressing holders, so water towers and
+            // signage crush into the rubble pancake with the massing.
+            var rubbleMat = new Material(ShaderUtil.FindRenderableShader());
+            rubbleMat.color = new Color(0.3f, 0.28f, 0.26f);
             foreach (var cube in cubes)
             {
                 var s = cube.transform.localScale;
                 cube.transform.localScale = new Vector3(s.x, s.y * 0.12f, s.z);
                 var p = cube.transform.position;
-                cube.transform.position = new Vector3(p.x, s.y * 0.06f, p.z);
-                var renderer = cube.GetComponent<Renderer>();
-                if (renderer != null)
-                {
-                    var mat = new Material(ShaderUtil.FindRenderableShader());
-                    mat.color = new Color(0.3f, 0.28f, 0.26f);
-                    renderer.sharedMaterial = mat;
-                }
+                cube.transform.position = new Vector3(p.x, p.y * 0.12f, p.z);
+                // GetComponentsInChildren includes the cube's own renderer
+                foreach (var renderer in cube.GetComponentsInChildren<Renderer>())
+                    renderer.sharedMaterial = rubbleMat;
                 var collider = cube.GetComponent<Collider>();
                 if (collider != null)
                 {
@@ -391,11 +550,13 @@ public class RuntimeCityBuilder : MonoBehaviour
         }
         else if (next.Stage == DamageStage.Damaged && current.Stage == DamageStage.Intact)
         {
-            // Intact -> Damaged visual: darken (docs/18's cracked state)
+            // Intact -> Damaged visual: darken (docs/18's cracked state),
+            // dressing included -- per-renderer material INSTANCES here,
+            // never a tint on the shared cached dresser materials (that
+            // would darken every building in the city at once)
             foreach (var cube in cubes)
             {
-                var renderer = cube.GetComponent<Renderer>();
-                if (renderer != null)
+                foreach (var renderer in cube.GetComponentsInChildren<Renderer>())
                 {
                     var mat = new Material(ShaderUtil.FindRenderableShader());
                     var c = renderer.sharedMaterial != null ? renderer.sharedMaterial.color : Color.gray;
@@ -470,7 +631,7 @@ public class RuntimeCityBuilder : MonoBehaviour
     {
         var marker = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         marker.name = "WaypointMarker";
-        marker.transform.position = new Vector3(at.x, 0.15f, at.z);
+        marker.transform.position = new Vector3(at.x, GroundHeightAt(at) + 0.15f, at.z);
         marker.transform.localScale = new Vector3(4f, 0.05f, 4f);
         var collider = marker.GetComponent<Collider>();
         if (collider != null) Object.Destroy(collider);

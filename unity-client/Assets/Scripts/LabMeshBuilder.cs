@@ -90,8 +90,9 @@ public static class LabMeshBuilder
     /// URP/Lit needs the full surface-type dance; if a fallback shader
     /// ignores these the dome renders opaque, which was the declared
     /// acceptable v1 degradation (the brass collar and ribs still sell
-    /// the structure).</summary>
-    private static void MakeTransparent(Material mat)
+    /// the structure). Public: the battlefield's water surfaces use the
+    /// same dance (docs/21).</summary>
+    public static void MakeTransparent(Material mat)
     {
         mat.SetOverrideTag("RenderType", "Transparent");
         if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);   // URP: transparent
