@@ -148,8 +148,19 @@ public static class RoadDresser
     /// one continuous straight street. Row-based E/W streets never
     /// trigger this (they're already exactly straight: z depends only on
     /// R), and neither do corners/dead-ends against a cross street or
-    /// 3+-way intersections.</summary>
-    private static bool TryStraightenCardinal(HexCoord hex, HashSet<HexCoord> network,
+    /// 3+-way intersections.
+    ///
+    /// Public so `BridgeDresser` can apply the IDENTICAL correction to
+    /// bridge deck hexes -- bridge hexes are themselves ordinary members
+    /// of `city.Roads` (CityGenerator unions them in), so a "vertical"
+    /// corridor that happens to cross a river zigzags exactly the same
+    /// way through its bridge hexes as through its road hexes. Sharing
+    /// this one function instead of a second copy is what guarantees the
+    /// two dressers agree on the SAME corrected anchor for a hex that
+    /// sits on the seam between them, so a bridge lines up with its
+    /// approach roads and with its own neighboring bridge hexes -- not
+    /// just internally consistent with itself.</summary>
+    public static bool TryStraightenCardinal(HexCoord hex, HashSet<HexCoord> network,
         List<(Vector3 dir, float angle)> connectors, out Vector3 correction)
     {
         correction = Vector3.zero;

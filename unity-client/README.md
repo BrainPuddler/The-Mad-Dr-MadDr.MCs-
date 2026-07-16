@@ -115,7 +115,13 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   RoadDresser skips its own street dressing on bridge deck hexes
   entirely, since BridgeDresser fully owns them (`city.Roads` includes
   bridge decks, so without this a thin road pad and furniture used to
-  render duplicated underneath/through the thicker deck); poles,
+  render duplicated underneath/through the thicker deck), and shares
+  RoadDresser's north-south-corridor straightening (`TryStraightenCardinal`,
+  made public for exactly this) rather than computing its own bearing --
+  a bridge crossing a zigzagging corridor used to kink at every hex
+  against both its own neighbors and the (already-straightened)
+  approach road, since bridge hexes are ordinary members of `city.Roads`
+  and zigzag the same way road hexes do; poles,
   hydrants, trash cans, and parked cars are **knockable** (a monster or
   tank walking through one tips it over, a timed tween, no physics
   engine); Damaged buildings breathe a slow smoke plume and a collapse

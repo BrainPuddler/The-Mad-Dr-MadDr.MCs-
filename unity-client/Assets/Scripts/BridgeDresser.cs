@@ -60,15 +60,19 @@ public static class BridgeDresser
 
         var water = new HashSet<HexCoord>(city.Water);
 
+        // the SAME network RoadDresser straightens against -- bridge
+        // hexes are already ordinary members of city.Roads, so this is
+        // one shared set, not a bridge-local one, for the whole method
+        var network = new HashSet<HexCoord>(city.Roads);
+
         foreach (var bridge in city.Bridges)
         {
-            var span = new HashSet<HexCoord>(bridge.Footprint);
             foreach (var hex in bridge.Footprint)
             {
                 var center = builder.WorldOf(hex);
 
-                // span direction: toward whichever neighbor is also part of
-                // THIS bridge's footprint (the deck's long axis) -- computed
+                // direction: toward every road-network neighbor (own
+                // bridge span AND the bank road it lands on), computed
                 // FIRST so the deck itself can be shaped and rotated to
                 // match, instead of sitting underneath as a fixed
                 // axis-aligned square while everything built on top of it
@@ -76,19 +80,25 @@ public static class BridgeDresser
                 // heading. An unrotated square reads as a static "diamond"
                 // wherever a bridge runs at an angle to world axes -- i.e.
                 // almost always, since hex grids don't align to world axes
-                var dir = Vector3.forward;
-                var found = false;
+                var connectors = new List<(Vector3 dir, float angle)>();
                 foreach (var n in hex.Neighbors())
                 {
-                    if (!span.Contains(n)) continue;
+                    if (!network.Contains(n)) continue;
                     var to = builder.WorldOf(n) - center;
                     to.y = 0f;
                     if (to.sqrMagnitude < 1e-4f) continue;
-                    dir = to.normalized;
-                    found = true;
-                    break;
+                    connectors.Add((to.normalized, Mathf.Atan2(to.x, to.z) * Mathf.Rad2Deg));
                 }
-                var facing = found ? dir : Vector3.forward;
+
+                // un-zigzag the SAME way RoadDresser does for approach
+                // roads (see that method's doc comment) -- without this,
+                // a "vertical" bridge crossing a zigzagging corridor kinks
+                // at every hex, both against its own neighbors and
+                // against the (already-straightened) road it meets
+                if (RoadDresser.TryStraightenCardinal(hex, network, connectors, out var correction))
+                    center += correction;
+
+                var facing = connectors.Count > 0 ? connectors[0].dir : Vector3.forward;
                 var perp = new Vector3(facing.z, 0f, -facing.x);
                 var deckRot = Quaternion.LookRotation(facing, Vector3.up);
 
