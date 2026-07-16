@@ -57,12 +57,16 @@ public static class BridgeDresser
             foreach (var hex in bridge.Footprint)
             {
                 var center = builder.WorldOf(hex);
-                builder.SpawnPrim(PrimitiveType.Cube, center + Vector3.up * DeckY,
-                    new Vector3((float)HexCoord.HexMeters * 0.9f, DeckHeight, (float)HexCoord.HexMeters * 0.9f),
-                    Deck(), host);
 
                 // span direction: toward whichever neighbor is also part of
-                // THIS bridge's footprint (the deck's long axis)
+                // THIS bridge's footprint (the deck's long axis) -- computed
+                // FIRST so the deck itself can be shaped and rotated to
+                // match, instead of sitting underneath as a fixed
+                // axis-aligned square while everything built on top of it
+                // (rails, truss) correctly follows the crossing's real
+                // heading. An unrotated square reads as a static "diamond"
+                // wherever a bridge runs at an angle to world axes -- i.e.
+                // almost always, since hex grids don't align to world axes
                 var dir = Vector3.forward;
                 var found = false;
                 foreach (var n in hex.Neighbors())
@@ -78,6 +82,17 @@ public static class BridgeDresser
                 var facing = found ? dir : Vector3.forward;
                 var perp = new Vector3(facing.z, 0f, -facing.x);
                 var deckRot = Quaternion.LookRotation(facing, Vector3.up);
+
+                // deck: a rectangle running WITH the road -- narrow across
+                // (rail-to-rail span, so the rails sit right at its edges
+                // instead of floating past or recessed into it) and long
+                // along the direction of travel (matching the rails' own
+                // length, a near-full hex pitch so consecutive bridge
+                // hexes tile with no visible gap), rotated to `deckRot`
+                var deck = builder.SpawnPrim(PrimitiveType.Cube, center + Vector3.up * DeckY,
+                    new Vector3(DeckHalfWidth * 2f * 0.92f, DeckHeight, (float)HexCoord.HexMeters * 0.95f),
+                    Deck(), host);
+                deck.transform.rotation = deckRot;
 
                 foreach (var side in new[] { 1f, -1f })
                 {

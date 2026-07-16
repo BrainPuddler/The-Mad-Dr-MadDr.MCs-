@@ -100,7 +100,11 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   diagonal (pathing/generation untouched; presentation only).
   **Batch 2** (`BridgeDresser.cs` / `KnockableProp.cs` / `DamageFx.cs` /
   `RubbleDresser.cs`): bridges get guardrails, a through-truss arch over
-  water spans, and piers dropping to the carved riverbed depth; poles,
+  water spans, and piers dropping to the carved riverbed depth -- the
+  deck itself is a rectangle rotated and shaped to the crossing's own
+  heading (not a fixed axis-aligned square, which reads as a static
+  brown diamond wherever a bridge runs at an angle to world axes, i.e.
+  almost always on a hex grid); poles,
   hydrants, trash cans, and parked cars are **knockable** (a monster or
   tank walking through one tips it over, a timed tween, no physics
   engine); Damaged buildings breathe a slow smoke plume and a collapse
