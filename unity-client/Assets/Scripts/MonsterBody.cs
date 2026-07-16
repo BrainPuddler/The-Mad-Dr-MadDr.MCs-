@@ -42,6 +42,13 @@ using UnityEngine;
 /// TORSO's local rotation only (never the root transform, which stays
 /// pure-yaw for MonsterAgent's steering and the leg rig's own math), so
 /// it reads as actual flight rather than a sled hanging in the air.
+/// DESCENT is gated by SetDescentFloor: the altitude ease never drops
+/// below whatever building is directly beneath the creature right now,
+/// so a takeoff off a tall roof (or a drop to a lower cruise tier over a
+/// shorter building) holds height until horizontally clear instead of
+/// sinking THROUGH the structure. And takeoff resets the standing
+/// surface to street level, so a creature that leaves a 40m roof stops
+/// treating 40m as "the ground" the instant it climbs off.
 ///
 /// WING FLAP (creator direction, 2026-07): a winged creature's wings are
 /// no longer baked into the static body mesh -- packages/creature-mesh
@@ -95,6 +102,7 @@ public class MonsterBody : MonoBehaviour
     private float _flightLowLift;  // clears short buildings (small/medium tier) -- the old single-tier altitude
     private float _flightHighLift; // clears EVERYTHING (large/landmark tier too), for "climb over it" legs
     private float _groundY;        // the surface under this creature: 0 at street level, a roof height when perched on a building
+    private float _descentFloor;   // minimum altitude the body may ease DOWN to right now (a building directly below) -- MonsterAgent pushes it every frame from SurfaceHeightAt
     private const float FlightLiftAirborneThreshold = 0.5f;   // this far above _groundY, legs are considered "in the air"
 
     /// <summary>True while the body is meaningfully off its standing
@@ -290,6 +298,16 @@ public class MonsterBody : MonoBehaviour
     public void SetFlying(bool flying, bool high)
     {
         if (!_canFly) return;
+        // TAKING OFF (false->true): we've left whatever we were standing
+        // on, so the standing surface is "unknown until we land again" --
+        // reset it to street level. Without this, a creature that took
+        // off from a 40m roof kept _groundY=40 the whole flight, and the
+        // instant its altitude eased below 40 (down to a 14m cruise, say)
+        // Airborne flipped false and the legs tried to plant on a 40m
+        // plane while the torso hung at 14m -- stretched, distorted legs.
+        // Landing sets the real new surface (SetGroundHeight, before
+        // SetFlying(false)), so only reset on the takeoff edge.
+        if (flying && !_flying) _groundY = 0f;
         _flying = flying;
         _flyingHigh = high;
     }
@@ -306,6 +324,20 @@ public class MonsterBody : MonoBehaviour
     {
         if (!_canFly) return;   // only flyers can ever stand anywhere but the street
         _groundY = Mathf.Max(0f, y);
+    }
+
+    /// <summary>Hard floor on how low the body may ease its altitude
+    /// RIGHT NOW: the height of any building directly beneath the
+    /// creature, so it can never descend THROUGH a roof/wall on the way
+    /// down (creator direction, 2026-07: "see if they have a clear path
+    /// before they descend"). Only gates DESCENT -- climbing over things
+    /// is always allowed, and the floor never forces the creature up.
+    /// MonsterAgent recomputes it every frame from
+    /// RuntimeCityBuilder.SurfaceHeightAt(current position).</summary>
+    public void SetDescentFloor(float minAltitude)
+    {
+        if (!_canFly) return;
+        _descentFloor = Mathf.Max(0f, minAltitude);
     }
 
     // ---- construction ------------------------------------------------------
@@ -627,6 +659,14 @@ public class MonsterBody : MonoBehaviour
             // landing eases down to the STANDING SURFACE, not always to
             // the street -- that's what perching on a roof is
             var targetLift = _flying ? tierLift : _groundY;
+            // ...but never below whatever building is directly below RIGHT
+            // NOW: Max(target, floor) holds altitude over a roof (takeoff
+            // off a tall building, a descent passing over a shorter one)
+            // until the creature has moved horizontally clear of it, then
+            // the floor drops and the descent completes. Climbing is
+            // unaffected -- if target is already above the floor, Max is a
+            // no-op. This is the whole "clear path before you descend."
+            targetLift = Mathf.Max(targetLift, _descentFloor);
             // ~1.4s for a full lift-off/landing/tier change, whatever the
             // relevant altitude is (a low->high climb mid-flight takes
             // longer than a landing from low, proportionally)

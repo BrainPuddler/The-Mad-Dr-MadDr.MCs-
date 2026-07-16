@@ -325,6 +325,16 @@ public class MonsterAgent : MonoBehaviour
             case OrderKind.Idle: velocity = TickSettle(dt); break;
         }
 
+        // clear-path-to-descend: the tallest thing directly below the
+        // creature RIGHT NOW. The body won't ease its altitude below this,
+        // so it can never descend through a roof -- it holds height until
+        // it has moved horizontally clear (takeoff off a tall roof, a
+        // descent passing over a shorter building). The horizontal
+        // pathfinder already routes AROUND tall buildings at each cruise
+        // tier; this covers the VERTICAL dimension the ease used to ignore.
+        if (_canFly && _body != null)
+            _body.SetDescentFloor(_builder != null ? _builder.SurfaceHeightAt(transform.position) : 0f);
+
         if (_body != null) _body.UpdateLocomotion(velocity, dt);
         // separation is a GROUND-plane push (transform y is always 0 --
         // altitude lives on the torso), so exempt units that aren't
