@@ -26,14 +26,22 @@ using UnityEngine;
 /// ground covered by construction rather than by tuning.
 ///
 /// FLIGHT (winged plan only, creator direction 2026-07): SetFlying(true)
-/// smoothly lifts the whole body -- torso AND every leg hip together, so
-/// nothing floats free of its legs -- to a flight altitude, tucking the
+/// smoothly lifts the whole body -- torso, every leg's articulated
+/// segments, AND every leg's hip HARDWARE (a separate static transform
+/// from the LegKit brace/joint mesh -- easy to miss, and missing it is
+/// exactly what "feet are still stuck to the ground" looked like: a
+/// piece of the leg staying planted at ground height while the rest of
+/// the creature flew off) -- to a flight altitude together, tucking the
 /// legs into a folded mid-air pose instead of trying to plant a ground
 /// step. SetFlying(false) eases back down and replants properly
 /// (SnapFeetToGround) the instant it touches down. This is purely a
 /// visual/height concern -- MonsterAgent's flight decision and pathing
 /// live entirely on its side; this class just makes the airborne state
-/// LOOK like flight.
+/// LOOK like flight -- including a nose-down lean proportional to speed
+/// and a bank into turns proportional to yaw rate, both applied to the
+/// TORSO's local rotation only (never the root transform, which stays
+/// pure-yaw for MonsterAgent's steering and the leg rig's own math), so
+/// it reads as actual flight rather than a sled hanging in the air.
 ///
 /// WING FLAP (creator direction, 2026-07): a winged creature's wings are
 /// no longer baked into the static body mesh -- packages/creature-mesh
@@ -57,6 +65,7 @@ public class MonsterBody : MonoBehaviour
         public Transform Upper;
         public Transform Lower;
         public Transform Foot;
+        public Transform Hip;     // LegKit's brass joint hardware, if any (null for primitive-cylinder legs)
         public float DressScale;  // >0: LegKit mesh segments (x/z keep this scale); 0: primitive cylinders
     }
 
@@ -99,6 +108,22 @@ public class MonsterBody : MonoBehaviour
     private const float WingFlapHzCruise = 0.9f;
     private const float WingFlapAmpTakeoff = 42f;   // degrees
     private const float WingFlapAmpCruise = 22f;    // degrees, a lighter cruise beat
+
+    // flight attitude (winged plan only, airborne only): nose-down lean
+    // proportional to forward speed, bank proportional to turn rate --
+    // creator direction, 2026-07: "should lean a little bit forward in
+    // the direction of travel, bank while making turns, more rooted in
+    // actual flight." Applied to _torso's LOCAL rotation only, never the
+    // root transform -- the root stays pure-yaw (MonsterAgent's
+    // FollowPath already owns it, and legs/hip math are computed in its
+    // frame), so pitch/bank is purely cosmetic on the visible body+wings
+    // and never fights the steering or the leg rig.
+    private float _flightPitch;
+    private float _flightBank;
+    private const float FlightMaxPitch = 22f;    // degrees, nose-down at speed
+    private const float FlightMaxBank = 30f;     // degrees, into a hard turn
+    private const float FlightPitchPerSpeed = 2.4f;   // degrees per m/s
+    private const float FlightBankPerYawRate = 0.4f;  // degrees per deg/s of turn
 
     /// <summary>Fixed at Build time from the plan's leg count -- NOT
     /// derived from _legs.Count on the fly: the first version did that,
@@ -462,10 +487,13 @@ public class MonsterBody : MonoBehaviour
                     Foot = LabMeshBuilder.AttachChunks(kit.Foot, transform, "LegFoot", s),
                     DressScale = s,
                 };
-                // hip hardware (brass brace, joint ball) sits fixed at the
-                // socket; the segments below it articulate
-                var hip = LabMeshBuilder.AttachChunks(kit.Hip, transform, "LegHip", s);
-                hip.localPosition = leg.HipLocal;
+                // hip hardware (brass brace, joint ball): fixed RELATIVE to
+                // the socket on the ground, but still has to ride the same
+                // flight lift as everything else once airborne -- kept on
+                // the Leg so UpdateLocomotion can reposition it, not just
+                // set once here and forgotten
+                leg.Hip = LabMeshBuilder.AttachChunks(kit.Hip, transform, "LegHip", s);
+                leg.Hip.localPosition = leg.HipLocal;
                 leg.FootWorld = transform.TransformPoint(new Vector3(leg.HipLocal.x, 0f, leg.HipLocal.z));
                 leg.FootWorld = new Vector3(leg.FootWorld.x, 0f, leg.FootWorld.z);
                 _legs.Add(leg);
@@ -613,6 +641,18 @@ public class MonsterBody : MonoBehaviour
             }
             _torso.localPosition = new Vector3(0f,
                 BodyHeight + Mathf.Sin(bobPhase) * _legLen * 0.045f + _flightLift + flightBob, 0f);
+
+            // flight attitude: nose down with speed, banked into turns --
+            // eased toward its target so a sudden speed/turn spike doesn't
+            // snap the body into a pose. Settles back level on the ground.
+            var airborne = _flightLift > FlightLiftAirborneThreshold;
+            var pitchTarget = airborne ? Mathf.Clamp(speed * FlightPitchPerSpeed, 0f, FlightMaxPitch) : 0f;
+            var bankTarget = airborne
+                ? Mathf.Clamp(-yawRate * Mathf.Rad2Deg * FlightBankPerYawRate, -FlightMaxBank, FlightMaxBank)
+                : 0f;
+            _flightPitch = Mathf.Lerp(_flightPitch, pitchTarget, dt * 3f);
+            _flightBank = Mathf.Lerp(_flightBank, bankTarget, dt * 4f);
+            if (_canFly) _torso.localRotation = Quaternion.Euler(_flightPitch, 0f, _flightBank);
         }
 
         var flatVel = new Vector3(velocity.x, 0f, velocity.z);
@@ -621,6 +661,14 @@ public class MonsterBody : MonoBehaviour
         foreach (var leg in _legs)
         {
             var hipW = transform.TransformPoint(leg.HipLocal) + Vector3.up * _flightLift;
+            // the hip HARDWARE (brass brace/joint ball) is a separate
+            // static transform from the articulated Upper/Lower/Foot
+            // segments -- it was being left behind at ground height
+            // during flight while the rest of the leg lifted with the
+            // body, which is exactly the "feet are still stuck to the
+            // ground" report (a piece of the leg literally staying
+            // planted while everything else flew off)
+            if (leg.Hip != null) leg.Hip.localPosition = leg.HipLocal + Vector3.up * _flightLift;
 
             if (_flightLift > FlightLiftAirborneThreshold)
             {
