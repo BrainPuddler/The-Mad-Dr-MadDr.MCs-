@@ -94,7 +94,15 @@ public class MonsterBody : MonoBehaviour
     private float _flightLift;     // actual animated lift, MoveTowards-eased toward the current target
     private float _flightLowLift;  // clears short buildings (small/medium tier) -- the old single-tier altitude
     private float _flightHighLift; // clears EVERYTHING (large/landmark tier too), for "climb over it" legs
-    private const float FlightLiftAirborneThreshold = 0.5f;   // above this, legs are considered "in the air"
+    private float _groundY;        // the surface under this creature: 0 at street level, a roof height when perched on a building
+    private const float FlightLiftAirborneThreshold = 0.5f;   // this far above _groundY, legs are considered "in the air"
+
+    /// <summary>True while the body is meaningfully off its standing
+    /// surface -- the single definition every airborne check shares, so
+    /// "perched on a 6m roof" (lift == groundY, feet planted) never gets
+    /// confused with "flying 6m up" (lift far above groundY, legs
+    /// tucked).</summary>
+    private bool Airborne { get { return _flightLift > _groundY + FlightLiftAirborneThreshold; } }
 
     // wing flap (winged plan only): a hinge transform per side, posed
     // ROOT-RELATIVE geometry parented under it (packages/creature-mesh's
@@ -231,14 +239,17 @@ public class MonsterBody : MonoBehaviour
     {
         foreach (var leg in _legs)
         {
-            var hipW = transform.TransformPoint(leg.HipLocal);
+            // hips sit above the STANDING SURFACE (street or rooftop
+            // perch), same offset the airborne leg loop applies
+            var hipW = transform.TransformPoint(leg.HipLocal) + Vector3.up * _groundY;
             // small per-group stagger so the first steps alternate
             // naturally instead of every leg triggering at once
             var stagger = (leg.Group == 0 ? 1f : -1f) * _stride * 0.15f;
-            leg.FootWorld = new Vector3(hipW.x, 0f, hipW.z) + transform.forward * stagger;
-            leg.FootWorld = new Vector3(leg.FootWorld.x, 0f, leg.FootWorld.z);
+            leg.FootWorld = new Vector3(hipW.x, _groundY, hipW.z) + transform.forward * stagger;
+            leg.FootWorld = new Vector3(leg.FootWorld.x, _groundY, leg.FootWorld.z);
             leg.Swinging = false;
             leg.SwingT = 0f;
+            if (leg.Hip != null) leg.Hip.localPosition = leg.HipLocal + Vector3.up * _groundY;
             RenderLeg(leg, hipW);
         }
         for (var i = 0; i < _tailTrail.Count; i++)
@@ -281,6 +292,20 @@ public class MonsterBody : MonoBehaviour
         if (!_canFly) return;
         _flying = flying;
         _flyingHigh = high;
+    }
+
+    /// <summary>The surface this creature stands (or lands) on: 0 at
+    /// street level, a roof height when perching on a building. Landing
+    /// eases the lift down to THIS height instead of always to the
+    /// street, and planted feet live on this plane. MonsterAgent sets it
+    /// right before landing (from RuntimeCityBuilder.SurfaceHeightAt) and
+    /// re-syncs it when destruction changes the surface under a perched
+    /// unit -- a collapsed roof lowers this to 0 and the body eases down
+    /// to the rubble on its own.</summary>
+    public void SetGroundHeight(float y)
+    {
+        if (!_canFly) return;   // only flyers can ever stand anywhere but the street
+        _groundY = Mathf.Max(0f, y);
     }
 
     // ---- construction ------------------------------------------------------
@@ -597,16 +622,18 @@ public class MonsterBody : MonoBehaviour
 
         if (_canFly)
         {
-            var wasAirborne = _flightLift > FlightLiftAirborneThreshold;
+            var wasAirborne = Airborne;
             var tierLift = _flyingHigh ? _flightHighLift : _flightLowLift;
-            var targetLift = _flying ? tierLift : 0f;
+            // landing eases down to the STANDING SURFACE, not always to
+            // the street -- that's what perching on a roof is
+            var targetLift = _flying ? tierLift : _groundY;
             // ~1.4s for a full lift-off/landing/tier change, whatever the
             // relevant altitude is (a low->high climb mid-flight takes
             // longer than a landing from low, proportionally)
             _flightLift = Mathf.MoveTowards(_flightLift, targetLift, (tierLift / 1.4f) * dt);
-            if (wasAirborne && !_flying && _flightLift <= FlightLiftAirborneThreshold)
+            if (wasAirborne && !_flying && !Airborne)
             {
-                _flightLift = 0f;
+                _flightLift = _groundY;
                 SnapFeetToGround();   // just touched down -- replant properly, not a stale mid-air tuck
             }
             // click-to-select must track what's actually on screen
@@ -661,7 +688,7 @@ public class MonsterBody : MonoBehaviour
             // the floater's hover, there's no footfall to sync a
             // distance-driven bob to once truly off the ground
             var flightBob = 0f;
-            if (_flightLift > FlightLiftAirborneThreshold)
+            if (Airborne)
             {
                 _flightBobPhase += dt * 3.2f;
                 flightBob = Mathf.Sin(_flightBobPhase) * 0.3f;
@@ -671,10 +698,10 @@ public class MonsterBody : MonoBehaviour
 
             // flight attitude: nose down with speed, banked into turns --
             // eased toward its target so a sudden speed/turn spike doesn't
-            // snap the body into a pose. Settles back level on the ground.
-            var airborne = _flightLift > FlightLiftAirborneThreshold;
-            var pitchTarget = airborne ? Mathf.Clamp(speed * FlightPitchPerSpeed, 0f, FlightMaxPitch) : 0f;
-            var bankTarget = airborne
+            // snap the body into a pose. Settles back level on the ground
+            // (or on a rooftop perch -- Airborne is false there too).
+            var pitchTarget = Airborne ? Mathf.Clamp(speed * FlightPitchPerSpeed, 0f, FlightMaxPitch) : 0f;
+            var bankTarget = Airborne
                 ? Mathf.Clamp(-yawRate * Mathf.Rad2Deg * FlightBankPerYawRate, -FlightMaxBank, FlightMaxBank)
                 : 0f;
             _flightPitch = Mathf.Lerp(_flightPitch, pitchTarget, dt * 3f);
@@ -697,7 +724,7 @@ public class MonsterBody : MonoBehaviour
             // planted while everything else flew off)
             if (leg.Hip != null) leg.Hip.localPosition = leg.HipLocal + Vector3.up * _flightLift;
 
-            if (_flightLift > FlightLiftAirborneThreshold)
+            if (Airborne)
             {
                 // airborne: fold the leg up rather than reaching for a
                 // ground contact that isn't there. FootWorld is scratch
@@ -710,7 +737,9 @@ public class MonsterBody : MonoBehaviour
                 continue;
             }
 
-            var restW = new Vector3(hipW.x, 0f, hipW.z);
+            // feet plant on the STANDING SURFACE -- street level normally,
+            // a roof plane while perched on a building
+            var restW = new Vector3(hipW.x, _groundY, hipW.z);
 
             // this leg's rest-point velocity: translation + rotation's
             // contribution at this hip (v_rot = yawRate * (r.z, 0, -r.x))
@@ -736,7 +765,7 @@ public class MonsterBody : MonoBehaviour
                     var t = leg.SwingT;
                     var eased = t * t * (3f - 2f * t);
                     var pos = Vector3.Lerp(leg.SwingFrom, leg.SwingTo, eased);
-                    pos.y = Mathf.Sin(t * Mathf.PI) * strideEff * 0.22f;
+                    pos.y = _groundY + Mathf.Sin(t * Mathf.PI) * strideEff * 0.22f;
                     leg.FootWorld = pos;
                 }
                 RenderLeg(leg, hipW);
@@ -799,7 +828,7 @@ public class MonsterBody : MonoBehaviour
     {
         if (_wingPivotL == null || _wingPivotR == null) return;
 
-        var flapping = _flying || _flightLift > FlightLiftAirborneThreshold;
+        var flapping = _flying || Airborne;   // folded while standing, street OR rooftop perch
         if (!flapping)
         {
             _wingPivotL.localRotation = Quaternion.identity;

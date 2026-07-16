@@ -52,9 +52,17 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   mid-air; a unit that flew to its target stays airborne to fight (an
   aerial attack) and only lands once its order is fully done. Turns are
   arcs, not snaps, while airborne — a wider "close enough, aim at the
-  next leg" radius rounds off hex-grid corners and a slower heading
-  catch-up sweeps through them, paired with the existing bank-into-
-  turns tilt. **Wings actually flap** — bat-style, fast
+  next leg" radius rounds off hex-grid corners, a slower heading
+  catch-up sweeps through them, and velocity follows the NOSE while the
+  nose chases the target (carving, not strafing), so a fresh order in
+  any new direction — even straight behind — transitions through a
+  smooth banked arc. **Winged units can land on buildings**: right-click
+  a building's ROOF (its flat top face) and winged units fly over and
+  perch on it — the roof becomes their standing surface, feet planted
+  on the roof plane, wings folded; a wall click is still an attack
+  order for everyone. Perched units hold their roost (no auto-engage)
+  until ordered; if the building collapses under them they ease down
+  onto the rubble. **Wings actually flap** — bat-style, fast
   powerful beats while still climbing or descending, a slower cruise
   beat once holding altitude, folded to rest once grounded — since
   `packages/creature-mesh` returns each wing as its own root-relative

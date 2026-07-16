@@ -31,7 +31,7 @@ using UnityEngine;
 /// </summary>
 public class MonsterAgent : MonoBehaviour
 {
-    private enum OrderKind { Idle, Move, AttackBuilding, AttackUnit, EatCitizen }
+    private enum OrderKind { Idle, Move, AttackBuilding, AttackUnit, EatCitizen, Perch }
 
     private RuntimeCityBuilder _builder;
     private StoredGenomeDto _creature;
@@ -44,6 +44,8 @@ public class MonsterAgent : MonoBehaviour
     private bool _flyingHigh;  // which cruise tier, when flying -- see DecideFlightTier
     private float _flightLowAlt;   // cached from _body once Build() has computed them (MonsterBody.LowFlightAltitude)
     private float _flightHighAlt;  // (MonsterBody.HighFlightAltitude)
+    private int _surfaceSyncVersion = -1;  // last CityVersion the body's ground height was synced at
+    private bool _perchApproach;           // perch order's final line-up-over-the-roof phase
 
     private OrderKind _order = OrderKind.Idle;
     private readonly Queue<HexCoord> _waypoints = new Queue<HexCoord>();
@@ -71,6 +73,22 @@ public class MonsterAgent : MonoBehaviour
     /// double-click "select all of this type on screen."</summary>
     public string BodyPlan { get { return _creature.Genome.Body.Plan; } }
 
+    /// <summary>Winged plan -- the commander routes a roof-click to a
+    /// perch order for these, an attack order for everyone else.</summary>
+    public bool IsFlyer { get { return _canFly; } }
+
+    /// <summary>Standing (not flying) on an elevated surface -- a rooftop
+    /// perch. Perched units hold their roost (no auto-engage) and any new
+    /// move starts with a takeoff, since there's no walking off a roof.</summary>
+    private bool Perched
+    {
+        get
+        {
+            return _canFly && !_flying && _builder != null
+                && _builder.SurfaceHeightAt(transform.position) > 0.1f;
+        }
+    }
+
     public string OrderDescription
     {
         get
@@ -82,7 +100,8 @@ public class MonsterAgent : MonoBehaviour
                 case OrderKind.AttackBuilding: return "ATTACKING" + air + " " + (_targetBuilding != null ? _targetBuilding.Tier.ToString() : "?") + " building";
                 case OrderKind.AttackUnit: return "ATTACKING" + air + " a unit";
                 case OrderKind.EatCitizen: return "hunting a citizen";
-                default: return "idle";
+                case OrderKind.Perch: return "flying to a rooftop perch";
+                default: return Perched ? "perched on a rooftop" : "idle";
             }
         }
     }
@@ -216,12 +235,29 @@ public class MonsterAgent : MonoBehaviour
         _order = OrderKind.AttackUnit;
     }
 
+    /// <summary>Fly to a building and land ON its roof (creator
+    /// direction, 2026-07: "they should be able to land on the
+    /// building"). Winged only -- the commander routes a roof-click here
+    /// for flyers and to OrderAttack for everyone else, but guard anyway
+    /// so a stray call can't strand a ground creature mid-wall.</summary>
+    public void OrderPerch(Building building)
+    {
+        if (building == null) return;
+        if (!_canFly) { OrderAttack(building); return; }
+        ClearTargets();
+        _waypoints.Clear();
+        _path = null;
+        _targetBuilding = building;
+        _order = OrderKind.Perch;
+    }
+
     private void ClearTargets()
     {
         _targetBuilding = null;
         _targetCitizen = null;
         _targetUnit = null;
         _settleTarget = null;   // any fresh order cancels a pending group-settle creep
+        _perchApproach = false;
     }
 
     /// <summary>The single place _order becomes Idle. Flight is only ever
@@ -233,7 +269,20 @@ public class MonsterAgent : MonoBehaviour
     private void GoIdle()
     {
         _order = OrderKind.Idle;
-        if (_flying) { _flying = false; if (_body != null) _body.SetFlying(false, false); }
+        if (_flying)
+        {
+            _flying = false;
+            if (_body != null)
+            {
+                // land onto whatever is directly below: street level
+                // normally, a roof if this order ended over a building
+                // (the perch order's whole point -- but also any flight
+                // that happens to finish over a short building it was
+                // legally cruising above)
+                _body.SetGroundHeight(_builder != null ? _builder.SurfaceHeightAt(transform.position) : 0f);
+                _body.SetFlying(false, false);
+            }
+        }
     }
 
     // ---- per-frame ----------------------------------------------------------
@@ -249,8 +298,21 @@ public class MonsterAgent : MonoBehaviour
 
         // idle units auto-acquire -- retaliate against whoever hit them, or
         // engage the nearest enemy in aggro range -- so the tank fight is
-        // self-driving without the player microing every unit
-        if (_order == OrderKind.Idle) AcquireTarget();
+        // self-driving without the player microing every unit. A PERCHED
+        // unit deliberately does NOT: it holds the roost the player chose
+        // (auto-engaging would make every perch instantly dissolve into a
+        // tank chase); attack it manually to send it back into the fight.
+        if (_order == OrderKind.Idle && !Perched) AcquireTarget();
+
+        // destruction can change the surface under a standing flyer (the
+        // roof it perched on collapses to rubble): re-sync the body's
+        // ground height whenever the city changes, and it eases itself
+        // down to whatever is left
+        if (_canFly && !_flying && _builder != null && _surfaceSyncVersion != _builder.CityVersion)
+        {
+            _surfaceSyncVersion = _builder.CityVersion;
+            if (_body != null) _body.SetGroundHeight(_builder.SurfaceHeightAt(transform.position));
+        }
 
         var velocity = Vector3.zero;
         switch (_order)
@@ -259,11 +321,19 @@ public class MonsterAgent : MonoBehaviour
             case OrderKind.AttackBuilding: velocity = TickAttack(dt); break;
             case OrderKind.AttackUnit: velocity = TickAttackUnit(dt); break;
             case OrderKind.EatCitizen: velocity = TickEat(dt); break;
+            case OrderKind.Perch: velocity = TickPerch(dt); break;
             case OrderKind.Idle: velocity = TickSettle(dt); break;
         }
 
         if (_body != null) _body.UpdateLocomotion(velocity, dt);
-        if (_fighter != null && _builder != null) _builder.ApplySeparation(_fighter);
+        // separation is a GROUND-plane push (transform y is always 0 --
+        // altitude lives on the torso), so exempt units that aren't
+        // actually standing in the crowd: an airborne flyer passing
+        // overhead shouldn't shove ground units around, and a ground unit
+        // walking past a building's base shouldn't shove a PERCHED flyer
+        // sideways off its roof
+        if (_fighter != null && _builder != null && !_flying && !Perched)
+            _builder.ApplySeparation(_fighter);
     }
 
     private void AcquireTarget()
@@ -286,6 +356,75 @@ public class MonsterAgent : MonoBehaviour
         }
         RecomputeIfCityChanged();
         return FollowPath(dt, RunOrWalkSpeed());
+    }
+
+    /// <summary>Fly to the target building's nearest footprint hex, then
+    /// land on the roof (GoIdle's surface-aware landing does the actual
+    /// touch-down; the roof IS the surface there). Always flies -- there
+    /// is no walking onto a roof -- and manages its own path/flight state
+    /// rather than going through ComputePath, whose DecideFlight could
+    /// legitimately choose to WALK a short hop and then be standing in
+    /// front of a wall with nowhere to go. Cruise tier must clear the
+    /// TARGET building itself at minimum (landing approach comes from
+    /// above); en-route obstacles taller than that tier bump it to High,
+    /// which nothing blocks.</summary>
+    private Vector3 TickPerch(float dt)
+    {
+        if (_targetBuilding == null) { GoIdle(); return Vector3.zero; }
+        if (_builder.IsDestroyed(_targetBuilding))
+        {
+            // nothing left to land on -- abort wherever we are
+            _targetBuilding = null;
+            GoIdle();
+            return Vector3.zero;
+        }
+
+        if (!_perchApproach && (_path == null || _pathCityVersion != _builder.CityVersion))
+        {
+            var start = _builder.HexAt(transform.position);
+            var goal = _builder.HexAt(NearestFootprintPoint(_targetBuilding));
+            _flying = true;
+            _flyingHigh = _builder.BuildingHeight(_targetBuilding) + 2f > _flightLowAlt;
+            if (_body != null) _body.SetFlying(true, _flyingHigh);
+            var hexPath = HexPathfinder.FindPath(start, goal, _builder.City, Blocked());
+            if (hexPath == null && !_flyingHigh)
+            {
+                // boxed in at low cruise -- climb; nothing blocks High
+                _flyingHigh = true;
+                if (_body != null) _body.SetFlying(true, true);
+                hexPath = HexPathfinder.FindPath(start, goal, _builder.City, Blocked());
+            }
+            _pathGoalHex = goal;
+            _path = ToWorldPath(hexPath);
+            if (_path == null) { GoIdle(); return Vector3.zero; }
+        }
+
+        if (!_perchApproach)
+        {
+            var v = FollowPath(dt, RunOrWalkSpeed());
+            if (_path == null) _perchApproach = true;   // main route done; line up over the roof hex
+            return v;
+        }
+
+        // final approach: FollowPath's wide flying arrive-radius can leave
+        // us up to ~8m off the roof-hex center -- close that gap before
+        // touching down, so the surface under the landing is actually the
+        // roof and not the street at the building's base
+        var goalW = _builder.WorldOf(_pathGoalHex);
+        var toGoal = goalW - transform.position;
+        toGoal.y = 0f;
+        if (toGoal.magnitude > 1.5f)
+        {
+            var dir = toGoal.normalized;
+            var speed = RunOrWalkSpeed();
+            transform.rotation = Quaternion.Slerp(transform.rotation,
+                Quaternion.LookRotation(dir, Vector3.up), dt * FlightTurnRate);
+            transform.position += dir * Mathf.Min(speed * dt, toGoal.magnitude);
+            return dir * speed;
+        }
+        _perchApproach = false;
+        GoIdle();   // centered over the roof: land on it
+        return Vector3.zero;
     }
 
     private const float SettleArriveDist = 0.6f;
@@ -532,11 +671,31 @@ public class MonsterAgent : MonoBehaviour
 
         var dir = to / dist;
         // arc around a unit sitting ahead so a faster creature overtakes a
-        // slower one instead of piling into its back (no-op when clear)
-        var steer = _builder != null && _fighter != null ? _builder.AvoidanceDir(_fighter, dir) : dir;
+        // slower one instead of piling into its back (no-op when clear).
+        // Airborne units skip it: everyone else is on the ground plane
+        // far below, and dodging their shadows would bend flight paths
+        // for no reason.
+        var steer = !_flying && _builder != null && _fighter != null ? _builder.AvoidanceDir(_fighter, dir) : dir;
         var turnRate = _flying ? FlightTurnRate : GroundTurnRate;
         transform.rotation = Quaternion.Slerp(transform.rotation,
             Quaternion.LookRotation(steer, Vector3.up), dt * turnRate);
+
+        if (_flying)
+        {
+            // CARVE, don't strafe: while airborne, velocity follows the
+            // NOSE while the nose chases the target -- so a fresh order in
+            // a new direction (even straight behind) sweeps through a
+            // smooth banked arc instead of instantly translating sideways
+            // with the heading lagging behind (creator direction, 2026-07:
+            // "when the change of direction order is issued they must
+            // transition to the new heading smoothly"). Turn radius =
+            // speed / turn rate, a few meters -- comfortably inside the
+            // flying arrive radius, so it can never orbit a waypoint.
+            var nose = new Vector3(transform.forward.x, 0f, transform.forward.z).normalized;
+            transform.position += nose * (speed * dt);
+            return nose * speed;
+        }
+
         var step = Mathf.Min(speed * dt, dist);
         transform.position += steer * step;
         return steer * speed;
@@ -569,6 +728,9 @@ public class MonsterAgent : MonoBehaviour
     private bool DecideFlight(HexCoord start, HexCoord goal)
     {
         if (!_canFly) return false;
+        // standing on a roof: every move starts with a takeoff -- there
+        // is no walking down the side of a building
+        if (_builder.SurfaceHeightAt(transform.position) > 0.1f) return true;
         var straight = start.DistanceTo(goal);
         if (straight == 0) return false;
         if (straight >= FarHexThreshold) return true;

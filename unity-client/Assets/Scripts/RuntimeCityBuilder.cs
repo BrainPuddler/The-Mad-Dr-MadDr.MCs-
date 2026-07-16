@@ -197,6 +197,39 @@ public class RuntimeCityBuilder : MonoBehaviour
         return blocked;
     }
 
+    /// <summary>Rendered height of this building right now -- the roof a
+    /// winged unit perches on. Same tier table the visuals use.</summary>
+    public float BuildingHeight(Building building)
+    {
+        return HeightForTier(building.Tier);
+    }
+
+    private Dictionary<HexCoord, float> _roofCache;
+    private int _roofCacheVersion = -1;
+
+    /// <summary>The standing surface at a world position: a STANDING
+    /// building's roof height on its footprint hexes, 0 (street level)
+    /// everywhere else -- including on rubble, so a perch whose building
+    /// gets destroyed under it eases back down to the ground. Cached per
+    /// city version; called per idle flyer per frame, so it has to be a
+    /// dictionary hit, not a building-list walk.</summary>
+    public float SurfaceHeightAt(Vector3 worldPos)
+    {
+        if (_roofCacheVersion != _cityVersion || _roofCache == null)
+        {
+            _roofCache = new Dictionary<HexCoord, float>();
+            foreach (var b in _battlefield.Buildings)
+            {
+                if (!b.BlocksMovement) continue;
+                var h = HeightForTier(b.Building.Tier);
+                foreach (var hex in b.Building.Footprint) _roofCache[hex] = h;
+            }
+            _roofCacheVersion = _cityVersion;
+        }
+        float height;
+        return _roofCache.TryGetValue(HexAt(worldPos), out height) ? height : 0f;
+    }
+
     // ---- static city geometry --------------------------------------------------
 
     private void BuildGround()

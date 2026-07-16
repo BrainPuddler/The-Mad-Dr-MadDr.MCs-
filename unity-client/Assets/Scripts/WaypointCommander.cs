@@ -16,7 +16,9 @@ using UnityEngine.InputSystem;
 ///     the above)           replacing it (double-click adds all of type)
 ///   Right click          : order the WHOLE selection --
 ///   (or Ctrl + left click,  on a citizen  -> chase and eat it
-///    trackpad support)      on a building -> walk to it and attack
+///    trackpad support)      on a building WALL -> walk to it and attack
+///                            on a building ROOF -> winged units fly to it
+///                              and land (perch); everyone else attacks
 ///                            on the ground -> waypoint (Shift queues)
 ///   G                    : glide the camera to the unit nearest the cursor
 /// </summary>
@@ -153,7 +155,18 @@ public class WaypointCommander : MonoBehaviour
         var building = _builder.BuildingFromCollider(hit.Value.collider);
         if (building != null)
         {
-            foreach (var a in _selected) a.OrderAttack(building);
+            // WHERE on the building you clicked matters: the flat ROOF
+            // (upward-facing surface) sends winged units to land on it,
+            // while a WALL is an attack order for everyone -- so both
+            // verbs stay reachable with a plain right-click and no extra
+            // modifier key. Ground units can't perch, so a roof-click is
+            // still just an attack for them.
+            var roofClick = hit.Value.normal.y > 0.5f;
+            foreach (var a in _selected)
+            {
+                if (roofClick && a.IsFlyer) a.OrderPerch(building);
+                else a.OrderAttack(building);
+            }
             return;
         }
 
