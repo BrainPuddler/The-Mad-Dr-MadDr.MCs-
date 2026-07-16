@@ -109,7 +109,13 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   deck itself is a rectangle rotated and shaped to the crossing's own
   heading (not a fixed axis-aligned square, which reads as a static
   brown diamond wherever a bridge runs at an angle to world axes, i.e.
-  almost always on a hex grid); poles,
+  almost always on a hex grid) and sits at road-surface height, not
+  floating a meter-plus above where units actually walk (TerrainField
+  flat-locks bridge hexes to the same y=0 roads and buildings use) --
+  RoadDresser skips its own street dressing on bridge deck hexes
+  entirely, since BridgeDresser fully owns them (`city.Roads` includes
+  bridge decks, so without this a thin road pad and furniture used to
+  render duplicated underneath/through the thicker deck); poles,
   hydrants, trash cans, and parked cars are **knockable** (a monster or
   tank walking through one tips it over, a timed tween, no physics
   engine); Damaged buildings breathe a slow smoke plume and a collapse

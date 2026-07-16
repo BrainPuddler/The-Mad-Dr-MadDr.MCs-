@@ -80,13 +80,26 @@ public static class RoadDresser
         var host = new GameObject("Roads").transform;
         host.SetParent(parent, false);
 
-        // connectivity truth: roads join other roads AND bridge decks
+        // connectivity truth: city.Roads already includes bridge deck
+        // hexes (CityGenerator unions them in), so `network` needs no
+        // separate merge -- but RoadDresser still needs to know WHICH
+        // road hexes are bridge deck, to skip dressing them itself
         var network = new HashSet<HexCoord>(city.Roads);
+        var bridgeHexes = new HashSet<HexCoord>();
         foreach (var bridge in city.Bridges)
-            foreach (var hex in bridge.Footprint) network.Add(hex);
+            foreach (var hex in bridge.Footprint) bridgeHexes.Add(hex);
 
         foreach (var hex in city.Roads)
         {
+            // bridge deck hexes are dressed entirely by BridgeDresser
+            // (deck, rails, truss, piers, sized and raised for a water
+            // crossing) -- RoadDresser's own thin street pad/strips/
+            // dashes on the SAME hex would z-fight with, or poke up
+            // through, that deck's surface. The hex stays in `network`
+            // above, so a bank hex's own connector strip still reaches
+            // into the bridge threshold instead of stopping short of it.
+            if (bridgeHexes.Contains(hex)) continue;
+
             var center = builder.WorldOf(hex);
             var connectors = new List<(Vector3 dir, float angle)>();
             foreach (var n in hex.Neighbors())

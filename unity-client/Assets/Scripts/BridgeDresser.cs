@@ -30,8 +30,17 @@ public static class BridgeDresser
     private static Material Pier() { return M(0.5f, 0.49f, 0.46f); }
     private static Material Rail() { return M(0.28f, 0.2f, 0.11f); }
 
-    private const float DeckY = 0.6f;
-    private const float DeckHeight = 1.2f;
+    // Deck top sits at ~0.3, matching RoadDresser's "slightly proud of
+    // the ground" asphalt height -- NOT an arbitrary choice: TerrainField
+    // flat-locks bridge footprint hexes to exactly y=0 (same rule as
+    // roads/buildings), and every ground unit's GroundHeightAt puts its
+    // feet AT that flat-locked height. The deck used to span y=[0, 1.2]
+    // (top at 1.2), which put a unit's feet exactly at the deck's BOTTOM
+    // face -- units visually clipped through/under a meter-plus of solid
+    // "deck" instead of standing on top of it. A thin plank at road
+    // height reads as a surface units actually walk ON.
+    private const float DeckY = 0.05f;
+    private const float DeckHeight = 0.5f;
     private const float DeckHalfWidth = 9f; // matches the massing cube's hexSize*0.9 footprint
 
     private static int Hash(HexCoord hex, int salt)
@@ -110,15 +119,19 @@ public static class BridgeDresser
 
                 if (isWater)
                 {
+                    // truss anchor heights are expressed relative to the
+                    // deck's TOP face, not its center -- so the arch keeps
+                    // its proportions if DeckY/DeckHeight ever change again
+                    var deckTop = DeckY + DeckHeight * 0.5f;
                     foreach (var side in new[] { 1f, -1f })
                     {
-                        var beamBase = center + perp * (side * DeckHalfWidth * 0.9f) + Vector3.up * (DeckY + 0.4f);
+                        var beamBase = center + perp * (side * DeckHalfWidth * 0.9f) + Vector3.up * (deckTop - 0.2f);
                         var beam = builder.SpawnPrim(PrimitiveType.Cube,
                             beamBase + Vector3.up * 2.6f, new Vector3(0.4f, 5.4f, 0.4f), Truss(), host);
                         beam.transform.rotation = Quaternion.LookRotation(perp, Vector3.up) * Quaternion.Euler(0f, 0f, side * 18f);
                     }
                     var topChord = builder.SpawnPrim(PrimitiveType.Cube,
-                        center + Vector3.up * (DeckY + 5.1f), new Vector3(DeckHalfWidth * 1.9f, 0.4f, 1.4f), Truss(), host);
+                        center + Vector3.up * (deckTop + 4.5f), new Vector3(DeckHalfWidth * 1.9f, 0.4f, 1.4f), Truss(), host);
                     topChord.transform.rotation = deckRot;
 
                     // piers: drop from under the deck to the carved riverbed
