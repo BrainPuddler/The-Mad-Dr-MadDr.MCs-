@@ -38,13 +38,23 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   **Winged units can walk or fly**, decided per order — "far" (a
   straight-line hex-distance threshold) or "high up" (no ground route
   at all, or a heavy detour around buildings/water) tips it into flight
-  (`MonsterAgent.DecideFlight`). Flying still runs the SAME A* over the
-  SAME hex grid, just with the amphibious-style blocked set (buildings
-  block, water doesn't) — never a straight-line ignore-everything hop.
-  `MonsterBody.SetFlying` smoothly lifts torso and legs together to
-  altitude and tucks the legs mid-air; a unit that flew to its target
-  stays airborne to fight (an aerial attack) and only lands once its
-  order is fully done. **Wings actually flap** — bat-style, fast
+  (`MonsterAgent.DecideFlight`). Flying runs the SAME A* over the SAME
+  hex grid, never a straight-line ignore-everything hop — but at TWO
+  cruise tiers: Low clears short buildings (small/medium) and weaves
+  around anything taller, High climbs above every tier and flies the
+  direct line. Which tier a leg actually flies is an energy call
+  (`MonsterAgent.DecideFlightTier`) comparing hex-distance-flown against
+  the one-time cost of the extra climb — a short detour beats climbing
+  over a building, a long one loses to it. `MonsterBody.SetFlying`
+  smoothly lifts torso, wings, AND every leg's hip hardware together to
+  whichever altitude was picked (missing the hip hardware was the
+  literal "feet still stuck to the ground" bug) and tucks the legs
+  mid-air; a unit that flew to its target stays airborne to fight (an
+  aerial attack) and only lands once its order is fully done. Turns are
+  arcs, not snaps, while airborne — a wider "close enough, aim at the
+  next leg" radius rounds off hex-grid corners and a slower heading
+  catch-up sweeps through them, paired with the existing bank-into-
+  turns tilt. **Wings actually flap** — bat-style, fast
   powerful beats while still climbing or descending, a slower cruise
   beat once holding altitude, folded to rest once grounded — since
   `packages/creature-mesh` returns each wing as its own root-relative

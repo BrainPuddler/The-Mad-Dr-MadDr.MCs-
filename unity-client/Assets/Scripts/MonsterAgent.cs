@@ -40,7 +40,10 @@ public class MonsterAgent : MonoBehaviour
     private LocomotionProfile _profile;
     private bool _amphibious;
     private bool _canFly;
-    private bool _flying;   // current order's mode -- decided once per path-compute, see DecideFlight
+    private bool _flying;      // current order's mode -- decided once per path-compute, see DecideFlight
+    private bool _flyingHigh;  // which cruise tier, when flying -- see DecideFlightTier
+    private float _flightLowAlt;   // cached from _body once Build() has computed them (MonsterBody.LowFlightAltitude)
+    private float _flightHighAlt;  // (MonsterBody.HighFlightAltitude)
 
     private OrderKind _order = OrderKind.Idle;
     private readonly Queue<HexCoord> _waypoints = new Queue<HexCoord>();
@@ -122,6 +125,7 @@ public class MonsterAgent : MonoBehaviour
         transform.position = _builder.WorldOf(homeHex);
         _body = gameObject.AddComponent<MonsterBody>();
         _body.Build(creature);
+        if (_canFly) { _flightLowAlt = _body.LowFlightAltitude; _flightHighAlt = _body.HighFlightAltitude; }
 
         // combat: health + weapon from the genome (Combat.Profile), the
         // same physiology-to-numbers discipline as Locomotion. The builder
@@ -229,7 +233,7 @@ public class MonsterAgent : MonoBehaviour
     private void GoIdle()
     {
         _order = OrderKind.Idle;
-        if (_flying) { _flying = false; if (_body != null) _body.SetFlying(false); }
+        if (_flying) { _flying = false; if (_body != null) _body.SetFlying(false, false); }
     }
 
     // ---- per-frame ----------------------------------------------------------
@@ -493,6 +497,19 @@ public class MonsterAgent : MonoBehaviour
         return (float)speed;
     }
 
+    // flying units round hex-grid corners into arcs instead of snapping
+    // heading-first at each waypoint: a much bigger "close enough, aim at
+    // the NEXT leg now" radius cuts the corner early (a simple, cheap
+    // stand-in for spline-fitting the path), and a slower yaw catch-up
+    // sweeps through the turn instead of whipping the heading around --
+    // creator direction, 2026-07: "turns are too sharp, they should be
+    // more arcs." Ground creatures keep the tight/snappy original values;
+    // this is purely a flight-feel change.
+    private const float GroundArriveDist = 0.6f;
+    private const float FlightArriveDist = 8f;     // well under a hex (20m) so it never cuts through a corner obstacle
+    private const float GroundTurnRate = 5f;
+    private const float FlightTurnRate = 1.8f;
+
     private Vector3 FollowPath(float dt, float speed)
     {
         if (_path == null || _pathIndex >= _path.Count)
@@ -506,7 +523,8 @@ public class MonsterAgent : MonoBehaviour
         var to = target - transform.position;
         to.y = 0f;
         var dist = to.magnitude;
-        if (dist < 0.6f)
+        var arriveDist = _flying ? FlightArriveDist : GroundArriveDist;
+        if (dist < arriveDist)
         {
             _pathIndex++;
             return FollowPath(dt, speed);
@@ -516,8 +534,9 @@ public class MonsterAgent : MonoBehaviour
         // arc around a unit sitting ahead so a faster creature overtakes a
         // slower one instead of piling into its back (no-op when clear)
         var steer = _builder != null && _fighter != null ? _builder.AvoidanceDir(_fighter, dir) : dir;
+        var turnRate = _flying ? FlightTurnRate : GroundTurnRate;
         transform.rotation = Quaternion.Slerp(transform.rotation,
-            Quaternion.LookRotation(steer, Vector3.up), dt * 5f);
+            Quaternion.LookRotation(steer, Vector3.up), dt * turnRate);
         var step = Mathf.Min(speed * dt, dist);
         transform.position += steer * step;
         return steer * speed;
@@ -525,6 +544,17 @@ public class MonsterAgent : MonoBehaviour
 
     private const int FarHexThreshold = 5;      // ~100m straight-line (20m hex) counts as "far"
     private const float DetourFactor = 1.8f;    // ground route this much longer than a straight line = "high up" territory
+
+    // energy weights for the low-vs-high cruise decision below: tuned so
+    // a modest weave around one tall building beats climbing over it, but
+    // a long detour (several buildings, or a wide one) loses to the climb
+    // -- creator direction, 2026-07: "decide to fly up and over others
+    // depending on what would take less energy." Units are arbitrary
+    // (this is a comparison, not a real physics simulation); what matters
+    // is their RATIO, so a bigger climb only pays off against a
+    // proportionally bigger detour.
+    private const float FlightEnergyPerHex = 1f;
+    private const float FlightClimbEnergyPerUnit = 0.05f;
 
     /// <summary>Decide walk vs fly for a winged unit's NEXT path, per the
     /// creator's rule: "if the distance is far or high up." Non-flyers
@@ -547,22 +577,43 @@ public class MonsterAgent : MonoBehaviour
         return groundPath.Count > straight * DetourFactor;
     }
 
+    /// <summary>Once flying, decide LOW (cruise under short buildings,
+    /// weave around anything taller -- cheap climb, maybe a longer route)
+    /// vs HIGH (climb above every building, fly the direct line -- a
+    /// bigger climb, but zero detour) by comparing total energy: hex
+    /// distance actually flown, plus the one-time cost of climbing to
+    /// that tier's altitude. "Fly over low buildings and decide to fly up
+    /// and over others depending on what would take less energy" --
+    /// creator direction, 2026-07. A boxed-in low route (no path at all
+    /// under the tall-building blocked set) always loses to climbing,
+    /// since the high route is never blocked by anything.</summary>
+    private bool DecideFlightTier(HexCoord start, HexCoord goal)
+    {
+        var straight = start.DistanceTo(goal);
+        var lowPath = HexPathfinder.FindPath(start, goal, _builder.City, _builder.BlockedForFlight(_flightLowAlt));
+        var highCost = straight * FlightEnergyPerHex + _flightHighAlt * FlightClimbEnergyPerUnit;
+        var lowCost = lowPath != null
+            ? lowPath.Count * FlightEnergyPerHex + _flightLowAlt * FlightClimbEnergyPerUnit
+            : float.PositiveInfinity;
+        return highCost < lowCost;
+    }
+
     /// <summary>The blocked set for whatever this unit is doing RIGHT
-    /// NOW: flying uses the same rule as an amphibious plan (only
-    /// buildings block -- water doesn't), regardless of the creature's
-    /// own amphibious flag, since that's exactly what "no going through
-    /// buildings" plus free passage over everything else means for a
-    /// flyer. Grounded movement keeps the creature's normal ground/
-    /// amphibious rule.</summary>
+    /// NOW. Flying ignores buildings shorter than its current cruise
+    /// tier (BlockedForFlight) -- water never blocks flight either way,
+    /// same as amphibious ground movement. Grounded movement keeps the
+    /// creature's normal ground/amphibious rule.</summary>
     private HashSet<HexCoord> Blocked()
     {
-        return _builder.BlockedFor(_flying || _amphibious);
+        if (_flying) return _builder.BlockedForFlight(_flyingHigh ? _flightHighAlt : _flightLowAlt);
+        return _builder.BlockedFor(_amphibious);
     }
 
     private void SetFlyingFor(HexCoord start, HexCoord goal)
     {
         _flying = DecideFlight(start, goal);
-        if (_body != null) _body.SetFlying(_flying);
+        _flyingHigh = _flying && DecideFlightTier(start, goal);
+        if (_body != null) _body.SetFlying(_flying, _flyingHigh);
     }
 
     private List<Vector3> ComputePath(HexCoord goal)

@@ -164,6 +164,39 @@ public class RuntimeCityBuilder : MonoBehaviour
         return amphibious ? _blockedAmphibiousCache : _blockedGroundCache;
     }
 
+    /// <summary>Building height by tier -- the SAME numbers BuildBuildings
+    /// renders with, so a flyer's "can I clear this roof" math can never
+    /// drift from what's actually on screen.</summary>
+    private static float HeightForTier(BuildingTier tier)
+    {
+        switch (tier)
+        {
+            case BuildingTier.Medium: return 12f;
+            case BuildingTier.Large: return 30f;
+            case BuildingTier.Landmark: return 40f;
+            default: return 6f;
+        }
+    }
+
+    /// <summary>Blocked hexes for a WINGED unit cruising at `clearAltitude`
+    /// -- only buildings TALLER than that altitude actually block (water
+    /// never blocks flight, same as amphibious ground movement); a short
+    /// building simply gets flown over. Not cached like BlockedFor since
+    /// it varies continuously by altitude rather than a fixed handful of
+    /// movement classes, and it's only ever called at path-compute time
+    /// (new orders, re-paths on city change), never per frame.</summary>
+    public HashSet<HexCoord> BlockedForFlight(float clearAltitude)
+    {
+        var blocked = new HashSet<HexCoord>();
+        foreach (var b in _battlefield.Buildings)
+        {
+            if (!b.BlocksMovement) continue;
+            if (HeightForTier(b.Building.Tier) <= clearAltitude) continue;
+            foreach (var hex in b.Building.Footprint) blocked.Add(hex);
+        }
+        return blocked;
+    }
+
     // ---- static city geometry --------------------------------------------------
 
     private void BuildGround()
@@ -214,14 +247,14 @@ public class RuntimeCityBuilder : MonoBehaviour
 
         foreach (var building in _city.Buildings)
         {
-            float height;
+            var height = HeightForTier(building.Tier);
             Material mat;
             switch (building.Tier)
             {
-                case BuildingTier.Medium: height = 12f; mat = medium; break;
-                case BuildingTier.Large: height = 30f; mat = large; break;
-                case BuildingTier.Landmark: height = 40f; mat = landmark; break;
-                default: height = 6f; mat = small; break;
+                case BuildingTier.Medium: mat = medium; break;
+                case BuildingTier.Large: mat = large; break;
+                case BuildingTier.Landmark: mat = landmark; break;
+                default: mat = small; break;
             }
             var cubes = new List<GameObject>();
             foreach (var hex in building.Footprint)

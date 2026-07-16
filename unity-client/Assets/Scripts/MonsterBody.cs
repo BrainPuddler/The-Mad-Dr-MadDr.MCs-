@@ -90,8 +90,10 @@ public class MonsterBody : MonoBehaviour
     // ---- flight (winged plan only) ------------------------------------------
     private bool _canFly;
     private bool _flying;          // MonsterAgent's current intent
-    private float _flightLift;     // actual animated lift, MoveTowards-eased toward _flying's target
-    private float _flightTargetLift;
+    private bool _flyingHigh;      // which cruise tier MonsterAgent picked -- see LowFlightAltitude/HighFlightAltitude
+    private float _flightLift;     // actual animated lift, MoveTowards-eased toward the current target
+    private float _flightLowLift;  // clears short buildings (small/medium tier) -- the old single-tier altitude
+    private float _flightHighLift; // clears EVERYTHING (large/landmark tier too), for "climb over it" legs
     private const float FlightLiftAirborneThreshold = 0.5f;   // above this, legs are considered "in the air"
 
     // wing flap (winged plan only): a hinge transform per side, posed
@@ -137,6 +139,19 @@ public class MonsterBody : MonoBehaviour
     /// for everything else.</summary>
     public bool CanFly { get { return _canFly; } }
 
+    /// <summary>Cruise altitude that clears short buildings (small/medium
+    /// tier, per RuntimeCityBuilder's height table) but NOT tall ones --
+    /// MonsterAgent reads these two so it can weigh "detour around a tall
+    /// building at this altitude" against "climb to HighFlightAltitude
+    /// and fly the direct line over it" by actual energy cost, rather
+    /// than the game guessing which is prettier.</summary>
+    public float LowFlightAltitude { get { return _flightLowLift; } }
+
+    /// <summary>Cruise altitude that clears every building tier, including
+    /// landmarks -- nothing left to route around, so a path flown at this
+    /// altitude is always the direct line.</summary>
+    public float HighFlightAltitude { get { return _flightHighLift; } }
+
     public void Build(StoredGenomeDto creature)
     {
         var g = creature.Genome;
@@ -148,11 +163,17 @@ public class MonsterBody : MonoBehaviour
         _stride = _legLen * 1.5f;
         _standHeight = Locomotion.LegsFor(_plan) > 0 ? _legLen : _bulkScale * 0.9f;
         _canFly = _plan == "winged";
-        // clears most building roofs (BuildingTier: small 6 / medium 12
-        // / large 30 / landmark 40) without needing to track real
-        // per-building height -- altitude is cosmetic only, since the
-        // agent's pathing already keeps flight out of building footprints
-        _flightTargetLift = Mathf.Max(14f, BodyHeight * 2.5f);
+        // two cruise tiers (BuildingTier heights, RuntimeCityBuilder:
+        // small 6 / medium 12 / large 30 / landmark 40): Low clears
+        // small/medium with margin -- MonsterAgent's pathing lets flight
+        // at this altitude ignore those buildings' footprints entirely,
+        // only weaving around large/landmark. High clears everything, so
+        // a path flown there never needs to detour at all. Which tier a
+        // given leg actually uses is MonsterAgent's call (SetFlying's
+        // `high` argument), weighed by energy: a short detour beats a
+        // big climb, a long detour loses to it.
+        _flightLowLift = Mathf.Max(14f, BodyHeight * 2.5f);
+        _flightHighLift = Mathf.Max(46f, _flightLowLift + 30f);
 
         var skin = SkinColor(g.Body.Plan, creature.Id);
 
@@ -249,14 +270,17 @@ public class MonsterBody : MonoBehaviour
         }
     }
 
-    /// <summary>MonsterAgent's flight intent (SetFlying(true) to take
-    /// off, SetFlying(false) to land). No-op on a plan that can't fly.
-    /// The actual lift animates smoothly in UpdateLocomotion rather than
-    /// snapping -- see _flightLift.</summary>
-    public void SetFlying(bool flying)
+    /// <summary>MonsterAgent's flight intent (SetFlying(true, ...) to take
+    /// off, SetFlying(false, ...) to land). `high` picks which cruise
+    /// tier to climb to while flying -- see LowFlightAltitude /
+    /// HighFlightAltitude -- ignored while landing. No-op on a plan that
+    /// can't fly. The actual lift animates smoothly in UpdateLocomotion
+    /// rather than snapping -- see _flightLift.</summary>
+    public void SetFlying(bool flying, bool high)
     {
         if (!_canFly) return;
         _flying = flying;
+        _flyingHigh = high;
     }
 
     // ---- construction ------------------------------------------------------
@@ -574,9 +598,12 @@ public class MonsterBody : MonoBehaviour
         if (_canFly)
         {
             var wasAirborne = _flightLift > FlightLiftAirborneThreshold;
-            var targetLift = _flying ? _flightTargetLift : 0f;
-            // ~1.4s for a full lift-off or landing, whatever _flightTargetLift is
-            _flightLift = Mathf.MoveTowards(_flightLift, targetLift, (_flightTargetLift / 1.4f) * dt);
+            var tierLift = _flyingHigh ? _flightHighLift : _flightLowLift;
+            var targetLift = _flying ? tierLift : 0f;
+            // ~1.4s for a full lift-off/landing/tier change, whatever the
+            // relevant altitude is (a low->high climb mid-flight takes
+            // longer than a landing from low, proportionally)
+            _flightLift = Mathf.MoveTowards(_flightLift, targetLift, (tierLift / 1.4f) * dt);
             if (wasAirborne && !_flying && _flightLift <= FlightLiftAirborneThreshold)
             {
                 _flightLift = 0f;
@@ -780,7 +807,8 @@ public class MonsterBody : MonoBehaviour
             return;
         }
 
-        var liftFrac = _flightTargetLift > 0.01f ? _flightLift / _flightTargetLift : 0f;
+        var tierLift = _flyingHigh ? _flightHighLift : _flightLowLift;
+        var liftFrac = tierLift > 0.01f ? _flightLift / tierLift : 0f;
         var atCruise = _flying && liftFrac > 0.97f;   // holding altitude, not still climbing/descending
         var hz = atCruise ? WingFlapHzCruise : WingFlapHzTakeoff;
         var amp = atCruise ? WingFlapAmpCruise : WingFlapAmpTakeoff;
