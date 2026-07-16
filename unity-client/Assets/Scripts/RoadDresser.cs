@@ -98,6 +98,13 @@ public static class RoadDresser
                 connectors.Add((dir, Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg));
             }
 
+            // un-zigzag Grid/MainStreet's "vertical" streets (see doc
+            // comment) -- straight-line-of-sight through-hexes render at
+            // a corrected anchor with a due-north/south bearing instead
+            // of their true kinked diagonal neighbor angle
+            if (TryStraightenCardinal(hex, network, connectors, out var correction))
+                center += correction;
+
             DressHex(builder, hex, center, connectors, host);
 
             // railyard siding (docs/21 batch 2, item 6): a parallel rail
@@ -106,6 +113,52 @@ public static class RoadDresser
             if (railyardCenter.HasValue && connectors.Count == 2 && hex.DistanceTo(railyardCenter.Value) <= RailyardRadius)
                 DressRailSiding(builder, center, connectors[0].dir, host);
         }
+    }
+
+    /// <summary>Offset-column coordinates approximate "south" by
+    /// alternating between two different diagonal hex edges every row
+    /// (SE from an even row, SW from an odd row) -- on a pointy-top hex
+    /// grid, no single edge points due south, so a literal "vertical"
+    /// road (Grid's `col % pitch == 0` streets, MainStreet's
+    /// perpendiculars) saws left-right by HexMeters/2 (10m) at EVERY
+    /// hex if rendered at raw hex centers with true neighbor bearings --
+    /// this is the "roads running north south are zig-zagging" report.
+    /// A hex whose ONLY road connections are that row-parity-specific
+    /// diagonal pair is a pure through-segment of such a corridor (a
+    /// real turn or junction always has a different connector set, and
+    /// is deliberately left alone by the exact-count check below): for
+    /// those hexes, and only those, this rewrites `connectors` to a due
+    /// north/south bearing and returns an x correction of +-HexMeters/4
+    /// -- the exact midpoint between the two alternating raw offsets, so
+    /// a hex's corrected anchor lands on precisely the same x as its
+    /// corridor neighbors' corrected anchors, turning the sawtooth into
+    /// one continuous straight street. Row-based E/W streets never
+    /// trigger this (they're already exactly straight: z depends only on
+    /// R), and neither do corners/dead-ends against a cross street or
+    /// 3+-way intersections.</summary>
+    private static bool TryStraightenCardinal(HexCoord hex, HashSet<HexCoord> network,
+        List<(Vector3 dir, float angle)> connectors, out Vector3 correction)
+    {
+        correction = Vector3.zero;
+        var rEven = (hex.R & 1) == 0;
+        var hasNorth = network.Contains(hex.Neighbor(rEven ? HexEdge.NE : HexEdge.NW));
+        var hasSouth = network.Contains(hex.Neighbor(rEven ? HexEdge.SE : HexEdge.SW));
+        var throughCount = (hasNorth ? 1 : 0) + (hasSouth ? 1 : 0);
+        if (throughCount == 0 || throughCount != connectors.Count) return false;
+
+        connectors.Clear();
+        if (hasNorth)
+        {
+            var d = new Vector3(0f, 0f, -1f);
+            connectors.Add((d, Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg));
+        }
+        if (hasSouth)
+        {
+            var d = new Vector3(0f, 0f, 1f);
+            connectors.Add((d, Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg));
+        }
+        correction = new Vector3((rEven ? 1f : -1f) * (float)HexCoord.HexMeters / 4f, 0f, 0f);
+        return true;
     }
 
     private static Material RailSteel() { return M(0.32f, 0.33f, 0.35f); }

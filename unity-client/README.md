@@ -91,6 +91,13 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   lane dashes, crosswalks, streetlights, telephone poles, hydrants,
   and pastel tail-finned parked cars — all colliderless, all hashed
   from the city seed (same seed = same city, dressed identically).
+  Grid/MainStreet's "vertical" streets (SmallTown, BigCity) render dead
+  straight, not the raw hex grid's inherent sawtooth: a pointy-top hex
+  has no edge that points due south, so offset-column roads alternate
+  between two diagonal edges every row -- `RoadDresser` detects pure
+  through-hexes of such a corridor and renders them at a corrected
+  anchor with a due north/south bearing instead of the true kinked
+  diagonal (pathing/generation untouched; presentation only).
   **Batch 2** (`BridgeDresser.cs` / `KnockableProp.cs` / `DamageFx.cs` /
   `RubbleDresser.cs`): bridges get guardrails, a through-truss arch over
   water spans, and piers dropping to the carved riverbed depth; poles,
