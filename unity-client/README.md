@@ -12,7 +12,12 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   smoke tests (gizmos, not real GameObjects): the first proves the
   `citygen-core` package reference works at all, the second draws a full
   generated city (roads/buildings/water/ridges/bridges) in the Scene view
-  while the Editor isn't playing.
+  while the Editor isn't playing. Drop `CityGizmo` on the SAME GameObject
+  as `RuntimeCityBuilder` to preview a seed/preset in the Scene view,
+  then hit Play: `RuntimeCityBuilder` adopts the gizmo's seed and preset
+  automatically (its own **Seed**/**Preset** fields are ignored whenever
+  a `CityGizmo` is present), so tuning the preview and playing it always
+  build the same city -- no separate copy of the settings to keep in sync.
 - **`Assets/Scripts/RuntimeCityBuilder.cs`** — the playable battlefield hub:
   drop it on an empty GameObject, hit **Play**. Builds the city as real
   geometry, fetches your Menagerie, spawns commanded monsters and

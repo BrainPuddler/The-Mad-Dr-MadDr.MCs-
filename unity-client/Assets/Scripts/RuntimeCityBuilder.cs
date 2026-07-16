@@ -18,9 +18,10 @@ public class RuntimeCityBuilder : MonoBehaviour
     public enum PresetChoice { Village, SmallTown, BigCity }
 
     [Header("City")]
-    [Tooltip("City seed: same seed + preset = identical city, every time (docs/18 determinism contract).")]
+    [Tooltip("City seed: same seed + preset = identical city, every time (docs/18 determinism contract). Ignored if a CityGizmo also sits on this GameObject -- its seed becomes the source of truth, so tuning the Scene-view preview and hitting Play build the same city without retyping.")]
     public int seed = 42;
 
+    [Tooltip("Ignored if a CityGizmo also sits on this GameObject -- see the seed tooltip.")]
     public PresetChoice preset = PresetChoice.Village;
 
     [Header("Roster")]
@@ -78,6 +79,22 @@ public class RuntimeCityBuilder : MonoBehaviour
     private void Start()
     {
         _origin = transform.position;
+
+        // CityGizmo is the Scene-view preview for this same city (docs/18
+        // SS2 smoke test) -- when both components share a GameObject, the
+        // natural workflow is tune-in-Editor then hit Play, and the two
+        // components previously had entirely separate seed/preset fields
+        // with nothing wiring them together: change one, forget the
+        // other, and Play silently builds a DIFFERENT city than the one
+        // just previewed. No good reason for that footgun to exist, so
+        // the gizmo (if present) becomes the source of truth here.
+        var gizmo = GetComponent<CityGizmo>();
+        if (gizmo != null)
+        {
+            seed = gizmo.seed;
+            preset = ConvertPreset(gizmo.preset);
+        }
+
         _city = CityGenerator.Generate(unchecked((uint)seed), ResolvePreset());
         _battlefield = BattlefieldState.FreshFrom(_city);
         _terrain = new TerrainField(_city, _origin, unchecked((uint)seed));
@@ -123,6 +140,20 @@ public class RuntimeCityBuilder : MonoBehaviour
         _roster.OnRosterReady += HandleRosterReady;
         _roster.OnRosterFailed += HandleRosterFailed;
         _roster.FetchRoster();
+    }
+
+    /// <summary>CityGizmo.PresetChoice -> RuntimeCityBuilder.PresetChoice.
+    /// The two enums are distinct nested types with (today) matching
+    /// declaration order, but mapping by NAME here means a future reorder
+    /// of either one can't silently swap presets underneath the other.</summary>
+    private static PresetChoice ConvertPreset(CityGizmo.PresetChoice p)
+    {
+        switch (p)
+        {
+            case CityGizmo.PresetChoice.SmallTown: return PresetChoice.SmallTown;
+            case CityGizmo.PresetChoice.BigCity: return PresetChoice.BigCity;
+            default: return PresetChoice.Village;
+        }
     }
 
     private CityPreset ResolvePreset()
