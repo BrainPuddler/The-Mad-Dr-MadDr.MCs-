@@ -463,6 +463,15 @@ public class RuntimeCityBuilder : MonoBehaviour
 
         foreach (var hex in _city.Ridges)
         {
+            // CityModel.Ridges is only filtered against roads/water in
+            // the generator ("Ridges never coincide with roads or
+            // water") -- buildings are placed in a LATER pass that
+            // treats ridge hexes as ordinary buildable open land, so a
+            // ridge hex can end up with a building footprint on it
+            // (TerrainField correctly flat-locks that hex to 0, buildings
+            // win over the mound -- but this tree pass never checked, so
+            // it kept sprouting trees through the building standing there)
+            if (blocked.Contains(hex)) continue;
             var n = 2 + Mod(hex.Q * 31 + hex.R * 17, 2);
             for (var i = 0; i < n; i++)
                 SpawnTree(hex, i, trunk, canopy, parent);
