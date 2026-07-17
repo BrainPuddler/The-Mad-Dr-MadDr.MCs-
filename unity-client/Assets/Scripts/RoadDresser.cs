@@ -300,14 +300,14 @@ public static class RoadDresser
                 MakeKnockable(b, holder.gameObject, 1.6f);
                 break;
             }
-            case 2:   // fire hydrant
+            case 2:   // fire hydrant -- shears off with a water jet
             {
                 var holder = KnockHolder(propSpot, host);
                 b.SpawnPrim(PrimitiveType.Cylinder, propSpot + Vector3.up * 0.4f,
                     new Vector3(0.35f, 0.4f, 0.35f), HydrantRed(), holder);
                 b.SpawnPrim(PrimitiveType.Sphere, propSpot + Vector3.up * 0.85f,
                     new Vector3(0.4f, 0.25f, 0.4f), HydrantRed(), holder);
-                MakeKnockable(b, holder.gameObject, 1.3f);
+                MakeKnockable(b, holder.gameObject, 1.3f).SpawnsWaterJet = true;
                 break;
             }
             case 3:   // trash can
@@ -347,9 +347,11 @@ public static class RoadDresser
         return holder;
     }
 
-    private static void MakeKnockable(RuntimeCityBuilder b, GameObject go, float radius)
+    private static KnockableProp MakeKnockable(RuntimeCityBuilder b, GameObject go, float radius)
     {
-        go.AddComponent<KnockableProp>().Init(b, radius);
+        var prop = go.AddComponent<KnockableProp>();
+        prop.Init(b, radius);
+        return prop;
     }
 
     /// <summary>A 1950s parked car: pastel slab body, cabin, chrome

@@ -106,6 +106,7 @@ public class RuntimeCityBuilder : MonoBehaviour
         BuildTerrainAndRoads();
         BuildBuildings();
         BuildBridges();
+        BuildLandmarkAuras();
         SpawnCitizens();
         SpawnTanks();
         SpawnTraffic();
@@ -604,6 +605,54 @@ public class RuntimeCityBuilder : MonoBehaviour
             // the massing they belong to
             BuildingDresser.Dress(this, building, height, cubes, buildings, industrial, suburb);
             _cubesByBuilding[building] = cubes;
+        }
+    }
+
+    /// <summary>Play-mode read for the landmark mechanics' radii --
+    /// docs/03's 3-hex emitter aura and docs/18/20's 5-hex Collection
+    /// Station harvest radius. CityGizmo draws these as wire spheres in
+    /// the Scene view, but the actual GAME never showed them; a ring of
+    /// short emissive pylons (teal = emitter, red = station, the gizmo's
+    /// own color code) marks each radius on the ground. Pylons that
+    /// would land inside a building or in water are skipped -- the ring
+    /// reads through the gap, and a post poking out of a roof would
+    /// read as a glitch. Registered with NeonRegistry, so they glow
+    /// properly at night like all other emissives.</summary>
+    private void BuildLandmarkAuras()
+    {
+        var host = new GameObject("LandmarkAuras").transform;
+        host.SetParent(transform, false);
+
+        var emitterMat = NewMaterial(new Color(0.2f, 0.85f, 0.85f));
+        emitterMat.EnableKeyword("_EMISSION");
+        emitterMat.SetColor("_EmissionColor", new Color(0.2f, 0.85f, 0.85f) * 0.9f);
+        NeonRegistry.Register(emitterMat, new Color(0.2f, 0.85f, 0.85f) * 0.9f);
+
+        var hubMat = NewMaterial(new Color(0.85f, 0.25f, 0.25f));
+        hubMat.EnableKeyword("_EMISSION");
+        hubMat.SetColor("_EmissionColor", new Color(0.85f, 0.25f, 0.25f) * 0.9f);
+        NeonRegistry.Register(hubMat, new Color(0.85f, 0.25f, 0.25f) * 0.9f);
+
+        var water = new HashSet<HexCoord>(_city.Water);
+        var blocked = BlockedFor(false);
+
+        foreach (var landmark in _city.Landmarks)
+        {
+            var mat = landmark.Kind == LandmarkKind.Emitter ? emitterMat : hubMat;
+            var center = WorldOf(landmark.Site);
+            var radius = landmark.RadiusHexes * (float)HexCoord.HexMeters;
+            const int posts = 18;
+            for (var i = 0; i < posts; i++)
+            {
+                var angle = i * (2f * Mathf.PI / posts);
+                var p = center + new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
+                var hex = HexAt(p);
+                if (!_city.Contains(hex) || blocked.Contains(hex) || water.Contains(hex)) continue;
+                p.y = GroundHeightAt(p);
+                var pylon = SpawnPrim(PrimitiveType.Cylinder, p + Vector3.up * 0.8f,
+                    new Vector3(0.22f, 0.8f, 0.22f), mat, host);
+                pylon.name = "AuraPylon";
+            }
         }
     }
 

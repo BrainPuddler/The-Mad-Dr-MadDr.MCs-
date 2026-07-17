@@ -30,6 +30,17 @@ public static class DamageFx
         go.AddComponent<DustBurstFx>();
     }
 
+    /// <summary>A vertical water spout where a hydrant just got sheared
+    /// off -- sprays for a few seconds, then peters out and cleans
+    /// itself up (`WaterSpout`).</summary>
+    public static void WaterJet(Vector3 at, Transform parent)
+    {
+        var go = new GameObject("WaterJet");
+        go.transform.SetParent(parent, false);
+        go.transform.position = at;
+        go.AddComponent<WaterSpout>();
+    }
+
     /// <summary>A dark ground stain at a citizen's last position -- the
     /// horror-movie kill mark. Fades out after a while (`GroundStain`)
     /// rather than lingering forever, so a long match's eaten-citizen
@@ -154,6 +165,18 @@ public class SmokePuff : MonoBehaviour
         _drift = new Vector3(_drift.x, 0.6f, _drift.z);
     }
 
+    /// <summary>Fully-specified drift -- the hydrant water jet uses this
+    /// to fire droplets UP hard with a slight scatter, unlike smoke's
+    /// lazy rise or dust's outward roll.</summary>
+    public void InitJet(Material mat, Vector3 drift, float life, float growth, float baseAlpha)
+    {
+        _mat = mat;
+        _drift = drift;
+        _life = life;
+        _growth = growth;
+        _baseAlpha = baseAlpha;
+    }
+
     private void Update()
     {
         _age += Time.deltaTime;
@@ -167,6 +190,51 @@ public class SmokePuff : MonoBehaviour
             _mat.color = new Color(c.r, c.g, c.b, _baseAlpha * (1f - t));
         }
         if (t >= 1f) Object.Destroy(gameObject);
+    }
+}
+
+/// <summary>Sprays water droplets upward for a few seconds after a
+/// hydrant is sheared off, then stops emitting and destroys itself once
+/// the last droplet has faded.</summary>
+public class WaterSpout : MonoBehaviour
+{
+    private float _age;
+    private float _emitTimer;
+    private const float SprayDuration = 6f;
+
+    private void Update()
+    {
+        _age += Time.deltaTime;
+        if (_age >= SprayDuration)
+        {
+            // droplets live ~1.1s; linger past the last one, then clean up
+            Object.Destroy(gameObject, 1.5f);
+            enabled = false;
+            return;
+        }
+
+        _emitTimer -= Time.deltaTime;
+        if (_emitTimer > 0f) return;
+        _emitTimer = 0.12f;
+
+        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        go.name = "WaterDroplet";
+        go.transform.SetParent(transform, false);
+        go.transform.position = transform.position + Vector3.up * 0.6f;
+        go.transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
+        var collider = go.GetComponent<Collider>();
+        if (collider != null) Object.Destroy(collider);
+
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(0.5f, 0.72f, 0.85f, 0.8f);
+        LabMeshBuilder.MakeTransparent(mat);
+        var renderer = go.GetComponent<Renderer>();
+        if (renderer != null) renderer.sharedMaterial = mat;
+
+        // hard vertical jet with a slight per-droplet scatter
+        var id = go.GetInstanceID();
+        var drift = new Vector3(((id & 7) - 3.5f) * 0.22f, 5.5f, (((id >> 3) & 7) - 3.5f) * 0.22f);
+        go.AddComponent<SmokePuff>().InitJet(mat, drift, 1.1f, 0.9f, 0.8f);
     }
 }
 

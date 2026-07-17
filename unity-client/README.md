@@ -130,7 +130,11 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   and zigzag the same way road hexes do; poles,
   hydrants, trash cans, and parked cars are **knockable** (a monster or
   tank walking through one tips it over, a timed tween, no physics
-  engine); Damaged buildings breathe a slow smoke plume and a collapse
+  engine — a sheared hydrant gushes a water jet for a few seconds);
+  landmark mechanic radii read in-game as rings of short emissive
+  pylons (teal emitter aura at 3 hexes, red Collection Station at 5 —
+  the same color code CityGizmo's Scene-view spheres use), with pylons
+  skipped wherever they'd land in a building or water; Damaged buildings breathe a slow smoke plume and a collapse
   fires a one-shot dust burst plus a dark scorch mark under the
   wreckage; destroyed buildings scatter tumbled rubble chunks over the
   crushed pancake instead of one flat slab;

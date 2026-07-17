@@ -21,6 +21,11 @@ public class KnockableProp : MonoBehaviour
     private Vector3 _restPosition;
     private Quaternion _restRotation;
 
+    /// <summary>Set for fire hydrants: the knock also shears the valve,
+    /// so a water jet erupts from where the prop stood -- the classic
+    /// B-movie street beat.</summary>
+    public bool SpawnsWaterJet;
+
     private const float TipDuration = 0.35f;
     private const float TipAngle = 82f;
     private const float SinkDepth = 0.35f;
@@ -65,6 +70,7 @@ public class KnockableProp : MonoBehaviour
             // horizontal axis perpendicular to the approach line
             _tipAxis = new Vector3(d.z, 0f, -d.x).normalized;
             if (_tipAxis.sqrMagnitude < 1e-4f) _tipAxis = Vector3.forward;
+            if (SpawnsWaterJet) DamageFx.WaterJet(pos, transform.parent);
             break;
         }
     }
