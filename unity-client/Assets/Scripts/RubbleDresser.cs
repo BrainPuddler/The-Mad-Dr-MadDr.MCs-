@@ -43,4 +43,40 @@ public static class RubbleDresser
             }
         }
     }
+
+    /// <summary>Replaces a footprint hex's massing cube -- destroyed by
+    /// the caller just before this runs -- with several big broken slab
+    /// pieces instead of squishing the whole 18m-wide cube flat in
+    /// place. A uniform full-width slab pancaked to a fraction of its
+    /// height reads as a flat stain (a "radiating puddle", per report)
+    /// from the RTS camera, not a collapsed building; a handful of
+    /// varied-size, steeply-tilted wall-section-scale slabs reads as
+    /// actual broken masonry. `Scatter`'s smaller debris chunks layer on
+    /// top of this, same as before.</summary>
+    public static void Shatter(RuntimeCityBuilder builder, HexCoord hex, Vector3 originalCenter, Material rubbleMat, Transform parent)
+    {
+        var host = new GameObject("Collapsed").transform;
+        host.SetParent(parent, false);
+
+        var h = Hash(hex, 61);
+        var pieces = 3 + h % 3;
+        for (var i = 0; i < pieces; i++)
+        {
+            var hi = Hash(hex, 200 + i);
+            var off = new Vector3((hi % 11) - 5f, 0f, ((hi >> 4) % 11) - 5f) * 0.9f;
+            var pos = originalCenter + off;
+            pos.y = builder.GroundHeightAt(pos) + 0.6f + (hi % 4) * 0.4f;
+            var width = 5f + (hi % 4) * 1.6f;         // 5-9.8m: a broken wall-section scale
+            var thickness = 0.8f + (hi % 3) * 0.4f;   // 0.8-2.0m thick, not a paper-thin sheet
+            var depth = 3f + ((hi >> 3) % 4) * 1.2f;
+            var slab = builder.SpawnPrim(PrimitiveType.Cube, pos,
+                new Vector3(width, thickness, depth), rubbleMat, host);
+            // tilted like a fallen wall section -- some lie nearly flat,
+            // others lean steeply, never all at the same uniform angle
+            slab.transform.rotation = Quaternion.Euler(
+                ((hi % 7) - 3f) * 6f + (hi % 2) * 30f,
+                (hi * 37) % 360,
+                (((hi >> 2) % 7) - 3f) * 6f);
+        }
+    }
 }

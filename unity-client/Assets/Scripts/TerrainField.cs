@@ -10,8 +10,12 @@ using UnityEngine;
 ///   ridge hexes  -> smooth ~3m mounds (CityModel.Ridges IS the docs/04
 ///                   high-ground gameplay set; the old renderer showed it
 ///                   as green blocks)
-///   water hexes  -> carved ~-1.4m river/pond beds (banks emerge from
-///                   smoothing into neighboring land)
+///   water hexes  -> carved ~-1.4m river/pond beds
+///   shoreline    -> open-ground hexes touching water get a shallow
+///                   recessed lip (~-0.55m, gently varied) instead of
+///                   their normal roll -- the smoothing below then
+///                   blends open ground -> recessed shore -> bed as one
+///                   continuous indented bank, not a straight ramp
 ///   flat-locked  -> exactly 0 under buildings, roads, and bridges, so
 ///                   every gameplay-vertical assumption (roof heights,
 ///                   flight tiers, descent floors, bridge decks, rubble)
@@ -29,6 +33,7 @@ public sealed class TerrainField
     public const float RidgeHeight = 3.0f;      // matches the old ridge block, so high-ground reads the same
     public const float WaterBedDepth = -1.4f;   // carved bed; water surface slabs sit above this
     public const float RollAmplitude = 1.5f;    // open-ground rolling hills ceiling
+    public const float BankRecess = -0.55f;     // shoreline lip, +-0.2 varied -- shallower than the bed
 
     private readonly Dictionary<HexCoord, float> _hexHeight = new Dictionary<HexCoord, float>();
     private readonly CityModel _city;
@@ -56,6 +61,7 @@ public sealed class TerrainField
             if (flat.Contains(hex)) h = 0f;
             else if (water.Contains(hex)) h = WaterBedDepth;
             else if (ridges.Contains(hex)) h = RidgeHeight;
+            else if (IsShoreline(hex, water)) h = BankRecess + (Roll(hex, seed) / RollAmplitude - 0.5f) * 0.4f;
             else h = Roll(hex, seed);
             _hexHeight[hex] = h;
         }
@@ -90,6 +96,16 @@ public sealed class TerrainField
         if (!_hexHeight.TryGetValue(hex, out h)) h = 0f;
         sum += h * w;
         weight += w;
+    }
+
+    /// <summary>Any of the hex's six neighbors is water -- open ground
+    /// touching a river/pond gets the recessed shoreline treatment
+    /// instead of its normal roll.</summary>
+    private static bool IsShoreline(HexCoord hex, HashSet<HexCoord> water)
+    {
+        foreach (var n in hex.Neighbors())
+            if (water.Contains(n)) return true;
+        return false;
     }
 
     /// <summary>Gentle rolling hills for open ground: 2-octave value

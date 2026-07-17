@@ -82,8 +82,11 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   `RoadDresser.cs`, docs/21) — the battlefield renders as a 1950s
   monster-movie miniature. Deterministic sculpted terrain (the
   generator's own ridge hexes become rolling high-ground mounds, rivers
-  and ponds get carved beds with visible banks and sunken translucent
-  water, open ground rolls gently) with the **flat-lock rule**: ground
+  and ponds get carved beds with sunken translucent water, open ground
+  rolls gently) -- shorelines get a shallow recessed lip (open-ground
+  hexes touching water target a gently-varied dip instead of their
+  normal roll, so the existing blend produces one continuous indented
+  bank rather than a straight ramp down to the bed) with the **flat-lock rule**: ground
   under every building plot, road, and bridge stays exactly y=0, so
   roof heights, flight tiers, perch/descent math, and rubble never
   drift. Units terrain-follow (`GroundHeightAt`), and `MonsterBody`
@@ -134,10 +137,13 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   landmark mechanic radii read in-game as rings of short emissive
   pylons (teal emitter aura at 3 hexes, red Collection Station at 5 —
   the same color code CityGizmo's Scene-view spheres use), with pylons
-  skipped wherever they'd land in a building or water; Damaged buildings breathe a slow smoke plume and a collapse
-  fires a one-shot dust burst plus a dark scorch mark under the
-  wreckage; destroyed buildings scatter tumbled rubble chunks over the
-  crushed pancake instead of one flat slab;
+  skipped wherever they'd land in a building or water; Damaged buildings
+  breathe a slow smoke plume and a collapse fires a one-shot dust burst
+  plus a few small scorch patches under the wreckage; destroyed
+  buildings shatter into several large tilted slabs plus a scatter of
+  smaller tumbled chunks, not one flat squashed pancake (a full-width
+  cube crushed flat in place read as a stain from the RTS camera, not
+  broken masonry);
   office billboards and occasional roadside boards carry period-poster
   color-block art (soda bullseyes, movie one-sheets, headline bands);
   buildings tint warmer/residential toward the outskirts and
@@ -166,7 +172,12 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   threat -- a quarter of them are boxy delivery vans instead of sedans,
   hash-picked per spawn hex for period street variety. Ridge hexes
   occasionally grow a small tumbled-boulder outcrop alongside the usual
-  trees, so hillsides don't read as pure forest.
+  trees, so hillsides don't read as pure forest. Ponds read differently
+  from the river: `RuntimeCityBuilder.PondHexes` splits `city.Water`
+  into connected components (the river is reliably the largest, carved
+  as one band spanning the whole map) and gives every OTHER component
+  (the ponds) floating lily pads plus cattail reeds ringing the shore,
+  instead of the river's plain shore bushes.
 - **Combat** (`UnitCombat.cs` / `WeaponFx.cs` / `Projectile.cs` /
   `Tank.cs` / `HealthBars.cs`) — every unit has health and a weapon
   derived from its genome (`roster-client`'s tested `Combat.Profile`):

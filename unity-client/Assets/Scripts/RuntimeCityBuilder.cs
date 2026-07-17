@@ -459,9 +459,13 @@ public class RuntimeCityBuilder : MonoBehaviour
         var canopy = NewMaterial(new Color(0.30f, 0.44f, 0.22f));
         var bush = NewMaterial(new Color(0.36f, 0.5f, 0.28f));
         var rock = NewMaterial(new Color(0.55f, 0.53f, 0.5f));
+        var lilyPad = NewMaterial(new Color(0.22f, 0.42f, 0.24f));
+        var reedStem = NewMaterial(new Color(0.32f, 0.42f, 0.22f));
+        var reedHead = NewMaterial(new Color(0.36f, 0.23f, 0.15f));
 
         var water = new HashSet<HexCoord>(_city.Water);
         var blocked = BlockedFor(false);
+        var ponds = PondHexes();
 
         foreach (var hex in _city.Ridges)
         {
@@ -484,10 +488,25 @@ public class RuntimeCityBuilder : MonoBehaviour
 
         foreach (var hex in _city.Water)
         {
-            // shore bushes: on the LAND neighbors of water hexes
+            var isPond = ponds.Contains(hex);
+
+            // still water grows lily pads on its own surface; the river
+            // (the map-spanning connected component, see PondHexes) stays
+            // clear -- flowing water doesn't carry pads
+            if (isPond && Mod(hex.Q * 17 + hex.R * 37, 3) != 0)
+                SpawnLilyPads(hex, lilyPad, parent);
+
+            // shoreline dressing: cattail reeds ringing a pond, the
+            // existing bushes along a river bank -- the two water bodies
+            // read differently at their edges, not just on the water
             foreach (var nb in hex.Neighbors())
             {
                 if (!_city.Contains(nb) || water.Contains(nb) || blocked.Contains(nb)) continue;
+                if (isPond)
+                {
+                    if (Mod(nb.Q * 31 + nb.R * 11, 5) == 0) SpawnCattails(nb, reedStem, reedHead, parent);
+                    continue;
+                }
                 if (Mod(nb.Q * 53 + nb.R * 29, 7) != 0) continue;
                 var w = WorldOf(nb);
                 var off = new Vector3(Mod(nb.Q * 13 + nb.R * 7, 9) - 4f, 0f, Mod(nb.Q * 5 + nb.R * 23, 9) - 4f);
@@ -497,6 +516,80 @@ public class RuntimeCityBuilder : MonoBehaviour
                     new Vector3(1.6f, 1.0f, 1.6f), bush, parent);
                 b.name = "Bush";
             }
+        }
+    }
+
+    /// <summary>Splits `_city.Water` into connected components (plain hex
+    /// adjacency BFS) and calls every hex OUTSIDE the largest one a
+    /// "pond" -- the generator's river is carved as one band spanning
+    /// the full map width, so it's reliably the biggest component; ponds
+    /// are separate, smaller, local blobs. citygen-core doesn't tag which
+    /// is which, so this infers it purely for presentation (lily pads vs.
+    /// open water) without touching the shared schema.</summary>
+    private HashSet<HexCoord> PondHexes()
+    {
+        var water = new HashSet<HexCoord>(_city.Water);
+        var seen = new HashSet<HexCoord>();
+        List<HexCoord> largest = null;
+
+        foreach (var start in _city.Water)
+        {
+            if (seen.Contains(start)) continue;
+            var component = new List<HexCoord>();
+            var queue = new Queue<HexCoord>();
+            queue.Enqueue(start);
+            seen.Add(start);
+            while (queue.Count > 0)
+            {
+                var hex = queue.Dequeue();
+                component.Add(hex);
+                foreach (var n in hex.Neighbors())
+                {
+                    if (!water.Contains(n) || seen.Contains(n)) continue;
+                    seen.Add(n);
+                    queue.Enqueue(n);
+                }
+            }
+            if (largest == null || component.Count > largest.Count) largest = component;
+        }
+
+        var ponds = new HashSet<HexCoord>(_city.Water);
+        if (largest != null) foreach (var h in largest) ponds.Remove(h);
+        return ponds;
+    }
+
+    private void SpawnLilyPads(HexCoord hex, Material pad, Transform parent)
+    {
+        var w = WorldOf(hex);
+        var count = 2 + Mod(hex.Q * 11 + hex.R * 7, 3);
+        for (var i = 0; i < count; i++)
+        {
+            var off = new Vector3(Mod(hex.Q * 19 + hex.R * 5 + i * 29, 13) - 6f, 0f,
+                Mod(hex.Q * 7 + hex.R * 23 + i * 17, 13) - 6f);
+            // sit just above the water slab's surface (spawned at
+            // center.y -0.5, height 0.14 -> top ~ -0.43)
+            var p = w + off + Vector3.up * -0.38f;
+            var size = 0.6f + Mod(hex.Q + hex.R + i * 3, 3) * 0.25f;
+            var lp = SpawnPrim(PrimitiveType.Cylinder, p, new Vector3(size, 0.04f, size), pad, parent);
+            lp.name = "LilyPad";
+        }
+    }
+
+    private void SpawnCattails(HexCoord hex, Material stem, Material head, Transform parent)
+    {
+        var w = WorldOf(hex);
+        var count = 2 + Mod(hex.Q * 5 + hex.R * 31, 3);
+        for (var i = 0; i < count; i++)
+        {
+            var off = new Vector3(Mod(hex.Q * 13 + hex.R * 7 + i * 19, 9) - 4f, 0f,
+                Mod(hex.Q * 3 + hex.R * 17 + i * 23, 9) - 4f);
+            var baseP = w + off;
+            baseP.y = GroundHeightAt(baseP);
+            var height = 1.4f + Mod(hex.Q + hex.R + i * 5, 3) * 0.3f;
+            SpawnPrim(PrimitiveType.Cylinder, baseP + Vector3.up * (height * 0.5f),
+                new Vector3(0.05f, height * 0.5f, 0.05f), stem, parent).name = "Reed";
+            SpawnPrim(PrimitiveType.Cylinder, baseP + Vector3.up * (height + 0.15f),
+                new Vector3(0.09f, 0.18f, 0.09f), head, parent).name = "CattailHead";
         }
     }
 
@@ -719,13 +812,36 @@ public class RuntimeCityBuilder : MonoBehaviour
         if (next.Stage == DamageStage.Destroyed)
         {
             // docs/18 SS3: collapse to walkable rubble; its hexes leave
-            // the pathing index -- flag agents to re-path. The cubes list
-            // includes the 1950s dressing holders, so water towers and
-            // signage crush into the rubble pancake with the massing.
+            // the pathing index -- flag agents to re-path. `cubes` holds
+            // the massing cube for each footprint hex FIRST (added in
+            // BuildBuildings' footprint loop), then one dressing holder
+            // per hex (added once by BuildingDresser.Dress right after)
+            // -- exactly footprint.Count of each, in that order. That
+            // structural invariant is what lets this tell them apart
+            // below without a separate marker.
             var rubbleMat = new Material(ShaderUtil.FindRenderableShader());
             rubbleMat.color = new Color(0.3f, 0.28f, 0.26f);
-            foreach (var cube in cubes)
+            var footprintCount = building.Footprint.Count;
+            for (var i = 0; i < cubes.Count; i++)
             {
+                var cube = cubes[i];
+                if (i < footprintCount)
+                {
+                    // massing cube: squishing an 18m-wide cube flat in
+                    // place read as a uniform stain from the RTS camera
+                    // ("radiating puddles", not broken masonry) -- destroy
+                    // it and replace with several big tilted slab pieces
+                    var hex = building.Footprint[i];
+                    var pos0 = cube.transform.position;
+                    var massingCollider = cube.GetComponent<Collider>();
+                    if (massingCollider != null) _buildingByCollider.Remove(massingCollider);
+                    Object.Destroy(cube);
+                    if (_buildingsHost != null) RubbleDresser.Shatter(this, hex, pos0, rubbleMat, _buildingsHost);
+                    continue;
+                }
+                // dressing holder: still squish in place -- it's already a
+                // cluster of smaller, varied pieces (windows, cornices,
+                // water towers), so flattening reads as debris, not a slab
                 var s = cube.transform.localScale;
                 cube.transform.localScale = new Vector3(s.x, s.y * 0.12f, s.z);
                 var p = cube.transform.position;
@@ -740,8 +856,9 @@ public class RuntimeCityBuilder : MonoBehaviour
                     Object.Destroy(collider); // rubble: clicks fall through to the ground
                 }
             }
-            // tumbled chunks over the pancake (docs/21 batch 2, item 5) and
-            // a one-shot dust puff burst for the collapse beat (item 3)
+            // small debris chunks scattered over the shattered slabs
+            // (docs/21 batch 2, item 5) and a one-shot dust puff burst
+            // for the collapse beat (item 3)
             if (_buildingsHost != null)
             {
                 RubbleDresser.Scatter(this, building, rubbleMat, _buildingsHost);
@@ -780,13 +897,27 @@ public class RuntimeCityBuilder : MonoBehaviour
     /// read, no gameplay weight.</summary>
     private void SpawnScorchDecal(Building building, Transform parent)
     {
+        // several small, irregular-sized patches per hex, NOT one big
+        // disc spanning the whole footprint -- a single hex-wide circle
+        // read as a "radiating puddle" from the RTS camera rather than
+        // a scorch accent under the (now-shattered) rubble
         var mat = NewMaterial(new Color(0.12f, 0.11f, 0.1f));
         foreach (var hex in building.Footprint)
         {
-            var pos = WorldOf(hex);
-            pos.y = GroundHeightAt(pos) + 0.06f;
-            var decal = SpawnPrim(PrimitiveType.Cylinder, pos, new Vector3(9f, 0.06f, 9f), mat, parent);
-            decal.name = "Scorch";
+            var center = WorldOf(hex);
+            var h = (hex.Q * 41 + hex.R * 17) & 0x7FFFFFFF;
+            var patches = 2 + h % 2;
+            for (var i = 0; i < patches; i++)
+            {
+                var hi = (h + i * 733) & 0x7FFFFFFF;
+                var off = new Vector3((hi % 9) - 4f, 0f, ((hi >> 4) % 9) - 4f) * 0.6f;
+                var pos = center + off;
+                pos.y = GroundHeightAt(pos) + 0.05f;
+                var size = 2.2f + (hi % 3) * 0.8f;
+                var decal = SpawnPrim(PrimitiveType.Cylinder, pos,
+                    new Vector3(size, 0.05f, size * (0.75f + (hi % 3) * 0.1f)), mat, parent);
+                decal.name = "Scorch";
+            }
         }
     }
 
