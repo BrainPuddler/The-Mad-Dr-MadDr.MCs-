@@ -4,7 +4,7 @@ Status: Draft v0.1 · Pillars served: 1 (*Every monster is yours*), 3 (*Honest c
 
 ## Scope
 
-This doc doesn't introduce new formulas of its own except Repair (§6) and in-match Cannibalize's channel time (§7, open — Q23), which have no other home. Everything else — Collection Station yields, the Bones-cost formula, the Megabrain Augmentation, Cannibalize's recovery rate, Community Hub density, faction corpse salvage, surgery grafting — is specified where it structurally belongs (05/06/16/17/18/19) and just told here as one continuous player-facing story.
+This doc doesn't introduce new formulas of its own except Repair (§6) and in-match Cannibalize's channel time (§7, open — Q23), which have no other home. The per-unit *onboard* economy layered on top of this wallet economy — blood/bone/brain capacities inside each unit, medic and harvester unit classes, storage structures, and factories — lives in [22-economy-system.md](22-economy-system.md). Everything else — Collection Station yields, the Bones-cost formula, the Megabrain Augmentation, Cannibalize's recovery rate, Community Hub density, faction corpse salvage, surgery grafting — is specified where it structurally belongs (05/06/16/17/18/19) and just told here as one continuous player-facing story.
 
 ## 1. The harvesting loop
 

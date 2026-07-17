@@ -26,6 +26,8 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | [18-city-battlefields.md](18-city-battlefields.md) | Unity battlefield layer: 5 km match scale, procedural city generation, destructible buildings, the engagement-zone LOD scheme, Unity↔Lab integration | Draft |
 | [19-citizens.md](19-citizens.md) | Civilian city population: age/body type, aggression & weapon access, sync-tier LOD; distinct from the Human Army faction | Draft |
 | [20-harvest-and-repair.md](20-harvest-and-repair.md) | Citizen and vanquished-foe harvesting (Collection Stations, faction corpse salvage, hybrid-monster parts), resource-gated construction (Bones cost, Megabrain Augmentation), field Repair, and in-match Cannibalize | Draft |
+| [21-world-upgrade-report.md](21-world-upgrade-report.md) | Unity battlefield presentation upgrade: world architecture report, sculpted terrain, 1950s building/road dressing, and its follow-up batches | Living |
+| [22-economy-system.md](22-economy-system.md) | The living economy: per-unit onboard blood/bone/brain pools (capacities, damage spill, efficiency floors), medic + harvester units, storage structures (blood banks, bone piles), factories (the Stitchworks), fun-first/never-annoying design contract | Draft |
 
 **Status legend**: *Draft* (numbers are v0.1 proposals) → *Reviewed* (survived Phase-0 paper playtest and a read-through) → *Locked* (implementation depends on it; changes require a decision-log entry in [12](12-open-questions.md)).
 
@@ -44,6 +46,9 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | **Allele** | One part slot's gene triple `{partFamilyId, sizeGene, variantGene}` ([06](06-mutator-design.md)) |
 | **Archetype / body plan** | One of 6 base skeletons (biped, quadruped, serpentine, winged, hulking, amorphous); selects rig, animation set, and slot list |
 | **Aura** | The 3-hex radius around an emitter where affinity modifiers apply ([03](03-mana-system.md)) |
+| **Blood Bank** | A player-built, Ghoul-constructed storage structure: refills nearby friendly units' onboard blood and extends the Blood wallet cap; distinct from doc 17's hospital world-source node ([22](22-economy-system.md)) |
+| **Bone Pile** | A player-built storage structure: refills onboard bone (armour stock) and extends the Bones wallet cap ([22](22-economy-system.md)) |
+| **Brain Trust** | A player-built storage structure: refills onboard grey-matter charge and extends the greyMatter wallet cap ([22](22-economy-system.md)) |
 | **Brain budget** | The stat-point and quirk cap imposed by a monster's brain quality (Dim/Average/Gifted/Mastermind) ([06](06-mutator-design.md)) |
 | **Brains** | Player-facing term for two things: the discrete, one-per-monster Brain tier-item that gates the genome's stat budget (see **Brain budget**, above); and the bulk, counted resource harvested from Citizens and vanquished foes, individually weak, whose only sink is Megabrain Augmentation — internally tracked as the distinct field `greyMatter` so the two never collide in code ([05](05-component-economy.md), [20](20-harvest-and-repair.md)) |
 | **Cannibalize** | Retire one of your own genomes at the Workshop, or recall a living fielded creature at the Vat mid-match, converting it back into Bones/Body Parts/a Brain-tier roll at 50% of its build cost — the same operation in two contexts ([06](06-mutator-design.md), [20](20-harvest-and-repair.md)) |
@@ -59,6 +64,7 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | **Failed experiment** | The comic, fiction-friendly result of an invalid Mutator operation — never silent clamping ([06](06-mutator-design.md)) |
 | **Genome** | The complete, immutable, server-signed description of a creature (~200–400 B). The normative schema lives in [06](06-mutator-design.md) |
 | **Genome fragment** | A salvage drop that reveals one enemy part family to your catalog ([04](04-combat-model.md)) |
+| **Ghoul** | The gatherer unit class: auto-scavenges corpse salvage and blood spills into the wallet, and constructs storage structures and the Stitchworks; unarmed, flees when threatened ([22](22-economy-system.md)) |
 | **Graft** | The deterministic Mutator operator: pay parts to set a slot directly ([06](06-mutator-design.md)) |
 | **Local city** | The mid engagement-zone LOD tier (~1 km): buildings static, Citizens run as client-side crowd only ([18](18-city-battlefields.md)) |
 | **Lumen Cycle** | The 4-minute Day→Dusk→Night→Dawn match clock driving emitter output and affinity buffs ([03](03-mana-system.md)) |
@@ -67,6 +73,7 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | **Menagerie** | The ≤12 active monster designs you can reanimate in a match ([02](02-gameplay-overview.md)) |
 | **Moon dial** | The always-public HUD clock showing the current Lumen phase and the 10-second transition warning |
 | **Mutate** | The one-parent Mutator operator: biased random mutation, steered by fed components ([06](06-mutator-design.md)) |
+| **Onboard pools** | The three per-unit resource tanks — blood (fuel), bone (armour stock), brain (grey-matter charge) — with genome-derived capacities; drained by fighting and damage, refilled by eating/storage/medics, degrading efficiency toward floors when empty ([22](22-economy-system.md)) |
 | **The Mutator** | The server-side genetic-algorithm laboratory: Mutate, Splice, Graft ([06](06-mutator-design.md), [07](07-mutator-server-architecture.md)) |
 | **The Notebook** | Dr. Frankenstein's inherited journals — the game's unifying UI metaphor and your collection record ([01](01-vision.md)) |
 | **Part family** | A catalog entry of part meshes (claw-arm, bat-wing…) with slot/archetype compatibility and authored scale bounds ([08](08-creature-visualization.md)) |
@@ -75,7 +82,9 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | **Reanimation** | Fielding a Menagerie design at the Vat: component bill + mana surge + 5–20 s build time ([05](05-component-economy.md)) |
 | **Repair** | An in-match Vat command that restores a living creature's lost HP for a Bone+Blood cost scaled to missing HP; distinct from surgery/graft and the `regeneration` quirk ([20](20-harvest-and-repair.md)) |
 | **Salvage** | The 40–60% component drop on a monster's death hex, lootable by either side for 15 s ([04](04-combat-model.md)) |
+| **Sawbones** | The medic unit class: auto-triage AI, channels field Repair at half Vat speed and transfuses onboard pools from the wallet; one medic per patient, no attack ([22](22-economy-system.md)) |
 | **Splice** | The two-parent Mutator operator: crossover breeding, with low-odds cross-archetype hybrids ([06](06-mutator-design.md)) |
+| **Stitchworks** | A player-built forward factory: reanimates Menagerie designs at 1.5× Vat build time with a 5-deep queue, and channels match-scoped field augments (+50% to an onboard capacity) ([22](22-economy-system.md)) |
 | **Structure HP** | A building's Vitality-equivalent stat, resolved through the existing damage formula ([04](04-combat-model.md), [18](18-city-battlefields.md)) |
 | **Style preset** | An authored parameter set (road layout, density, facade/prop kit) skinning the shared city generator per theme ([18](18-city-battlefields.md)) |
 | **Territory tick** | The per-controlled-hex blood trickle (+0.1 blood/min) ([05](05-component-economy.md)) |

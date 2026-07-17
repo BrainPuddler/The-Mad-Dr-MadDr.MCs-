@@ -30,6 +30,7 @@ Two independent tracks; neither blocks the other, and **no netcode in either**.
 ## Phase 2 — The Stitching
 
 - Join the tracks: real creatures (Track B) fighting in the real sandbox (Track A). Full single-player skirmish vs. scripted AI on the [02](02-gameplay-overview.md) match anatomy — all three victory conditions, FTUE rough cut, the meta loop live (win components → mutate → refight).
+- **The living-economy layer** ([22](22-economy-system.md)) validates here too: onboard pools, efficiency floors, medics/harvesters, storage, and factories, with its Q25–Q29 numbers tuned in this sandbox. Its never-annoying contract is an explicit playtest question ("did anything about feeding/repairing your army irritate you?"), not just a balance pass.
 - **Exit criterion (the famous one)**: *a stranger plays three matches and mutates a monster unprompted* — the loop sells itself without a designer in the room.
 
 ## Phase 3 — First Blood Online
