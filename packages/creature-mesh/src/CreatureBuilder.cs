@@ -87,7 +87,15 @@ namespace MadDr.CreatureMesh
             if (s.Hand != null) BuildSlot(mb, "hand", genome.Slots.Hand, s.Hand, o);
             if (!o.Headless)
             {
-                if (s.Sensor != null) BuildSlot(mb, "sensor", genome.Slots.Sensor, s.Sensor, o);
+                if (s.Sensor != null)
+                {
+                    // a STORAGE vessel is a tank on the creature's BACK, not
+                    // a sense organ on its head -- mount it dorsally (docs/22,
+                    // creator direction). Everything else stays head-mounted.
+                    var sensorSock = IsStorageVessel(genome.Slots.Sensor.Family)
+                        ? DorsalSock(s) : s.Sensor;
+                    BuildSlot(mb, "sensor", genome.Slots.Sensor, sensorSock, o);
+                }
                 if (s.Eye != null) BuildSlot(mb, "eye", genome.Slots.Eye, s.Eye, o);
             }
 
@@ -119,6 +127,10 @@ namespace MadDr.CreatureMesh
             public string? LegFam;
             public string BrainTier = "average";
             public bool Headless;
+            /// <summary>Storage-vessel contents read (docs/22): RED for a
+            /// blood harvester, WHITE for a bone harvester -- set from the
+            /// hand tool, since the tool decides what the tank fills with.</summary>
+            public bool StoreIsBone;
         }
 
         private sealed class Sockets
@@ -187,6 +199,11 @@ namespace MadDr.CreatureMesh
                 HeartLevel = HeartLevelOf(g.Heart.Tier),
                 BrainTier = g.Brain.Tier,
                 Headless = g.Slots.Sensor.Family == "sensor_stub" && g.Slots.Eye.Family == "eye_socket",
+                // bone-dominant tools fill the tank with bone (white); every
+                // other tool (lamprey, siphon, claws...) fills it with blood
+                // (red) -- matches harvest.ts's per-tool gather bias
+                StoreIsBone = g.Slots.Hand.Family == "bone_saw"
+                    || g.Slots.Hand.Family == "chain_blade" || g.Slots.Hand.Family == "pincer",
             };
 
             // leg genes set stance height (stumps slump low); plans that
@@ -1086,6 +1103,33 @@ namespace MadDr.CreatureMesh
             public double ArmCapLen = double.PositiveInfinity;
         }
 
+        private static bool IsStorageVessel(string family)
+        {
+            return family == "storage_bladder" || family == "steel_tank" || family == "amber_vesicle";
+        }
+
+        // resource-contents colors (docs/22, creator direction): RED blood,
+        // WHITE bone -- what the tank is FULL of, by the harvest tool
+        private static readonly Col BloodRed = new Col(150, 30, 40);
+        private static readonly Col BoneWhite = new Col(224, 216, 194);
+
+        /// <summary>A dorsal (back) mount derived generically from the plan's
+        /// own geometry: the eye socket gives the torso's FRONT depth, so
+        /// -depth is the back face; height sits on the upper back between
+        /// waist and top; the normal points up-and-back so a tank rests ON
+        /// the spine. Single-mount (no mirror) -- one tank, centered.</summary>
+        private static Sock DorsalSock(Sockets s)
+        {
+            var depth = s.Eye != null ? Math.Abs(s.Eye.P.Z) : 0.8;
+            var y = s.WaistY + 0.32 * (s.TopY - s.WaistY);
+            return new Sock
+            {
+                P = new Vec3(0, y, -depth * 0.9),
+                Nrm = new Vec3(0, 1, -0.35).Norm(),
+                Mirror = false,
+            };
+        }
+
         private static void BuildSlot(Builder mb, string slot, PartAlleleDto al, Sock sock, Ctx o)
         {
             // dormant organic head sensors: low ornament gene -> bald head
@@ -1096,18 +1140,20 @@ namespace MadDr.CreatureMesh
             // instead of blending into this body's skin
             var partSkin = al.Hue.HasValue ? Palette.MadDrSkin(al.Hue.Value, o.Vigor) : o.Skin;
 
+            // storage-vessel contents color (docs/22): RED blood / WHITE bone
+            var store = o.StoreIsBone ? BoneWhite : BloodRed;
             if (sock.Mirror)
             {
-                BuildPart(mb, al.Family, al.Params, 1, sock, partSkin);
-                BuildPart(mb, al.Family, al.Params, -1, sock, partSkin);
+                BuildPart(mb, al.Family, al.Params, 1, sock, partSkin, store);
+                BuildPart(mb, al.Family, al.Params, -1, sock, partSkin, store);
             }
             else
             {
-                BuildPart(mb, al.Family, al.Params, 1, sock, partSkin);
+                BuildPart(mb, al.Family, al.Params, 1, sock, partSkin, store);
             }
         }
 
-        private static void BuildPart(Builder mb, string family, double[] pg, double side, Sock sock, Col skin)
+        private static void BuildPart(Builder mb, string family, double[] pg, double side, Sock sock, Col skin, Col store)
         {
             var len = P(pg, 0, 0.5);
             var girth = P(pg, 1, 0.5);
@@ -1441,35 +1487,38 @@ namespace MadDr.CreatureMesh
                 }
                 case "storage_bladder":
                 {
-                    // the organic storage vessel (docs/22): a distended
-                    // dorsal sac with darker fluid filling its lower half.
-                    // (The JS sac is translucent; this port pass renders it
-                    // opaque -- the same per-vertex-alpha channel dropped for
-                    // the blob's gelatin in pass 1, docs/12.)
+                    // the organic storage vessel (docs/22): a distended sac on
+                    // the BACK, its fluid reading RED for blood / WHITE for
+                    // bone by the harvest tool. (The JS sac is translucent;
+                    // this port renders it opaque -- the per-vertex-alpha
+                    // channel dropped for the blob's gelatin in pass 1.)
+                    var contents = store;
                     var sacR = 0.8 + 0.9 * girth;
                     var sacL = 1.0 + 0.9 * len;
                     var c = s + n * (sacR * 0.55);
                     Prims.LimbJoint(mb, s, n, sacR * 0.5);
                     Prims.Ellipsoid(mb, new Vec3(c.X, c.Y - sacR * 0.15, c.Z),
-                        new Vec3(sacR * 0.72, sacR * 0.55, sacL * 0.72), new Col(122, 30, 38), 0.25, 0.1, 9);
+                        new Vec3(sacR * 0.86, sacR * 0.72, sacL * 0.86), contents, 0.25, 0.1, 11);
                     Prims.Ellipsoid(mb, c, new Vec3(sacR, sacR * 0.9, sacL), skin, 0.35, 0, 11);
                     break;
                 }
                 case "steel_tank":
                 {
                     // the tech storage vessel (docs/22): a riveted steel tank
-                    // lying along the spine, with a filler cap, sight gauge,
-                    // and a rivet seam -- the human-army harvester look
+                    // on the BACK -- the human-army look. Metal shell, but the
+                    // sight gauge AND the end caps read RED blood / WHITE bone
+                    // so you can tell at a glance what it hauls.
+                    var contents = store;
                     var tR = 0.55 + 0.5 * girth;
                     var tL = 1.2 + 1.1 * len;
                     var c = s + n * (tR * 0.7);
                     Prims.LimbJoint(mb, s, n, tR * 0.5);
                     Prims.Tube(mb, new[] { new Vec3(c.X, c.Y, c.Z - tL), new Vec3(c.X, c.Y, c.Z + tL) },
                         new[] { tR, tR }, Palette.METAL, 0.75, 0, 12, 2);
-                    Prims.Ellipsoid(mb, new Vec3(c.X, c.Y, c.Z - tL), new Vec3(tR * 0.95, tR * 0.95, tR * 0.4), Palette.METDK, 0.7, 0, 10);
-                    Prims.Ellipsoid(mb, new Vec3(c.X, c.Y, c.Z + tL), new Vec3(tR * 0.95, tR * 0.95, tR * 0.4), Palette.METDK, 0.7, 0, 10);
+                    Prims.Ellipsoid(mb, new Vec3(c.X, c.Y, c.Z - tL), new Vec3(tR * 0.95, tR * 0.95, tR * 0.4), contents, 0.5, 0.15, 10);
+                    Prims.Ellipsoid(mb, new Vec3(c.X, c.Y, c.Z + tL), new Vec3(tR * 0.95, tR * 0.95, tR * 0.4), contents, 0.5, 0.15, 10);
                     Prims.Ellipsoid(mb, new Vec3(c.X, c.Y + tR * 0.95, c.Z - tL * 0.3), new Vec3(0.22, 0.16, 0.22), Palette.METDK, 0.6, 0, 6);
-                    Prims.Ellipsoid(mb, new Vec3(c.X, c.Y + tR * 0.8, c.Z + tL * 0.4), new Vec3(0.1, 0.28, 0.1), new Col(150, 30, 40), 0.4, 0.4, 5);
+                    Prims.Ellipsoid(mb, new Vec3(c.X, c.Y + tR * 0.82, c.Z + tL * 0.4), new Vec3(0.12, 0.32, 0.12), contents, 0.4, 0.4, 5);
                     for (var i = 0; i < 5; i++)
                         Prims.Ellipsoid(mb, new Vec3(c.X, c.Y + tR * 0.98, c.Z - tL * 0.8 + i * (tL * 1.6 / 4)),
                             new Vec3(0.06, 0.05, 0.06), Palette.METDK, 0.8, 0, 4);
@@ -1478,9 +1527,10 @@ namespace MadDr.CreatureMesh
                 case "amber_vesicle":
                 {
                     // the biotech storage vessel (docs/22): a clustered mass
-                    // of amber vesicles fused along the spine, each glowing
-                    // faintly -- the alien harvester look
-                    var amber = new Col(225, 168, 70);
+                    // of vesicles fused along the BACK, glowing with their
+                    // contents -- RED for blood, WHITE for bone -- the alien
+                    // harvester look
+                    var contents = store;
                     var nV = (int)Clamp(3 + Math.Round(count * 3), 3, 6);
                     var vR = 0.45 + 0.45 * girth;
                     Prims.LimbJoint(mb, s, n, vR * 0.6);
@@ -1492,7 +1542,7 @@ namespace MadDr.CreatureMesh
                             s.Y + n.Y * vR * 0.7 + Math.Cos(i * 1.7) * vR * 0.25,
                             s.Z + (t - 0.5) * vR * 2.6);
                         var r = vR * (0.7 + 0.35 * Math.Abs(Math.Sin(i * 1.3)));
-                        Prims.Ellipsoid(mb, p, new Vec3(r, r * 0.9, r), amber, 0.25, 0.25, 8);
+                        Prims.Ellipsoid(mb, p, new Vec3(r, r * 0.9, r), contents, 0.25, 0.4, 8);
                     }
                     break;
                 }

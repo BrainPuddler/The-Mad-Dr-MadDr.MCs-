@@ -426,6 +426,31 @@ export function locomotionProfile(genome) {
 
 const SLOT_NAMES = ['hand', 'sensor', 'eye', 'leg'];
 
+// harvester storage vessels (docs/22): tanks that mount on the BACK, not
+// the head. Their contents read RED for blood / WHITE for bone, set by the
+// harvest tool (bone-dominant tools store bone; everything else, blood).
+const STORAGE_FAMILIES = new Set(['storage_bladder', 'steel_tank', 'amber_vesicle']);
+const STORE_IS_BONE = new Set(['bone_saw', 'chain_blade', 'pincer']);
+const BLOOD_RED = [150, 30, 40];
+const BONE_WHITE = [224, 216, 194];
+
+/** A dorsal (back) mount derived from the plan's own sockets: the eye
+ * socket gives the torso FRONT depth, so -depth is the back face; height
+ * sits on the upper back below the head; the normal points up-and-back so
+ * a tank rests ON the spine. Single-mount, and it rides the head socket's
+ * own breathing anim so it moves with the body. */
+function dorsalSock(sockets) {
+  const eye = sockets.eye, sen = sockets.sensor;
+  const depth = eye ? Math.abs(eye.p[2]) : 1.5;
+  const y = (sen ? sen.p[1] : 6) * 0.72;
+  return {
+    p: [0, y, -depth * 0.9],
+    nrm: V.norm([0, 1, -0.35]),
+    mirror: false, out: 1,
+    anim: sen ? sen.anim : undefined, gait: sen ? sen.gait : undefined,
+  };
+}
+
 function skinColorFn(skin, belly, spine) {
   // pale belly toward +z, dusky spine toward -z, darker underside
   return (u) => {
@@ -551,10 +576,18 @@ function buildCreatureAtDetail(genome) {
     const partKit = al.hue !== undefined ? factionKit(_faction, al.hue, vigor) : null;
     const partSkin = partKit ? partKit.skin : skin, partSkinFn = partKit ? partKit.skinFn : skinFn;
 
-    const sock = sockets[slot];
+    // a STORAGE vessel is a tank on the creature's BACK, not a sense organ
+    // on its head (docs/22, creator direction) -- mount it dorsally, single.
+    // Its contents read RED for blood / WHITE for bone, by the harvest tool.
+    let sock = sockets[slot];
+    let store = undefined;
+    if (slot === 'sensor' && STORAGE_FAMILIES.has(al.family)) {
+      sock = dorsalSock(sockets);
+      store = STORE_IS_BONE.has(slots.hand?.family) ? BONE_WHITE : BLOOD_RED;
+    }
     const sides = sock.mirror ? [1, -1] : [1];
     for (const side of sides)
-      buildPart(mb, slot, al.family, al.params ?? [], side, sock, { skin: partSkin, skinFn: partSkinFn, faction: _faction });
+      buildPart(mb, slot, al.family, al.params ?? [], side, sock, { skin: partSkin, skinFn: partSkinFn, faction: _faction, store });
   }
   return mb;
 }
@@ -2018,15 +2051,16 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       break;
     }
     case 'storage_bladder': {
-      // the organic storage vessel (docs/22): a translucent distended
-      // dorsal sac with darker fluid visibly filling its lower half --
-      // girth sets how swollen, length how far it slumps along the spine
+      // the organic storage vessel (docs/22): a translucent distended sac
+      // on the BACK, its fluid reading RED for blood / WHITE for bone (o.store)
+      // -- girth sets how swollen, length how far it slumps along the spine
+      const store = o.store ?? BLOOD_RED;
       const sacR = (0.8 + 0.9*girth);
       const sacL = (1.0 + 0.9*len);
       const c = V.add(S, V.scale(N, sacR*0.55));
       limbJoint(mb, S, N, sacR*0.5);
-      // the fluid inside first (opaque, blood-dark), then the membrane over it
-      ellipsoid(mb, [c[0], c[1]-sacR*0.15, c[2]], [sacR*0.72, sacR*0.55, sacL*0.72], [122, 30, 38], 0.25, 0.1, 9);
+      // the fluid inside first (opaque, the resource color), then the membrane over it
+      ellipsoid(mb, [c[0], c[1]-sacR*0.1, c[2]], [sacR*0.82, sacR*0.66, sacL*0.82], store, 0.25, 0.1, 11);
       mb.setAlpha(0.42);
       ellipsoid(mb, c, [sacR, sacR*0.9, sacL], o.skin, 0.2, 0, 11, o.skinFn,
         (t) => [0, 0, 0.06, t*1.3]);   // a slow slosh wobble
@@ -2034,27 +2068,29 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       break;
     }
     case 'steel_tank': {
-      // the tech storage vessel (docs/22): a riveted steel dorsal tank
-      // lying along the spine -- filler cap, sight gauge, rivet seam
+      // the tech storage vessel (docs/22): a riveted steel tank on the BACK
+      // -- the human-army look. Metal shell, but the sight gauge AND end caps
+      // read RED blood / WHITE bone (o.store) so you can tell what it hauls.
+      const store = o.store ?? BLOOD_RED;
       const tR = (0.55 + 0.5*girth);
       const tL = (1.2 + 1.1*len);
       const c = V.add(S, V.scale(N, tR*0.7));
       limbJoint(mb, S, N, tR*0.5);
       tube(mb, [[c[0], c[1], c[2]-tL], [c[0], c[1], c[2]+tL]], [tR, tR], METAL, 0.75, 0, 12, 2);
-      ellipsoid(mb, [c[0], c[1], c[2]-tL], [tR*0.95, tR*0.95, tR*0.4], METDK, 0.7, 0, 10);   // end caps
-      ellipsoid(mb, [c[0], c[1], c[2]+tL], [tR*0.95, tR*0.95, tR*0.4], METDK, 0.7, 0, 10);
+      ellipsoid(mb, [c[0], c[1], c[2]-tL], [tR*0.95, tR*0.95, tR*0.4], store, 0.5, 0.15, 10);   // end caps show the contents
+      ellipsoid(mb, [c[0], c[1], c[2]+tL], [tR*0.95, tR*0.95, tR*0.4], store, 0.5, 0.15, 10);
       ellipsoid(mb, [c[0], c[1]+tR*0.95, c[2]-tL*0.3], [0.22, 0.16, 0.22], METDK, 0.6, 0, 6);   // filler cap
-      ellipsoid(mb, [c[0], c[1]+tR*0.8, c[2]+tL*0.4], [0.1, 0.28, 0.1], [150, 30, 40], 0.4, 0.4, 5);   // sight gauge showing the blood level
+      ellipsoid(mb, [c[0], c[1]+tR*0.82, c[2]+tL*0.4], [0.12, 0.32, 0.12], store, 0.4, 0.4, 5);   // sight gauge showing the level
       for (let i = 0; i < 5; i++) {   // rivet seam down the top
         ellipsoid(mb, [c[0], c[1]+tR*0.98, c[2]-tL*0.8 + i*(tL*1.6/4)], [0.06,0.05,0.06], METDK, 0.8, 0, 4);
       }
       break;
     }
     case 'amber_vesicle': {
-      // the biotech storage vessel (docs/22): a clustered mass of amber
-      // vesicles fused along the spine, each faintly glowing with what it
-      // holds -- count sets how many, girth how swollen
-      const AMBER = [225, 168, 70];
+      // the biotech storage vessel (docs/22): a clustered mass of vesicles
+      // fused along the BACK, glowing with their contents -- RED blood /
+      // WHITE bone (o.store) -- the alien harvester look
+      const store = o.store ?? BLOOD_RED;
       const nV = clamp(3 + Math.round(count*3), 3, 6);
       const vR = (0.45 + 0.45*girth);
       limbJoint(mb, S, N, vR*0.6);
@@ -2066,11 +2102,11 @@ function buildPart(mb, slot, family, params, side, sock, o) {
           S[2] + (t - 0.5) * vR * 2.6,
         ];
         const r = vR * (0.7 + 0.35 * Math.abs(Math.sin(i*1.3)));
-        mb.setAlpha(0.72);
-        ellipsoid(mb, p, [r, r*0.9, r], AMBER, 0.25, 0.25, 8, null,
+        mb.setAlpha(0.78);
+        ellipsoid(mb, p, [r, r*0.9, r], store, 0.25, 0.4, 8, null,
           (tt) => [0, 0, 0.05, i*1.9 + tt*1.1]);   // each vesicle breathes
         mb.setAlpha(1);
-        mb.glow(p, AMBER, 5);
+        mb.glow(p, store, 6);
       }
       break;
     }

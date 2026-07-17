@@ -592,11 +592,27 @@ public class CreatureBuilderTests
     }
 
     [Fact]
-    public void SteelTankIsMetalAndAmberVesicleIsAmber()
+    public void SteelTankShellIsMetal()
     {
-        // the human-army tank reads as metal; the alien cluster reads amber
+        // the human-army tank keeps its metal shell (origin read)
         Assert.True(HasColor(CreatureBuilder.Build(Genome(sensor: "steel_tank")), Palette.METAL));
-        Assert.True(HasColor(CreatureBuilder.Build(Genome(sensor: "amber_vesicle")), new Col(225, 168, 70)));
+    }
+
+    [Fact]
+    public void StorageContentsReadRedForBloodAndWhiteForBone()
+    {
+        // creator direction: RED for blood, WHITE for bone -- the tank's
+        // contents color is set by the harvest tool (bone_saw -> bone/white,
+        // a blood tool like lamprey_maw -> blood/red)
+        var bloodRed = new Col(150, 30, 40);
+        var boneWhite = new Col(224, 216, 194);
+        foreach (var vessel in new[] { "storage_bladder", "steel_tank", "amber_vesicle" })
+        {
+            var bloodRig = CreatureBuilder.Build(Genome(hand: "lamprey_maw", sensor: vessel));
+            var boneRig = CreatureBuilder.Build(Genome(hand: "bone_saw", sensor: vessel));
+            Assert.True(HasColor(bloodRig, bloodRed), $"{vessel} on a blood tool should read red");
+            Assert.True(HasColor(boneRig, boneWhite), $"{vessel} on a bone tool should read white");
+        }
     }
 
     [Fact]
@@ -604,5 +620,19 @@ public class CreatureBuilderTests
     {
         Assert.True(HasColor(CreatureBuilder.Build(Genome(hand: "bone_saw")), Palette.METAL));
         Assert.True(HasColor(CreatureBuilder.Build(Genome(hand: "ichor_siphon")), Palette.ICHOR));
+    }
+
+    [Fact]
+    public void StorageVesselMountsOnTheBackNotTheHead()
+    {
+        // a tank must sit on the BACK (behind the torso, -Z), not up on the
+        // head where sense organs go -- so its geometry should extend well
+        // behind the body's mid-plane
+        var r = CreatureBuilder.Build(Genome(hand: "lamprey_maw", sensor: "steel_tank"));
+        double minZ = double.PositiveInfinity;
+        foreach (var c in r.Chunks)
+            for (var i = 0; i < c.VertexCount; i++)
+                minZ = System.Math.Min(minZ, c.Positions[i * 3 + 2]);
+        Assert.True(minZ < -0.8, $"storage vessel is not behind the body (minZ={minZ})");
     }
 }
