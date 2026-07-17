@@ -89,8 +89,9 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   Buildings get era dressing parented into the damage pipeline
   (crushes/tints with the massing): suburban gables, gas-station
   canopies, diner chrome, brick walk-ups with fire escapes, stepped
-  deco offices, archetype-aware landmarks (spired churches, columned
-  town halls, a civic plaza with a colonnade and fountain, a schoolyard
+  deco offices, archetype-aware landmarks (a spired parish church, a
+  grander twin-towered cathedral with a rose window, columned town
+  halls, a civic plaza with a colonnade and fountain, a schoolyard
   with a bell cupola and flagpole, a homely old-age-home porch, a
   marquee'd movie palace as the default read for anything else), and
   rooftop water towers /
@@ -155,7 +156,10 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   a small industrial district. `trafficCarCount` cars drive the road
   network hex-to-hex and flee like Citizens when a monster gets close,
   peeling off toward whichever reachable hex is farthest from the
-  threat.
+  threat -- a quarter of them are boxy delivery vans instead of sedans,
+  hash-picked per spawn hex for period street variety. Ridge hexes
+  occasionally grow a small tumbled-boulder outcrop alongside the usual
+  trees, so hillsides don't read as pure forest.
 - **Combat** (`UnitCombat.cs` / `WeaponFx.cs` / `Projectile.cs` /
   `Tank.cs` / `HealthBars.cs`) — every unit has health and a weapon
   derived from its genome (`roster-client`'s tested `Combat.Profile`):

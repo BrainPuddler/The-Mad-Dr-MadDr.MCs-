@@ -342,14 +342,34 @@ public static class BuildingDresser
         switch (archetype)
         {
             case "church":
-            case "cathedral":
-                // spire: tapering stacked boxes + a needle
+                // parish spire: tapering stacked boxes + a needle
                 b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 4f),
                     new Vector3(7f, 8f, 7f), Concrete(), t);
                 b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 10f),
                     new Vector3(4f, 5f, 4f), Concrete(), t);
                 b.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (height + 15f),
                     new Vector3(0.4f, 3.5f, 0.4f), Chrome(), t);
+                break;
+            case "cathedral":
+                // grander than a parish church: twin flanking towers
+                // (each taller than the single church spire) plus a rose
+                // window on the front face -- the "downtown Notre Dame"
+                // silhouette, so cathedral reads as an upgrade, not a
+                // recolor of the same building
+                foreach (var side in new[] { 1f, -1f })
+                {
+                    var towerBase = basePos + new Vector3(side * 6.5f, 0f, 0f);
+                    b.SpawnPrim(PrimitiveType.Cube, towerBase + Vector3.up * (height + 5f),
+                        new Vector3(5f, 10f, 5f), Concrete(), t);
+                    b.SpawnPrim(PrimitiveType.Cube, towerBase + Vector3.up * (height + 12f),
+                        new Vector3(3f, 4f, 3f), Concrete(), t);
+                    b.SpawnPrim(PrimitiveType.Cylinder, towerBase + Vector3.up * (height + 16.5f),
+                        new Vector3(0.4f, 4.5f, 0.4f), Chrome(), t);
+                }
+                var rose = b.SpawnPrim(PrimitiveType.Cylinder,
+                    basePos + new Vector3(0f, height * 0.6f, Half * 1.02f),
+                    new Vector3(2.6f, 0.1f, 2.6f), NeonTeal(), t);
+                rose.transform.rotation = Quaternion.Euler(0f, 0f, 90f);
                 break;
             case "town_hall":
                 // columned portico + pediment + flagpole

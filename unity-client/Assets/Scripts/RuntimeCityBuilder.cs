@@ -457,6 +457,7 @@ public class RuntimeCityBuilder : MonoBehaviour
         var trunk = NewMaterial(new Color(0.36f, 0.27f, 0.18f));
         var canopy = NewMaterial(new Color(0.30f, 0.44f, 0.22f));
         var bush = NewMaterial(new Color(0.36f, 0.5f, 0.28f));
+        var rock = NewMaterial(new Color(0.55f, 0.53f, 0.5f));
 
         var water = new HashSet<HexCoord>(_city.Water);
         var blocked = BlockedFor(false);
@@ -475,6 +476,9 @@ public class RuntimeCityBuilder : MonoBehaviour
             var n = 2 + Mod(hex.Q * 31 + hex.R * 17, 2);
             for (var i = 0; i < n; i++)
                 SpawnTree(hex, i, trunk, canopy, parent);
+            // occasional rock outcrops break up an all-trees hillside
+            if (Mod(hex.Q * 41 + hex.R * 19, 4) == 0)
+                SpawnRocks(hex, rock, parent);
         }
 
         foreach (var hex in _city.Water)
@@ -507,6 +511,31 @@ public class RuntimeCityBuilder : MonoBehaviour
             new Vector3(0.35f, height * 0.25f, 0.35f), trunk, parent).name = "Trunk";
         SpawnPrim(PrimitiveType.Sphere, baseP + Vector3.up * (height * 0.75f),
             new Vector3(height * 0.7f, height * 0.62f, height * 0.7f), canopy, parent).name = "Canopy";
+    }
+
+    /// <summary>A small cluster of tumbled boulders on a ridge hex --
+    /// deterministic, tilted at odd angles, terrain-following. Gated to
+    /// a quarter of ridge hexes (see caller) so hillsides read as mostly
+    /// trees with the occasional rocky outcrop, not a gravel yard.</summary>
+    private void SpawnRocks(HexCoord hex, Material rock, Transform parent)
+    {
+        var w = WorldOf(hex);
+        var count = 1 + Mod(hex.Q * 7 + hex.R * 13, 2);
+        for (var i = 0; i < count; i++)
+        {
+            var off = new Vector3(Mod(hex.Q * 17 + hex.R * 11 + i * 23, 15) - 7f, 0f,
+                Mod(hex.Q * 29 + hex.R * 3 + i * 37, 15) - 7f);
+            var baseP = w + off;
+            baseP.y = GroundHeightAt(baseP);
+            var size = 0.8f + Mod(hex.Q + hex.R + i * 5, 3) * 0.35f;
+            var boulder = SpawnPrim(PrimitiveType.Cube, baseP + Vector3.up * (size * 0.4f),
+                new Vector3(size * 1.3f, size * 0.8f, size), rock, parent);
+            boulder.transform.rotation = Quaternion.Euler(
+                Mod(hex.Q * 13 + i * 7, 20) - 10f,
+                Mod(hex.Q * 31 + hex.R * 5 + i * 19, 360),
+                Mod(hex.R * 17 + i * 11, 20) - 10f);
+            boulder.name = "Rock";
+        }
     }
 
     /// <summary>Colliderless styled primitive -- the dresser workhorse.</summary>

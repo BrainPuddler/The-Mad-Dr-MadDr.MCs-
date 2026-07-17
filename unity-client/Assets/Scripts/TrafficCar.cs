@@ -34,19 +34,52 @@ public class TrafficCar : MonoBehaviour
         _to = start;
         transform.position = _builder.WorldOf(start) + Vector3.up * 0.75f;
         _target = transform.position;
-        BuildBody(body);
+        BuildBody(body, Hash(start, 7) % 4 == 0);
         PickNext();
     }
 
-    private void BuildBody(Color body)
+    private static int Hash(HexCoord hex, int salt)
     {
-        // this component sits on the chassis primitive itself -- one
-        // extra cube for the cabin, no bumpers/fins (moving fast enough
-        // that the extra parked-car detail wouldn't read from RTS height)
+        unchecked
+        {
+            var h = hex.Q * 374761393 + hex.R * 668265263 + salt * 974711;
+            h = (h ^ (h >> 13)) * 1274126177;
+            return h & 0x7FFFFFFF;
+        }
+    }
+
+    private void BuildBody(Color body, bool truck)
+    {
+        // this component sits on the chassis primitive itself
         var mat = new Material(ShaderUtil.FindRenderableShader());
         mat.color = body;
         var renderer = GetComponent<Renderer>();
         if (renderer != null) renderer.sharedMaterial = mat;
+
+        if (truck)
+        {
+            // a boxy 1950s delivery van -- one tall rectangular body plus
+            // a dark windshield band up front, instead of the sedan's
+            // sloped cabin/fins: period street variety without a second
+            // multi-piece rig's part-count/positioning risk
+            transform.localScale = new Vector3(2.4f, 1.7f, 4.4f);
+            var windowMat = new Material(ShaderUtil.FindRenderableShader());
+            windowMat.color = new Color(0.12f, 0.14f, 0.18f);
+            var windshield = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            windshield.name = "Windshield";
+            windshield.transform.SetParent(transform, false);
+            windshield.transform.localPosition = new Vector3(0f, -0.06f, 0.56f);
+            windshield.transform.localScale = new Vector3(0.98f, 0.7f, 0.32f);
+            var windshieldRenderer = windshield.GetComponent<Renderer>();
+            if (windshieldRenderer != null) windshieldRenderer.sharedMaterial = windowMat;
+            var windshieldCollider = windshield.GetComponent<Collider>();
+            if (windshieldCollider != null) Object.Destroy(windshieldCollider);
+            return;
+        }
+
+        // sedan: one extra cube for the cabin, no bumpers/fins (moving
+        // fast enough that the extra parked-car detail wouldn't read
+        // from RTS height)
         transform.localScale = new Vector3(2.2f, 0.8f, 5.2f);
 
         var cabin = GameObject.CreatePrimitive(PrimitiveType.Cube);
