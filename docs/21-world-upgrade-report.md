@@ -174,7 +174,7 @@ the docs/21 SS6 list is now fully closed.
 7. ~~Billboard art: period-poster quads ("ATOMIC COLA", movie one-sheets).~~ **Done** (`BuildingDresser.DressPoster` + `RoadDresser` roadside boards).
 8. ~~Miniature-set border: table edge / painted-backdrop skybox ring.~~ **Done** (`RuntimeCityBuilder.BuildTableEdge`).
 9. ~~Citizen vehicles that drive road hexes and flee (docs/19 traffic).~~ **Done** (`TrafficCar.cs`).
-10. ~~Per-district palettes (downtown vs suburbs) from road-graph radius.~~ **Done** (massing tint only; dressing-level palette bias still open).
+10. ~~Per-district palettes (downtown vs suburbs) from road-graph radius.~~ **Done** (massing tint plus dressing-level wall/roof material bias, `BuildingDresser.DressSmall`/`DressApartment`).
 
 All ten items are now either fully done or, for item 10, done at the
 scope originally committed (massing tint; a future pass could extend the

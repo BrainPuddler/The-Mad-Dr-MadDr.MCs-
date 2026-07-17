@@ -135,9 +135,14 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   color-block art (soda bullseyes, movie one-sheets, headline bands);
   buildings tint warmer/residential toward the outskirts and
   cooler/institutional near downtown (hex-distance from `CenterHex`
-  standing in for road-graph radius); and a wooden table rim plus a
-  flat-color backdrop ring frame the whole map so it reads as a
-  diorama on a table rather than trailing into the void at its edge.
+  standing in for road-graph radius) -- the bias runs through the
+  dressing itself too, not just the massing cube: suburb houses lean
+  toward warm terracotta roofs and downtown small-tier lots lean
+  commercial (gas station/diner over house), suburb apartment walls
+  lean cream/brick and downtown ones lean seafoam; and a wooden table
+  rim plus a flat-color backdrop ring frame the whole map so it reads
+  as a diorama on a table rather than trailing into the void at its
+  edge.
   **Batch 3** (`NightMode.cs` / `NeonRegistry.cs` / `TrafficCar.cs`,
   finishing the docs/21 SS6 list): press **N** to ease the whole city
   from day to a dusk lighting preset (a code-created directional light

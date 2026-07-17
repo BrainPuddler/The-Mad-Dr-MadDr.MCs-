@@ -75,9 +75,17 @@ public static class BuildingDresser
     /// (docs/21 batch 2, item 6) re-skins Small/Medium tiers as warehouse
     /// stock inside a rail_depot landmark's radius -- Large/Landmark keep
     /// their usual look, since a factory reads fine as a stepped office
-    /// shell and the depot itself already carries the archetype set piece.</summary>
+    /// shell and the depot itself already carries the archetype set piece.
+    /// `suburb` (docs/21 batch 2, item 10 -- previously only tinted the
+    /// massing cube; this extends the same bias one level deeper into the
+    /// dressing's own wall/roof material choice) shifts Small/Medium's
+    /// palette warmer toward the outskirts and cooler downtown, WITHOUT
+    /// going monotone -- still hash-varied, just reweighted; skipped for
+    /// `industrial` (a warehouse stays utilitarian regardless of district)
+    /// and for Large/Landmark (they cluster near downtown by construction
+    /// anyway, per the massing-tint precedent this mirrors).</summary>
     public static void Dress(RuntimeCityBuilder builder, Building building, float height,
-        List<GameObject> cubes, Transform parent, bool industrial = false)
+        List<GameObject> cubes, Transform parent, bool industrial = false, bool suburb = false)
     {
         var footprint = building.Footprint;
         for (var i = 0; i < footprint.Count; i++)
@@ -100,11 +108,11 @@ public static class BuildingDresser
                     break;
                 case BuildingTier.Medium:
                     if (industrial) DressIndustrial(builder, holder.transform, height, h, primary);
-                    else DressApartment(builder, holder.transform, height, h, primary);
+                    else DressApartment(builder, holder.transform, height, h, primary, suburb);
                     break;
                 default:
                     if (industrial) DressIndustrial(builder, holder.transform, height, h, primary);
-                    else DressSmall(builder, holder.transform, height, h, primary);
+                    else DressSmall(builder, holder.transform, height, h, primary, suburb);
                     break;
             }
         }
@@ -115,14 +123,21 @@ public static class BuildingDresser
 
     // ---- small tier: suburbia / roadside America ------------------------------
 
-    private static void DressSmall(RuntimeCityBuilder b, Transform t, float height, int h, bool primary)
+    private static void DressSmall(RuntimeCityBuilder b, Transform t, float height, int h, bool primary, bool suburb = false)
     {
         var basePos = t.position;
-        switch (h % 3)
+        // suburb: house-heavy (60/20/20 house/gas/diner); downtown:
+        // commercial-heavy (20/40/40) -- still hash-varied, just reweighted
+        var pick = suburb
+            ? (h % 5 < 3 ? 0 : h % 5 == 3 ? 1 : 2)
+            : (h % 5 < 1 ? 0 : h % 5 < 3 ? 1 : 2);
+        switch (pick)
         {
             case 0:   // suburban house: pitched gable roof + chimney
             {
-                var roofMat = (h / 3) % 2 == 0 ? RustRed() : M(0.35f, 0.42f, 0.5f);
+                var roofMat = suburb
+                    ? ((h / 3) % 3 != 0 ? RustRed() : M(0.35f, 0.42f, 0.5f))   // warm roof more often
+                    : ((h / 3) % 3 == 0 ? RustRed() : M(0.35f, 0.42f, 0.5f));  // cool slate more often
                 // a 45-degree diamond prism sunk into the block: only the
                 // top V shows, reading as a pitched gable roof
                 var gable = b.SpawnPrim(PrimitiveType.Cube,
@@ -196,10 +211,14 @@ public static class BuildingDresser
 
     // ---- medium tier: brick walk-up apartments ---------------------------------
 
-    private static void DressApartment(RuntimeCityBuilder b, Transform t, float height, int h, bool primary)
+    private static void DressApartment(RuntimeCityBuilder b, Transform t, float height, int h, bool primary, bool suburb = false)
     {
         var basePos = t.position;
-        var wall = (h / 7) % 3 == 0 ? Cream() : (h / 7) % 3 == 1 ? Brick() : Seafoam();
+        // suburb: warm-leaning (50% cream / 25% brick / 25% seafoam);
+        // downtown: cool-leaning (50% seafoam / 25% cream / 25% brick)
+        var wall = suburb
+            ? ((h / 7) % 4 < 2 ? Cream() : (h / 7) % 4 == 2 ? Brick() : Seafoam())
+            : ((h / 7) % 4 < 2 ? Seafoam() : (h / 7) % 4 == 2 ? Cream() : Brick());
 
         // window bands: dark strips proud of two opposite faces per floor
         var floors = Mathf.Max(2, Mathf.RoundToInt(height / 4f));

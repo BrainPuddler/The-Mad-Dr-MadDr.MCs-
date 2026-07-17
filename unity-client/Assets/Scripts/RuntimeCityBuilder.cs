@@ -573,7 +573,7 @@ public class RuntimeCityBuilder : MonoBehaviour
             // the same cubes list, so the damage pipeline below crushes
             // and tints the water towers/signs/fire escapes along with
             // the massing they belong to
-            BuildingDresser.Dress(this, building, height, cubes, buildings, industrial);
+            BuildingDresser.Dress(this, building, height, cubes, buildings, industrial, suburb);
             _cubesByBuilding[building] = cubes;
         }
     }
