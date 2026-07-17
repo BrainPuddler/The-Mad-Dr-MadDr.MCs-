@@ -668,6 +668,7 @@ public class RuntimeCityBuilder : MonoBehaviour
             {
                 RubbleDresser.Scatter(this, building, rubbleMat, _buildingsHost);
                 DamageFx.DustBurst(WorldOf(building.Footprint[0]), _buildingsHost);
+                SpawnScorchDecal(building, _buildingsHost);
             }
             _cityVersion++;
             Debug.Log("Building destroyed -- rubble is now walkable.");
@@ -691,6 +692,23 @@ public class RuntimeCityBuilder : MonoBehaviour
             // a lazy smoke plume for as long as the building stands damaged
             // (docs/21 batch 2, item 3)
             if (cubes.Count > 0) DamageFx.AttachSmoke(cubes[0].transform, BuildingHeight(building));
+        }
+    }
+
+    /// <summary>A dark, flat, near-ground scorch mark under each footprint
+    /// hex of a just-destroyed building -- the rubble pass darkens the
+    /// wreckage itself, but left the ground it fell on unmarked. Terrain-
+    /// following (GroundHeightAt), colliderless -- purely a scorched-earth
+    /// read, no gameplay weight.</summary>
+    private void SpawnScorchDecal(Building building, Transform parent)
+    {
+        var mat = NewMaterial(new Color(0.12f, 0.11f, 0.1f));
+        foreach (var hex in building.Footprint)
+        {
+            var pos = WorldOf(hex);
+            pos.y = GroundHeightAt(pos) + 0.06f;
+            var decal = SpawnPrim(PrimitiveType.Cylinder, pos, new Vector3(9f, 0.06f, 9f), mat, parent);
+            decal.name = "Scorch";
         }
     }
 

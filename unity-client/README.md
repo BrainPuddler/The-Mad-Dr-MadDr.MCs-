@@ -90,7 +90,10 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   (crushes/tints with the massing): suburban gables, gas-station
   canopies, diner chrome, brick walk-ups with fire escapes, stepped
   deco offices, archetype-aware landmarks (spired churches, columned
-  town halls, a marquee'd movie palace), and rooftop water towers /
+  town halls, a civic plaza with a colonnade and fountain, a schoolyard
+  with a bell cupola and flagpole, a homely old-age-home porch, a
+  marquee'd movie palace as the default read for anything else), and
+  rooftop water towers /
   antennas / vents. Roads are hub-and-spoke tiles (corners/T's/
   crossroads emerge from hex adjacency, seamlessly) with sidewalks,
   lane dashes, crosswalks, streetlights, telephone poles, hydrants,
@@ -125,8 +128,9 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   hydrants, trash cans, and parked cars are **knockable** (a monster or
   tank walking through one tips it over, a timed tween, no physics
   engine); Damaged buildings breathe a slow smoke plume and a collapse
-  fires a one-shot dust burst; destroyed buildings scatter tumbled
-  rubble chunks over the crushed pancake instead of one flat slab;
+  fires a one-shot dust burst plus a dark scorch mark under the
+  wreckage; destroyed buildings scatter tumbled rubble chunks over the
+  crushed pancake instead of one flat slab;
   office billboards and occasional roadside boards carry period-poster
   color-block art (soda bullseyes, movie one-sheets, headline bands);
   buildings tint warmer/residential toward the outskirts and

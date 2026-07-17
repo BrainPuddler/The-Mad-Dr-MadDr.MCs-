@@ -55,6 +55,7 @@ public static class BuildingDresser
     private static Material NeonRed() { return M(0.95f, 0.25f, 0.3f, 1.6f); }
     private static Material NeonTeal() { return M(0.3f, 0.9f, 0.85f, 1.6f); }
     private static Material SignWhite() { return M(0.92f, 0.9f, 0.82f, 0.6f); }
+    private static Material GardenGreen() { return M(0.3f, 0.42f, 0.24f); }
 
     private static int Hash(HexCoord hex, int salt)
     {
@@ -354,8 +355,63 @@ public static class BuildingDresser
                 b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, height + 4f, 0f),
                     new Vector3(1.8f, 6f, 1.2f), NeonRed(), t);   // vertical bar
                 break;
+            case "plaza":
+                // a grand civic building FRONTING the square, not the
+                // square itself (the massing cube is still a 40m
+                // landmark-tier block by construction -- this dresses it
+                // as the formal building anchoring the plaza): a
+                // colonnade, a clock cupola, and a small fountain out
+                // front on the plaza pavement itself
+                for (var i = -2; i <= 2; i++)
+                    b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(i * 3f, 6f, Half * 1.1f),
+                        new Vector3(0.7f, 6f, 0.7f), Cream(), t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 12.4f, Half * 1.1f),
+                    new Vector3(16f, 0.8f, 2.6f), Cream(), t);   // entablature over the columns
+                b.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (height + 2.5f),
+                    new Vector3(2.2f, 2.5f, 2.2f), Concrete(), t);   // clock cupola drum
+                b.SpawnPrim(PrimitiveType.Sphere, basePos + Vector3.up * (height + 5.4f),
+                    new Vector3(1.6f, 1.6f, 1.6f), Chrome(), t);
+                var fountainAt = basePos + new Vector3(0f, 0f, Half * 1.7f);
+                b.SpawnPrim(PrimitiveType.Cylinder, fountainAt + Vector3.up * 0.3f,
+                    new Vector3(2.6f, 0.3f, 2.6f), Concrete(), t);   // basin
+                b.SpawnPrim(PrimitiveType.Cylinder, fountainAt + Vector3.up * 1.1f,
+                    new Vector3(1.2f, 0.8f, 1.2f), Chrome(), t);     // pedestal
+                b.SpawnPrim(PrimitiveType.Sphere, fountainAt + Vector3.up * 2f,
+                    new Vector3(0.5f, 0.9f, 0.5f), NeonTeal(), t);   // stylized water jet
+                break;
+            case "school":
+                // a modest columned entrance -- plainer and smaller than
+                // the plaza/town_hall civic scale -- plus the schoolyard
+                // silhouette: bell cupola and a flagpole
+                for (var i = -1; i <= 1; i++)
+                    b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(i * 3.6f, 4f, Half * 1.1f),
+                        new Vector3(0.6f, 4f, 0.6f), Cream(), t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 8.3f, Half * 1.1f),
+                    new Vector3(13f, 0.6f, 2.2f), Cream(), t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 1.8f),
+                    new Vector3(2.4f, 2.2f, 2.4f), Concrete(), t);   // bell cupola housing
+                b.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (height + 3.6f),
+                    new Vector3(0.15f, 0.6f, 0.15f), RustRed(), t);  // bell
+                b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(-6f, height + 3f, -6f),
+                    new Vector3(0.15f, 3f, 0.15f), Chrome(), t);     // flagpole
+                break;
+            case "old_age_home":
+                // quieter and homelier than the other institutions: a
+                // wraparound porch roof instead of a civic cornice, plus
+                // a garden trellis on the ground -- reads residential
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 5.4f, Half * 1.15f),
+                    new Vector3(17f, 0.5f, 4f), RustRed(), t);
+                for (var i = -1; i <= 1; i++)
+                    b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(i * 5f, 2.6f, Half * 1.25f),
+                        new Vector3(0.35f, 2.6f, 0.35f), Cream(), t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 1.5f),
+                    new Vector3(6f, 1.6f, 4f), Cream(), t);   // dormer-ish roof projection
+                var trellisAt = basePos + new Vector3(0f, 0f, Half * 1.6f);
+                b.SpawnPrim(PrimitiveType.Cube, trellisAt + Vector3.up * 1.4f,
+                    new Vector3(3.2f, 2.6f, 0.15f), GardenGreen(), t);
+                break;
             default:
-                // plaza / school / old_age_home -> THE MOVIE PALACE: a
+                // any future/unlisted archetype -> THE MOVIE PALACE: a
                 // marquee slab out front and a big neon rooftop sign --
                 // every b-movie city needs one theater downtown
                 b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 6.5f, Half * 1.25f),
