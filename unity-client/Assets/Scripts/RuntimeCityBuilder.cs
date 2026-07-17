@@ -969,6 +969,18 @@ public class RuntimeCityBuilder : MonoBehaviour
         return best;
     }
 
+    /// <summary>A harvester unloads its onboard tank into the session
+    /// wallet (docs/22): the carried load is banked as Blood (fuel), the
+    /// dominant lane a harvest tool draws. Called when a laden harvester
+    /// idles near its home/Vat.</summary>
+    public void BankHarvestLoad(float load)
+    {
+        var banked = Mathf.RoundToInt(load);
+        if (banked <= 0) return;
+        WalletBlood += banked;
+        Debug.Log("Harvester banked " + banked + " blood. Wallet: " + WalletBlood + " blood.");
+    }
+
     public void OnCitizenEaten(Citizen citizen)
     {
         // docs/20 per-citizen yield: Blood 2 / Bones 1 / Brains 1

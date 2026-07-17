@@ -567,4 +567,42 @@ public class CreatureBuilderTests
         Assert.True(maxY <= r.TopY + 4.5, $"geometry pokes far above TopY: {maxY} vs {r.TopY}");
         Assert.True(r.TopY > r.WaistY);
     }
+
+    // ---- harvester morphology (docs/22) --------------------------------------
+
+    [Theory]
+    [InlineData("lamprey_maw")]
+    [InlineData("bone_saw")]
+    [InlineData("ichor_siphon")]
+    public void HarvestHandToolsBuildRealGeometry(string family)
+    {
+        var r = CreatureBuilder.Build(Genome(hand: family));
+        Assert.True(TotalTris(r) > 1000, $"{family} produced no meaningful geometry");
+    }
+
+    [Theory]
+    [InlineData("storage_bladder")]
+    [InlineData("steel_tank")]
+    [InlineData("amber_vesicle")]
+    public void StorageVesselsBuildRealGeometry(string family)
+    {
+        var bare = TotalTris(CreatureBuilder.Build(Genome(sensor: "sensor_stub")));
+        var withVessel = TotalTris(CreatureBuilder.Build(Genome(sensor: family)));
+        Assert.True(withVessel > bare + 100, $"{family} added no visible vessel geometry");
+    }
+
+    [Fact]
+    public void SteelTankIsMetalAndAmberVesicleIsAmber()
+    {
+        // the human-army tank reads as metal; the alien cluster reads amber
+        Assert.True(HasColor(CreatureBuilder.Build(Genome(sensor: "steel_tank")), Palette.METAL));
+        Assert.True(HasColor(CreatureBuilder.Build(Genome(sensor: "amber_vesicle")), new Col(225, 168, 70)));
+    }
+
+    [Fact]
+    public void BoneSawIsMetalAndIchorSiphonGlowsIchor()
+    {
+        Assert.True(HasColor(CreatureBuilder.Build(Genome(hand: "bone_saw")), Palette.METAL));
+        Assert.True(HasColor(CreatureBuilder.Build(Genome(hand: "ichor_siphon")), Palette.ICHOR));
+    }
 }

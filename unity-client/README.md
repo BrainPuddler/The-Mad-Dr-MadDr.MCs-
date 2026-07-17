@@ -28,7 +28,13 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   (around buildings — unless the order IS the building), target locking
   (attack a building until Destroyed; chase and eat a Citizen), with
   speeds from the creature's own physiology (`roster-client`'s tested
-  `Locomotion` port). **All nine body plans regenerate the Lab
+  `Locomotion` port). A creature bred to **harvest** (a blood-drinking
+  lamprey maw or ichor siphon, a bone saw, plus a storage vessel — real
+  genome parts, docs/22) strips a load into its onboard tank when it
+  eats; the carried weight **slows it via `roster-client`'s golden-tested
+  `Harvest` factors — floored so it never stalls, and paying double for
+  flyers** — and it banks the load into the wallet when idled back near
+  its spawn. **All nine body plans regenerate the Lab
   website's actual body from DNA** via `packages/creature-mesh` +
   `LabMeshBuilder.cs` — torso lathes, brass belts, franken faces,
   brain-tier heads (mastermind's brain under glass), bat wings, cobra

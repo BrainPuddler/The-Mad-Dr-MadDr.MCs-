@@ -61,6 +61,15 @@ public class MonsterAgent : MonoBehaviour
     private float _attackCooldown;
     private Transform _selectionRing;
 
+    // harvest & carry (docs/22 harvester morphology). Every unit has a
+    // profile; it only matters for creatures actually built to harvest --
+    // a lamprey maw + a storage tank. Carried load slows the carrier
+    // (weight, floored per docs/22 so it never strands anyone), doubly so
+    // for flyers; it banks to the wallet when the unit idles near home.
+    private HarvestProfile _harvest;
+    private float _carriedLoad;       // 0.._harvest.Capacity, pooled resource units
+    private HexCoord _homeHex;         // spawn = this harvester's unload point (a Vat stand-in)
+
     public string DisplayName { get; private set; } = "";
     public bool Selected { get; private set; }
 
@@ -132,6 +141,8 @@ public class MonsterAgent : MonoBehaviour
         _creature = creature;
         DisplayName = creature.Id;
         _profile = Locomotion.Profile(creature.Genome);
+        _harvest = Harvest.Profile(creature.Genome);
+        _homeHex = homeHex;
         var plan = creature.Genome.Body.Plan;
         _amphibious = plan == "crab" || plan == "serpentine";
         _canFly = plan == "winged";
@@ -308,6 +319,23 @@ public class MonsterAgent : MonoBehaviour
         // (auto-engaging would make every perch instantly dissolve into a
         // tank chase); attack it manually to send it back into the fight.
         if (_order == OrderKind.Idle && !Perched) AcquireTarget();
+
+        // unload the harvest tank when idle near home (docs/22): the
+        // player hauls a laden harvester back toward its spawn -- its Vat
+        // stand-in -- and it banks automatically on arrival, no button,
+        // and its speed recovers. Auto-first, but the HAULING is the
+        // player's decision (no unprompted walk-off), so it never yanks a
+        // unit away from where it was parked.
+        if (_order == OrderKind.Idle && _carriedLoad > 0.01f && _builder != null)
+        {
+            var toHome = _builder.WorldOf(_homeHex) - transform.position;
+            toHome.y = 0f;
+            if (toHome.magnitude < 2.5f * (float)HexCoord.HexMeters)
+            {
+                _builder.BankHarvestLoad(_carriedLoad);
+                _carriedLoad = 0f;
+            }
+        }
 
         // destruction can change the surface under a standing flyer (the
         // roof it perched on collapses to rubble): re-sync the body's
@@ -632,6 +660,16 @@ public class MonsterAgent : MonoBehaviour
         if (toTarget.magnitude < 3f)
         {
             _builder.OnCitizenEaten(_targetCitizen);
+            // harvest into the onboard tank (docs/22): a real harvest tool
+            // strips far more per body than teeth do -- the gathered load
+            // is the citizen's yield scaled by this creature's blood-gather
+            // rate, capped at what its vessel can hold. This is what makes a
+            // lamprey-and-tank build a hauler and slows it as it fills.
+            if (_harvest != null && _harvest.Capacity > 0.01f)
+            {
+                _carriedLoad = Mathf.Min((float)_harvest.Capacity,
+                    _carriedLoad + 3f * (float)_harvest.GatherBlood);
+            }
             _targetCitizen = null;
             GoIdle();
             _path = null;
@@ -647,7 +685,9 @@ public class MonsterAgent : MonoBehaviour
             if (_path == null) return Vector3.zero; // cornered somewhere unreachable; wait
         }
         RecomputeIfCityChanged();
-        return FollowPath(dt, (float)_profile.RunMetersPerSecond(_builder.speedDisplayMultiplier)); // always chase at a run
+        // always chase at a run -- but a laden harvester still pays the
+        // weight tax (a full blood-tanker can't sprint down a fresh victim)
+        return FollowPath(dt, (float)_profile.RunMetersPerSecond(_builder.speedDisplayMultiplier) * LoadFactor());
     }
 
     // ---- movement mechanics --------------------------------------------------
@@ -660,7 +700,19 @@ public class MonsterAgent : MonoBehaviour
         var speed = farToGo && mayRun
             ? _profile.RunMetersPerSecond(_builder.speedDisplayMultiplier)
             : _profile.WalkMetersPerSecond(_builder.speedDisplayMultiplier);
-        return (float)speed;
+        return (float)speed * LoadFactor();
+    }
+
+    /// <summary>Speed multiplier for the carried harvest load (docs/22):
+    /// a laden carrier trudges, and a laden FLYER pays double for the
+    /// weight -- both floored (never grounded/stalled) by the harvest
+    /// math. Returns 1 when empty, so it's a no-op for everything that
+    /// isn't hauling a full tank.</summary>
+    private float LoadFactor()
+    {
+        if (_harvest == null || _carriedLoad <= 0.01f || _harvest.Capacity <= 0.01f) return 1f;
+        var fill = _carriedLoad / (float)_harvest.Capacity;
+        return (float)(_flying ? Harvest.FlightSpeedFactor(fill) : Harvest.GroundSpeedFactor(fill));
     }
 
     // flying units round hex-grid corners into arcs instead of snapping

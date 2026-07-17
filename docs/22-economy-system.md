@@ -179,7 +179,15 @@ Capacity = base + body bulk + the vessel's expressed size; the **blob plan gets 
 
 **Weight and flight.** Carried load slows the carrier: up to −25% ground speed at full, and **−50% for winged/floater plans — flight pays double for every unit carried** (creator direction: "flying units will need to take weight into account"). Both floored per §1's contract (0.6× ground, 0.4× flight): a laden flyer is slow and juicy to intercept, never grounded — the risk/reward of an aerial blood-tanker is the *fun*, being stranded would be the *annoying*.
 
-All of it is ordinary genetics end to end: these families mutate, splice, canalize, cost upkeep by origin ([energy](05-component-economy.md)), harvest/sew between bodies ("nothing is wasted"), and obey the heart-capacity gate. The catalog addition shifted the deterministic mutation stream, so the golden lineage digest was regenerated — a deliberate, versioned change ([12](12-open-questions.md) decision log). Battlefield-side (Unity) behavior for gather/carry and the C# renderer treatment of the six new families are the follow-up bricks; the C# weapon mapper already degrades them gracefully (unarmed melee) in the meantime.
+All of it is ordinary genetics end to end: these families mutate, splice, canalize, cost upkeep by origin ([energy](05-component-economy.md)), harvest/sew between bodies ("nothing is wasted"), and obey the heart-capacity gate. The catalog addition shifted the deterministic mutation stream, so the golden lineage digest was regenerated — a deliberate, versioned change ([12](12-open-questions.md) decision log).
+
+**Battlefield-side, now wired in (Unity):**
+
+- **`harvest.ts` has a C# twin** — `roster-client/Harvest.cs`, golden-verified against the real JS (the same Locomotion/Weapon discipline), so the Lab preview and the battlefield agree on gather rate, carry capacity, and how much a load slows a carrier.
+- **The six families render on the battlefield** — `creature-mesh` gained real geometry for all of them (sucker-mouth-with-tooth-rings, saw blade on a boom, pulsing siphon tubes, a fluid-filled sac, a riveted tank with a sight gauge, a glowing amber cluster), so a bred harvester looks like one in the field, not a default stub.
+- **Gather / carry / weight is live in `MonsterAgent`** — a harvester that eats a citizen strips a load into its onboard tank scaled by its blood-gather rate (a lamprey-and-tank build is a real hauler); the carried load **slows the carrier via the exact `Harvest` speed factors — floored, and doubled for flyers** (the creator's weight rule, made real); and the player hauls a laden harvester back near its spawn, where it **banks automatically** into the session wallet and its speed recovers. Auto on arrival, but the hauling is the player's call — no unit ever walks off on its own.
+
+Still design-only (the larger docs/22 build-out): dedicated storage structures, medics, factories, and the full onboard blood/bone/brain pools of §2 — the harvester's single pooled `_carriedLoad` here is the first working slice of that system.
 
 ## 12. Open questions
 

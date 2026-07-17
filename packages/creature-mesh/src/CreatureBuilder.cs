@@ -1305,6 +1305,88 @@ namespace MadDr.CreatureMesh
                         Palette.PHOTON_N, 0.5, 0.85 + 0.15 * orn, 8);
                     break;
                 }
+                case "lamprey_maw":
+                {
+                    // the harvest suction tool (docs/22): a fleshy hose-arm
+                    // ending in a round rasping sucker mouth ringed with teeth
+                    var baseR = (0.42 + 0.4 * girth) * scale;
+                    var hoseL = (2.0 + 1.8 * len) * scale;
+                    var path = new List<Vec3>();
+                    for (var i = 0; i <= 8; i++)
+                    {
+                        var t = (double)i / 8;
+                        var exit = baseR * 1.5 * Math.Pow(1 - t, 1.5);
+                        path.Add(new Vec3(
+                            s.X + n.X * exit + side * 0.35 * t,
+                            s.Y + n.Y * exit - t * hoseL + Math.Sin(t * Math.PI) * 0.25,
+                            s.Z + n.Z * exit + 0.7 * t + curl * Math.Sin(t * Math.PI * 1.3) * 0.6));
+                    }
+                    Prims.LimbJoint(mb, path[0], path[1] - path[0], baseR);
+                    var hr = new double[9];
+                    for (var i = 0; i <= 8; i++) hr[i] = baseR * (1 - (double)i / 8 * 0.25);
+                    Prims.Tube(mb, path, hr, skin, 0.3, 0, 9, 3);
+                    var mouth = path[8];
+                    var mR = baseR * 1.55;
+                    Prims.Ellipsoid(mb, mouth, new Vec3(mR, mR * 0.55, mR), skin, 0.3, 0, 9);
+                    Prims.Ellipsoid(mb, new Vec3(mouth.X, mouth.Y - mR * 0.28, mouth.Z),
+                        new Vec3(mR * 0.62, mR * 0.3, mR * 0.62), Palette.MOUTHC, 0.2, 0, 8);
+                    var rows = (int)Clamp(1 + Math.Round(count * 2), 1, 3);
+                    for (var r = 0; r < rows; r++)
+                    {
+                        var rr = mR * (0.85 - r * 0.22);
+                        var nT = 8 - r * 2;
+                        for (var i = 0; i < nT; i++)
+                        {
+                            var a = (double)i / nT * Math.PI * 2;
+                            Prims.CurvedCone(mb,
+                                new Vec3(mouth.X + Math.Cos(a) * rr, mouth.Y - mR * 0.18 - r * 0.08, mouth.Z + Math.Sin(a) * rr),
+                                new Vec3(-Math.Cos(a) * 0.4, -0.9, -Math.Sin(a) * 0.4),
+                                0.28 + 0.1 * girth, 0.08, new Vec3(0, 0, 0), Palette.CLAW, 0.4);
+                        }
+                    }
+                    break;
+                }
+                case "bone_saw":
+                {
+                    // the harvest saw tool (docs/22): a motor housing driving
+                    // a round surgical saw blade on an articulated boom
+                    var wrist = ArmDrop(mb, s, side, 0.42 * scale, scale, skin, pg, n, capLen);
+                    Prims.Ellipsoid(mb, wrist, new Vec3(0.45, 0.42, 0.55), Palette.METAL, 0.7, 0, 8);
+                    var boomLen = (1.2 + 1.2 * len) * scale;
+                    var hub = new Vec3(wrist.X, wrist.Y + boomLen * 0.1, wrist.Z + boomLen);
+                    Prims.Tube(mb, new[] { wrist, hub }, new[] { 0.15, 0.12 }, Palette.METDK, 0.75, 0, 8);
+                    var bladeR = (0.7 + 0.55 * girth) * scale;
+                    Prims.Ellipsoid(mb, hub, new Vec3(0.06, bladeR, bladeR), Palette.METAL, 0.85, 0, 12);
+                    Prims.Ellipsoid(mb, hub, new Vec3(0.09, bladeR * 0.3, bladeR * 0.3), Palette.METDK, 0.6, 0, 8);
+                    for (var i = 0; i < 10; i++)
+                    {
+                        var a = (double)i / 10 * Math.PI * 2;
+                        Prims.Ellipsoid(mb,
+                            new Vec3(hub.X, hub.Y + Math.Cos(a) * bladeR, hub.Z + Math.Sin(a) * bladeR),
+                            new Vec3(0.05, 0.14, 0.14), Palette.METDK, 0.7, 0, 4);
+                    }
+                    break;
+                }
+                case "ichor_siphon":
+                {
+                    // the biotech harvest siphon (docs/22): a fleshy arm
+                    // splitting into siphon tubes that drink from wounds
+                    var wrist = ArmDrop(mb, s, side, 0.44 * scale, scale, Palette.CHITIN, pg, n, capLen);
+                    Prims.Ellipsoid(mb, wrist, new Vec3(0.5, 0.45, 0.5), Palette.CHITIN, 0.4, 0, 8);
+                    var nTubes = (int)Clamp(2 + Math.Round(count * 2), 2, 4);
+                    var tubeL = (1.5 + 1.4 * len) * scale;
+                    for (var i = 0; i < nTubes; i++)
+                    {
+                        var a = ((double)i / Math.Max(nTubes - 1, 1) - 0.5) * 1.2;
+                        var tip = new Vec3(wrist.X + Math.Sin(a) * 0.8 * scale, wrist.Y - tubeL * 0.8,
+                            wrist.Z + tubeL * 0.55 + Math.Cos(a) * 0.25 * scale);
+                        var mid = new Vec3(wrist.X + Math.Sin(a) * 0.5, wrist.Y - tubeL * 0.35, wrist.Z + tubeL * 0.4);
+                        Prims.Tube(mb, new[] { wrist, mid, tip },
+                            new[] { 0.14 * scale, 0.1 * scale, 0.07 * scale }, Palette.ICHOR, 0.3, 0.35, 7, 2);
+                        Prims.Ellipsoid(mb, tip, new Vec3(0.12, 0.12, 0.12), Palette.ICHOR, 0.4, 0.7, 5);
+                    }
+                    break;
+                }
 
                 // ---- sensors (paired via sock.Mirror) ----
                 case "antenna":
@@ -1355,6 +1437,63 @@ namespace MadDr.CreatureMesh
                 case "sensor_stub":
                 {
                     Prims.Ellipsoid(mb, s, new Vec3(0.3, 0.22, 0.3), Palette.PALLOR, 0.25, 0, 6);
+                    break;
+                }
+                case "storage_bladder":
+                {
+                    // the organic storage vessel (docs/22): a distended
+                    // dorsal sac with darker fluid filling its lower half.
+                    // (The JS sac is translucent; this port pass renders it
+                    // opaque -- the same per-vertex-alpha channel dropped for
+                    // the blob's gelatin in pass 1, docs/12.)
+                    var sacR = 0.8 + 0.9 * girth;
+                    var sacL = 1.0 + 0.9 * len;
+                    var c = s + n * (sacR * 0.55);
+                    Prims.LimbJoint(mb, s, n, sacR * 0.5);
+                    Prims.Ellipsoid(mb, new Vec3(c.X, c.Y - sacR * 0.15, c.Z),
+                        new Vec3(sacR * 0.72, sacR * 0.55, sacL * 0.72), new Col(122, 30, 38), 0.25, 0.1, 9);
+                    Prims.Ellipsoid(mb, c, new Vec3(sacR, sacR * 0.9, sacL), skin, 0.35, 0, 11);
+                    break;
+                }
+                case "steel_tank":
+                {
+                    // the tech storage vessel (docs/22): a riveted steel tank
+                    // lying along the spine, with a filler cap, sight gauge,
+                    // and a rivet seam -- the human-army harvester look
+                    var tR = 0.55 + 0.5 * girth;
+                    var tL = 1.2 + 1.1 * len;
+                    var c = s + n * (tR * 0.7);
+                    Prims.LimbJoint(mb, s, n, tR * 0.5);
+                    Prims.Tube(mb, new[] { new Vec3(c.X, c.Y, c.Z - tL), new Vec3(c.X, c.Y, c.Z + tL) },
+                        new[] { tR, tR }, Palette.METAL, 0.75, 0, 12, 2);
+                    Prims.Ellipsoid(mb, new Vec3(c.X, c.Y, c.Z - tL), new Vec3(tR * 0.95, tR * 0.95, tR * 0.4), Palette.METDK, 0.7, 0, 10);
+                    Prims.Ellipsoid(mb, new Vec3(c.X, c.Y, c.Z + tL), new Vec3(tR * 0.95, tR * 0.95, tR * 0.4), Palette.METDK, 0.7, 0, 10);
+                    Prims.Ellipsoid(mb, new Vec3(c.X, c.Y + tR * 0.95, c.Z - tL * 0.3), new Vec3(0.22, 0.16, 0.22), Palette.METDK, 0.6, 0, 6);
+                    Prims.Ellipsoid(mb, new Vec3(c.X, c.Y + tR * 0.8, c.Z + tL * 0.4), new Vec3(0.1, 0.28, 0.1), new Col(150, 30, 40), 0.4, 0.4, 5);
+                    for (var i = 0; i < 5; i++)
+                        Prims.Ellipsoid(mb, new Vec3(c.X, c.Y + tR * 0.98, c.Z - tL * 0.8 + i * (tL * 1.6 / 4)),
+                            new Vec3(0.06, 0.05, 0.06), Palette.METDK, 0.8, 0, 4);
+                    break;
+                }
+                case "amber_vesicle":
+                {
+                    // the biotech storage vessel (docs/22): a clustered mass
+                    // of amber vesicles fused along the spine, each glowing
+                    // faintly -- the alien harvester look
+                    var amber = new Col(225, 168, 70);
+                    var nV = (int)Clamp(3 + Math.Round(count * 3), 3, 6);
+                    var vR = 0.45 + 0.45 * girth;
+                    Prims.LimbJoint(mb, s, n, vR * 0.6);
+                    for (var i = 0; i < nV; i++)
+                    {
+                        var t = (double)i / Math.Max(nV - 1, 1);
+                        var p = new Vec3(
+                            s.X + Math.Sin(i * 2.4) * vR * 0.55,
+                            s.Y + n.Y * vR * 0.7 + Math.Cos(i * 1.7) * vR * 0.25,
+                            s.Z + (t - 0.5) * vR * 2.6);
+                        var r = vR * (0.7 + 0.35 * Math.Abs(Math.Sin(i * 1.3)));
+                        Prims.Ellipsoid(mb, p, new Vec3(r, r * 0.9, r), amber, 0.25, 0.25, 8);
+                    }
                     break;
                 }
 
