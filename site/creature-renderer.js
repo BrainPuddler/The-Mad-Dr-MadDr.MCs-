@@ -1729,7 +1729,9 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     rifle_arm: ['none', 0], plasma_lance: ['chitin', 0.6], hand_stump: ['warts', 0.3],
     chain_blade: ['none', 0], spore_launcher: ['chitin', 0.55],
     laser_array: ['chitin', 0.5], photon_blaster: ['chitin', 0.6],
+    lamprey_maw: ['slick', 0.85], bone_saw: ['none', 0], ichor_siphon: ['slick', 0.7],
     antenna: ['ridge', 0.35], horn: ['ridge', 0.55], sensor_mast: ['none', 0],
+    storage_bladder: ['slick', 0.6], steel_tank: ['none', 0], amber_vesicle: ['slick', 0.5],
     sensor_stub: ['warts', 0.3],
     bug_eyes: ['none', 0], cyclops_eye: ['none', 0], stalk_eyes: ['none', 0],
     optic_visor: ['none', 0], eye_socket: ['warts', 0.3],
@@ -1894,6 +1896,87 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       mb.glow(mawC, PHOTON_N, 14 + 10*orn);
       break;
     }
+    case 'lamprey_maw': {
+      // the harvest suction tool (docs/22): a fleshy hose-arm ending in a
+      // round rasping sucker mouth ringed with tooth rows -- count sets
+      // how many rings of teeth, girth the hose thickness
+      const baseR = (0.42 + 0.4*girth) * scale;
+      const L = (2.0 + 1.8*len) * scale;
+      const path = [];
+      for (let i = 0; i <= 8; i++) {
+        const t = i / 8;
+        const exit = baseR * 1.5 * Math.pow(1 - t, 1.5);
+        path.push([
+          S[0] + N[0]*exit + side * 0.35*t,
+          S[1] + N[1]*exit - t*L + Math.sin(t*Math.PI) * 0.25,
+          S[2] + N[2]*exit + 0.7*t + curl * Math.sin(t*Math.PI*1.3) * 0.6,
+        ]);
+      }
+      limbJoint(mb, path[0], V.sub(path[1], path[0]), baseR);
+      tube(mb, path, path.map((_, i) => baseR * (1 - (i/8)*0.25)), o.skin, 0.3, 0, 9, 3,
+        null, (t) => [0, 0, 0.08 + 0.3*t*t, side*2 + t*2.5]);   // a slow feeding ripple
+      // the sucker disc: a broad mouth ellipsoid with a dark throat
+      const mouth = path[8];
+      const mR = baseR * 1.55;
+      ellipsoid(mb, mouth, [mR, mR*0.55, mR], o.skin, 0.3, 0, 9, o.skinFn);
+      ellipsoid(mb, [mouth[0], mouth[1]-mR*0.28, mouth[2]], [mR*0.62, mR*0.3, mR*0.62], MOUTHC, 0.2, 0, 8);
+      // rings of rasping teeth around the rim
+      const rows = clamp(1 + Math.round(count*2), 1, 3);
+      for (let r = 0; r < rows; r++) {
+        const rr = mR * (0.85 - r*0.22);
+        const nT = 8 - r*2;
+        for (let i = 0; i < nT; i++) {
+          const a = (i/nT) * Math.PI * 2;
+          curvedCone(mb, [mouth[0]+Math.cos(a)*rr, mouth[1]-mR*0.18-r*0.08, mouth[2]+Math.sin(a)*rr],
+            [-Math.cos(a)*0.4, -0.9, -Math.sin(a)*0.4], 0.28+0.1*girth, 0.08, [0,0,0], CLAW, 0.4);
+        }
+      }
+      break;
+    }
+    case 'bone_saw': {
+      // the harvest saw tool (docs/22): a motor housing driving a round
+      // surgical saw blade on an articulated boom -- tech, so metal
+      const wrist = armDrop(mb, S, side, 0.42*scale, scale, o, [len, girth, taper, curl], N, armCapLen);
+      ellipsoid(mb, wrist, [0.45, 0.42, 0.55], METAL, 0.7, 0, 8);   // motor housing
+      const boomLen = (1.2 + 1.2*len) * scale;
+      const hub = [wrist[0], wrist[1]+boomLen*0.1, wrist[2]+boomLen];
+      tube(mb, [wrist, hub], [0.15, 0.12], METDK, 0.75, 0, 8);
+      // the blade: a wide, thin disc standing vertical, teeth around the rim
+      const bladeR = (0.7 + 0.55*girth) * scale;
+      ellipsoid(mb, hub, [0.06, bladeR, bladeR], METAL, 0.85, 0, 12);
+      ellipsoid(mb, hub, [0.09, bladeR*0.3, bladeR*0.3], METDK, 0.6, 0, 8);   // arbor hub
+      const nTeeth = 10;
+      for (let i = 0; i < nTeeth; i++) {
+        const a = (i/nTeeth) * Math.PI * 2;
+        ellipsoid(mb, [hub[0], hub[1]+Math.cos(a)*bladeR, hub[2]+Math.sin(a)*bladeR],
+          [0.05, 0.14, 0.14], METDK, 0.7, 0, 4);
+      }
+      break;
+    }
+    case 'ichor_siphon': {
+      // the biotech harvest siphon (docs/22): a fleshy arm splitting into
+      // translucent drinking tubes -- count sets how many, each pulsing
+      const wrist = armDrop(mb, S, side, 0.44*scale, scale, { skin: CHITIN, skinFn: null }, [len, girth, taper, curl], N, armCapLen);
+      ellipsoid(mb, wrist, [0.5, 0.45, 0.5], CHITIN, 0.4, 0, 8);
+      const nTubes = clamp(2 + Math.round(count*2), 2, 4);
+      const L = (1.5 + 1.4*len) * scale;
+      mb.setAlpha(0.6);   // translucent feeding tubes
+      for (let i = 0; i < nTubes; i++) {
+        const a = (i/(nTubes-1||1) - 0.5) * 1.2;
+        const tip = [wrist[0]+Math.sin(a)*0.8*scale, wrist[1]-L*0.8, wrist[2]+L*0.55+Math.cos(a)*0.25*scale];
+        tube(mb, [wrist, [wrist[0]+Math.sin(a)*0.5, wrist[1]-L*0.35, wrist[2]+L*0.4], tip],
+          [0.14*scale, 0.1*scale, 0.07*scale], ICHOR, 0.3, 0.35, 7, 2,
+          null, (t) => [0, 0, 0.1 + 0.3*t, i*1.7 + t*3.0]);   // each tube pulses as it draws
+      }
+      mb.setAlpha(1);
+      for (let i = 0; i < nTubes; i++) {
+        const a = (i/(nTubes-1||1) - 0.5) * 1.2;
+        const tip = [wrist[0]+Math.sin(a)*0.8*scale, wrist[1]-L*0.8, wrist[2]+L*0.55+Math.cos(a)*0.25*scale];
+        ellipsoid(mb, tip, [0.12, 0.12, 0.12], ICHOR, 0.4, 0.7, 5);
+        mb.glow(tip, ICHOR, 8);
+      }
+      break;
+    }
 
     // ---- sensors (paired via sock.mirror) ----
     case 'antenna': {
@@ -1932,6 +2015,63 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       ellipsoid(mb, [mTop[0], mTop[1], mTop[2]+0.15], [0.68, 0.68, 0.18], METDK, 0.7, 0, 10);
       ellipsoid(mb, [mTop[0], mTop[1], mTop[2]+0.34], [0.16,0.16,0.16], GLOW, 0.5, 1, 6);
       mb.glow([mTop[0], mTop[1], mTop[2]+0.36], GLOW, 20);
+      break;
+    }
+    case 'storage_bladder': {
+      // the organic storage vessel (docs/22): a translucent distended
+      // dorsal sac with darker fluid visibly filling its lower half --
+      // girth sets how swollen, length how far it slumps along the spine
+      const sacR = (0.8 + 0.9*girth);
+      const sacL = (1.0 + 0.9*len);
+      const c = V.add(S, V.scale(N, sacR*0.55));
+      limbJoint(mb, S, N, sacR*0.5);
+      // the fluid inside first (opaque, blood-dark), then the membrane over it
+      ellipsoid(mb, [c[0], c[1]-sacR*0.15, c[2]], [sacR*0.72, sacR*0.55, sacL*0.72], [122, 30, 38], 0.25, 0.1, 9);
+      mb.setAlpha(0.42);
+      ellipsoid(mb, c, [sacR, sacR*0.9, sacL], o.skin, 0.2, 0, 11, o.skinFn,
+        (t) => [0, 0, 0.06, t*1.3]);   // a slow slosh wobble
+      mb.setAlpha(1);
+      break;
+    }
+    case 'steel_tank': {
+      // the tech storage vessel (docs/22): a riveted steel dorsal tank
+      // lying along the spine -- filler cap, sight gauge, rivet seam
+      const tR = (0.55 + 0.5*girth);
+      const tL = (1.2 + 1.1*len);
+      const c = V.add(S, V.scale(N, tR*0.7));
+      limbJoint(mb, S, N, tR*0.5);
+      tube(mb, [[c[0], c[1], c[2]-tL], [c[0], c[1], c[2]+tL]], [tR, tR], METAL, 0.75, 0, 12, 2);
+      ellipsoid(mb, [c[0], c[1], c[2]-tL], [tR*0.95, tR*0.95, tR*0.4], METDK, 0.7, 0, 10);   // end caps
+      ellipsoid(mb, [c[0], c[1], c[2]+tL], [tR*0.95, tR*0.95, tR*0.4], METDK, 0.7, 0, 10);
+      ellipsoid(mb, [c[0], c[1]+tR*0.95, c[2]-tL*0.3], [0.22, 0.16, 0.22], METDK, 0.6, 0, 6);   // filler cap
+      ellipsoid(mb, [c[0], c[1]+tR*0.8, c[2]+tL*0.4], [0.1, 0.28, 0.1], [150, 30, 40], 0.4, 0.4, 5);   // sight gauge showing the blood level
+      for (let i = 0; i < 5; i++) {   // rivet seam down the top
+        ellipsoid(mb, [c[0], c[1]+tR*0.98, c[2]-tL*0.8 + i*(tL*1.6/4)], [0.06,0.05,0.06], METDK, 0.8, 0, 4);
+      }
+      break;
+    }
+    case 'amber_vesicle': {
+      // the biotech storage vessel (docs/22): a clustered mass of amber
+      // vesicles fused along the spine, each faintly glowing with what it
+      // holds -- count sets how many, girth how swollen
+      const AMBER = [225, 168, 70];
+      const nV = clamp(3 + Math.round(count*3), 3, 6);
+      const vR = (0.45 + 0.45*girth);
+      limbJoint(mb, S, N, vR*0.6);
+      for (let i = 0; i < nV; i++) {
+        const t = i / (nV - 1 || 1);
+        const p = [
+          S[0] + Math.sin(i*2.4) * vR * 0.55,
+          S[1] + N[1]*vR*0.7 + Math.cos(i*1.7) * vR * 0.25,
+          S[2] + (t - 0.5) * vR * 2.6,
+        ];
+        const r = vR * (0.7 + 0.35 * Math.abs(Math.sin(i*1.3)));
+        mb.setAlpha(0.72);
+        ellipsoid(mb, p, [r, r*0.9, r], AMBER, 0.25, 0.25, 8, null,
+          (tt) => [0, 0, 0.05, i*1.9 + tt*1.1]);   // each vesicle breathes
+        mb.setAlpha(1);
+        mb.glow(p, AMBER, 5);
+      }
       break;
     }
     case 'sensor_stub': {

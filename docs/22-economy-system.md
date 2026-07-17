@@ -153,6 +153,34 @@ Every arrow that *drains* the player is automatic and legible; every arrow that 
 | Stitchworks build-time multiplier / queue depth | 1.5× Vat / 5 |
 | Field augment costs (+50% capacity each) | Plating 15 Bones · Stomach 10 Blood + 5 Bones · Gland 5 Brains |
 
-## 11. Open questions
+## 11. Harvester morphology: bred in the Lab, never a bolt-on (IMPLEMENTED)
+
+The Ghoul of §6 described a *unit class*; on creator direction it is realized instead as **genetics** — harvest capability is parts, and parts are the Lab's whole language. You don't buy a harvester off a menu: you **breed, mutate, or graft one**, the same way you make anything else. Implemented in `genome-core` (`catalog.ts` families + `harvest.ts` derived stats) and rendered in the Lab site.
+
+**Harvest tools — hand-homolog families**, one per origin so every faction path has its option ([17](17-factions.md)):
+
+| Family | Origin | Fantasy | Bias |
+| --- | --- | --- | --- |
+| `lamprey_maw` | organic | a fleshy hose-arm ending in a rasping sucker mouth | **Blood ×3** — and it **drains living targets**, not just corpses |
+| `bone_saw` | tech | a motorized circular surgical saw on an articulated boom | **Bone ×3** — corpses only |
+| `ichor_siphon` | biotech | translucent siphon tubes that drink from wounds, pulsing | Blood ×2.4, brain ×0.8 — drains living |
+
+Ordinary hands still gather (claws, pincers, chain blades tear at corpses at reduced rates — "nothing is wasted"); a *gun* arm gathers almost nothing. Tool size genes (length/girth) scale the rate: a bigger maw drinks faster. **Speedy legs are simply legs** — pick `talon_leg` and high locomotion genes for a fast gatherer; gather rate rides the hand, speed rides the legs, so the classic fast-fragile-hauler is a build you assemble from existing axes, not a stat block we author.
+
+**Storage vessels — sensor-homolog families** (dorsal-mounted, like antenna/horn/mast — the Hox grammar is untouched, no new slot, no schema change; the trade is real: *a tank on your back is a sensor you don't have*):
+
+| Family | Origin | Fantasy |
+| --- | --- | --- |
+| `storage_bladder` | organic | a translucent distended sac that visibly sloshes as it fills |
+| `steel_tank` | tech | a riveted steel tank with filler cap and a sight gauge showing the blood level — the human-army look |
+| `amber_vesicle` | biotech | clustered amber vesicles fused along the spine, each faintly glowing — the alien look |
+
+Capacity = base + body bulk + the vessel's expressed size; the **blob plan gets a ×1.5 bonus** — an amorphous body *is* a bag ("blob body storage capacity"). Onboard capacity from §2 and vessel capacity pool together.
+
+**Weight and flight.** Carried load slows the carrier: up to −25% ground speed at full, and **−50% for winged/floater plans — flight pays double for every unit carried** (creator direction: "flying units will need to take weight into account"). Both floored per §1's contract (0.6× ground, 0.4× flight): a laden flyer is slow and juicy to intercept, never grounded — the risk/reward of an aerial blood-tanker is the *fun*, being stranded would be the *annoying*.
+
+All of it is ordinary genetics end to end: these families mutate, splice, canalize, cost upkeep by origin ([energy](05-component-economy.md)), harvest/sew between bodies ("nothing is wasted"), and obey the heart-capacity gate. The catalog addition shifted the deterministic mutation stream, so the golden lineage digest was regenerated — a deliberate, versioned change ([12](12-open-questions.md) decision log). Battlefield-side (Unity) behavior for gather/carry and the C# renderer treatment of the six new families are the follow-up bricks; the C# weapon mapper already degrades them gracefully (unarmed melee) in the meantime.
+
+## 12. Open questions
 
 Logged in [12-open-questions.md](12-open-questions.md): **Q25** (wallet-zero decay rule superseded — full reconciliation with [05](05-component-economy.md)), **Q26** (Stitchworks destruction: refund queued bills?), **Q27** (medic auto-triage AI tuning vs. deathball risk), **Q28** (wallet-cap values and whether caps apply retroactively when storage dies), **Q29** (brain-charge interplay with Megabrain Augmentation and commander capacity — does the +7.2 Capacity monster also need a bigger grey-matter tank?).

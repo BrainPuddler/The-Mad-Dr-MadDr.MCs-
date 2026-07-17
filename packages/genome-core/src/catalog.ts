@@ -86,6 +86,25 @@ export const FAMILIES: Readonly<Record<string, PartFamily>> = {
     bounds: bounds({ girth: [0.35, 1.0] }),
     invariants: "a fleshy arm ending in a bulbous veined pod that vents spore motes",
   },
+  // ---- hand homologs: harvest tools (docs/22 harvester morphology) ----------
+  // Tools, not weapons: they gather blood/bone from targets living or dead
+  // (harvest.ts computes the rates). They breed, mutate, and graft exactly
+  // like any other hand family -- a harvester is BRED, not bolted on.
+  lamprey_maw: {
+    homolog: "hand", origin: "organic",
+    bounds: bounds({ girth: [0.25, 0.85], taper: [0.4, 1.0], count: [0.2, 1.0] }),
+    invariants: "a fleshy hose-arm ending in a round rasping sucker mouth ringed with tooth rows; drinks from the living and the dead alike",
+  },
+  bone_saw: {
+    homolog: "hand", origin: "tech",
+    bounds: bounds({ curl: [0.0, 0.25], girth: [0.3, 0.9] }),
+    invariants: "an arm mounting a motorized circular surgical saw on an articulated boom; cuts skeleton out of carcasses",
+  },
+  ichor_siphon: {
+    homolog: "hand", origin: "biotech",
+    bounds: bounds({ girth: [0.2, 0.7], taper: [0.5, 1.0], count: [0.3, 1.0] }),
+    invariants: "a fleshy arm splitting into translucent siphon tubes that drink from wounds, pulsing as they draw",
+  },
   // ---- sensor homologs ------------------------------------------------------
   antenna: {
     homolog: "sensor", origin: "organic",
@@ -101,6 +120,28 @@ export const FAMILIES: Readonly<Record<string, PartFamily>> = {
     homolog: "sensor", origin: "tech",
     bounds: bounds({ girth: [0.0, 0.4] }),
     invariants: "a single rigid antenna mast with a dish or vane at the tip",
+  },
+  // ---- sensor homologs: storage vessels (docs/22 harvester morphology) ------
+  // Dorsal-mounted like every sensor family (antenna/horn/mast all express
+  // at the same mount), but these are TANKS, not senses: they extend the
+  // creature's onboard resource capacity (harvest.ts). Storage rides the
+  // sensor homolog so it breeds within the existing Hox grammar -- no new
+  // slot, no schema change; the trade is real: a tank on your back is a
+  // sensor you don't have.
+  storage_bladder: {
+    homolog: "sensor", origin: "organic",
+    bounds: bounds({ girth: [0.4, 1.0], length: [0.2, 0.8] }),
+    invariants: "a translucent distended dorsal sac, membrane-veined, that visibly sloshes as it fills",
+  },
+  steel_tank: {
+    homolog: "sensor", origin: "tech",
+    bounds: bounds({ girth: [0.35, 0.9], length: [0.3, 0.9], curl: [0.0, 0.2] }),
+    invariants: "a riveted steel dorsal tank with a filler cap and a sight gauge; sloshes dully when struck",
+  },
+  amber_vesicle: {
+    homolog: "sensor", origin: "biotech",
+    bounds: bounds({ girth: [0.3, 0.9], count: [0.3, 1.0] }),
+    invariants: "a clustered mass of amber vesicles fused along the spine, each glowing faintly with what it holds",
   },
   // ---- eye homologs ---------------------------------------------------------
   bug_eyes: {
