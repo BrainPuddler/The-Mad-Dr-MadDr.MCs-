@@ -797,6 +797,12 @@ public class RuntimeCityBuilder : MonoBehaviour
         WalletBrains += 1;
         CitizensEaten++;
         _citizens.Remove(citizen);
+        if (citizen != null && _buildingsHost != null)
+        {
+            var pos = citizen.transform.position;
+            pos.y = GroundHeightAt(pos);
+            DamageFx.BloodSplatter(pos, _buildingsHost);
+        }
         if (citizen != null) Object.Destroy(citizen.gameObject);
         Debug.Log("Citizen eaten. Wallet: " + WalletBlood + " blood / " + WalletBones + " bones / " + WalletBrains + " brains.");
     }

@@ -29,6 +29,60 @@ public static class DamageFx
         go.transform.position = at;
         go.AddComponent<DustBurstFx>();
     }
+
+    /// <summary>A dark ground stain at a citizen's last position -- the
+    /// horror-movie kill mark. Fades out after a while (`GroundStain`)
+    /// rather than lingering forever, so a long match's eaten-citizen
+    /// count doesn't accumulate into ground clutter.</summary>
+    public static void BloodSplatter(Vector3 at, Transform parent)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        go.name = "BloodSplatter";
+        go.transform.SetParent(parent, false);
+        go.transform.position = at + Vector3.up * 0.04f;
+        var collider = go.GetComponent<Collider>();
+        if (collider != null) Object.Destroy(collider);
+
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(0.42f, 0.05f, 0.06f, 0.85f);
+        LabMeshBuilder.MakeTransparent(mat);
+        var renderer = go.GetComponent<Renderer>();
+        if (renderer != null) renderer.sharedMaterial = mat;
+
+        go.AddComponent<GroundStain>().Init(mat, go.transform);
+    }
+}
+
+/// <summary>A flat ground decal that holds, then fades out and self-
+/// destructs. Deterministic-ish size variety off its own instance ID
+/// (no gameplay meaning riding on it, so GetInstanceID is fine here
+/// unlike the seeded-hash dressers).</summary>
+public class GroundStain : MonoBehaviour
+{
+    private Material _mat;
+    private float _age;
+    private const float Life = 14f;
+    private const float FadeStart = 9f;
+
+    public void Init(Material mat, Transform t)
+    {
+        _mat = mat;
+        var id = GetInstanceID();
+        var size = 1.3f + (id & 3) * 0.35f;
+        t.localScale = new Vector3(size, 0.05f, size * (0.7f + ((id >> 2) & 3) * 0.15f));
+    }
+
+    private void Update()
+    {
+        _age += Time.deltaTime;
+        if (_age > FadeStart && _mat != null)
+        {
+            var t = Mathf.Clamp01((_age - FadeStart) / (Life - FadeStart));
+            var c = _mat.color;
+            _mat.color = new Color(c.r, c.g, c.b, 0.85f * (1f - t));
+        }
+        if (_age >= Life) Object.Destroy(gameObject);
+    }
 }
 
 /// <summary>Spawns a soft gray puff every beat, for as long as the

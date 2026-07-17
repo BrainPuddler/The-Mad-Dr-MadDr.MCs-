@@ -387,6 +387,15 @@ public static class BuildingDresser
                 var shed = b.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * height,
                     new Vector3(9f, 9.6f, 9f), RustRed(), t);
                 shed.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                // platform + a small ticket booth out front -- ties the
+                // depot into the railyard district (docs/21 batch 3)
+                // instead of reading as an isolated trainshed
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 0.5f, Half * 1.3f),
+                    new Vector3(16f, 1f, 5f), Concrete(), t);      // platform slab
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(-6f, 2.4f, Half * 1.3f),
+                    new Vector3(3f, 3.8f, 3f), Cream(), t);        // ticket booth
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(-6f, 4.6f, Half * 1.3f),
+                    new Vector3(3.6f, 0.4f, 3.6f), RustRed(), t);  // booth roof
                 break;
             case "hospital":
                 b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, height + 4f, 0f),

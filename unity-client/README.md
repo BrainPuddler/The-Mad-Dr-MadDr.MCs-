@@ -75,7 +75,9 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   that `MonsterBody.BuildWings`/`UpdateWingFlap` mount and hinge live.
 - **`Assets/Scripts/Citizen.cs`** — docs/19 client-side cosmetic crowd:
   wanders the streets, flees monsters, edible (docs/20 yields: Blood 2 /
-  Bones 1 / Brains 1 into the session wallet).
+  Bones 1 / Brains 1 into the session wallet), leaving a dark ground
+  splatter (`DamageFx.BloodSplatter`) that holds for a while and fades
+  rather than lingering forever.
 - **The miniature-set world** (`TerrainField.cs` / `BuildingDresser.cs` /
   `RoadDresser.cs`, docs/21) — the battlefield renders as a 1950s
   monster-movie miniature. Deterministic sculpted terrain (the
@@ -152,8 +154,9 @@ Contents are still the stock template (SampleScene, TutorialInfo) plus:
   bulbs, billboard art -- brightens to actually read as neon against
   the dim. Buildings within a `rail_depot` landmark's radius re-skin as
   warehouses (corrugated roofs, loading docks, a smokestack) and nearby
-  straight road hexes grow a parallel rail siding, tying the depot into
-  a small industrial district. `trafficCarCount` cars drive the road
+  straight road hexes grow a parallel rail siding, tying the depot
+  (itself a trainshed plus a platform slab and a small ticket booth)
+  into a small industrial district. `trafficCarCount` cars drive the road
   network hex-to-hex and flee like Citizens when a monster gets close,
   peeling off toward whichever reachable hex is farthest from the
   threat -- a quarter of them are boxy delivery vans instead of sedans,
