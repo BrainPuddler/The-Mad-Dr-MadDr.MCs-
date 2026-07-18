@@ -120,6 +120,16 @@ namespace MadDr.CityGen
         /// arterial.</summary>
         public IReadOnlyList<HexCoord> ArterialRoads { get; }
 
+        /// <summary>Road hexes that render as a proper roundabout (a
+        /// circular island + circulating lane) instead of a plain 4-way
+        /// cross -- the major arterial intersections (creator direction,
+        /// 2026-07: "for European styling proper Roundabouts"). A SUBSET
+        /// of Roads, sorted (R, Q). Every other 3+-way junction renders
+        /// as a North-American 4-way cross / T. TrafficCar also reads
+        /// this to circulate around the island instead of driving
+        /// straight through. Empty for Grid presets.</summary>
+        public IReadOnlyList<HexCoord> Roundabouts { get; }
+
         /// <summary>Water hexes (river + ponds), sorted by (R, Q).
         /// Impassable to ground plans; amphibious plans (crab,
         /// serpentine -- genome-core catalog) cross freely; winged/
@@ -143,6 +153,7 @@ namespace MadDr.CityGen
             int heightHexes,
             IReadOnlyList<HexCoord> roads,
             IReadOnlyList<HexCoord> arterialRoads,
+            IReadOnlyList<HexCoord> roundabouts,
             IReadOnlyList<HexCoord> water,
             IReadOnlyList<HexCoord> ridges,
             IReadOnlyList<Building> buildings,
@@ -155,6 +166,7 @@ namespace MadDr.CityGen
             HeightHexes = heightHexes;
             Roads = roads;
             ArterialRoads = arterialRoads;
+            Roundabouts = roundabouts;
             Water = water;
             Ridges = ridges;
             Buildings = buildings;

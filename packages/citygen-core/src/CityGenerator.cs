@@ -31,6 +31,11 @@ namespace MadDr.CityGen
     /// </summary>
     public static class CityGenerator
     {
+        /// <summary>How many arterial intersections become roundabouts --
+        /// the central few, so a North-American grid keeps its 4-way
+        /// crosses everywhere else (creator direction, 2026-07).</summary>
+        private const int MaxRoundabouts = 2;
+
         public static CityModel Generate(uint seed, CityPreset preset)
         {
             var rng = new Rng(seed);
@@ -88,6 +93,33 @@ namespace MadDr.CityGen
             foreach (var h in arterialGeom)
                 if (!allWater.Contains(h) || bridgeHexes.Contains(h)) arterialSet.Add(h);
 
+            // Roundabouts: the MAJOR arterial intersections, upgraded from
+            // a plain 4-way cross to a proper circular junction (creator
+            // direction, 2026-07). Only where Main Street (the arterial
+            // row) crosses a full vertical street (col % pitch == 0), and
+            // only the few nearest the town center -- a North-American
+            // grid with a couple of elegant roundabouts at its heart, not
+            // a roundabout maze. Never on a bridge deck (a roundabout on
+            // open water makes no sense) and never drowned.
+            var roundaboutSet = new HashSet<HexCoord>();
+            if (isMainStreet)
+            {
+                var arterialRow = height / 2;
+                var centerCol = width / 2;
+                var pitch = preset.BlockPitch;
+                var junctionCols = new List<int>();
+                for (var col = 0; col < width; col += pitch)
+                {
+                    var hex = HexCoord.FromOffset(col, arterialRow);
+                    if (roadSet.Contains(hex) && !bridgeHexes.Contains(hex)) junctionCols.Add(col);
+                }
+                // nearest-to-center first, take up to MaxRoundabouts
+                junctionCols.Sort((a, b) => Math.Abs(a - centerCol).CompareTo(Math.Abs(b - centerCol)));
+                var want = Math.Min(MaxRoundabouts, junctionCols.Count);
+                for (var i = 0; i < want; i++)
+                    roundaboutSet.Add(HexCoord.FromOffset(junctionCols[i], arterialRow));
+            }
+
             // Ridges never coincide with roads or water.
             var ridgeSet = new HashSet<HexCoord>();
             foreach (var h in ridgeCandidates)
@@ -117,11 +149,14 @@ namespace MadDr.CityGen
             var arterialList = new List<HexCoord>(arterialSet);
             arterialList.Sort(CompareRQ);
 
+            var roundaboutList = new List<HexCoord>(roundaboutSet);
+            roundaboutList.Sort(CompareRQ);
+
             var ridgeList = new List<HexCoord>(ridgeSet);
             ridgeList.Sort(CompareRQ);
 
             return new CityModel(seed, preset.Name, width, height,
-                roadList, arterialList, waterList, ridgeList, buildings, landmarks, bridges);
+                roadList, arterialList, roundaboutList, waterList, ridgeList, buildings, landmarks, bridges);
         }
 
         // ---- terrain ----------------------------------------------------

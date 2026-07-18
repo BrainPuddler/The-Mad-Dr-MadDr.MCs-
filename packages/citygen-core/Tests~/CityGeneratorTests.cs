@@ -118,6 +118,30 @@ public class CityGeneratorTests
     }
 
     [Theory]
+    [InlineData("village")]
+    [InlineData("small_town")]
+    public void MainStreet_presets_place_a_few_roundabouts_on_the_arterial(string presetName)
+    {
+        var preset = PresetByName(presetName);
+        var m = CityGenerator.Generate(3u, preset);
+        Assert.NotEmpty(m.Roundabouts);
+        Assert.True(m.Roundabouts.Count <= 2, $"expected at most 2 roundabouts, got {m.Roundabouts.Count}");
+        var arterialRow = preset.HeightHexes / 2;
+        foreach (var h in m.Roundabouts)
+        {
+            Assert.Contains(h, m.ArterialRoads);   // a roundabout is always on Main Street
+            Assert.Equal(arterialRow, h.R);        // ... which runs along the center row
+        }
+    }
+
+    [Fact]
+    public void Grid_preset_has_no_roundabouts()
+    {
+        var m = CityGenerator.Generate(3u, CityPreset.BigCity());
+        Assert.Empty(m.Roundabouts);
+    }
+
+    [Theory]
     [InlineData("village", 3, 1)]     // 1.96 km2: round(1.5*1.96)=3 emitters, round(0.5*1.96)=1 hub
     [InlineData("small_town", 6, 2)]  // 4 km2:  6 emitters, 2 hubs
     [InlineData("big_city", 10, 6)]   // 25 km2: capped at docs/02's 10, hubs capped at 6

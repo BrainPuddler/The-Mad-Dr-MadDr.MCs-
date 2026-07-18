@@ -133,16 +133,25 @@ board), or nav changes.
   cached materials (SRP-batcher friendly); ≤ ~15 primitives/building.
 
 **Phase 4 — Roads** (`RoadDresser.cs`)
-- Hub-and-spoke tiles: a center pad plus a connector strip toward each
-  road/bridge neighbor — straights, corners, T's, X's, and dead ends
-  *emerge from adjacency*, seamlessly, with no tile catalog to break.
+- **Cardinal tiles** (2026-07 rewrite): a center pad plus a strip toward
+  each *world-cardinal* (N/S/E/W) road neighbor, derived from
+  **offset-coordinate** adjacency rather than hex adjacency — so streets
+  are axis-aligned, straight, and parallel, and a full junction is a
+  clean **North-American 4-way cross** (or T), never a zig-zag or a
+  diagonal Y. (Rendering the hex's 60°-diagonal neighbors was the root
+  cause of both the persistent zig-zag and the Y intersections.)
 - Sidewalk trim, yellow center dashes (double yellow + a lane divider on
-  the wide Main Street arterial); ≥3-way intersections render as
-  European-style roundabouts, not crosswalk-striped X's (creator
-  direction, 2026-07 — see docs/12); deterministic street furniture:
-  streetlights, telephone poles, hydrants, trash cans, and pastel
-  tail-finned 1950s parked cars. All colliderless (clicks fall through
-  to the ground).
+  the wide Main Street arterial), crosswalk stripes at crosses; the
+  major arterial junctions render as a **fully detailed European
+  roundabout** — circulating asphalt ring, raised curb, landscaped grass
+  island with shrubs + a central sculpture, dashed circular lane
+  markings, flared entries with give-way triangles, set-back pedestrian
+  crossings, evenly spaced streetlamps, and blue-circular / red-triangular
+  signage (creator direction, 2026-07 — see docs/12). Traffic circulates
+  around the island (`TrafficCar`) instead of driving across it.
+  Deterministic street furniture: streetlights, telephone poles,
+  hydrants, trash cans, pastel tail-finned 1950s parked cars. All
+  colliderless (clicks fall through to the ground).
 
 **Verification** (no Editor in this environment): the entire gameplay
 layer stub-compiles against the real citygen-core/roster-client/

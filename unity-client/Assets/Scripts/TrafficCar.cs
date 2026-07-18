@@ -45,6 +45,14 @@ public class TrafficCar : MonoBehaviour
     private int _tripSalt;
     private int _hopCounter; // rotates the wander hash every pick -- see PickNext
 
+    // roundabout circulation state (creator direction, 2026-07: "Cars
+    // must follow the curve proper curves of the road")
+    private bool _circling;        // currently arcing around a roundabout island
+    private HexCoord _roundExit;   // hex chosen to leave the roundabout by
+    private float _exitAngle;      // world angle of _roundExit from the island center
+    private float _prevAngle;      // last frame's angle around the center (for sweep accumulation)
+    private float _sweptDeg;       // total degrees circulated since entering
+
     public bool IsDriving { get { return _state == State.Driving; } }
 
     /// <summary>Force an immediate departure regardless of this car's own
@@ -293,24 +301,38 @@ public class TrafficCar : MonoBehaviour
 
         if (threat != null)
         {
+            // fleeing overrides everything, including roundabout etiquette
+            // (creator: "unless fleeing from monster") -- drive straight out
+            _circling = false;
             speed = FleeSpeed;
             if (!_fleeing) PickNext(threat.transform.position); // threat just appeared: redirect now
             _fleeing = true;
             var to = _target - transform.position;
             to.y = 0f;
             if (to.magnitude < ArriveRadius) PickNext(threat.transform.position);
+            MoveToward(_target, speed, dt);
+            return;
         }
-        else
+
+        _fleeing = false;
+
+        // roundabout: arc around the circulating lane instead of driving
+        // across the island (creator direction: cars follow the curve).
+        if (_builder.IsRoundabout(_to))
         {
-            _fleeing = false;
-            var to = _target - transform.position;
-            to.y = 0f;
-            if (to.magnitude < ArriveRadius)
-            {
-                _hopsRemaining--;
-                if (_hopsRemaining <= 0) { ParkHere(); return; }
-                PickNext();
-            }
+            var steer = CirculateRoundabout(dt);
+            if (steer.HasValue) { MoveToward(steer.Value, speed, dt); return; }
+            // steer==null means we've come around to our exit -- fall
+            // through to a normal hop onto the chosen exit hex
+        }
+
+        var toTarget = _target - transform.position;
+        toTarget.y = 0f;
+        if (toTarget.magnitude < ArriveRadius)
+        {
+            _hopsRemaining--;
+            if (_hopsRemaining <= 0) { ParkHere(); return; }
+            PickNext();
         }
 
         // realistic on-road avoidance (creator direction, 2026-07:
@@ -320,21 +342,88 @@ public class TrafficCar : MonoBehaviour
         // MonsterAwareRadius) -- it doesn't touch the literal path
         // toward the CURRENT target. This nudges just this frame's
         // steering point sideways around a monster the car is about to
-        // drive past, so it curves through the lane instead of driving
-        // straight at it and only reacting once already fleeing. Never
-        // stacked with the full-panic swerve (already moving away by
-        // definition) or altered _target/hop bookkeeping -- purely
-        // cosmetic steering.
+        // drive past. Purely cosmetic steering.
         var steerTarget = _target;
-        if (threat == null)
-        {
-            var travelDir = _target - transform.position;
-            travelDir.y = 0f;
-            if (travelDir.sqrMagnitude > 0.01f)
-                steerTarget += SwerveOffset(travelDir.normalized);
-        }
+        var travelDir = _target - transform.position;
+        travelDir.y = 0f;
+        if (travelDir.sqrMagnitude > 0.01f)
+            steerTarget += SwerveOffset(travelDir.normalized);
 
         MoveToward(steerTarget, speed, dt);
+    }
+
+    /// <summary>Steer the car around a roundabout's circulating lane
+    /// (counter-clockwise, right-hand European traffic) rather than
+    /// across the central island. Returns the steering point to aim at,
+    /// or null once the car has circulated far enough AND lined up with
+    /// its chosen exit -- at which point it hops onto that exit hex like
+    /// a normal move. Chooses the exit the first frame it enters, so it
+    /// knows which spoke to leave by.</summary>
+    private Vector3? CirculateRoundabout(float dt)
+    {
+        var center = _builder.WorldOf(_to);
+        var radial = transform.position - center;
+        radial.y = 0f;
+        if (radial.sqrMagnitude < 0.01f) radial = new Vector3(0f, 0f, 1f);
+        var ang = Mathf.Atan2(radial.x, radial.z);   // world angle from +Z
+
+        if (!_circling)
+        {
+            _circling = true;
+            _sweptDeg = 0f;
+            _prevAngle = ang;
+            _roundExit = PickExit(_to);
+            var exitRadial = _builder.WorldOf(_roundExit) - center;
+            exitRadial.y = 0f;
+            _exitAngle = Mathf.Atan2(exitRadial.x, exitRadial.z);
+        }
+
+        // accumulate how far we've swept (unsigned, wrap-safe)
+        _sweptDeg += Mathf.Abs(Mathf.DeltaAngle(_prevAngle * Mathf.Rad2Deg, ang * Mathf.Rad2Deg));
+        _prevAngle = ang;
+
+        // exit once we've come around a bit AND are near the exit spoke
+        var atExit = Mathf.Abs(Mathf.DeltaAngle(ang * Mathf.Rad2Deg, _exitAngle * Mathf.Rad2Deg)) < 22f;
+        if (_sweptDeg > 40f && atExit)
+        {
+            _circling = false;
+            _from = _to;
+            _to = _roundExit;
+            _target = _builder.WorldOf(_to) + Vector3.up * 0.75f;
+            _hopsRemaining--;
+            return null;
+        }
+
+        // aim a little further counter-clockwise along the ring
+        const float lookahead = 0.55f;   // radians ahead around the circle
+        var na = ang + lookahead;        // +ang = counter-clockwise circulation
+        var ringPt = center + new Vector3(Mathf.Sin(na), 0f, Mathf.Cos(na)) * RuntimeCityBuilder.RoundaboutLaneRadius;
+        return ringPt + Vector3.up * 0.75f;
+    }
+
+    /// <summary>Pick a spoke to leave a roundabout by -- a road neighbor
+    /// of the hub other than the one we entered from (falling back to
+    /// any neighbor at a dead-end hub), by the same rotating wander hash
+    /// PickNext uses so exits vary trip to trip.</summary>
+    private HexCoord PickExit(HexCoord hub)
+    {
+        var candidates = new List<HexCoord>();
+        foreach (var n in hub.Neighbors())
+            if (_network.Contains(n) && !n.Equals(_from)) candidates.Add(n);
+        if (candidates.Count == 0)
+            foreach (var n in hub.Neighbors())
+                if (_network.Contains(n)) candidates.Add(n);
+        if (candidates.Count == 0) return hub;
+
+        _hopCounter++;
+        var best = candidates[0];
+        var bestScore = long.MinValue;
+        foreach (var n in candidates)
+        {
+            var score = ((long)n.Q * 928371 + (long)n.R * 128371 + GetInstanceID() + (long)_hopCounter * 40503) & 0xFFFF;
+            if (score > bestScore) { bestScore = score; best = n; }
+        }
+        return best;
     }
 
     /// <summary>Lateral offset that curves the car's immediate steering

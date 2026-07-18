@@ -69,36 +69,20 @@ public static class BridgeDresser
         {
             foreach (var hex in bridge.Footprint)
             {
-                var center = builder.WorldOf(hex);
-
-                // direction: toward every road-network neighbor (own
-                // bridge span AND the bank road it lands on), computed
-                // FIRST so the deck itself can be shaped and rotated to
-                // match, instead of sitting underneath as a fixed
-                // axis-aligned square while everything built on top of it
-                // (rails, truss) correctly follows the crossing's real
-                // heading. An unrotated square reads as a static "diamond"
-                // wherever a bridge runs at an angle to world axes -- i.e.
-                // almost always, since hex grids don't align to world axes
-                var connectors = new List<(Vector3 dir, float angle, bool arterial)>();
-                foreach (var n in hex.Neighbors())
-                {
-                    if (!network.Contains(n)) continue;
-                    var to = builder.WorldOf(n) - center;
-                    to.y = 0f;
-                    if (to.sqrMagnitude < 1e-4f) continue;
-                    connectors.Add((to.normalized, Mathf.Atan2(to.x, to.z) * Mathf.Rad2Deg, false));
-                }
-
-                // un-zigzag the SAME way RoadDresser does for approach
-                // roads (see that method's doc comment) -- without this,
-                // a "vertical" bridge crossing a zigzagging corridor kinks
-                // at every hex, both against its own neighbors and
-                // against the (already-straightened) road it meets
-                if (RoadDresser.TryStraightenCardinal(hex, network, connectors, out var correction))
-                    center += correction;
-
-                var facing = connectors.Count > 0 ? connectors[0].dir : Vector3.forward;
+                // CARDINAL alignment, shared with RoadDresser so a bridge
+                // lands on the same straight centerline as the road it
+                // meets and its own neighboring bridge hexes -- bridge
+                // hexes are ordinary members of city.Roads, so a
+                // "vertical" corridor crossing the river must resolve to
+                // the same due-N/S geometry the approach road does, not a
+                // per-hex diagonal kink. Facing = the road direction from
+                // this hex's own cardinal neighbors (a bridge across the
+                // horizontal river is a vertical street -> faces N/S).
+                var card = RoadDresser.CardinalNeighbors(hex, network);
+                var center = RoadDresser.CardinalAnchor(builder, hex, card.Vertical);
+                var facing = card.Vertical
+                    ? new Vector3(0f, 0f, card.N ? -1f : 1f)
+                    : new Vector3(card.E ? 1f : -1f, 0f, 0f);
                 var perp = new Vector3(facing.z, 0f, -facing.x);
                 var deckRot = Quaternion.LookRotation(facing, Vector3.up);
 

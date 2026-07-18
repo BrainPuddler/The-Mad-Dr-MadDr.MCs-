@@ -189,6 +189,7 @@ public class RuntimeCityBuilder : MonoBehaviour
     }
 
     private HashSet<HexCoord> _waterSet;
+    private HashSet<HexCoord> _roundaboutSet;
 
     /// <summary>O(1) water-hex lookup, lazily built from CityModel.Water
     /// (never changes after generation).</summary>
@@ -197,6 +198,22 @@ public class RuntimeCityBuilder : MonoBehaviour
         if (_waterSet == null) _waterSet = new HashSet<HexCoord>(_city.Water);
         return _waterSet.Contains(hex);
     }
+
+    /// <summary>O(1) roundabout-hex lookup (CityModel.Roundabouts) -- a
+    /// junction hex rendered as a circular roundabout. TrafficCar reads
+    /// this to circulate around the central island instead of driving
+    /// straight through (creator direction, 2026-07: "Cars must follow
+    /// the curve proper curves of the road").</summary>
+    public bool IsRoundabout(HexCoord hex)
+    {
+        if (_roundaboutSet == null) _roundaboutSet = new HashSet<HexCoord>(_city.Roundabouts);
+        return _roundaboutSet.Contains(hex);
+    }
+
+    /// <summary>The circulating-lane radius traffic follows around a
+    /// roundabout island -- kept in sync with RoadDresser's ring so cars
+    /// drive on the asphalt, not over the curb or off the edge.</summary>
+    public const float RoundaboutLaneRadius = 7.4f;
 
     /// <summary>How deep the water sits above the carved bed at a hex's
     /// centre -- TerrainField.WaterLevel minus the actual terrain height
