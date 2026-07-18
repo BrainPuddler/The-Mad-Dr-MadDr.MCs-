@@ -434,18 +434,23 @@ const STORE_IS_BONE = new Set(['bone_saw', 'chain_blade', 'pincer']);
 const BLOOD_RED = [150, 30, 40];
 const BONE_WHITE = [224, 216, 194];
 
-/** A dorsal (back) mount derived from the plan's own sockets: the eye
- * socket gives the torso FRONT depth, so -depth is the back face; height
- * sits on the upper back below the head; the normal points up-and-back so
- * a tank rests ON the spine. Single-mount, and it rides the head socket's
- * own breathing anim so it moves with the body. */
+/** A dorsal (back) mount seated DEAD CENTRE of the back, derived from the
+ * plan's own sockets: the eye socket gives the torso FRONT half-depth, so
+ * -depth is the back face; the height is the vertical middle of the trunk
+ * (between the waist/hand mount and — not up by the neck, not down by the
+ * tail); the normal is the near-vertical back's outward normal (mostly
+ * backward, slightly up). Single-mount, riding the head socket's own
+ * breathing anim so it moves with the body. */
 function dorsalSock(sockets) {
-  const eye = sockets.eye, sen = sockets.sensor;
+  const eye = sockets.eye, sen = sockets.sensor, hand = sockets.hand;
   const depth = eye ? Math.abs(eye.p[2]) : 1.5;
-  const y = (sen ? sen.p[1] : 6) * 0.72;
+  // dead centre of the trunk: midway between the shoulder/hand mount and
+  // the lower body (hand y is shoulder-ish; drop toward mid-torso)
+  const shoulderY = hand ? hand.p[1] : (sen ? sen.p[1] * 0.7 : 4);
+  const y = shoulderY * 0.72;
   return {
-    p: [0, y, -depth * 0.9],
-    nrm: V.norm([0, 1, -0.35]),
+    p: [0, y, -depth * 0.92],
+    nrm: V.norm([0, 0.2, -1]),
     mirror: false, out: 1,
     anim: sen ? sen.anim : undefined, gait: sen ? sen.gait : undefined,
   };
@@ -2050,60 +2055,67 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       mb.glow([mTop[0], mTop[1], mTop[2]+0.36], GLOW, 20);
       break;
     }
+    // storage vessels seat DEAD CENTRE of the back, pushed INTO the trunk
+    // so they read as part of the creature, not floating (creator
+    // direction). S is the back-surface point; +Z is into the body, -Z out.
     case 'storage_bladder': {
-      // the organic storage vessel (docs/22): a translucent distended sac
-      // on the BACK, its fluid reading RED for blood / WHITE for bone (o.store)
-      // -- girth sets how swollen, length how far it slumps along the spine
+      // organic: pus-filled sacs pushed INTO the trunk, bulging out THROUGH
+      // the skin -- each blob half-seated in the body under a taut skin cap.
+      // Contents read RED blood / WHITE bone (o.store).
       const store = o.store ?? BLOOD_RED;
-      const sacR = (0.8 + 0.9*girth);
-      const sacL = (1.0 + 0.9*len);
-      const c = V.add(S, V.scale(N, sacR*0.55));
-      limbJoint(mb, S, N, sacR*0.5);
-      // the fluid inside first (opaque, the resource color), then the membrane over it
-      ellipsoid(mb, [c[0], c[1]-sacR*0.1, c[2]], [sacR*0.82, sacR*0.66, sacL*0.82], store, 0.25, 0.1, 11);
-      mb.setAlpha(0.42);
-      ellipsoid(mb, c, [sacR, sacR*0.9, sacL], o.skin, 0.2, 0, 11, o.skinFn,
-        (t) => [0, 0, 0.06, t*1.3]);   // a slow slosh wobble
-      mb.setAlpha(1);
-      break;
-    }
-    case 'steel_tank': {
-      // the tech storage vessel (docs/22): a riveted steel tank on the BACK
-      // -- the human-army look. Metal shell, but the sight gauge AND end caps
-      // read RED blood / WHITE bone (o.store) so you can tell what it hauls.
-      const store = o.store ?? BLOOD_RED;
-      const tR = (0.55 + 0.5*girth);
-      const tL = (1.2 + 1.1*len);
-      const c = V.add(S, V.scale(N, tR*0.7));
-      limbJoint(mb, S, N, tR*0.5);
-      tube(mb, [[c[0], c[1], c[2]-tL], [c[0], c[1], c[2]+tL]], [tR, tR], METAL, 0.75, 0, 12, 2);
-      ellipsoid(mb, [c[0], c[1], c[2]-tL], [tR*0.95, tR*0.95, tR*0.4], store, 0.5, 0.15, 10);   // end caps show the contents
-      ellipsoid(mb, [c[0], c[1], c[2]+tL], [tR*0.95, tR*0.95, tR*0.4], store, 0.5, 0.15, 10);
-      ellipsoid(mb, [c[0], c[1]+tR*0.95, c[2]-tL*0.3], [0.22, 0.16, 0.22], METDK, 0.6, 0, 6);   // filler cap
-      ellipsoid(mb, [c[0], c[1]+tR*0.82, c[2]+tL*0.4], [0.12, 0.32, 0.12], store, 0.4, 0.4, 5);   // sight gauge showing the level
-      for (let i = 0; i < 5; i++) {   // rivet seam down the top
-        ellipsoid(mb, [c[0], c[1]+tR*0.98, c[2]-tL*0.8 + i*(tL*1.6/4)], [0.06,0.05,0.06], METDK, 0.8, 0, 4);
+      const blobR = (0.55 + 0.55*girth);
+      const nBlob = clamp(2 + Math.round(len*2), 2, 3);
+      for (let i = 0; i < nBlob; i++) {
+        const t = i / (nBlob - 1 || 1) - 0.5;
+        const r = blobR * (0.8 + 0.35 * Math.abs(Math.sin(i*1.7)));
+        const c = [S[0] + t*blobR*0.9, S[1] + t*blobR*0.5, S[2] + r*0.45];   // sunk ~45% in
+        ellipsoid(mb, c, [r, r*0.95, r*1.05], store, 0.3, 0.1, 10,
+          null, (tt) => [0, 0, 0.05, i*1.6 + tt*1.1]);   // each sac throbs
+        mb.setAlpha(0.5);
+        ellipsoid(mb, [c[0], c[1], c[2]-r*0.3], [r*0.82, r*0.78, r*0.5], o.skin, 0.35, 0, 9, o.skinFn);
+        mb.setAlpha(1);
       }
       break;
     }
+    case 'steel_tank': {
+      // tech: a riveted BACKPACK -- a rectangular frame plate seated flat
+      // against the back (rear half sunk into the trunk) with two cylinder
+      // tanks INSET into it so it reads solid/functional. Gauge + tank caps
+      // show the contents (RED blood / WHITE bone, o.store).
+      const store = o.store ?? BLOOD_RED;
+      const plW = (0.95 + 0.5*girth);
+      const plH = (1.1 + 0.7*len);
+      const plT = 0.34;
+      const plC = [S[0], S[1], S[2] + plT*0.55];   // rear half sunk into the trunk
+      ellipsoid(mb, plC, [plW, plH, plT], METDK, 0.7, 0, 12);
+      ellipsoid(mb, [plC[0], plC[1], plC[2]-plT*0.4], [plW*0.9, plH*0.9, plT*0.5], METAL, 0.75, 0, 12);   // face panel
+      const tR = plW*0.34, tHalf = plH*0.66, tankZ = S[2] - 0.02;
+      for (const sx of [1, -1]) {
+        const tx = plW*0.42*sx;
+        tube(mb, [[tx, plC[1]-tHalf, tankZ], [tx, plC[1]+tHalf, tankZ]], [tR, tR], METAL, 0.78, 0, 12, 2);
+        ellipsoid(mb, [tx, plC[1]+tHalf, tankZ], [tR*0.95, tR*0.4, tR*0.95], store, 0.5, 0.15, 8);   // caps = contents
+        ellipsoid(mb, [tx, plC[1]-tHalf, tankZ], [tR*0.95, tR*0.4, tR*0.95], store, 0.5, 0.15, 8);
+        ellipsoid(mb, [tx, plC[1]+tHalf+0.12, tankZ], [0.14, 0.14, 0.14], METDK, 0.6, 0, 5);   // filler cap
+      }
+      // sight gauge strip down the frame centre, contents-coloured
+      tube(mb, [[S[0], plC[1]-tHalf*0.8, S[2]-0.05], [S[0], plC[1]+tHalf*0.8, S[2]-0.05]], [0.08, 0.08], store, 0.4, 0.4, 6);
+      for (const sx of [1, -1]) for (const sy of [1, -1])   // corner rivets
+        ellipsoid(mb, [plW*0.86*sx, plC[1]+plH*0.82*sy, S[2]-0.04], [0.07, 0.07, 0.05], METDK, 0.8, 0, 4);
+      break;
+    }
     case 'amber_vesicle': {
-      // the biotech storage vessel (docs/22): a clustered mass of vesicles
-      // fused along the BACK, glowing with their contents -- RED blood /
-      // WHITE bone (o.store) -- the alien harvester look
+      // biotech: a cluster of vesicles fused INTO the back, half-sunk in the
+      // trunk and swelling out through the hide, glowing with their contents
+      // (RED blood / WHITE bone, o.store) -- the mad-doctor/alien read
       const store = o.store ?? BLOOD_RED;
       const nV = clamp(3 + Math.round(count*3), 3, 6);
-      const vR = (0.45 + 0.45*girth);
-      limbJoint(mb, S, N, vR*0.6);
+      const vR = (0.4 + 0.4*girth);
       for (let i = 0; i < nV; i++) {
-        const t = i / (nV - 1 || 1);
-        const p = [
-          S[0] + Math.sin(i*2.4) * vR * 0.55,
-          S[1] + N[1]*vR*0.7 + Math.cos(i*1.7) * vR * 0.25,
-          S[2] + (t - 0.5) * vR * 2.6,
-        ];
+        const t = i / (nV - 1 || 1) - 0.5;
         const r = vR * (0.7 + 0.35 * Math.abs(Math.sin(i*1.3)));
-        mb.setAlpha(0.78);
-        ellipsoid(mb, p, [r, r*0.9, r], store, 0.25, 0.4, 8, null,
+        const p = [S[0] + Math.sin(i*2.4)*vR*0.7, S[1] + t*vR*2.4, S[2] + r*0.4];   // sunk ~40% in
+        mb.setAlpha(0.82);
+        ellipsoid(mb, p, [r, r*0.95, r*1.05], store, 0.25, 0.45, 8, null,
           (tt) => [0, 0, 0.05, i*1.9 + tt*1.1]);   // each vesicle breathes
         mb.setAlpha(1);
         mb.glow(p, store, 6);
