@@ -141,8 +141,10 @@ board), or nav changes.
   diagonal Y. (Rendering the hex's 60°-diagonal neighbors was the root
   cause of both the persistent zig-zag and the Y intersections.)
 - Sidewalk trim, yellow center dashes (double yellow + a lane divider on
-  the wide Main Street arterial), crosswalk stripes at crosses; the
-  major arterial junctions render as a **fully detailed European
+  the wide Main Street arterial), crosswalk stripes at crosses; a couple
+  of ordinary residential junctions OFF the multi-lane arterial (never on
+  Main Street itself — a junction is either a cross or a roundabout,
+  never both) render as a **fully detailed European
   roundabout** — circulating asphalt ring, raised curb, landscaped grass
   island with shrubs + a central sculpture, dashed circular lane
   markings, flared entries with give-way triangles, set-back pedestrian

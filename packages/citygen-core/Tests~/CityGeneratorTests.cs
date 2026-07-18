@@ -120,17 +120,25 @@ public class CityGeneratorTests
     [Theory]
     [InlineData("village")]
     [InlineData("small_town")]
-    public void MainStreet_presets_place_a_few_roundabouts_on_the_arterial(string presetName)
+    public void MainStreet_presets_place_a_few_roundabouts_off_the_arterial(string presetName)
     {
         var preset = PresetByName(presetName);
         var m = CityGenerator.Generate(3u, preset);
         Assert.NotEmpty(m.Roundabouts);
         Assert.True(m.Roundabouts.Count <= 2, $"expected at most 2 roundabouts, got {m.Roundabouts.Count}");
         var arterialRow = preset.HeightHexes / 2;
+        var roads = new System.Collections.Generic.HashSet<HexCoord>(m.Roads);
         foreach (var h in m.Roundabouts)
         {
-            Assert.Contains(h, m.ArterialRoads);   // a roundabout is always on Main Street
-            Assert.Equal(arterialRow, h.R);        // ... which runs along the center row
+            Assert.Contains(h, roads);                       // a roundabout is a road hex
+            Assert.DoesNotContain(h, m.ArterialRoads);       // ... but NEVER on the multi-lane arterial
+            Assert.NotEqual(arterialRow, h.R);               // ... which runs along the center row
+            // and it is a genuine full 4-way crossing (all cardinal neighbors are roads)
+            var col = h.Q + (h.R - (h.R & 1)) / 2;
+            Assert.Contains(HexCoord.FromOffset(col + 1, h.R), roads);
+            Assert.Contains(HexCoord.FromOffset(col - 1, h.R), roads);
+            Assert.Contains(HexCoord.FromOffset(col, h.R - 1), roads);
+            Assert.Contains(HexCoord.FromOffset(col, h.R + 1), roads);
         }
     }
 

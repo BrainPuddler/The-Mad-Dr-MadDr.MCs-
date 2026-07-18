@@ -93,31 +93,39 @@ namespace MadDr.CityGen
             foreach (var h in arterialGeom)
                 if (!allWater.Contains(h) || bridgeHexes.Contains(h)) arterialSet.Add(h);
 
-            // Roundabouts: the MAJOR arterial intersections, upgraded from
-            // a plain 4-way cross to a proper circular junction (creator
-            // direction, 2026-07). Only where Main Street (the arterial
-            // row) crosses a full vertical street (col % pitch == 0), and
-            // only the few nearest the town center -- a North-American
-            // grid with a couple of elegant roundabouts at its heart, not
-            // a roundabout maze. Never on a bridge deck (a roundabout on
-            // open water makes no sense) and never drowned.
+            // Roundabouts: a couple of ORDINARY residential 4-way
+            // junctions upgraded to a circular junction (creator
+            // direction, 2026-07). Explicitly NOT on the multi-lane Main
+            // Street arterial -- a roundabout must never sit in the
+            // middle of the through-arterial, and a junction is EITHER a
+            // cross OR a roundabout, never both. So candidates are the
+            // full 4-way crossings of a NON-arterial cross-street (row %
+            // (pitch*2) == 0, != arterialRow) with a vertical street
+            // (col % pitch == 0), nearest the town center, never a
+            // drowned or bridge hex. Every OTHER junction (including all
+            // the arterial crossings) stays a plain 4-way cross.
             var roundaboutSet = new HashSet<HexCoord>();
             if (isMainStreet)
             {
                 var arterialRow = height / 2;
                 var centerCol = width / 2;
                 var pitch = preset.BlockPitch;
-                var junctionCols = new List<int>();
-                for (var col = 0; col < width; col += pitch)
+                var candidates = new List<HexCoord>();
+                for (var row = 0; row < height; row++)
                 {
-                    var hex = HexCoord.FromOffset(col, arterialRow);
-                    if (roadSet.Contains(hex) && !bridgeHexes.Contains(hex)) junctionCols.Add(col);
+                    if (row == arterialRow) continue;          // never on the arterial
+                    if (row % (pitch * 2) != 0) continue;      // only the through cross-streets
+                    for (var col = 0; col < width; col += pitch)
+                    {
+                        var hex = HexCoord.FromOffset(col, row);
+                        if (!roadSet.Contains(hex) || bridgeHexes.Contains(hex)) continue;
+                        if (IsFourWay(hex, roadSet)) candidates.Add(hex);
+                    }
                 }
-                // nearest-to-center first, take up to MaxRoundabouts
-                junctionCols.Sort((a, b) => Math.Abs(a - centerCol).CompareTo(Math.Abs(b - centerCol)));
-                var want = Math.Min(MaxRoundabouts, junctionCols.Count);
-                for (var i = 0; i < want; i++)
-                    roundaboutSet.Add(HexCoord.FromOffset(junctionCols[i], arterialRow));
+                candidates.Sort((a, b) =>
+                    OffsetDist2(a, centerCol, arterialRow).CompareTo(OffsetDist2(b, centerCol, arterialRow)));
+                var want = Math.Min(MaxRoundabouts, candidates.Count);
+                for (var i = 0; i < want; i++) roundaboutSet.Add(candidates[i]);
             }
 
             // Ridges never coincide with roads or water.
@@ -597,6 +605,31 @@ namespace MadDr.CityGen
         private static int RoundAway(double x)
         {
             return (int)Math.Round(x, MidpointRounding.AwayFromZero);
+        }
+
+        /// <summary>Whether a road hex has all four world-cardinal road
+        /// neighbors (a full crossroads), by OFFSET step -- the same
+        /// cardinal adjacency the renderer uses, so "4-way" here means the
+        /// same thing it draws.</summary>
+        private static bool IsFourWay(HexCoord hex, HashSet<HexCoord> roads)
+        {
+            var row = hex.R;
+            var col = hex.Q + (row - (row & 1)) / 2;
+            return roads.Contains(HexCoord.FromOffset(col + 1, row))
+                && roads.Contains(HexCoord.FromOffset(col - 1, row))
+                && roads.Contains(HexCoord.FromOffset(col, row - 1))
+                && roads.Contains(HexCoord.FromOffset(col, row + 1));
+        }
+
+        /// <summary>Squared offset (col,row) distance from a hex to a
+        /// target offset cell -- for ranking junctions by nearness to
+        /// town center without float geometry.</summary>
+        private static long OffsetDist2(HexCoord hex, int col, int row)
+        {
+            var hc = hex.Q + (hex.R - (hex.R & 1)) / 2;
+            long dc = hc - col;
+            long dr = hex.R - row;
+            return dc * dc + dr * dr;
         }
 
         private static int Clamp(int value, int lo, int hi)
