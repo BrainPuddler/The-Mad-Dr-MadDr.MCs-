@@ -89,11 +89,13 @@ namespace MadDr.CreatureMesh
             {
                 if (s.Sensor != null)
                 {
-                    // a STORAGE vessel is a tank on the creature's BACK, not
-                    // a sense organ on its head -- mount it dorsally (docs/22,
-                    // creator direction). Everything else stays head-mounted.
+                    // a STORAGE vessel is a tank on the creature's BACK/TOP,
+                    // not a sense organ on its head -- each plan provides its
+                    // own Back mount (docs/22, creator direction); the
+                    // derived DorsalSock is only a fallback for a plan that
+                    // forgot to. Everything else stays head-mounted.
                     var sensorSock = IsStorageVessel(genome.Slots.Sensor.Family)
-                        ? DorsalSock(s) : s.Sensor;
+                        ? (s.Back ?? DorsalSock(s)) : s.Sensor;
                     BuildSlot(mb, "sensor", genome.Slots.Sensor, sensorSock, o);
                 }
                 if (s.Eye != null) BuildSlot(mb, "eye", genome.Slots.Eye, s.Eye, o);
@@ -138,6 +140,12 @@ namespace MadDr.CreatureMesh
             public Sock? Hand;
             public Sock? Sensor;
             public Sock? Eye;
+            /// <summary>Where a storage vessel straps on (docs/22): each plan
+            /// sets this from its OWN real geometry -- top of the shell for
+            /// horizontal bodies (crab/arachnid, normal up), mid-back for
+            /// upright torsos (normal backward) -- always dead centre,
+            /// always clear of the head, tail, and wing roots.</summary>
+            public Sock? Back;
             public LegSocketInfo? Leg;
             public WingSocketInfo? Wing;
             public double TopY;
@@ -268,6 +276,14 @@ namespace MadDr.CreatureMesh
                 },
                 Sensor = HeadSock(sensP, head, true),
                 Eye = EyeSock(eyeP, head),
+                // upright torso: a vertical pack against the mid-back, at
+                // the chest level's true rear face
+                Back = new Sock
+                {
+                    P = new Vec3(0, (waistY + shl.Y) * 0.5, ch.Z - ch.Rz * 0.92),
+                    Nrm = new Vec3(0, 0.15, -1).Norm(),
+                    Mirror = false,
+                },
                 Leg = new LegSocketInfo
                 {
                     P = new Vec3(Math.Max(0.7, levels[0].Rx * 0.58), o.LegLen, 0),
@@ -365,6 +381,14 @@ namespace MadDr.CreatureMesh
                 Hand = new Sock { P = handP, Nrm = Prims.EllipN(handP, dC, dR), Mirror = true },
                 Sensor = new Sock { P = sensP, Nrm = Prims.EllipN(sensP, dC, dR), Mirror = true },
                 Eye = new Sock { P = eyeP, Nrm = Prims.EllipN(eyeP, dC, dR), Mirror = false, FaceR = dr * 0.8 },
+                // a dome has no back -- storage sits flat on TOP of the
+                // mound, half-sunk in the gelatin
+                Back = new Sock
+                {
+                    P = new Vec3(0, dC.Y + dR.Y * 0.8, 0),
+                    Nrm = new Vec3(0, 1, 0),
+                    Mirror = false,
+                },
                 TopY = dC.Y + dR.Y,
                 WaistY = dC.Y,
             };
@@ -436,6 +460,14 @@ namespace MadDr.CreatureMesh
                 },
                 Sensor = new Sock { P = sSensP, Nrm = Prims.EllipN(sSensP, hC, hR), Mirror = false },
                 Eye = EyeSock(sEyeP, fakeHead),
+                // cargo strapped flat on TOP of the thickest coil, where
+                // the neck rises -- never floating behind the S-curve
+                Back = new Sock
+                {
+                    P = new Vec3(neckBase.X * 0.75, neckBase.Y + baseR * 0.5, neckBase.Z * 0.75),
+                    Nrm = new Vec3(0, 1, 0),
+                    Mirror = false,
+                },
                 TopY = hC.Y + hR.Y,
                 WaistY = headY * 0.4,
             };
@@ -500,6 +532,14 @@ namespace MadDr.CreatureMesh
                     RootR = rootR,
                     Left = wingL.Chunks,
                     Right = wingR.Chunks,
+                },
+                // vertical pack low on the back, BELOW the wing roots at
+                // levels[3] so it never collides with the membranes
+                Back = new Sock
+                {
+                    P = new Vec3(0, (waistY + levels[2].Y) * 0.5, levels[2].Z - levels[2].Rz * 0.92),
+                    Nrm = new Vec3(0, 0.15, -1).Norm(),
+                    Mirror = false,
                 },
                 TopY = o.Headless ? neckTop : head.TopY,
                 WaistY = waistY,
@@ -621,6 +661,15 @@ namespace MadDr.CreatureMesh
                     Mirror = false,
                     FaceR = head.HR.X,
                 },
+                // horizontal shell: the pack lies flat ON TOP of the
+                // carapace, dead centre and biased slightly FORWARD --
+                // never behind, never near the tail (creator direction)
+                Back = new Sock
+                {
+                    P = new Vec3(0, y0 + h * 0.92, d * 0.12),
+                    Nrm = new Vec3(0, 1, 0),
+                    Mirror = false,
+                },
                 Leg = new LegSocketInfo
                 {
                     P = new Vec3(shl.Rx * 0.85, o.LegLen, -shl.Rz * 0.15),
@@ -665,6 +714,15 @@ namespace MadDr.CreatureMesh
                 },
                 Sensor = HeadSock(sensP, head, true),
                 Eye = EyeSock(eyeP, head),
+                // horizontal body: the pack rides flat ON TOP of the
+                // abdomen's crown, biased toward the waist (forward) so
+                // nothing hangs off the spinneret end
+                Back = new Sock
+                {
+                    P = new Vec3(0, aC.Y + ar * 0.75, aC.Z + ar * 0.25),
+                    Nrm = new Vec3(0, 1, 0),
+                    Mirror = false,
+                },
                 Leg = new LegSocketInfo
                 {
                     P = new Vec3(cr * 0.9, o.LegLen, cC.Z * 0.3),
@@ -717,6 +775,16 @@ namespace MadDr.CreatureMesh
                 },
                 Sensor = HeadSock(sensP, head, true),
                 Eye = EyeSock(eyeP, head),
+                // the raptor's sloped upper back, between chest and
+                // shoulders -- high and forward, well clear of the tail
+                // counterbalance at the body's low rear
+                Back = new Sock
+                {
+                    P = new Vec3(0, (levels[2].Y + levels[3].Y) * 0.5,
+                        ((levels[2].Z - levels[2].Rz) + (levels[3].Z - levels[3].Rz)) * 0.5 * 0.95),
+                    Nrm = new Vec3(0, 0.5, -0.87).Norm(),
+                    Mirror = false,
+                },
                 Leg = new LegSocketInfo
                 {
                     P = new Vec3(Math.Max(0.6, levels[0].Rx * 0.55), o.LegLen, levels[0].Z * 0.3),
@@ -770,6 +838,13 @@ namespace MadDr.CreatureMesh
                 },
                 Sensor = HeadSock(sensP, head, true),
                 Eye = EyeSock(eyeP, head),
+                // vertical trunk: a pack strapped flat to the bark, mid-height
+                Back = new Sock
+                {
+                    P = new Vec3(0, levels[2].Y, -levels[2].Rz * 0.95),
+                    Nrm = new Vec3(0, 0.1, -1).Norm(),
+                    Mirror = false,
+                },
                 TopY = o.Headless ? y0 + h : head.TopY,
                 WaistY = y0 + h * 0.5,
             };
@@ -832,6 +907,14 @@ namespace MadDr.CreatureMesh
                     Nrm = Prims.EllipN(eyeP, head.HC, head.HR),
                     Mirror = false,
                     FaceR = head.HR.X,
+                },
+                // upright hull: a saddle pack on the fuselage waist's rear
+                // face, at the hull's true surface radius
+                Back = new Sock
+                {
+                    P = new Vec3(0, levels[2].Y, levels[2].Z - levels[2].Rz * 0.92),
+                    Nrm = new Vec3(0, 0.1, -1).Norm(),
+                    Mirror = false,
                 },
                 TopY = o.Headless ? y0 + h : head.TopY,
                 WaistY = y0 + h * 0.5,
@@ -1106,6 +1189,27 @@ namespace MadDr.CreatureMesh
         private static bool IsStorageVessel(string family)
         {
             return family == "storage_bladder" || family == "steel_tank" || family == "amber_vesicle";
+        }
+
+        // ---- storage-pack frame -------------------------------------------------
+        // Pack geometry is authored once in a local frame -- `across` the
+        // body (X), `along` the spine, `out` of the body surface -- and
+        // mapped to world by the mount's orientation: an upright torso's
+        // back-mount lays the pack VERTICALLY (along = +Y, out = -Z); a
+        // horizontal body's top-mount lays it HORIZONTALLY on the shell
+        // (along = +Z, out = +Y), like an actual backpack. Positive `o`
+        // is always OUT of the body; negative `o` sinks into the trunk.
+
+        private static Vec3 PackP(Vec3 s, bool topMount, double a, double l, double o)
+        {
+            return topMount
+                ? new Vec3(s.X + a, s.Y + o, s.Z + l)
+                : new Vec3(s.X + a, s.Y + l, s.Z - o);
+        }
+
+        private static Vec3 PackR(bool topMount, double a, double l, double o)
+        {
+            return topMount ? new Vec3(a, o, l) : new Vec3(a, l, o);
         }
 
         // resource-contents colors (docs/22, creator direction): RED blood,
@@ -1489,15 +1593,19 @@ namespace MadDr.CreatureMesh
                     Prims.Ellipsoid(mb, s, new Vec3(0.3, 0.22, 0.3), Palette.PALLOR, 0.25, 0, 6);
                     break;
                 }
-                // storage vessels seat DEAD CENTRE of the back, pushed INTO
-                // the trunk so they read as part of the creature, not floating
-                // (creator direction). `s` is the back-surface point; +Z is
-                // into the body, -Z is out through the back.
+                // storage vessels seat DEAD CENTRE of the back mount, pushed
+                // INTO the body so they read as part of the creature, never
+                // floating (creator direction). Geometry is authored in the
+                // Pack frame (across/along/out): on an upright torso it lays
+                // vertically against the back; on a horizontal body (crab,
+                // arachnid) it lies flat ON TOP of the shell like a real
+                // backpack -- never below or near the tail.
                 case "storage_bladder":
                 {
-                    // organic: pus-filled sacs pushed INTO the trunk, bulging
-                    // out THROUGH the skin -- each blob half-seated in the
-                    // body, its outer dome swollen through a taut skin cap
+                    // organic: pus-filled sacs pushed INTO the body, bulging
+                    // out THROUGH the skin -- each blob half-seated, its
+                    // outer dome swollen through a taut skin cap
+                    var top = n.Y > 0.6;
                     var contents = store;
                     var blobR = 0.55 + 0.55 * girth;
                     var nBlob = (int)Clamp(2 + Math.Round(len * 2), 2, 3);
@@ -1505,62 +1613,62 @@ namespace MadDr.CreatureMesh
                     {
                         var t = (double)i / Math.Max(nBlob - 1, 1) - 0.5;
                         var r = blobR * (0.8 + 0.35 * Math.Abs(Math.Sin(i * 1.7)));
-                        // centre sunk ~45% into the trunk (+Z), so ~55% bulges out
-                        var c = new Vec3(s.X + t * blobR * 0.9, s.Y + t * blobR * 0.5, s.Z + r * 0.45);
-                        Prims.Ellipsoid(mb, c, new Vec3(r, r * 0.95, r * 1.05), contents, 0.3, 0.1, 10);
+                        // centre sunk ~45% in, so ~55% bulges out of the hide
+                        var c = PackP(s, top, t * blobR * 0.9, t * blobR * 0.5, -r * 0.45);
+                        Prims.Ellipsoid(mb, c, PackR(top, r, r * 0.95, r * 1.05), contents, 0.3, 0.1, 10);
                         // a taut skin membrane over the outer (bulging) face
-                        Prims.Ellipsoid(mb, new Vec3(c.X, c.Y, c.Z - r * 0.3),
-                            new Vec3(r * 0.82, r * 0.78, r * 0.5), skin, 0.35, 0, 9);
+                        Prims.Ellipsoid(mb, PackP(s, top, t * blobR * 0.9, t * blobR * 0.5, -r * 0.15),
+                            PackR(top, r * 0.82, r * 0.78, r * 0.5), skin, 0.35, 0, 9);
                     }
                     break;
                 }
                 case "steel_tank":
                 {
                     // tech: a riveted BACKPACK -- a rectangular frame plate
-                    // seated flat against the back (its rear half sunk into
-                    // the trunk), with two cylinder tanks INSET into the
+                    // seated flat against the mount (inner half sunk into
+                    // the body), with two cylinder tanks INSET into the
                     // frame so it reads solid/functional. The gauge + tank
                     // caps show the contents (RED blood / WHITE bone).
+                    var top = n.Y > 0.6;
                     var contents = store;
-                    var plW = 0.95 + 0.5 * girth;   // half-width across the back
-                    var plH = 1.1 + 0.7 * len;       // half-height along the spine
+                    var plW = 0.95 + 0.5 * girth;    // half-width across the body
+                    var plH = 1.1 + 0.7 * len;       // half-length along the spine
                     const double plT = 0.34;          // plate half-thickness
-                    // plate centre: pushed +Z (into trunk) so the back half
-                    // is seated in the body, the front face proud
-                    var plC = new Vec3(s.X, s.Y, s.Z + plT * 0.55);
-                    Prims.Ellipsoid(mb, plC, new Vec3(plW, plH, plT), Palette.METDK, 0.7, 0, 12);
-                    Prims.Ellipsoid(mb, new Vec3(plC.X, plC.Y, plC.Z - plT * 0.4),
-                        new Vec3(plW * 0.9, plH * 0.9, plT * 0.5), Palette.METAL, 0.75, 0, 12); // face panel
-                    // two vertical tanks inset into the frame, front flush
+                    // plate centre sunk so the inner half seats in the body
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -plT * 0.55),
+                        PackR(top, plW, plH, plT), Palette.METDK, 0.7, 0, 12);
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -plT * 0.15),
+                        PackR(top, plW * 0.9, plH * 0.9, plT * 0.5), Palette.METAL, 0.75, 0, 12); // face panel
+                    // two tanks inset into the frame, outer face just proud
                     var tR = plW * 0.34;
                     var tHalf = plH * 0.66;
-                    var tankZ = s.Z - 0.02;   // front just proud, body inside the plate
                     foreach (var sx in Sides)
                     {
                         var tx = plW * 0.42 * sx;
                         Prims.Tube(mb,
-                            new[] { new Vec3(tx, plC.Y - tHalf, tankZ), new Vec3(tx, plC.Y + tHalf, tankZ) },
+                            new[] { PackP(s, top, tx, -tHalf, 0.02), PackP(s, top, tx, tHalf, 0.02) },
                             new[] { tR, tR }, Palette.METAL, 0.78, 0, 12, 2);
-                        Prims.Ellipsoid(mb, new Vec3(tx, plC.Y + tHalf, tankZ), new Vec3(tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8); // top cap = contents
-                        Prims.Ellipsoid(mb, new Vec3(tx, plC.Y - tHalf, tankZ), new Vec3(tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8);
-                        Prims.Ellipsoid(mb, new Vec3(tx, plC.Y + tHalf + 0.12, tankZ), new Vec3(0.14, 0.14, 0.14), Palette.METDK, 0.6, 0, 5); // filler cap
+                        Prims.Ellipsoid(mb, PackP(s, top, tx, tHalf, 0.02), PackR(top, tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8); // end caps = contents
+                        Prims.Ellipsoid(mb, PackP(s, top, tx, -tHalf, 0.02), PackR(top, tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8);
+                        Prims.Ellipsoid(mb, PackP(s, top, tx, tHalf + 0.12, 0.02), new Vec3(0.14, 0.14, 0.14), Palette.METDK, 0.6, 0, 5); // filler cap
                     }
                     // a sight gauge strip down the frame's centre, contents-coloured
-                    Prims.Tube(mb, new[] { new Vec3(s.X, plC.Y - tHalf * 0.8, s.Z - 0.05), new Vec3(s.X, plC.Y + tHalf * 0.8, s.Z - 0.05) },
+                    Prims.Tube(mb, new[] { PackP(s, top, 0, -tHalf * 0.8, 0.05), PackP(s, top, 0, tHalf * 0.8, 0.05) },
                         new[] { 0.08, 0.08 }, contents, 0.4, 0.4, 6);
                     // corner rivets -- the functional-hardware read
                     foreach (var sx in Sides)
                         foreach (var sy in Sides)
-                            Prims.Ellipsoid(mb, new Vec3(plW * 0.86 * sx, plC.Y + plH * 0.82 * sy, s.Z - 0.04),
-                                new Vec3(0.07, 0.07, 0.05), Palette.METDK, 0.8, 0, 4);
+                            Prims.Ellipsoid(mb, PackP(s, top, plW * 0.86 * sx, plH * 0.82 * sy, 0.04),
+                                new Vec3(0.07, 0.07, 0.07), Palette.METDK, 0.8, 0, 4);
                     break;
                 }
                 case "amber_vesicle":
                 {
-                    // biotech: a cluster of vesicles fused INTO the back,
-                    // half-sunk in the trunk and swelling out through the
-                    // hide, glowing with their contents (RED blood / WHITE
-                    // bone) -- the mad-doctor/alien read
+                    // biotech: a cluster of vesicles fused INTO the body,
+                    // half-sunk and swelling out through the hide, glowing
+                    // with their contents (RED blood / WHITE bone) -- the
+                    // mad-doctor/alien read
+                    var top = n.Y > 0.6;
                     var contents = store;
                     var nV = (int)Clamp(3 + Math.Round(count * 3), 3, 6);
                     var vR = 0.4 + 0.4 * girth;
@@ -1568,12 +1676,9 @@ namespace MadDr.CreatureMesh
                     {
                         var t = (double)i / Math.Max(nV - 1, 1) - 0.5;
                         var r = vR * (0.7 + 0.35 * Math.Abs(Math.Sin(i * 1.3)));
-                        // sunk ~40% into the trunk, bulging out the rest
-                        var p = new Vec3(
-                            s.X + Math.Sin(i * 2.4) * vR * 0.7,
-                            s.Y + t * vR * 2.4,
-                            s.Z + r * 0.4);
-                        Prims.Ellipsoid(mb, p, new Vec3(r, r * 0.95, r * 1.05), contents, 0.25, 0.45, 8);
+                        // sunk ~40% into the body, bulging out the rest
+                        var p = PackP(s, top, Math.Sin(i * 2.4) * vR * 0.7, t * vR * 2.4, -r * 0.4);
+                        Prims.Ellipsoid(mb, p, PackR(top, r, r * 0.95, r * 1.05), contents, 0.25, 0.45, 8);
                     }
                     break;
                 }

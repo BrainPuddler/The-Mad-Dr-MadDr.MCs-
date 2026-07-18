@@ -434,18 +434,12 @@ const STORE_IS_BONE = new Set(['bone_saw', 'chain_blade', 'pincer']);
 const BLOOD_RED = [150, 30, 40];
 const BONE_WHITE = [224, 216, 194];
 
-/** A dorsal (back) mount seated DEAD CENTRE of the back, derived from the
- * plan's own sockets: the eye socket gives the torso FRONT half-depth, so
- * -depth is the back face; the height is the vertical middle of the trunk
- * (between the waist/hand mount and — not up by the neck, not down by the
- * tail); the normal is the near-vertical back's outward normal (mostly
- * backward, slightly up). Single-mount, riding the head socket's own
- * breathing anim so it moves with the body. */
+/** Fallback dorsal mount for a plan that doesn't declare its own `back`
+ * socket (every plan now does -- this only guards future plans): dead
+ * centre of the trunk, on the back face, normal mostly backward. */
 function dorsalSock(sockets) {
   const eye = sockets.eye, sen = sockets.sensor, hand = sockets.hand;
   const depth = eye ? Math.abs(eye.p[2]) : 1.5;
-  // dead centre of the trunk: midway between the shoulder/hand mount and
-  // the lower body (hand y is shoulder-ish; drop toward mid-torso)
   const shoulderY = hand ? hand.p[1] : (sen ? sen.p[1] * 0.7 : 4);
   const y = shoulderY * 0.72;
   return {
@@ -454,6 +448,20 @@ function dorsalSock(sockets) {
     mirror: false, out: 1,
     anim: sen ? sen.anim : undefined, gait: sen ? sen.gait : undefined,
   };
+}
+
+// ---- storage-pack frame ----------------------------------------------------
+// Pack geometry is authored once in a local frame -- `a` across the body,
+// `l` along the spine, `o` out of the body surface -- and mapped to world
+// by the mount's orientation: an upright torso's back-mount lays the pack
+// VERTICALLY (along = +Y, out = -Z); a horizontal body's top-mount (crab,
+// arachnid -- normal points up) lays it HORIZONTALLY on the shell like an
+// actual backpack. Positive `o` is OUT of the body; negative sinks in.
+function packP(S, top, a, l, o) {
+  return top ? [S[0] + a, S[1] + o, S[2] + l] : [S[0] + a, S[1] + l, S[2] - o];
+}
+function packR(top, a, l, o) {
+  return top ? [a, o, l] : [a, l, o];
 }
 
 function skinColorFn(skin, belly, spine) {
@@ -581,13 +589,14 @@ function buildCreatureAtDetail(genome) {
     const partKit = al.hue !== undefined ? factionKit(_faction, al.hue, vigor) : null;
     const partSkin = partKit ? partKit.skin : skin, partSkinFn = partKit ? partKit.skinFn : skinFn;
 
-    // a STORAGE vessel is a tank on the creature's BACK, not a sense organ
-    // on its head (docs/22, creator direction) -- mount it dorsally, single.
-    // Its contents read RED for blood / WHITE for bone, by the harvest tool.
+    // a STORAGE vessel is a tank on the creature's BACK/TOP, not a sense
+    // organ on its head (docs/22, creator direction) -- each plan declares
+    // its own `back` mount (top of the shell on horizontal bodies, mid-back
+    // on upright ones). Contents read RED blood / WHITE bone, by the tool.
     let sock = sockets[slot];
     let store = undefined;
     if (slot === 'sensor' && STORAGE_FAMILIES.has(al.family)) {
-      sock = dorsalSock(sockets);
+      sock = sockets.back ?? dorsalSock(sockets);
       store = STORE_IS_BONE.has(slots.hand?.family) ? BONE_WHITE : BLOOD_RED;
     }
     const sides = sock.mirror ? [1, -1] : [1];
@@ -1177,6 +1186,11 @@ function planTetrapod(mb, o) {
               anim: BREATH_H, gait: HEADBOB },
     eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR),
               mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
+    // upright torso: a vertical storage pack against the mid-back, at the
+    // chest level's true rear face (docs/22)
+    back:   { p: [0, (waistY + shl.y) * 0.5, ch.z - ch.rz * 0.92],
+              nrm: V.norm([0, 0.15, -1]), mirror: false, out: 1,
+              anim: BREATH_T, gait: [0, 0, 0, 0.10] },
   };
 }
 
@@ -1294,6 +1308,10 @@ function planBlob(mb, o) {
     hand:   { p: bHandP, nrm: ellipN(bHandP, dC, dR), mirror: true, anim: JELLY, gait: SQUELCH },
     sensor: { p: bSensP, nrm: ellipN(bSensP, dC, dR), mirror: true, out: 1, anim: JELLY, gait: SQUELCH },
     eye:    { p: bEyeP, nrm: ellipN(bEyeP, dC, dR), mirror: false, faceR: dr*0.8, anim: JELLY, gait: SQUELCH },
+    // a dome has no back -- storage sits flat on TOP of the mound,
+    // half-sunk in the gelatin (docs/22)
+    back:   { p: [0, dC[1] + dR[1]*0.8, 0], nrm: [0, 1, 0], mirror: false, out: 1,
+              anim: JELLY, gait: SQUELCH },
   };
 }
 
@@ -1366,6 +1384,10 @@ function planSerpentine(mb, o) {
               anim: SWAY_H, gait: [0, 0, 5.0, 0.30] },
     eye:    { p: sEyeP, nrm: ellipN(sEyeP, hC, hR), mirror: false, faceR: hR[0],
               anim: SWAY_H, gait: [0, 0, 5.0, 0.30] },
+    // cargo strapped flat on TOP of the thickest coil, where the neck
+    // rises -- never floating behind the S-curve (docs/22)
+    back:   { p: [neckBase[0]*0.75, neckBase[1] + baseR*0.5, neckBase[2]*0.75],
+              nrm: [0, 1, 0], mirror: false, out: 1 },
   };
 }
 
@@ -1460,6 +1482,10 @@ function planWinged(mb, o) {
               anim: BREATH_H, gait: WHEADBOB },
     eye:    { p: wEyeP, nrm: ellipN(wEyeP, head.hC, head.hR),
               mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: WHEADBOB },
+    // vertical pack low on the back, BELOW the wing roots so it never
+    // collides with the membranes (docs/22)
+    back:   { p: [0, (waistY + levels[2].y) * 0.5, levels[2].z - levels[2].rz * 0.92],
+              nrm: V.norm([0, 0.15, -1]), mirror: false, out: 1, anim: BREATH_B },
   };
 }
 
@@ -1520,6 +1546,11 @@ function planCrab(mb, o) {
               anim: BREATH_H, gait: HEADBOB },
     eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR),
               mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
+    // horizontal shell: the pack lies flat ON TOP of the carapace, dead
+    // centre and biased slightly FORWARD -- never behind, never near the
+    // tail (docs/22, creator direction)
+    back:   { p: [0, y0 + h*0.92, D*0.12], nrm: [0, 1, 0], mirror: false, out: 1,
+              anim: BREATH_T, gait: [0, 0, 0, 0.1] },
   };
 }
 
@@ -1567,6 +1598,11 @@ function planArachnid(mb, o) {
     leg:    { p: [cr*0.9, o.legLen, cC[2]*0.3], nrm: V.norm([0.6, -1, 0.1]), mirror: true, len: o.legLen },
     sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H, gait: HEADBOB },
     eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
+    // horizontal body: the pack rides flat ON TOP of the abdomen's crown,
+    // biased toward the waist (forward) so nothing hangs off the
+    // spinneret end (docs/22, creator direction)
+    back:   { p: [0, aC[1] + ar*0.75, aC[2] + ar*0.25], nrm: [0, 1, 0], mirror: false, out: 1,
+              anim: BREATH_T, gait: [0, 0, 0, 0.09] },
   };
 }
 
@@ -1615,6 +1651,11 @@ function planAvian(mb, o) {
               nrm: V.norm([0.25, -1, 0]), mirror: true, len: o.legLen },
     sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H, gait: HEADBOB },
     eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
+    // the raptor's sloped upper back, between chest and shoulders -- high
+    // and forward, well clear of the tail counterbalance (docs/22)
+    back:   { p: [0, (levels[2].y + levels[3].y) * 0.5,
+                  ((levels[2].z - levels[2].rz) + (levels[3].z - levels[3].rz)) * 0.5 * 0.95],
+              nrm: V.norm([0, 0.5, -0.87]), mirror: false, out: 1, anim: BREATH_T },
   };
 }
 
@@ -1661,6 +1702,9 @@ function planTreant(mb, o) {
     hand:   { p: [levels[3].rx*0.9, levels[3].y, levels[3].z+0.15], nrm: V.norm([1, 0.3, 0.15]), mirror: true },
     sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H, gait: HEADBOB },
     eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
+    // vertical trunk: a pack strapped flat to the bark, mid-height
+    back:   { p: [0, levels[2].y, -levels[2].rz * 0.95], nrm: V.norm([0, 0.1, -1]),
+              mirror: false, out: 1, anim: BREATH_T },
   };
 }
 
@@ -1723,6 +1767,10 @@ function planFloater(mb, o) {
     hand:   { p: [levels[3].rx*0.8, levels[3].y, levels[3].z+0.1], nrm: V.norm([1, 0, 0.3]), mirror: true, tiny: true },
     sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H, gait: HEADBOB },
     eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
+    // upright hull: a saddle pack on the fuselage waist's rear face, at
+    // the hull's true surface radius
+    back:   { p: [0, levels[2].y, levels[2].z - levels[2].rz * 0.92], nrm: V.norm([0, 0.1, -1]),
+              mirror: false, out: 1, anim: BREATH_T, gait: HOVER },
   };
 }
 
@@ -2055,67 +2103,73 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       mb.glow([mTop[0], mTop[1], mTop[2]+0.36], GLOW, 20);
       break;
     }
-    // storage vessels seat DEAD CENTRE of the back, pushed INTO the trunk
-    // so they read as part of the creature, not floating (creator
-    // direction). S is the back-surface point; +Z is into the body, -Z out.
+    // storage vessels seat DEAD CENTRE of the back mount, pushed INTO the
+    // body so they read as part of the creature, never floating (creator
+    // direction). Geometry is authored in the pack frame (packP/packR): on
+    // an upright torso it lays vertically against the back; on a horizontal
+    // body (crab, arachnid -- mount normal points up) it lies flat ON TOP
+    // of the shell like a real backpack -- never below or near the tail.
     case 'storage_bladder': {
-      // organic: pus-filled sacs pushed INTO the trunk, bulging out THROUGH
-      // the skin -- each blob half-seated in the body under a taut skin cap.
+      // organic: pus-filled sacs pushed INTO the body, bulging out THROUGH
+      // the skin -- each blob half-seated under a taut skin cap.
       // Contents read RED blood / WHITE bone (o.store).
+      const top = N[1] > 0.6;
       const store = o.store ?? BLOOD_RED;
       const blobR = (0.55 + 0.55*girth);
       const nBlob = clamp(2 + Math.round(len*2), 2, 3);
       for (let i = 0; i < nBlob; i++) {
         const t = i / (nBlob - 1 || 1) - 0.5;
         const r = blobR * (0.8 + 0.35 * Math.abs(Math.sin(i*1.7)));
-        const c = [S[0] + t*blobR*0.9, S[1] + t*blobR*0.5, S[2] + r*0.45];   // sunk ~45% in
-        ellipsoid(mb, c, [r, r*0.95, r*1.05], store, 0.3, 0.1, 10,
+        const c = packP(S, top, t*blobR*0.9, t*blobR*0.5, -r*0.45);   // sunk ~45% in
+        ellipsoid(mb, c, packR(top, r, r*0.95, r*1.05), store, 0.3, 0.1, 10,
           null, (tt) => [0, 0, 0.05, i*1.6 + tt*1.1]);   // each sac throbs
         mb.setAlpha(0.5);
-        ellipsoid(mb, [c[0], c[1], c[2]-r*0.3], [r*0.82, r*0.78, r*0.5], o.skin, 0.35, 0, 9, o.skinFn);
+        ellipsoid(mb, packP(S, top, t*blobR*0.9, t*blobR*0.5, -r*0.15),
+          packR(top, r*0.82, r*0.78, r*0.5), o.skin, 0.35, 0, 9, o.skinFn);
         mb.setAlpha(1);
       }
       break;
     }
     case 'steel_tank': {
       // tech: a riveted BACKPACK -- a rectangular frame plate seated flat
-      // against the back (rear half sunk into the trunk) with two cylinder
+      // against the mount (inner half sunk into the body) with two cylinder
       // tanks INSET into it so it reads solid/functional. Gauge + tank caps
       // show the contents (RED blood / WHITE bone, o.store).
+      const top = N[1] > 0.6;
       const store = o.store ?? BLOOD_RED;
       const plW = (0.95 + 0.5*girth);
       const plH = (1.1 + 0.7*len);
       const plT = 0.34;
-      const plC = [S[0], S[1], S[2] + plT*0.55];   // rear half sunk into the trunk
-      ellipsoid(mb, plC, [plW, plH, plT], METDK, 0.7, 0, 12);
-      ellipsoid(mb, [plC[0], plC[1], plC[2]-plT*0.4], [plW*0.9, plH*0.9, plT*0.5], METAL, 0.75, 0, 12);   // face panel
-      const tR = plW*0.34, tHalf = plH*0.66, tankZ = S[2] - 0.02;
+      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.55), packR(top, plW, plH, plT), METDK, 0.7, 0, 12);
+      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.15), packR(top, plW*0.9, plH*0.9, plT*0.5), METAL, 0.75, 0, 12);   // face panel
+      const tR = plW*0.34, tHalf = plH*0.66;
       for (const sx of [1, -1]) {
         const tx = plW*0.42*sx;
-        tube(mb, [[tx, plC[1]-tHalf, tankZ], [tx, plC[1]+tHalf, tankZ]], [tR, tR], METAL, 0.78, 0, 12, 2);
-        ellipsoid(mb, [tx, plC[1]+tHalf, tankZ], [tR*0.95, tR*0.4, tR*0.95], store, 0.5, 0.15, 8);   // caps = contents
-        ellipsoid(mb, [tx, plC[1]-tHalf, tankZ], [tR*0.95, tR*0.4, tR*0.95], store, 0.5, 0.15, 8);
-        ellipsoid(mb, [tx, plC[1]+tHalf+0.12, tankZ], [0.14, 0.14, 0.14], METDK, 0.6, 0, 5);   // filler cap
+        tube(mb, [packP(S, top, tx, -tHalf, 0.02), packP(S, top, tx, tHalf, 0.02)], [tR, tR], METAL, 0.78, 0, 12, 2);
+        ellipsoid(mb, packP(S, top, tx, tHalf, 0.02), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8);   // caps = contents
+        ellipsoid(mb, packP(S, top, tx, -tHalf, 0.02), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8);
+        ellipsoid(mb, packP(S, top, tx, tHalf + 0.12, 0.02), [0.14, 0.14, 0.14], METDK, 0.6, 0, 5);   // filler cap
       }
       // sight gauge strip down the frame centre, contents-coloured
-      tube(mb, [[S[0], plC[1]-tHalf*0.8, S[2]-0.05], [S[0], plC[1]+tHalf*0.8, S[2]-0.05]], [0.08, 0.08], store, 0.4, 0.4, 6);
+      tube(mb, [packP(S, top, 0, -tHalf*0.8, 0.05), packP(S, top, 0, tHalf*0.8, 0.05)], [0.08, 0.08], store, 0.4, 0.4, 6);
       for (const sx of [1, -1]) for (const sy of [1, -1])   // corner rivets
-        ellipsoid(mb, [plW*0.86*sx, plC[1]+plH*0.82*sy, S[2]-0.04], [0.07, 0.07, 0.05], METDK, 0.8, 0, 4);
+        ellipsoid(mb, packP(S, top, plW*0.86*sx, plH*0.82*sy, 0.04), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
       break;
     }
     case 'amber_vesicle': {
-      // biotech: a cluster of vesicles fused INTO the back, half-sunk in the
-      // trunk and swelling out through the hide, glowing with their contents
-      // (RED blood / WHITE bone, o.store) -- the mad-doctor/alien read
+      // biotech: a cluster of vesicles fused INTO the body, half-sunk and
+      // swelling out through the hide, glowing with their contents (RED
+      // blood / WHITE bone, o.store) -- the mad-doctor/alien read
+      const top = N[1] > 0.6;
       const store = o.store ?? BLOOD_RED;
       const nV = clamp(3 + Math.round(count*3), 3, 6);
       const vR = (0.4 + 0.4*girth);
       for (let i = 0; i < nV; i++) {
         const t = i / (nV - 1 || 1) - 0.5;
         const r = vR * (0.7 + 0.35 * Math.abs(Math.sin(i*1.3)));
-        const p = [S[0] + Math.sin(i*2.4)*vR*0.7, S[1] + t*vR*2.4, S[2] + r*0.4];   // sunk ~40% in
+        const p = packP(S, top, Math.sin(i*2.4)*vR*0.7, t*vR*2.4, -r*0.4);   // sunk ~40% in
         mb.setAlpha(0.82);
-        ellipsoid(mb, p, [r, r*0.95, r*1.05], store, 0.25, 0.45, 8, null,
+        ellipsoid(mb, p, packR(top, r, r*0.95, r*1.05), store, 0.25, 0.45, 8, null,
           (tt) => [0, 0, 0.05, i*1.9 + tt*1.1]);   // each vesicle breathes
         mb.setAlpha(1);
         mb.glow(p, store, 6);

@@ -635,4 +635,37 @@ public class CreatureBuilderTests
                 minZ = System.Math.Min(minZ, c.Positions[i * 3 + 2]);
         Assert.True(minZ < -0.8, $"storage vessel is not behind the body (minZ={minZ})");
     }
+
+    [Theory]
+    [InlineData("crab")]
+    [InlineData("arachnid")]
+    public void OnHorizontalBodiesThePackRidesOnTop(string plan)
+    {
+        // creator direction: on low horizontal bodies the backpack sits ON
+        // TOP of the shell, horizontal, never below/near the tail. The
+        // steel tank is the only METAL-coloured geometry in this build, so
+        // every metal chunk must sit high on the body (above the waist)
+        // and never trail behind the rear half (where the tail lives).
+        var r = CreatureBuilder.Build(Genome(plan: plan, hand: "lamprey_maw", sensor: "steel_tank"));
+        var metalChunks = 0;
+        foreach (var c in r.Chunks)
+        {
+            if ((int)c.Color.R != (int)Palette.METAL.R || (int)c.Color.G != (int)Palette.METAL.G
+                || (int)c.Color.B != (int)Palette.METAL.B) continue;
+            metalChunks++;
+            double sy = 0, sz = 0;
+            for (var i = 0; i < c.VertexCount; i++)
+            {
+                sy += c.Positions[i * 3 + 1];
+                sz += c.Positions[i * 3 + 2];
+            }
+            var cy = sy / c.VertexCount;
+            var cz = sz / c.VertexCount;
+            Assert.True(cy > r.WaistY, $"{plan}: pack part sits low (y={cy:F2} vs waist {r.WaistY:F2})");
+            Assert.True(cz > -2.5, $"{plan}: pack part trails toward the tail (z={cz:F2})");
+        }
+        // prims batch into shared chunks per material key, so the tank's
+        // metal reads as ~2 chunks (face-panel gloss + tank gloss)
+        Assert.True(metalChunks >= 2, $"{plan}: expected the tank's metal parts, found {metalChunks}");
+    }
 }
