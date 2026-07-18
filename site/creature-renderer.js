@@ -2131,29 +2131,32 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       break;
     }
     case 'steel_tank': {
-      // tech: a riveted BACKPACK -- a rectangular frame plate seated flat
-      // against the mount (inner half sunk into the body) with two cylinder
-      // tanks INSET into it so it reads solid/functional. Gauge + tank caps
-      // show the contents (RED blood / WHITE bone, o.store).
+      // tech: a classic single-barrel CYLINDER tank strapped to the mount
+      // -- the scuba/oxygen-tank silhouette, not a rack of parts. Mostly
+      // proud of the hide (strapped ON, not embedded) with a saddle collar
+      // that seats it against the body. End caps + gauge show the
+      // contents (RED blood / WHITE bone, o.store).
       const top = N[1] > 0.6;
       const store = o.store ?? BLOOD_RED;
-      const plW = (0.95 + 0.5*girth);
-      const plH = (1.1 + 0.7*len);
-      const plT = 0.34;
-      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.55), packR(top, plW, plH, plT), METDK, 0.7, 0, 12);
-      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.15), packR(top, plW*0.9, plH*0.9, plT*0.5), METAL, 0.75, 0, 12);   // face panel
-      const tR = plW*0.34, tHalf = plH*0.66;
+      const tR = (0.62 + 0.34*girth);    // barrel radius
+      const tHalf = (1.05 + 0.75*len);   // barrel half-length along the spine
+      const sink = tR*0.18;              // strapped-on, not embedded
+      // saddle collar seats the tank against the body
+      ellipsoid(mb, packP(S, top, 0, 0, -sink*2.2), packR(top, tR*1.15, tR*0.4, tR*0.5), METAL, 0.5, 0, 10);
+      // the barrel itself
+      tube(mb, [packP(S, top, 0, -tHalf, -sink), packP(S, top, 0, tHalf, -sink)], [tR, tR], METAL, 0.78, 0, 14, 2);
+      // contents-coloured end caps
+      ellipsoid(mb, packP(S, top, 0, tHalf, -sink), packR(top, tR*0.95, tR*0.35, tR*0.95), store, 0.5, 0.15, 10);
+      ellipsoid(mb, packP(S, top, 0, -tHalf, -sink), packR(top, tR*0.95, tR*0.35, tR*0.95), store, 0.5, 0.15, 10);
+      // filler / valve cap
+      ellipsoid(mb, packP(S, top, 0, tHalf + 0.16, -sink), [0.15, 0.15, 0.15], METDK, 0.6, 0, 6);
+      // sight gauge running along the barrel, contents-coloured
+      tube(mb, [packP(S, top, tR*0.55, -tHalf*0.75, -sink), packP(S, top, tR*0.55, tHalf*0.75, -sink)], [0.08, 0.08], store, 0.4, 0.4, 6);
+      // strap rivets -- the functional-hardware read
       for (const sx of [1, -1]) {
-        const tx = plW*0.42*sx;
-        tube(mb, [packP(S, top, tx, -tHalf, 0.02), packP(S, top, tx, tHalf, 0.02)], [tR, tR], METAL, 0.78, 0, 12, 2);
-        ellipsoid(mb, packP(S, top, tx, tHalf, 0.02), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8);   // caps = contents
-        ellipsoid(mb, packP(S, top, tx, -tHalf, 0.02), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8);
-        ellipsoid(mb, packP(S, top, tx, tHalf + 0.12, 0.02), [0.14, 0.14, 0.14], METDK, 0.6, 0, 5);   // filler cap
+        ellipsoid(mb, packP(S, top, tR*0.85*sx, -tHalf*0.5, -sink*1.6), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
+        ellipsoid(mb, packP(S, top, tR*0.85*sx, tHalf*0.5, -sink*1.6), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
       }
-      // sight gauge strip down the frame centre, contents-coloured
-      tube(mb, [packP(S, top, 0, -tHalf*0.8, 0.05), packP(S, top, 0, tHalf*0.8, 0.05)], [0.08, 0.08], store, 0.4, 0.4, 6);
-      for (const sx of [1, -1]) for (const sy of [1, -1])   // corner rivets
-        ellipsoid(mb, packP(S, top, plW*0.86*sx, plH*0.82*sy, 0.04), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
       break;
     }
     case 'amber_vesicle': {
