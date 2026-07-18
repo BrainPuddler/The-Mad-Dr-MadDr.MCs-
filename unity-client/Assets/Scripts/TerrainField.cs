@@ -10,12 +10,14 @@ using UnityEngine;
 ///   ridge hexes  -> smooth ~3m mounds (CityModel.Ridges IS the docs/04
 ///                   high-ground gameplay set; the old renderer showed it
 ///                   as green blocks)
-///   water hexes  -> carved ~-1.4m river/pond beds
-///   shoreline    -> open-ground hexes touching water get a shallow
-///                   recessed lip (~-0.55m, gently varied) instead of
-///                   their normal roll -- the smoothing below then
-///                   blends open ground -> recessed shore -> bed as one
-///                   continuous indented bank, not a straight ramp
+///   water hexes  -> carved ~-1.7m river/pond beds (deep, so the dark
+///                   riverbed reads as real depth through the surface)
+///   shoreline    -> open-ground hexes touching water get a low bank
+///                   CREST (~-0.28m, gently varied) sitting just ABOVE the
+///                   -0.55m waterline -- the smoothing below then blends
+///                   open ground -> bank crest -> waterline -> bed as one
+///                   continuous bank a viewer reads as land rising out of
+///                   the water, not the ground sliding flat under it
 ///   flat-locked  -> exactly 0 under buildings, roads, and bridges, so
 ///                   every gameplay-vertical assumption (roof heights,
 ///                   flight tiers, descent floors, bridge decks, rubble)
@@ -31,9 +33,10 @@ using UnityEngine;
 public sealed class TerrainField
 {
     public const float RidgeHeight = 3.0f;      // matches the old ridge block, so high-ground reads the same
-    public const float WaterBedDepth = -1.4f;   // carved bed; water surface slabs sit above this
+    public const float WaterBedDepth = -1.7f;   // carved bed; deep enough that the dark bed reads as depth THROUGH the translucent surface
     public const float RollAmplitude = 1.5f;    // open-ground rolling hills ceiling
-    public const float BankRecess = -0.55f;     // shoreline lip, +-0.2 varied -- shallower than the bed
+    public const float WaterLevel = -0.55f;     // the flowing surface sheet sits here (RuntimeCityBuilder.BuildWaterBody); banks rise ABOVE it, the bed drops well below
+    public const float ShoreLip = -0.28f;       // first ring of land: a low bank CREST just above the waterline, +-0.15 varied, so a real bank rises out of the water instead of the ground sliding flat under it
 
     private readonly Dictionary<HexCoord, float> _hexHeight = new Dictionary<HexCoord, float>();
     private readonly CityModel _city;
@@ -61,7 +64,7 @@ public sealed class TerrainField
             if (flat.Contains(hex)) h = 0f;
             else if (water.Contains(hex)) h = WaterBedDepth;
             else if (ridges.Contains(hex)) h = RidgeHeight;
-            else if (IsShoreline(hex, water)) h = BankRecess + (Roll(hex, seed) / RollAmplitude - 0.5f) * 0.4f;
+            else if (IsShoreline(hex, water)) h = ShoreLip + (Roll(hex, seed) / RollAmplitude - 0.5f) * 0.3f;
             else h = Roll(hex, seed);
             _hexHeight[hex] = h;
         }

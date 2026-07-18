@@ -432,12 +432,12 @@ public class RuntimeCityBuilder : MonoBehaviour
         var terrain = new GameObject("Terrain").transform;
         terrain.SetParent(transform, false);
 
-        // water: a thin translucent surface SUNK INTO the carved bed
-        // (TerrainField digs the bed; the banks rise visibly above this
-        // slab) -- physically-placed water, not a painted-on blue block
-        var waterMat = NewMaterial(new Color(0.16f, 0.42f, 0.5f, 0.62f));
-        LabMeshBuilder.MakeTransparent(waterMat);
-        foreach (var hex in _city.Water) SpawnCube(hex, -0.5f, 0.14f, waterMat, terrain, false);
+        // water: one continuous, gently flowing surface -- NOT a grid of
+        // painted blue tiles. A translucent sheet welded across whole water
+        // bodies (river and each pond) rides at TerrainField.WaterLevel and
+        // undulates (WaterSurface); a dark murky bed sheet sits just above
+        // the carved riverbed so real depth reads down THROUGH the surface.
+        BuildWater(terrain);
 
         // ridges are now SCULPTED by the terrain mesh; what they get here
         // is the miniature-set read: model-railroad puffball trees
@@ -519,6 +519,134 @@ public class RuntimeCityBuilder : MonoBehaviour
         }
     }
 
+    /// <summary>The battlefield's water, built as continuous flowing
+    /// bodies instead of one blue cube per hex. Each connected body (the
+    /// river, and the ponds) gets a DARK murky bed sheet hugging the carved
+    /// riverbed and a TRANSLUCENT surface sheet at TerrainField.WaterLevel
+    /// that WaterSurface undulates -- so water reads as one smooth sheet
+    /// with real depth beneath it, a river visibly flowing along its length
+    /// while ponds gently chop. Road/building/bridge hexes are skipped:
+    /// TerrainField flat-locks them to 0, and the old per-hex cube loop's
+    /// latent bug was drawing water over a bridge deck.</summary>
+    private void BuildWater(Transform parent)
+    {
+        if (_city.Water == null) return;
+
+        var flat = new HashSet<HexCoord>();
+        foreach (var h in _city.Roads) flat.Add(h);
+        foreach (var b in _city.Buildings) foreach (var h in b.Footprint) flat.Add(h);
+        foreach (var br in _city.Bridges) foreach (var h in br.Footprint) flat.Add(h);
+
+        var ponds = PondHexes();
+        var river = new List<HexCoord>();
+        var pondHexes = new List<HexCoord>();
+        foreach (var hex in _city.Water)
+        {
+            if (flat.Contains(hex)) continue;
+            if (ponds.Contains(hex)) pondHexes.Add(hex);
+            else river.Add(hex);
+        }
+
+        // deep, translucent, glossy: the murky bed showing through IS the
+        // depth cue, so the surface is only lightly tinted and quite clear
+        var surfaceMat = NewMaterial(new Color(0.17f, 0.40f, 0.46f, 0.55f));
+        if (surfaceMat.HasProperty("_Smoothness")) surfaceMat.SetFloat("_Smoothness", 0.9f);
+        else if (surfaceMat.HasProperty("_Glossiness")) surfaceMat.SetFloat("_Glossiness", 0.9f);
+        LabMeshBuilder.MakeTransparent(surfaceMat);
+        var bedMat = NewMaterial(new Color(0.06f, 0.13f, 0.13f));
+
+        BuildWaterBody(river, RiverFlow(river), 0f, parent, surfaceMat, bedMat, "River");
+        BuildWaterBody(pondHexes, Vector2.zero, 1.7f, parent, surfaceMat, bedMat, "Ponds");
+    }
+
+    /// <summary>Builds one water body: a translucent surface sheet (with a
+    /// WaterSurface so it flows) plus a dark bed sheet just above the carved
+    /// riverbed. Both are welded hex fans, so adjacent hexes share corners
+    /// and the sheet is seamless. Colliderless -- clicks fall to the ground
+    /// plane; water never blocks movement (pathing reads the hex set).</summary>
+    private void BuildWaterBody(List<HexCoord> hexes, Vector2 flow, float phase,
+        Transform parent, Material surfaceMat, Material bedMat, string name)
+    {
+        if (hexes == null || hexes.Count == 0) return;
+
+        var surfMesh = HexFanMesh(hexes, _ => TerrainField.WaterLevel);
+        var surfGo = new GameObject(name + "Surface");
+        surfGo.transform.SetParent(parent, false);
+        surfGo.AddComponent<MeshFilter>().sharedMesh = surfMesh;
+        surfGo.AddComponent<MeshRenderer>().sharedMaterial = surfaceMat;
+        surfGo.AddComponent<WaterSurface>().Init(surfMesh, surfMesh.vertices, flow, phase);
+
+        var bedMesh = HexFanMesh(hexes, p => _terrain.HeightAt(p) + 0.05f);
+        var bedGo = new GameObject(name + "Bed");
+        bedGo.transform.SetParent(parent, false);
+        bedGo.AddComponent<MeshFilter>().sharedMesh = bedMesh;
+        bedGo.AddComponent<MeshRenderer>().sharedMaterial = bedMat;
+    }
+
+    /// <summary>A welded hex-fan mesh over `hexes`: per hex a centre vertex
+    /// plus its six pointy-top corners (at HexCoord's own circumradius),
+    /// six triangles wound to face up. `heightAt` maps a world-xz point to
+    /// its y. Because every hex computes corners from its own centre with
+    /// the identical offset, two neighbours' shared corners land on exactly
+    /// the same world position -- the sheet tiles with no seam.</summary>
+    private Mesh HexFanMesh(List<HexCoord> hexes, System.Func<Vector3, float> heightAt)
+    {
+        var size = (float)(HexCoord.HexMeters / 1.7320508075688772); // circumradius
+        var verts = new List<Vector3>(hexes.Count * 7);
+        var tris = new List<int>(hexes.Count * 18);
+
+        foreach (var hex in hexes)
+        {
+            var c = WorldOf(hex);
+            var baseIdx = verts.Count;
+            var cp = new Vector3(c.x, 0f, c.z);
+            cp.y = heightAt(cp);
+            verts.Add(cp);
+            for (var i = 0; i < 6; i++)
+            {
+                var ang = Mathf.Deg2Rad * (60f * i - 30f); // pointy-top corner
+                var p = new Vector3(c.x + size * Mathf.Cos(ang), 0f, c.z + size * Mathf.Sin(ang));
+                p.y = heightAt(p);
+                verts.Add(p);
+            }
+            for (var i = 0; i < 6; i++)
+            {
+                // (centre, next, cur) winds the top face up -- same up-normal
+                // convention the terrain chunk mesh uses
+                tris.Add(baseIdx);
+                tris.Add(baseIdx + 1 + (i + 1) % 6);
+                tris.Add(baseIdx + 1 + i);
+            }
+        }
+
+        var mesh = new Mesh();
+        if (verts.Count > 65000) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+        mesh.vertices = verts.ToArray();
+        mesh.triangles = tris.ToArray();
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
+    /// <summary>A river's downstream direction, approximated as its longer
+    /// world axis -- the generator carves the river as a band spanning the
+    /// map, so its bounding box is reliably long one way. Ponds pass zero
+    /// flow instead (still water).</summary>
+    private Vector2 RiverFlow(List<HexCoord> river)
+    {
+        if (river == null || river.Count == 0) return Vector2.zero;
+        float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
+        foreach (var hex in river)
+        {
+            var w = WorldOf(hex);
+            if (w.x < minX) minX = w.x;
+            if (w.x > maxX) maxX = w.x;
+            if (w.z < minZ) minZ = w.z;
+            if (w.z > maxZ) maxZ = w.z;
+        }
+        return (maxX - minX) >= (maxZ - minZ) ? new Vector2(1f, 0f) : new Vector2(0f, 1f);
+    }
+
     /// <summary>Splits `_city.Water` into connected components (plain hex
     /// adjacency BFS) and calls every hex OUTSIDE the largest one a
     /// "pond" -- the generator's river is carved as one band spanning
@@ -566,9 +694,9 @@ public class RuntimeCityBuilder : MonoBehaviour
         {
             var off = new Vector3(Mod(hex.Q * 19 + hex.R * 5 + i * 29, 13) - 6f, 0f,
                 Mod(hex.Q * 7 + hex.R * 23 + i * 17, 13) - 6f);
-            // sit just above the water slab's surface (spawned at
-            // center.y -0.5, height 0.14 -> top ~ -0.43)
-            var p = w + off + Vector3.up * -0.38f;
+            // float on the flowing surface sheet (TerrainField.WaterLevel),
+            // a hair proud so a pad reads as sitting ON the film
+            var p = w + off + Vector3.up * (TerrainField.WaterLevel + 0.06f);
             var size = 0.6f + Mod(hex.Q + hex.R + i * 3, 3) * 0.25f;
             var lp = SpawnPrim(PrimitiveType.Cylinder, p, new Vector3(size, 0.04f, size), pad, parent);
             lp.name = "LilyPad";
