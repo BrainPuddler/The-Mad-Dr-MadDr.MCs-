@@ -191,10 +191,14 @@ public class WaypointCommander : MonoBehaviour
     /// their spot instead of crossing paths. `clusterPoint` is where each
     /// unit creeps toward once it arrives and stops -- the fix for a
     /// stopped group looking too spread out (FormationHexes only
-    /// guarantees WALKING doesn't collide, a full hex apart).</summary>
+    /// guarantees WALKING doesn't collide, a full hex apart). A single
+    /// GroupFacing token is shared across the whole group so they settle
+    /// facing one direction -- whichever unit gets to its slot first
+    /// (creator direction, 2026-07).</summary>
     private void AssignFormation(System.Collections.Generic.List<MadDr.CityGen.HexCoord> slots, bool queue,
         Vector3 clusterPoint)
     {
+        var facing = new MonsterAgent.GroupFacing();
         var remaining = new System.Collections.Generic.List<MonsterAgent>(_selected);
         foreach (var slot in slots)
         {
@@ -212,7 +216,7 @@ public class WaypointCommander : MonoBehaviour
             if (best < 0) break;
             var unit = remaining[best];
             remaining.RemoveAt(best);
-            unit.OrderMove(slot, queue, clusterPoint);
+            unit.OrderMove(slot, queue, clusterPoint, facing);
         }
     }
 

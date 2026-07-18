@@ -33,6 +33,20 @@ public class MonsterAgent : MonoBehaviour
 {
     private enum OrderKind { Idle, Move, AttackBuilding, AttackUnit, EatCitizen, Perch }
 
+    /// <summary>Shared "which way does the group face" token for a squad
+    /// move order (see OrderMove's groupFacing overload). Stays unlocked
+    /// until the first unit in the group finishes pathing to its slot,
+    /// which locks it to that unit's heading -- creator direction,
+    /// 2026-07: "determined by the first creature that reaches the
+    /// waypoint." Every other unit in the group then turns to match once
+    /// it arrives, instead of holding whatever direction it happened to
+    /// be walking. A class (not a struct) so every unit in the group
+    /// shares the exact same instance.</summary>
+    public sealed class GroupFacing
+    {
+        public Quaternion? Locked;
+    }
+
     private RuntimeCityBuilder _builder;
     private StoredGenomeDto _creature;
     private MonsterBody _body;
@@ -53,6 +67,7 @@ public class MonsterAgent : MonoBehaviour
     private Citizen _targetCitizen;
     private UnitCombat _targetUnit;
     private Vector3? _settleTarget;   // shared cluster point to creep toward once idle (group moves only)
+    private GroupFacing _groupFacing; // shared arrival-facing token for a group move (see GroupFacing)
 
     private List<Vector3> _path;      // world-space nodes for the current leg
     private int _pathIndex;
@@ -201,7 +216,7 @@ public class MonsterAgent : MonoBehaviour
 
     public void OrderMove(HexCoord hex, bool queue)
     {
-        OrderMove(hex, queue, null);
+        OrderMove(hex, queue, null, null);
     }
 
     /// <summary>Move order that also remembers a shared cluster point to
@@ -213,11 +228,21 @@ public class MonsterAgent : MonoBehaviour
     /// and never drift after arriving.</summary>
     public void OrderMove(HexCoord hex, bool queue, Vector3? settleTarget)
     {
+        OrderMove(hex, queue, settleTarget, null);
+    }
+
+    /// <summary>Move order for a squad, additionally sharing a
+    /// GroupFacing token so the whole group ends up looking the same
+    /// direction once everyone's arrived (see GroupFacing). Pass null for
+    /// a single-unit move -- no group to agree on a facing with.</summary>
+    public void OrderMove(HexCoord hex, bool queue, Vector3? settleTarget, GroupFacing groupFacing)
+    {
         ClearTargets();
         if (!queue) { _waypoints.Clear(); _path = null; }
         _waypoints.Enqueue(hex);
         _order = OrderKind.Move;
         _settleTarget = settleTarget;
+        _groupFacing = groupFacing;
     }
 
     public void OrderAttack(Building building)
@@ -273,6 +298,7 @@ public class MonsterAgent : MonoBehaviour
         _targetCitizen = null;
         _targetUnit = null;
         _settleTarget = null;   // any fresh order cancels a pending group-settle creep
+        _groupFacing = null;    // and any pending group-arrival facing agreement
         _perchApproach = false;
     }
 
@@ -285,6 +311,14 @@ public class MonsterAgent : MonoBehaviour
     private void GoIdle()
     {
         _order = OrderKind.Idle;
+        // group-move arrival facing: the first unit of the group to
+        // finish pathing to its waypoint locks the shared token to ITS
+        // heading right now, before any settle creep can turn it further
+        // -- "reaches the waypoint" means finishing the path, not the
+        // creep afterward. Every other unit in the group (including this
+        // one, if it drifts while creeping) turns to match in TickSettle.
+        if (_groupFacing != null && _groupFacing.Locked == null)
+            _groupFacing.Locked = transform.rotation;
         if (_flying)
         {
             _flying = false;
@@ -504,29 +538,42 @@ public class MonsterAgent : MonoBehaviour
     /// stops dead at the boundary and gives up the creep for good.</summary>
     private Vector3 TickSettle(float dt)
     {
-        if (!_settleTarget.HasValue || _builder == null) return Vector3.zero;
-        var target = _settleTarget.Value;
-        var to = target - transform.position;
-        to.y = 0f;
-        var dist = to.magnitude;
-        if (dist < SettleArriveDist) { _settleTarget = null; return Vector3.zero; }
-
-        var settleSpeed = Mathf.Max(3.5f, (float)_profile.WalkMetersPerSecond(_builder.speedDisplayMultiplier) * 0.9f);
-        var dir = to / dist;
-        var step = Mathf.Min(settleSpeed * dt, dist);
-        var next = transform.position + dir * step;
-
-        var hex = _builder.HexAt(next);
-        if (!_builder.City.Contains(hex) || Blocked().Contains(hex))
+        if (_settleTarget.HasValue && _builder != null)
         {
-            _settleTarget = null;   // a building or water is in the way -- stop right here
-            return Vector3.zero;
+            var target = _settleTarget.Value;
+            var to = target - transform.position;
+            to.y = 0f;
+            var dist = to.magnitude;
+            if (dist >= SettleArriveDist)
+            {
+                var settleSpeed = Mathf.Max(3.5f, (float)_profile.WalkMetersPerSecond(_builder.speedDisplayMultiplier) * 0.9f);
+                var dir = to / dist;
+                var step = Mathf.Min(settleSpeed * dt, dist);
+                var next = transform.position + dir * step;
+
+                var hex = _builder.HexAt(next);
+                if (_builder.City.Contains(hex) && !Blocked().Contains(hex))
+                {
+                    transform.rotation = Quaternion.Slerp(transform.rotation,
+                        Quaternion.LookRotation(dir, Vector3.up), dt * 4f);
+                    transform.position = next;
+                    return dir * settleSpeed;
+                }
+            }
+            _settleTarget = null;   // arrived, or a building/water blocked the last step
         }
 
-        transform.rotation = Quaternion.Slerp(transform.rotation,
-            Quaternion.LookRotation(dir, Vector3.up), dt * 4f);
-        transform.position = next;
-        return dir * settleSpeed;
+        // group-move arrival facing (see GroupFacing / GoIdle): once the
+        // creep above is done, turn to match whichever unit in this
+        // group locked the shared facing first -- everyone ends up
+        // looking the same direction, not just wherever their own last
+        // step happened to point.
+        if (_groupFacing != null && _groupFacing.Locked.HasValue)
+        {
+            transform.rotation = Quaternion.Slerp(transform.rotation,
+                _groupFacing.Locked.Value, dt * 4f);
+        }
+        return Vector3.zero;
     }
 
     private Vector3 TickAttack(float dt)
