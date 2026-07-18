@@ -44,6 +44,10 @@ public class RuntimeCityBuilder : MonoBehaviour
     [Tooltip("How many cars drive the road network (docs/19 traffic) -- they flee monsters like Citizens do.")]
     public int trafficCarCount = 10;
 
+    [Tooltip("Traffic field: the target fraction of the fleet actively driving at any moment. The rest sit parked at the curb between bounded trips (drive N hops, park a while, repeat). 1 = every car always driving, never parks. Long-run average, not a per-frame guarantee -- see HudStatus for the live measured percentage.")]
+    [Range(0.05f, 1f)]
+    public float trafficMovingPercent = 0.55f;
+
     // live state
     private CityModel _city;
     private BattlefieldState _battlefield;
@@ -64,6 +68,7 @@ public class RuntimeCityBuilder : MonoBehaviour
     private readonly List<Citizen> _citizens = new List<Citizen>();
     private readonly List<Tank> _tanks = new List<Tank>();
     private readonly List<UnitCombat> _combatants = new List<UnitCombat>();
+    private readonly List<TrafficCar> _trafficCars = new List<TrafficCar>();
 
     public CityModel City { get { return _city; } }
     public int CityVersion { get { return _cityVersion; } }
@@ -1284,9 +1289,10 @@ public class RuntimeCityBuilder : MonoBehaviour
     }
 
     /// <summary>Docs/19 traffic (docs/21 batch 2, item 9): cars that
-    /// drive the road network and flee monsters like Citizens do.
-    /// Colliderless -- cosmetic crowd, not an order target or an
-    /// obstacle.</summary>
+    /// drive the road network in bounded trips, park at the curb between
+    /// them (trafficMovingPercent is the target fraction driving at any
+    /// moment), and flee monsters like Citizens do. Colliderless --
+    /// cosmetic crowd, not an order target or an obstacle.</summary>
     private void SpawnTraffic()
     {
         if (trafficCarCount <= 0) return;
@@ -1306,7 +1312,28 @@ public class RuntimeCityBuilder : MonoBehaviour
             if (collider != null) Object.Destroy(collider);
             var car = go.AddComponent<TrafficCar>();
             var hue = (i * 53 % 100) / 100f;
-            car.Init(this, network, start, Color.HSVToRGB(hue, 0.4f, 0.75f));
+            car.Init(this, network, start, Color.HSVToRGB(hue, 0.4f, 0.75f), trafficMovingPercent);
+            _trafficCars.Add(car);
+        }
+    }
+
+    /// <summary>Live count of spawned traffic cars (0 if trafficCarCount
+    /// is 0) -- HudStatus uses this to decide whether to show the traffic
+    /// readout at all.</summary>
+    public int TrafficCarCount { get { return _trafficCars.Count; } }
+
+    /// <summary>The traffic field's ACTUAL measured fraction of the fleet
+    /// currently driving, vs. trafficMovingPercent's target -- read this
+    /// in HudStatus to confirm the target is actually being hit live,
+    /// not just assumed from the derivation.</summary>
+    public float TrafficMovingFraction
+    {
+        get
+        {
+            if (_trafficCars.Count == 0) return 0f;
+            var driving = 0;
+            foreach (var c in _trafficCars) if (c != null && c.IsDriving) driving++;
+            return (float)driving / _trafficCars.Count;
         }
     }
 

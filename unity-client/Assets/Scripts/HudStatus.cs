@@ -23,6 +23,13 @@ public class HudStatus : MonoBehaviour
         Line(ref y, "🩸 " + _builder.WalletBlood + "   🦴 " + _builder.WalletBones + "   🧠 " + _builder.WalletBrains
             + "   (eaten citizens: " + _builder.CitizensEaten + ")");
 
+        if (_builder.TrafficCarCount > 0)
+        {
+            var live = Mathf.RoundToInt(_builder.TrafficMovingFraction * 100f);
+            var target = Mathf.RoundToInt(_builder.trafficMovingPercent * 100f);
+            Line(ref y, "🚗 traffic: " + live + "% moving (target " + target + "%, " + _builder.TrafficCarCount + " cars)");
+        }
+
         var selected = _commander != null ? _commander.SelectedAgent : null;
         var count = _commander != null ? _commander.SelectedCount : 0;
         if (selected != null && count > 1)
