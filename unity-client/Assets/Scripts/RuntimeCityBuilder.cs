@@ -215,6 +215,32 @@ public class RuntimeCityBuilder : MonoBehaviour
     /// drive on the asphalt, not over the curb or off the edge.</summary>
     public const float RoundaboutLaneRadius = 7.4f;
 
+    /// <summary>Distance to the nearest thing (traffic car, tank, or
+    /// citizen) sitting AHEAD of `pos` along `dir` and within
+    /// `laneHalfWidth` of that line, up to `maxRange`; `maxRange` if the
+    /// lane is clear. A car reads this to keep a following gap (creator
+    /// direction, 2026-07: "slow down if there is a human, car, tank
+    /// something in front of them"). O(fleet) per call -- fine at
+    /// tens of cars.</summary>
+    public float DistanceAhead(Vector3 pos, Vector3 dir, float maxRange, float laneHalfWidth, TrafficCar self)
+    {
+        var best = maxRange;
+        void Consider(Vector3 p)
+        {
+            var to = p - pos;
+            to.y = 0f;
+            var along = Vector3.Dot(to, dir);
+            if (along <= 0.2f || along >= best) return;   // behind me, or farther than the current nearest
+            var lateral = (to - dir * along).magnitude;
+            if (lateral > laneHalfWidth) return;          // not in my lane
+            best = along;
+        }
+        foreach (var c in _trafficCars) if (c != null && c != self) Consider(c.transform.position);
+        foreach (var t in _tanks) if (t != null && t.Combat != null && t.Combat.Alive) Consider(t.transform.position);
+        foreach (var z in _citizens) if (z != null) Consider(z.transform.position);
+        return best;
+    }
+
     /// <summary>How deep the water sits above the carved bed at a hex's
     /// centre -- TerrainField.WaterLevel minus the actual terrain height
     /// there. Continuous, not a flat per-hex value: TerrainField blends
@@ -250,6 +276,61 @@ public class RuntimeCityBuilder : MonoBehaviour
             if (Vector3.Dot(firstDir.Value, dir) > -0.5f) return true; // not roughly opposite -> a bend/junction
         }
         return roadNeighbors <= 1; // dead end (or isolated): also crossable, only a straight run isn't
+    }
+
+    private HashSet<HexCoord> _sidewalkSet;
+
+    /// <summary>Sidewalk hexes: an in-city, non-road, non-water,
+    /// non-building hex that BORDERS a road -- the walkable strip along a
+    /// block's street frontage. Citizens live on these (creator
+    /// direction, 2026-07: pedestrians "MUST stay on Sidewalk unless
+    /// they are crossing the road or avoiding monsters"). Built once and
+    /// cached; the road/building layout is fixed after generation (only
+    /// damage changes passability, which doesn't create sidewalks).</summary>
+    public bool IsSidewalkHex(HexCoord hex)
+    {
+        if (_sidewalkSet == null) BuildSidewalkSet();
+        return _sidewalkSet.Contains(hex);
+    }
+
+    private void BuildSidewalkSet()
+    {
+        _sidewalkSet = new HashSet<HexCoord>();
+        var roads = RoadNetworkHexes();
+        var blockedGround = BlockedFor(false);   // buildings + water
+        foreach (var hex in roads)
+        {
+            foreach (var n in hex.Neighbors())
+            {
+                if (roads.Contains(n)) continue;              // the road itself, not a sidewalk
+                if (!_city.Contains(n)) continue;             // off-map
+                if (blockedGround.Contains(n)) continue;      // building footprint or water
+                _sidewalkSet.Add(n);
+            }
+        }
+    }
+
+    /// <summary>A random sidewalk hex within `radius` hexes of `near`,
+    /// for a citizen to head toward -- a real destination instead of an
+    /// aimless wander (creator direction, 2026-07). Falls back to any
+    /// sidewalk hex, then to `near` itself, so it never returns
+    /// off-sidewalk.</summary>
+    public HexCoord RandomSidewalkNear(HexCoord near, int radius, int salt)
+    {
+        if (_sidewalkSet == null) BuildSidewalkSet();
+        if (_sidewalkSet.Count == 0) return near;
+        HexCoord best = near;
+        var bestScore = -1;
+        var i = 0;
+        foreach (var s in _sidewalkSet)
+        {
+            i++;
+            if (s.DistanceTo(near) > radius) continue;
+            // deterministic-ish pick: hash each candidate, keep the top
+            var score = unchecked((s.Q * 73856093) ^ (s.R * 19349663) ^ (salt * 83492791)) & 0x7FFFFFFF;
+            if (score > bestScore) { bestScore = score; best = s; }
+        }
+        return best;
     }
 
     /// <summary>CityGizmo.PresetChoice -> RuntimeCityBuilder.PresetChoice.

@@ -113,7 +113,13 @@ namespace MadDr.CityGen
                 var candidates = new List<HexCoord>();
                 for (var row = 0; row < height; row++)
                 {
-                    if (row == arterialRow) continue;          // never on the arterial
+                    // never on OR touching the arterial: a ~13 m-radius
+                    // roundabout one row (~17 m) off the 14 m-wide
+                    // arterial still overlaps it (creator correction:
+                    // roundabouts "DO NOT occur in the middle of multi
+                    // lane roads"). Two rows (~35 m) of separation clears
+                    // the roundabout's whole footprint off Main Street.
+                    if (Math.Abs(row - arterialRow) < 2) continue;
                     if (row % (pitch * 2) != 0) continue;      // only the through cross-streets
                     for (var col = 0; col < width; col += pitch)
                     {

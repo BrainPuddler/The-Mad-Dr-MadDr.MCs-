@@ -26,6 +26,13 @@ public class TrafficCar : MonoBehaviour
     private const float ArriveRadius = 1.5f;
     private const float CurbOffset = 2.5f;     // same curb-lane distance RoadDresser parks its own cars at
 
+    // lane discipline (creator direction, 2026-07: cars must drive in
+    // straight lines, in their lane, with proper following gaps)
+    private const float LaneOffset = 2.0f;     // metres to the right of the road centerline -- keeps opposing traffic apart and cars in a lane
+    private const float FollowRange = 15f;     // start easing off the throttle when something's this close ahead
+    private const float FollowGap = 5.5f;      // hard gap kept in front (~one car length + 0.2*size) -- speed hits 0 here
+    private const float LaneHalfWidth = 2.4f;  // only things within this of the lane line count as "ahead of me"
+
     private const int MinTripHops = 5;
     private const int MaxTripHops = 14;
 
@@ -80,7 +87,7 @@ public class TrafficCar : MonoBehaviour
         _network = network;
         _from = start;
         _to = start;
-        transform.position = _builder.WorldOf(start) + Vector3.up * 0.75f;
+        transform.position = RoadPoint(start, start);
         _target = transform.position;
         BuildBody(body, Hash(start, 7) % 4 == 0);
 
@@ -193,8 +200,13 @@ public class TrafficCar : MonoBehaviour
     private void PickNext(Vector3? awayFrom = null)
     {
         var candidates = new List<HexCoord>();
+        // Normal driving never immediately reverses (excludes _from);
+        // FLEEING deliberately allows it, so a car can U-turn straight
+        // back the way it came to escape a monster ahead (creator
+        // direction, 2026-07: "If it is a monster they should make a
+        // u-turn and run away").
         foreach (var n in _to.Neighbors())
-            if (_network.Contains(n) && !n.Equals(_from)) candidates.Add(n);
+            if (_network.Contains(n) && (awayFrom.HasValue || !n.Equals(_from))) candidates.Add(n);
         if (candidates.Count == 0)
             foreach (var n in _to.Neighbors())
                 if (_network.Contains(n)) candidates.Add(n); // dead end: doubling back is the only option
@@ -227,7 +239,32 @@ public class TrafficCar : MonoBehaviour
         }
         _from = _to;
         _to = best;
-        _target = _builder.WorldOf(_to) + Vector3.up * 0.75f;
+        _target = RoadPoint(_to, _from);
+    }
+
+    /// <summary>The world point a car aims at to sit ON the drawn road,
+    /// in its own lane: the target hex's CARDINAL road centerline (the
+    /// same corrected anchor RoadDresser renders the strip at -- driving
+    /// to the RAW hex center instead is exactly why cars zig-zagged down
+    /// a straightened street), nudged to the RIGHT of travel by
+    /// LaneOffset so opposing traffic stays apart and each car holds a
+    /// lane.</summary>
+    private Vector3 RoadPoint(HexCoord hex, HexCoord from)
+    {
+        var vertical = RoadDresser.CardinalNeighbors(hex, _network).Vertical;
+        var anchor = RoadDresser.CardinalAnchor(_builder, hex, vertical);
+
+        var fromVertical = RoadDresser.CardinalNeighbors(from, _network).Vertical;
+        var fromAnchor = RoadDresser.CardinalAnchor(_builder, from, fromVertical);
+        var dir = anchor - fromAnchor;
+        dir.y = 0f;
+        if (dir.sqrMagnitude > 0.01f)
+        {
+            dir = dir.normalized;
+            var right = new Vector3(dir.z, 0f, -dir.x);
+            anchor += right * LaneOffset;
+        }
+        return new Vector3(anchor.x, 0.75f, anchor.z);
     }
 
     private int RandomHopBudget()
@@ -347,7 +384,20 @@ public class TrafficCar : MonoBehaviour
         var travelDir = _target - transform.position;
         travelDir.y = 0f;
         if (travelDir.sqrMagnitude > 0.01f)
-            steerTarget += SwerveOffset(travelDir.normalized);
+        {
+            var fwd = travelDir.normalized;
+            steerTarget += SwerveOffset(fwd);
+
+            // follow the traffic ahead: slow (down to a full stop) when a
+            // car, tank, or citizen sits in my lane just in front, so cars
+            // keep a proper gap instead of piling through each other
+            // (creator direction, 2026-07: "they need to slow down if
+            // there is a human, car, tank something in front of them...
+            // proper space between them").
+            var clear = _builder.DistanceAhead(transform.position, fwd, FollowRange, LaneHalfWidth, this);
+            if (clear < FollowRange)
+                speed *= Mathf.Clamp01((clear - FollowGap) / (FollowRange - FollowGap));
+        }
 
         MoveToward(steerTarget, speed, dt);
     }
@@ -389,7 +439,7 @@ public class TrafficCar : MonoBehaviour
             _circling = false;
             _from = _to;
             _to = _roundExit;
-            _target = _builder.WorldOf(_to) + Vector3.up * 0.75f;
+            _target = RoadPoint(_to, _from);
             _hopsRemaining--;
             return null;
         }
