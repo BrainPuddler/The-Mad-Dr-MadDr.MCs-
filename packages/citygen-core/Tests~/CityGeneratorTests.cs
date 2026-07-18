@@ -101,7 +101,7 @@ public class CityGeneratorTests
     }
 
     [Theory]
-    [InlineData("village", 2, 1)]     // 1 km2:  round(1.5)=2 emitters, max(1, round(0.5))=1 hub
+    [InlineData("village", 3, 1)]     // 1.96 km2: round(1.5*1.96)=3 emitters, round(0.5*1.96)=1 hub
     [InlineData("small_town", 6, 2)]  // 4 km2:  6 emitters, 2 hubs
     [InlineData("big_city", 10, 6)]   // 25 km2: capped at docs/02's 10, hubs capped at 6
     public void Landmark_counts_follow_the_docs_densities_and_caps(string presetName, int emitters, int hubs)
@@ -143,20 +143,6 @@ public class CityGeneratorTests
             var pool = l.Kind == LandmarkKind.Emitter ? preset.EmitterArchetypes : preset.HubArchetypes;
             Assert.Contains(l.Archetype, pool);
         }
-    }
-
-    [Fact]
-    public void Village_anchors_an_emitter_on_the_central_plaza()
-    {
-        var preset = CityPreset.Village();
-        var center = HexCoord.FromOffset(preset.WidthHexes / 2, preset.HeightHexes / 2);
-        var m = CityGenerator.Generate(21u, preset);
-
-        var first = m.Landmarks[0];
-        Assert.Equal(LandmarkKind.Emitter, first.Kind);
-        // The plaza block is center + ring 1; the site is its central hex.
-        Assert.True(first.Site.DistanceTo(center) <= 1,
-            $"plaza landmark at {first.Site}, expected within 1 hex of center {center}");
     }
 
     [Theory]

@@ -3,12 +3,15 @@ using System;
 namespace MadDr.CityGen
 {
     /// <summary>Road-network patterns, one per docs/18 SS1 preset row:
-    /// Village = "organic/radial streets around a central plaza",
-    /// Small Town = "one Main Street arterial + a perpendicular
-    /// residential grid", Big City = "dense grid".</summary>
+    /// Village and Small Town both = "one Main Street arterial + a
+    /// perpendicular residential grid" (creator direction, 2026-07:
+    /// Village must NOT lay out as hex-connected/radial roads -- base it
+    /// on a real North American town, 1950s, population 8,000-30,000,
+    /// which means a Main-Street grid downtown, not a wagon-wheel plaza),
+    /// Big City = "dense grid". The two MainStreet presets differ only in
+    /// DATA (size, pitch, density) -- same pattern, smaller town.</summary>
     public enum RoadPattern
     {
-        Radial,
         MainStreet,
         Grid,
     }
@@ -115,15 +118,21 @@ namespace MadDr.CityGen
 
         private static readonly string[] Hubs = { "hospital", "school", "old_age_home" };
 
-        /// <summary>~1 km x 1 km, radial around a central plaza (docs/18 SS1).
-        /// A 1-hex stream with two footbridges; a couple of ponds and low hills.</summary>
+        /// <summary>~1.4 km x 1.4 km, a Main Street grid (docs/18 SS1;
+        /// creator direction, 2026-07: modeled on a real North American
+        /// town, 1950s, population 8,000-30,000 -- NOT hex-connected/
+        /// radial roads around a plaza). Smaller and sparser than Small
+        /// Town's own Main-Street grid, not a different pattern: a
+        /// modest downtown strip along the arterial, houses filling out
+        /// the residential blocks around it. A 1-hex stream with two
+        /// footbridges; a couple of ponds and low hills.</summary>
         public static CityPreset Village()
         {
             return new CityPreset(
-                "village", 50, 50, RoadPattern.Radial,
-                blockPitch: 6, buildDensity: 0.35,
-                smallWeight: 0.80, mediumWeight: 0.18, largeWeight: 0.02,
-                emitterArchetypes: new[] { "plaza", "church" },
+                "village", 70, 70, RoadPattern.MainStreet,
+                blockPitch: 6, buildDensity: 0.42,
+                smallWeight: 0.75, mediumWeight: 0.22, largeWeight: 0.03,
+                emitterArchetypes: new[] { "town_hall", "plaza", "church" },
                 hubArchetypes: Hubs,
                 riverWidthHexes: 1, bridgeCount: 2,
                 pondCount: 2, hillCount: 3, hillRadiusHexes: 2);

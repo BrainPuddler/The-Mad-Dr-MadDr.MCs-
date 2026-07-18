@@ -36,7 +36,8 @@ public class CityModelBoundsTests
     [Fact]
     public void Axial_origin_is_the_corner_not_the_center()
     {
-        var m = CityGenerator.Generate(42u, CityPreset.Village());
+        var preset = CityPreset.Village();
+        var m = CityGenerator.Generate(42u, preset);
 
         // (0,0) IS on the map -- that's what made the bug quiet: spawning
         // there doesn't fail, it just puts monsters at the map corner.
@@ -46,11 +47,11 @@ public class CityModelBoundsTests
         // CenterHex is genuinely central: max distance to any corner is
         // roughly half the map diagonal, not the full diagonal.
         var center = m.CenterHex;
-        Assert.Equal(HexCoord.FromOffset(25, 25), center);
+        Assert.Equal(HexCoord.FromOffset(preset.WidthHexes / 2, preset.HeightHexes / 2), center);
         Assert.True(m.Contains(center));
 
         var corner = HexCoord.FromOffset(0, 0);
-        var farCorner = HexCoord.FromOffset(49, 49);
+        var farCorner = HexCoord.FromOffset(preset.WidthHexes - 1, preset.HeightHexes - 1);
         Assert.True(center.DistanceTo(corner) < corner.DistanceTo(farCorner),
             "center should be markedly closer to a corner than the corners are to each other");
     }

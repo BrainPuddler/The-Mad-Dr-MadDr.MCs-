@@ -18,8 +18,8 @@ Map-size **presets** sit below that 5 km ceiling — small maps don't need to fi
 
 | Preset | Footprint | Signature layout |
 | --- | --- | --- |
-| Village (culturally themed) | ~1 km × 1 km | Organic/radial streets around a central plaza |
-| Small Town | ~2 km × 2 km | One Main Street arterial + a perpendicular residential grid |
+| Village | ~1.4 km × 1.4 km | A real North American small town, 1950s, population 8,000–30,000: one Main Street arterial + a perpendicular residential grid (NOT hex-connected/radial roads around a plaza — creator direction, 2026-07) |
+| Small Town | ~2 km × 2 km | The same Main-Street grid, bigger and denser -- more downtown, more residential blocks |
 | Big City | up to 5 km × 5 km | Dense grid, verticality, sightline-blocking canyons |
 
 **"Options to expand"** means the generator (§2) and the LOD scheme (§5) are both already parameterized by map size — raising the 5 km ceiling later is a number change, not an architecture change.
@@ -108,7 +108,7 @@ No new engine decision is required — Unity is already the recommendation ([10]
 | --- | --- |
 | Match battlefield ceiling | 5 km × 5 km |
 | Hex-to-meter scale | 1 hex = 20 m |
-| Village / Small Town / Big City footprint | ~1 km / ~2 km / up to 5 km |
+| Village / Small Town / Big City footprint | ~1.4 km / ~2 km / up to 5 km |
 | Emitter density | 1–2 per km² of built area |
 | Building Structure HP (house/storefront/block/landmark) | 300 / 600 / 1500 / 3000 |
 | Building Armor (house/storefront/block/landmark) | 2 / 4 / 6 / 8 |

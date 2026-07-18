@@ -58,7 +58,7 @@ namespace MadDr.CityGen
                 for (var col = 0; col < width; col++)
                 {
                     var hex = HexCoord.FromOffset(col, row);
-                    if (IsRoad(preset, col, row, hex, center)) roadGeom.Add(hex);
+                    if (IsRoad(preset, col, row)) roadGeom.Add(hex);
                 }
             }
 
@@ -88,7 +88,7 @@ namespace MadDr.CityGen
             var occupied = new HashSet<HexCoord>();
             var landmarks = new List<Landmark>();
             var buildings = new List<Building>();
-            PlaceLandmarks(preset, center, blocks, occupied, landmarks, buildings);
+            PlaceLandmarks(preset, blocks, occupied, landmarks, buildings);
             PlaceBuildings(preset, rng, blocks, occupied, buildings);
 
             // -- 6. model (all lists sorted for element-wise identity) ---
@@ -300,7 +300,7 @@ namespace MadDr.CityGen
 
         // ---- roads ------------------------------------------------------
 
-        private static bool IsRoad(CityPreset preset, int col, int row, HexCoord hex, HexCoord center)
+        private static bool IsRoad(CityPreset preset, int col, int row)
         {
             var pitch = preset.BlockPitch;
             switch (preset.Pattern)
@@ -315,19 +315,6 @@ namespace MadDr.CityGen
                     return row == preset.HeightHexes / 2
                         || col % pitch == 0
                         || row % (pitch * 2) == 0;
-
-                case RoadPattern.Radial:
-                {
-                    // Ring roads every pitch hexes; 6 spokes along the hex
-                    // axes, starting at distance 2 so the central plaza
-                    // block (center + ring 1, 7 hexes) stays whole.
-                    var d = center.DistanceTo(hex);
-                    if (d > 0 && d % pitch == 0) return true;
-                    if (d < 2) return false;
-                    var dq = hex.Q - center.Q;
-                    var dr = hex.R - center.R;
-                    return dr == 0 || dq == 0 || dq == -dr; // the 3 axial lines (both signs each)
-                }
 
                 default:
                     throw new ArgumentOutOfRangeException(nameof(preset));
@@ -386,7 +373,6 @@ namespace MadDr.CityGen
 
         private static void PlaceLandmarks(
             CityPreset preset,
-            HexCoord center,
             List<List<HexCoord>> blocks,
             HashSet<HexCoord> occupied,
             List<Landmark> landmarks,
@@ -401,22 +387,11 @@ namespace MadDr.CityGen
             var emitterCount = Clamp(RoundAway(1.5 * preset.AreaKm2), 2, 10);
             var hubCount = Clamp(RoundAway(0.5 * preset.AreaKm2), 1, 6);
 
-            // Order blocks for allocation: on a radial map the plaza block
-            // (the one holding the center) comes first regardless of size
-            // -- docs/18 SS1: "organic/radial streets around a central
-            // plaza"; the plaza IS the anchor landmark.
-            var ordered = new List<List<HexCoord>>(blocks);
-            if (preset.Pattern == RoadPattern.Radial)
-            {
-                for (var i = 0; i < ordered.Count; i++)
-                {
-                    if (!ordered[i].Contains(center)) continue;
-                    var plaza = ordered[i];
-                    ordered.RemoveAt(i);
-                    ordered.Insert(0, plaza);
-                    break;
-                }
-            }
+            // Biggest blocks first (already FindBlocks' own sort order) --
+            // every preset is a Main-Street-or-grid town now, so the
+            // biggest block earns the first landmark on its own merits,
+            // no plaza-block special case.
+            var ordered = blocks;
 
             var total = Math.Min(emitterCount + hubCount, ordered.Count);
             var emittersLeft = emitterCount;
