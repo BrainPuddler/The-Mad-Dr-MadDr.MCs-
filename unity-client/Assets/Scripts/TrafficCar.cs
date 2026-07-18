@@ -20,6 +20,8 @@ public class TrafficCar : MonoBehaviour
     private const float CruiseSpeed = 6.5f;
     private const float FleeSpeed = 11f;
     private const float FleeRadius = 16f;      // a monster this close: full panic, drop everything
+    private const float SwerveRadius = 22f;    // between FleeRadius and MonsterAwareRadius: curve around it
+    private const float SwerveMax = 5.5f;      // lateral metres at full strength -- a real lane's worth
     private const float MonsterAwareRadius = 28f; // a monster this close: steer a normal route away from it
     private const float ArriveRadius = 1.5f;
     private const float CurbOffset = 2.5f;     // same curb-lane distance RoadDresser parks its own cars at
@@ -44,6 +46,18 @@ public class TrafficCar : MonoBehaviour
     private int _hopCounter; // rotates the wander hash every pick -- see PickNext
 
     public bool IsDriving { get { return _state == State.Driving; } }
+
+    /// <summary>Force an immediate departure regardless of this car's own
+    /// remaining park timer -- called by RuntimeCityBuilder's periodic
+    /// traffic-band check when the fleet's live moving fraction has
+    /// drifted too far below target (creator direction, 2026-07: "make
+    /// sure the proper % of cars are in motion"). No-op if already
+    /// driving.</summary>
+    public void DepartNow()
+    {
+        if (_state == State.Driving) return;
+        BeginTrip();
+    }
 
     /// <summary>`movingPercent` is the docs/19 traffic-field target: the
     /// long-run fraction of the fleet that should be actively driving at
@@ -299,7 +313,49 @@ public class TrafficCar : MonoBehaviour
             }
         }
 
-        MoveToward(_target, speed, dt);
+        // realistic on-road avoidance (creator direction, 2026-07:
+        // "avoiding monsters on the road by swerving around monsters in
+        // a realistic way"): the reroute above only changes which hex
+        // gets picked NEXT (full panic at FleeRadius, aware-penalty at
+        // MonsterAwareRadius) -- it doesn't touch the literal path
+        // toward the CURRENT target. This nudges just this frame's
+        // steering point sideways around a monster the car is about to
+        // drive past, so it curves through the lane instead of driving
+        // straight at it and only reacting once already fleeing. Never
+        // stacked with the full-panic swerve (already moving away by
+        // definition) or altered _target/hop bookkeeping -- purely
+        // cosmetic steering.
+        var steerTarget = _target;
+        if (threat == null)
+        {
+            var travelDir = _target - transform.position;
+            travelDir.y = 0f;
+            if (travelDir.sqrMagnitude > 0.01f)
+                steerTarget += SwerveOffset(travelDir.normalized);
+        }
+
+        MoveToward(steerTarget, speed, dt);
+    }
+
+    /// <summary>Lateral offset that curves the car's immediate steering
+    /// around a monster ahead of it within SwerveRadius, strongest when
+    /// close and directly in the way, fading to zero once past or well
+    /// off to the side -- see the Update() call site.</summary>
+    private Vector3 SwerveOffset(Vector3 travelDir)
+    {
+        var m = _builder.NearestMonsterTo(transform.position, SwerveRadius);
+        if (m == null) return Vector3.zero;
+        var toMonster = m.transform.position - transform.position;
+        toMonster.y = 0f;
+        var dist = toMonster.magnitude;
+        if (dist < 0.05f) return Vector3.zero;
+        var ahead = Vector3.Dot(toMonster.normalized, travelDir);
+        if (ahead < 0.15f) return Vector3.zero; // behind or well off to the side: nothing to swerve around
+
+        var side = new Vector3(travelDir.z, 0f, -travelDir.x);
+        var sign = Vector3.Dot(toMonster, side) > 0f ? -1f : 1f; // steer to whichever side it ISN'T on
+        var strength = Mathf.Clamp01((SwerveRadius - dist) / SwerveRadius) * ahead;
+        return side * (sign * strength * SwerveMax);
     }
 
     private void MoveToward(Vector3 target, float speed, float dt)

@@ -65,18 +65,42 @@ public class Citizen : MonoBehaviour
         if (to.magnitude < 0.5f || _repickTimer <= 0f)
         {
             _repickTimer = 2f + (GetInstanceID() % 30) / 10f;
-            var here = _builder.HexAt(transform.position);
-            var blocked = _builder.BlockedFor(false);
-            foreach (var n in here.Neighbors())
-            {
-                if (_builder.City.Contains(n) && !blocked.Contains(n))
-                {
-                    _target = _builder.WorldOf(n) + new Vector3(0f, 0.9f, 0f);
-                    break;
-                }
-            }
+            PickSidewalkTarget();
         }
         MoveToward(_target, WalkSpeed, dt);
+    }
+
+    /// <summary>Docs/19 crowd wander, sidewalk-aware (creator direction,
+    /// 2026-07: "Humans should prefer walk on sidewalks. Cross at
+    /// corners. unless fleeing from monster" -- the flee branch above is
+    /// deliberately untouched by any of this, panic ignores sidewalks
+    /// entirely). Strongly prefers a neighbor OFF the road network; if
+    /// every off-road neighbor is unavailable, it'll step onto the road
+    /// only at a corner/junction hex (RuntimeCityBuilder.IsRoadCorner) --
+    /// never a mid-block jaywalk. A last-resort fallback (any open
+    /// neighbor at all, road or not) keeps a citizen boxed in against a
+    /// long straight from freezing in place.</summary>
+    private void PickSidewalkTarget()
+    {
+        var here = _builder.HexAt(transform.position);
+        var blocked = _builder.BlockedFor(false);
+        var roads = _builder.RoadNetworkHexes();
+
+        HexCoord? fallback = null;
+        foreach (var n in here.Neighbors())
+        {
+            if (!_builder.City.Contains(n) || blocked.Contains(n)) continue;
+            if (fallback == null) fallback = n;
+            if (!roads.Contains(n)) { SetTarget(n); return; }        // off the road: always fine
+            if (_builder.IsRoadCorner(n)) { SetTarget(n); return; }   // a corner: a legal crossing
+            // else: a mid-block road hex -- skip it, keep looking
+        }
+        if (fallback.HasValue) SetTarget(fallback.Value);
+    }
+
+    private void SetTarget(HexCoord hex)
+    {
+        _target = _builder.WorldOf(hex) + new Vector3(0f, 0.9f, 0f);
     }
 
     private void MoveToward(Vector3 target, float speed, float dt)

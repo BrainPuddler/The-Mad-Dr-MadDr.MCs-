@@ -69,6 +69,8 @@ public class RuntimeCityBuilder : MonoBehaviour
     private readonly List<Tank> _tanks = new List<Tank>();
     private readonly List<UnitCombat> _combatants = new List<UnitCombat>();
     private readonly List<TrafficCar> _trafficCars = new List<TrafficCar>();
+    private float _trafficCheckTimer;
+    private int _trafficWakeCursor;
 
     public CityModel City { get { return _city; } }
     public int CityVersion { get { return _cityVersion; } }
@@ -146,6 +148,68 @@ public class RuntimeCityBuilder : MonoBehaviour
         _roster.OnRosterReady += HandleRosterReady;
         _roster.OnRosterFailed += HandleRosterFailed;
         _roster.FetchRoster();
+    }
+
+    private const float TrafficCheckInterval = 4f;
+    private const float TrafficBandTolerance = 0.2f; // +-20% of trafficMovingPercent, creator direction
+
+    /// <summary>Docs/19 traffic field, corrective half: each car's OWN
+    /// independent park timer (rolled at Init/ParkHere) already targets
+    /// trafficMovingPercent on average, but a run of bad luck can drift
+    /// the LIVE fraction driving well below it for a while with nobody
+    /// due to depart soon. Rather than forcing an exact per-park-event
+    /// swap (too rigid -- creator direction: "the next car(s) do not
+    /// have to start immediately, we can have more cars on longer
+    /// journeys"), this periodically checks the measured fraction and,
+    /// only once it's dropped more than TrafficBandTolerance below
+    /// target, wakes ONE currently-parked car early -- a loose band, not
+    /// a lockstep swap. A rotating cursor spreads the early wake-ups
+    /// across the fleet instead of always picking the same car.</summary>
+    private void Update()
+    {
+        if (_trafficCars.Count == 0) return;
+        _trafficCheckTimer -= Time.deltaTime;
+        if (_trafficCheckTimer > 0f) return;
+        _trafficCheckTimer = TrafficCheckInterval;
+
+        var target = trafficMovingPercent;
+        var lowBand = target * (1f - TrafficBandTolerance);
+        if (TrafficMovingFraction >= lowBand) return;
+
+        var n = _trafficCars.Count;
+        for (var i = 0; i < n; i++)
+        {
+            var idx = (_trafficWakeCursor + i) % n;
+            var c = _trafficCars[idx];
+            if (c == null || c.IsDriving) continue;
+            _trafficWakeCursor = (idx + 1) % n;
+            c.DepartNow();
+            break;   // one car per check -- see the "don't have to start immediately" note above
+        }
+    }
+
+    /// <summary>A road hex counts as a pedestrian-legal crossing point
+    /// ("corner") if it ISN'T a plain straight mid-block segment -- i.e.
+    /// its road-neighbors aren't just two hexes roughly opposite each
+    /// other. A junction (3+ road neighbors), a bend (2 neighbors that
+    /// aren't opposite), or a dead end (0-1) all count; only a genuine
+    /// through-stretch of street doesn't. Citizens use this to cross at
+    /// corners instead of jaywalking mid-block (see Citizen.cs).</summary>
+    public bool IsRoadCorner(HexCoord hex)
+    {
+        var roads = RoadNetworkHexes();
+        var here = WorldOf(hex);
+        var roadNeighbors = 0;
+        Vector3? firstDir = null;
+        foreach (var n in hex.Neighbors())
+        {
+            if (!roads.Contains(n)) continue;
+            roadNeighbors++;
+            var dir = (WorldOf(n) - here).normalized;
+            if (firstDir == null) { firstDir = dir; continue; }
+            if (Vector3.Dot(firstDir.Value, dir) > -0.5f) return true; // not roughly opposite -> a bend/junction
+        }
+        return roadNeighbors <= 1; // dead end (or isolated): also crossable, only a straight run isn't
     }
 
     /// <summary>CityGizmo.PresetChoice -> RuntimeCityBuilder.PresetChoice.
