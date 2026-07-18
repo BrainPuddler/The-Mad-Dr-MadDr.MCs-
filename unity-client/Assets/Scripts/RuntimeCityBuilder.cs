@@ -188,6 +188,29 @@ public class RuntimeCityBuilder : MonoBehaviour
         }
     }
 
+    private HashSet<HexCoord> _waterSet;
+
+    /// <summary>O(1) water-hex lookup, lazily built from CityModel.Water
+    /// (never changes after generation).</summary>
+    public bool IsWaterHex(HexCoord hex)
+    {
+        if (_waterSet == null) _waterSet = new HashSet<HexCoord>(_city.Water);
+        return _waterSet.Contains(hex);
+    }
+
+    /// <summary>How deep the water sits above the carved bed at a hex's
+    /// centre -- TerrainField.WaterLevel minus the actual terrain height
+    /// there. Continuous, not a flat per-hex value: TerrainField blends
+    /// height by inverse distance, so this reads shallow near a bank and
+    /// deep mid-channel, same curve the visible shoreline follows. 0 for
+    /// a non-water hex. Tanks use this to decide whether a crossing is
+    /// fordable (see Tank.cs).</summary>
+    public float WaterDepthAt(HexCoord hex)
+    {
+        if (!IsWaterHex(hex)) return 0f;
+        return TerrainField.WaterLevel - GroundHeightAt(WorldOf(hex));
+    }
+
     /// <summary>A road hex counts as a pedestrian-legal crossing point
     /// ("corner") if it ISN'T a plain straight mid-block segment -- i.e.
     /// its road-neighbors aren't just two hexes roughly opposite each

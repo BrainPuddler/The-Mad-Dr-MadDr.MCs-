@@ -21,6 +21,31 @@ public static class DamageFx
         go.AddComponent<SmokePlume>();
     }
 
+    /// <summary>One-shot muzzle smoke the instant a gun fires (creator
+    /// direction, 2026-07: "guns have smoke when they fire") -- small and
+    /// quick next to the building SmokePlume's lazy loop or DustBurstFx's
+    /// wide radial burst, so it reads as a gunshot, not a fire or a
+    /// collapse. Unparented (world-space): the muzzle it fired from keeps
+    /// moving/turning, but the puff itself should hang where it was fired
+    /// and drift, not get dragged along by the barrel.</summary>
+    public static void MuzzleSmoke(Vector3 at)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        go.name = "MuzzleSmoke";
+        go.transform.position = at;
+        go.transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
+        var collider = go.GetComponent<Collider>();
+        if (collider != null) Object.Destroy(collider);
+
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(0.6f, 0.58f, 0.55f, 0.65f);
+        LabMeshBuilder.MakeTransparent(mat);
+        var renderer = go.GetComponent<Renderer>();
+        if (renderer != null) renderer.sharedMaterial = mat;
+
+        go.AddComponent<SmokePuff>().InitBurst(mat, 0.55f, 1.4f, 0.65f);
+    }
+
     /// <summary>One-shot dust puff burst at a collapsing building's site.</summary>
     public static void DustBurst(Vector3 at, Transform parent)
     {
