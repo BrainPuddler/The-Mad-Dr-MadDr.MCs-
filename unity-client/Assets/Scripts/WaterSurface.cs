@@ -1,8 +1,8 @@
 using UnityEngine;
 
 /// <summary>
-/// Makes a water-surface mesh (RuntimeCityBuilder.BuildWaterBody) actually
-/// flow instead of sitting as a dead-flat blue sheet: it holds the mesh's
+/// Makes the water sheet (RuntimeCityBuilder.BuildWater) actually flow
+/// instead of sitting as a dead-flat blue sheet: it holds the mesh's
 /// rest positions and, every frame, displaces each vertex vertically by a
 /// couple of travelling sine waves, then recomputes normals so the light
 /// glints and rolls across the surface. Purely cosmetic -- no collider, no
@@ -10,26 +10,29 @@ using UnityEngine;
 /// dresses it), same as every other dresser in the docs/21 miniature-set
 /// arc.
 ///
-/// A river is given a <see cref="_flow"/> direction (its long axis) so its
-/// waves march downstream; a pond gets zero flow, so its waves are a gentle
-/// standing chop that reads as still water. Time-driven like NightMode /
-/// TrafficCar / the gait rig -- never UnityEngine.Random, and the rest
-/// geometry it animates around is itself deterministic.
+/// The <see cref="_flow"/> direction is the river's long axis, so the
+/// primary wave marches downstream; a softer secondary wave runs across
+/// it so ponds sharing the sheet read as chop rather than a conveyor.
+/// The wavelength MUST stay several times the sheet's grid spacing
+/// (BuildWaterSheet quads, >=4m) or the sampled wave aliases into
+/// shimmer. Time-driven like NightMode / TrafficCar / the gait rig --
+/// never UnityEngine.Random, and the rest geometry it animates around is
+/// itself deterministic.
 /// </summary>
 public sealed class WaterSurface : MonoBehaviour
 {
     private Mesh _mesh;
     private Vector3[] _rest;
     private Vector3[] _work;
-    private Vector2 _flow;      // downstream direction (zero for a still pond)
-    private float _phase;       // per-body offset so two bodies don't pulse in lockstep
+    private Vector2 _flow;      // downstream direction
+    private float _phase;       // offset so a second sheet wouldn't pulse in lockstep
 
-    // Gentle: a miniature-set pond/river, not an ocean. Amplitude is a few
-    // centimetres so banks/lily pads still read as sitting AT the surface.
-    private const float Amplitude = 0.055f;
-    private const float WaveLength = 9f;    // metres between crests
-    private const float Speed = 1.4f;       // metres/sec crest travel
-    private const float CrossChop = 0.45f;  // secondary wave across the flow
+    // Gentle: a miniature-set pond/river, not an ocean. Amplitude stays
+    // well under the bank crest height so waves never poke over the shore.
+    private const float Amplitude = 0.08f;
+    private const float WaveLength = 17f;   // metres between crests -- ~4x the sheet's finest grid spacing
+    private const float Speed = 1.8f;       // metres/sec crest travel
+    private const float CrossChop = 0.5f;   // secondary wave across the flow
 
     public void Init(Mesh mesh, Vector3[] restVerts, Vector2 flow, float phase)
     {
@@ -44,8 +47,9 @@ public sealed class WaterSurface : MonoBehaviour
     {
         if (_mesh == null || _rest == null) return;
 
-        var t = Time.time * Speed + _phase;
         var k = 2f * Mathf.PI / WaveLength;
+        // scale by k so a crest genuinely travels at Speed metres/sec
+        var t = (Time.time * Speed + _phase) * k;
 
         // Primary wave marches along the flow (or, for a still pond with no
         // flow, along a fixed diagonal so the chop still has direction).

@@ -519,68 +519,109 @@ public class RuntimeCityBuilder : MonoBehaviour
         }
     }
 
-    /// <summary>The battlefield's water, built as continuous flowing
-    /// bodies instead of one blue cube per hex. Each connected body (the
-    /// river, and the ponds) gets a DARK murky bed sheet hugging the carved
-    /// riverbed and a TRANSLUCENT surface sheet at TerrainField.WaterLevel
-    /// that WaterSurface undulates -- so water reads as one smooth sheet
-    /// with real depth beneath it, a river visibly flowing along its length
-    /// while ponds gently chop. Road/building/bridge hexes are skipped:
-    /// TerrainField flat-locks them to 0, and the old per-hex cube loop's
-    /// latent bug was drawing water over a bridge deck.</summary>
+    /// <summary>The battlefield's water: ONE subdivided translucent sheet
+    /// resting at TerrainField.WaterLevel over the whole water region,
+    /// animated by WaterSurface, over a dark murky bed hugging the carved
+    /// riverbed. The waterline is not drawn at all -- it EMERGES: the
+    /// terrain mesh is opaque and sits above the waterline everywhere
+    /// except the carved beds and their blended banks, so the depth test
+    /// hides every submerged part of the sheet and the visible edge is
+    /// exactly where each bank crosses the waterline. That contour follows
+    /// TerrainField's smoothed noise, so the shore is an organic curve --
+    /// no hex outline, no tiles. Depth reads as a gradient for free:
+    /// near the shore the sheet is tinted over the bank's own sunken
+    /// grass (light shallows), mid-river it's over the dark bed (deeps).
+    /// Colliderless; pathing still reads the hex set, never the visuals.</summary>
     private void BuildWater(Transform parent)
     {
         if (_city.Water == null) return;
 
+        // bridge/road/building hexes are flat-locked to 0 by TerrainField,
+        // so the sheet is depth-hidden under them automatically; the bed
+        // skips them so no dark slab pokes up through a bridge deck
         var flat = new HashSet<HexCoord>();
         foreach (var h in _city.Roads) flat.Add(h);
         foreach (var b in _city.Buildings) foreach (var h in b.Footprint) flat.Add(h);
         foreach (var br in _city.Bridges) foreach (var h in br.Footprint) flat.Add(h);
 
-        var ponds = PondHexes();
-        var river = new List<HexCoord>();
-        var pondHexes = new List<HexCoord>();
-        foreach (var hex in _city.Water)
-        {
-            if (flat.Contains(hex)) continue;
-            if (ponds.Contains(hex)) pondHexes.Add(hex);
-            else river.Add(hex);
-        }
+        var wet = new List<HexCoord>();
+        foreach (var hex in _city.Water) if (!flat.Contains(hex)) wet.Add(hex);
+        if (wet.Count == 0) return;
 
-        // deep, translucent, glossy: the murky bed showing through IS the
-        // depth cue, so the surface is only lightly tinted and quite clear
-        var surfaceMat = NewMaterial(new Color(0.17f, 0.40f, 0.46f, 0.55f));
-        if (surfaceMat.HasProperty("_Smoothness")) surfaceMat.SetFloat("_Smoothness", 0.9f);
-        else if (surfaceMat.HasProperty("_Glossiness")) surfaceMat.SetFloat("_Glossiness", 0.9f);
-        LabMeshBuilder.MakeTransparent(surfaceMat);
-        var bedMat = NewMaterial(new Color(0.06f, 0.13f, 0.13f));
-
-        BuildWaterBody(river, RiverFlow(river), 0f, parent, surfaceMat, bedMat, "River");
-        BuildWaterBody(pondHexes, Vector2.zero, 1.7f, parent, surfaceMat, bedMat, "Ponds");
-    }
-
-    /// <summary>Builds one water body: a translucent surface sheet (with a
-    /// WaterSurface so it flows) plus a dark bed sheet just above the carved
-    /// riverbed. Both are welded hex fans, so adjacent hexes share corners
-    /// and the sheet is seamless. Colliderless -- clicks fall to the ground
-    /// plane; water never blocks movement (pathing reads the hex set).</summary>
-    private void BuildWaterBody(List<HexCoord> hexes, Vector2 flow, float phase,
-        Transform parent, Material surfaceMat, Material bedMat, string name)
-    {
-        if (hexes == null || hexes.Count == 0) return;
-
-        var surfMesh = HexFanMesh(hexes, _ => TerrainField.WaterLevel);
-        var surfGo = new GameObject(name + "Surface");
-        surfGo.transform.SetParent(parent, false);
-        surfGo.AddComponent<MeshFilter>().sharedMesh = surfMesh;
-        surfGo.AddComponent<MeshRenderer>().sharedMaterial = surfaceMat;
-        surfGo.AddComponent<WaterSurface>().Init(surfMesh, surfMesh.vertices, flow, phase);
-
-        var bedMesh = HexFanMesh(hexes, p => _terrain.HeightAt(p) + 0.05f);
-        var bedGo = new GameObject(name + "Bed");
+        var bedMat = NewMaterial(new Color(0.05f, 0.11f, 0.12f));
+        var bedMesh = HexFanMesh(wet, p => _terrain.HeightAt(p) + 0.05f);
+        var bedGo = new GameObject("WaterBed");
         bedGo.transform.SetParent(parent, false);
         bedGo.AddComponent<MeshFilter>().sharedMesh = bedMesh;
         bedGo.AddComponent<MeshRenderer>().sharedMaterial = bedMat;
+
+        // translucent and glossy: the murky bed and sunken banks showing
+        // through ARE the depth cue, and high smoothness lets the waves'
+        // recomputed normals roll light glints across the surface
+        var surfaceMat = NewMaterial(new Color(0.16f, 0.38f, 0.45f, 0.6f));
+        if (surfaceMat.HasProperty("_Smoothness")) surfaceMat.SetFloat("_Smoothness", 0.92f);
+        else if (surfaceMat.HasProperty("_Glossiness")) surfaceMat.SetFloat("_Glossiness", 0.92f);
+        LabMeshBuilder.MakeTransparent(surfaceMat);
+        BuildWaterSheet(wet, parent, surfaceMat);
+    }
+
+    /// <summary>The animated surface: a regular grid over the water
+    /// region's bounds (padded a hex and a half so it always reaches past
+    /// the waterline into the banks, where the depth test trims it). Grid
+    /// spacing stays well under WaterSurface's wavelength so the travelling
+    /// waves are properly sampled, coarsening only on huge maps to hold
+    /// the vertex budget (docs/21: BigCity trades detail for scale).</summary>
+    private void BuildWaterSheet(List<HexCoord> wet, Transform parent, Material surfaceMat)
+    {
+        var hexM = (float)HexCoord.HexMeters;
+        float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
+        foreach (var hex in wet)
+        {
+            var w = WorldOf(hex);
+            if (w.x < minX) minX = w.x;
+            if (w.x > maxX) maxX = w.x;
+            if (w.z < minZ) minZ = w.z;
+            if (w.z > maxZ) maxZ = w.z;
+        }
+        minX -= hexM * 1.5f; maxX += hexM * 1.5f;
+        minZ -= hexM * 1.5f; maxZ += hexM * 1.5f;
+
+        var spanX = maxX - minX;
+        var spanZ = maxZ - minZ;
+        var quad = Mathf.Max(4f, Mathf.Max(spanX, spanZ) / 200f);
+        var nx = Mathf.CeilToInt(spanX / quad);
+        var nz = Mathf.CeilToInt(spanZ / quad);
+
+        var verts = new Vector3[(nx + 1) * (nz + 1)];
+        for (var j = 0; j <= nz; j++)
+            for (var i = 0; i <= nx; i++)
+                verts[j * (nx + 1) + i] = new Vector3(minX + i * quad, TerrainField.WaterLevel, minZ + j * quad);
+        var tris = new int[nx * nz * 6];
+        var t = 0;
+        for (var j = 0; j < nz; j++)
+            for (var i = 0; i < nx; i++)
+            {
+                // same up-facing winding as the terrain chunk mesh
+                var v0 = j * (nx + 1) + i;
+                var v1 = v0 + 1;
+                var v2 = v0 + nx + 1;
+                var v3 = v2 + 1;
+                tris[t++] = v0; tris[t++] = v2; tris[t++] = v1;
+                tris[t++] = v1; tris[t++] = v2; tris[t++] = v3;
+            }
+
+        var mesh = new Mesh();
+        if (verts.Length > 65000) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+        mesh.vertices = verts;
+        mesh.triangles = tris;
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+
+        var go = new GameObject("WaterSheet");
+        go.transform.SetParent(parent, false);
+        go.AddComponent<MeshFilter>().sharedMesh = mesh;
+        go.AddComponent<MeshRenderer>().sharedMaterial = surfaceMat;
+        go.AddComponent<WaterSurface>().Init(mesh, verts, RiverFlow(wet), 0f);
     }
 
     /// <summary>A welded hex-fan mesh over `hexes`: per hex a centre vertex
@@ -628,10 +669,11 @@ public class RuntimeCityBuilder : MonoBehaviour
         return mesh;
     }
 
-    /// <summary>A river's downstream direction, approximated as its longer
-    /// world axis -- the generator carves the river as a band spanning the
-    /// map, so its bounding box is reliably long one way. Ponds pass zero
-    /// flow instead (still water).</summary>
+    /// <summary>The water's downstream direction, approximated as the
+    /// region's longer world axis -- the generator carves the river as a
+    /// band spanning the map, so the bounding box of all water is reliably
+    /// long along the river. The sheet's waves march this way; ponds ride
+    /// the same sheet and just read as gentle chop.</summary>
     private Vector2 RiverFlow(List<HexCoord> river)
     {
         if (river == null || river.Count == 0) return Vector2.zero;
@@ -695,8 +737,9 @@ public class RuntimeCityBuilder : MonoBehaviour
             var off = new Vector3(Mod(hex.Q * 19 + hex.R * 5 + i * 29, 13) - 6f, 0f,
                 Mod(hex.Q * 7 + hex.R * 23 + i * 17, 13) - 6f);
             // float on the flowing surface sheet (TerrainField.WaterLevel),
-            // a hair proud so a pad reads as sitting ON the film
-            var p = w + off + Vector3.up * (TerrainField.WaterLevel + 0.06f);
+            // proud of the wave amplitude so a pad reads as sitting ON the
+            // film rather than being periodically swallowed by a crest
+            var p = w + off + Vector3.up * (TerrainField.WaterLevel + 0.11f);
             var size = 0.6f + Mod(hex.Q + hex.R + i * 3, 3) * 0.25f;
             var lp = SpawnPrim(PrimitiveType.Cylinder, p, new Vector3(size, 0.04f, size), pad, parent);
             lp.name = "LilyPad";
