@@ -111,6 +111,15 @@ namespace MadDr.CityGen
         /// element-by-element, not just set-equal. Includes bridge decks.</summary>
         public IReadOnlyList<HexCoord> Roads { get; }
 
+        /// <summary>The single Main Street arterial through a MainStreet-
+        /// pattern preset (Village, Small Town) -- a SUBSET of Roads,
+        /// sorted the same way. Renderer-side, this is what earns the
+        /// wide 3-4 lane treatment instead of an ordinary residential
+        /// street's width (creator direction, 2026-07). Empty for Grid
+        /// presets (Big City): a dense grid has no single distinguished
+        /// arterial.</summary>
+        public IReadOnlyList<HexCoord> ArterialRoads { get; }
+
         /// <summary>Water hexes (river + ponds), sorted by (R, Q).
         /// Impassable to ground plans; amphibious plans (crab,
         /// serpentine -- genome-core catalog) cross freely; winged/
@@ -133,6 +142,7 @@ namespace MadDr.CityGen
             int widthHexes,
             int heightHexes,
             IReadOnlyList<HexCoord> roads,
+            IReadOnlyList<HexCoord> arterialRoads,
             IReadOnlyList<HexCoord> water,
             IReadOnlyList<HexCoord> ridges,
             IReadOnlyList<Building> buildings,
@@ -144,6 +154,7 @@ namespace MadDr.CityGen
             WidthHexes = widthHexes;
             HeightHexes = heightHexes;
             Roads = roads;
+            ArterialRoads = arterialRoads;
             Water = water;
             Ridges = ridges;
             Buildings = buildings;

@@ -46,6 +46,8 @@ public static class RoadDresser
     private static Material Sidewalk() { return M(0.58f, 0.56f, 0.52f); }
     private static Material LanePaint() { return M(0.85f, 0.7f, 0.2f); }
     private static Material CrossPaint() { return M(0.85f, 0.84f, 0.8f); }
+    private static Material RoundaboutCurb() { return M(0.62f, 0.6f, 0.56f); }
+    private static Material RoundaboutGrass() { return M(0.30f, 0.44f, 0.21f); }
     private static Material PoleWood() { return M(0.35f, 0.26f, 0.18f); }
     private static Material PoleMetal() { return M(0.45f, 0.48f, 0.5f); }
     private static Material Bulb() { return M(1f, 0.9f, 0.6f, 1.4f); }
@@ -85,6 +87,7 @@ public static class RoadDresser
         // separate merge -- but RoadDresser still needs to know WHICH
         // road hexes are bridge deck, to skip dressing them itself
         var network = new HashSet<HexCoord>(city.Roads);
+        var arterial = new HashSet<HexCoord>(city.ArterialRoads);
         var bridgeHexes = new HashSet<HexCoord>();
         foreach (var bridge in city.Bridges)
             foreach (var hex in bridge.Footprint) bridgeHexes.Add(hex);
@@ -101,14 +104,20 @@ public static class RoadDresser
             if (bridgeHexes.Contains(hex)) continue;
 
             var center = builder.WorldOf(hex);
-            var connectors = new List<(Vector3 dir, float angle)>();
+            var connectors = new List<(Vector3 dir, float angle, bool arterial)>();
             foreach (var n in hex.Neighbors())
             {
                 if (!network.Contains(n)) continue;
                 var to = builder.WorldOf(n) - center;
                 to.y = 0f;
                 var dir = to.normalized;
-                connectors.Add((dir, Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg));
+                // a connector is part of the arterial only if BOTH ends
+                // are -- a residential cross-street stub off a Main
+                // Street junction stays ordinary width even though the
+                // hex itself is arterial (creator direction, 2026-07:
+                // Main Street gets a 3-4 lane road, side streets don't)
+                var isArterialConnector = arterial.Contains(hex) && arterial.Contains(n);
+                connectors.Add((dir, Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg, isArterialConnector));
             }
 
             // un-zigzag Grid/MainStreet's "vertical" streets (see doc
@@ -118,7 +127,7 @@ public static class RoadDresser
             if (TryStraightenCardinal(hex, network, connectors, out var correction))
                 center += correction;
 
-            DressHex(builder, hex, center, connectors, host);
+            DressHex(builder, hex, center, connectors, arterial.Contains(hex), host);
 
             // railyard siding (docs/21 batch 2, item 6): a parallel rail
             // track alongside straight road hexes near a rail_depot
@@ -161,7 +170,7 @@ public static class RoadDresser
     /// approach roads and with its own neighboring bridge hexes -- not
     /// just internally consistent with itself.</summary>
     public static bool TryStraightenCardinal(HexCoord hex, HashSet<HexCoord> network,
-        List<(Vector3 dir, float angle)> connectors, out Vector3 correction)
+        List<(Vector3 dir, float angle, bool arterial)> connectors, out Vector3 correction)
     {
         correction = Vector3.zero;
         var rEven = (hex.R & 1) == 0;
@@ -170,16 +179,19 @@ public static class RoadDresser
         var throughCount = (hasNorth ? 1 : 0) + (hasSouth ? 1 : 0);
         if (throughCount == 0 || throughCount != connectors.Count) return false;
 
+        // a pure vertical corridor is always a residential/perpendicular
+        // street, never Main Street itself (the arterial's own row runs
+        // east/west by construction) -- never arterial-wide
         connectors.Clear();
         if (hasNorth)
         {
             var d = new Vector3(0f, 0f, -1f);
-            connectors.Add((d, Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg));
+            connectors.Add((d, Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg, false));
         }
         if (hasSouth)
         {
             var d = new Vector3(0f, 0f, 1f);
-            connectors.Add((d, Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg));
+            connectors.Add((d, Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg, false));
         }
         correction = new Vector3((rEven ? 1f : -1f) * (float)HexCoord.HexMeters / 4f, 0f, 0f);
         return true;
@@ -210,69 +222,127 @@ public static class RoadDresser
 
     private const float HalfSpan = 10f;      // hex center-to-edge along a neighbor direction
     private const float RoadWidth = 7.5f;
+    private const float ArterialRoadWidth = 14f;   // a real 3-4 lane arterial (creator direction, 2026-07), not a residential street
+
+    // Junction hexes (3+ connectors) render as a roundabout instead of a
+    // small pad with crosswalk stripes (creator direction, 2026-07:
+    // "Replace the Y cross roads with Cross or T configurations or for
+    // European styling proper Roundabouts") -- deliberately the
+    // roundabout branch, not a forced Cross/T: this hex grid's
+    // "vertical" street direction is a genuine diagonal (see
+    // TryStraightenCardinal's doc comment), not exactly perpendicular to
+    // an east/west arterial, so any attempt to force true 90 degree
+    // symmetry onto that bearing would either kink (a Y) or require
+    // corrupting the straight-through alignment fixed earlier. A circular
+    // hub has no such constraint -- arms can meet it at any angle and
+    // still read as a clean, intentional junction.
+    private const float RoundaboutRadius = 9.5f;
+    private const float RoundaboutIslandRadius = 3.5f;
 
     private static void DressHex(RuntimeCityBuilder b, HexCoord hex, Vector3 center,
-        List<(Vector3 dir, float angle)> connectors, Transform host)
+        List<(Vector3 dir, float angle, bool arterial)> connectors, bool isArterialHex, Transform host)
     {
-        // concrete apron under everything, then the asphalt pad -- the
-        // apron rim reads as the surrounding sidewalk/curb ring
-        b.SpawnPrim(PrimitiveType.Cylinder, center + Vector3.up * 0.12f,
-            new Vector3(6.8f, 0.12f, 6.8f), Sidewalk(), host);
-        b.SpawnPrim(PrimitiveType.Cylinder, center + Vector3.up * 0.24f,
-            new Vector3(5.2f, 0.1f, 5.2f), Asphalt(), host);
+        if (connectors.Count >= 3)
+        {
+            // roundabout: apron, asphalt ring, raised curb + grass island
+            b.SpawnPrim(PrimitiveType.Cylinder, center + Vector3.up * 0.12f,
+                new Vector3(RoundaboutRadius + 1.6f, 0.12f, RoundaboutRadius + 1.6f), Sidewalk(), host);
+            b.SpawnPrim(PrimitiveType.Cylinder, center + Vector3.up * 0.24f,
+                new Vector3(RoundaboutRadius, 0.1f, RoundaboutRadius), Asphalt(), host);
+            b.SpawnPrim(PrimitiveType.Cylinder, center + Vector3.up * 0.3f,
+                new Vector3(RoundaboutIslandRadius + 0.3f, 0.06f, RoundaboutIslandRadius + 0.3f), RoundaboutCurb(), host);
+            b.SpawnPrim(PrimitiveType.Cylinder, center + Vector3.up * 0.55f,
+                new Vector3(RoundaboutIslandRadius, 0.5f, RoundaboutIslandRadius), RoundaboutGrass(), host);
+        }
+        else
+        {
+            // concrete apron under everything, then the asphalt pad --
+            // the apron rim reads as the surrounding sidewalk/curb ring.
+            // Sized off the SAME formula the connector strips below use
+            // (roadHalf + margin), so an arterial hex's pad/apron
+            // widens right along with its strips instead of pinching.
+            var padWidth = isArterialHex ? ArterialRoadWidth : RoadWidth;
+            var padRadius = padWidth * 0.5f + 1.45f;
+            var apronRadius = (padWidth + 3.4f) * 0.5f + 1.35f;
+            b.SpawnPrim(PrimitiveType.Cylinder, center + Vector3.up * 0.12f,
+                new Vector3(apronRadius, 0.12f, apronRadius), Sidewalk(), host);
+            b.SpawnPrim(PrimitiveType.Cylinder, center + Vector3.up * 0.24f,
+                new Vector3(padRadius, 0.1f, padRadius), Asphalt(), host);
+        }
 
-        foreach (var (dir, angle) in connectors)
+        foreach (var (dir, angle, isArterialConnector) in connectors)
         {
             var rot = Quaternion.Euler(0f, angle, 0f);
             var mid = center + dir * (HalfSpan * 0.5f);
+            var roadWidth = isArterialConnector ? ArterialRoadWidth : RoadWidth;
 
             // sidewalk under-slab first (wider), asphalt strip on top
             var walk = b.SpawnPrim(PrimitiveType.Cube, mid + Vector3.up * 0.12f,
-                new Vector3(RoadWidth + 3.4f, 0.24f, HalfSpan + 1.2f), Sidewalk(), host);
+                new Vector3(roadWidth + 3.4f, 0.24f, HalfSpan + 1.2f), Sidewalk(), host);
             walk.transform.rotation = rot;
             var strip = b.SpawnPrim(PrimitiveType.Cube, mid + Vector3.up * 0.24f,
-                new Vector3(RoadWidth, 0.2f, HalfSpan + 0.8f), Asphalt(), host);
+                new Vector3(roadWidth, 0.2f, HalfSpan + 0.8f), Asphalt(), host);
             strip.transform.rotation = rot;
 
-            // yellow center dashes
-            for (var d = 0; d < 3; d++)
+            if (isArterialConnector)
             {
-                var dash = b.SpawnPrim(PrimitiveType.Cube,
-                    center + dir * (2.2f + d * 2.9f) + Vector3.up * 0.36f,
-                    new Vector3(0.35f, 0.05f, 1.5f), LanePaint(), host);
-                dash.transform.rotation = rot;
-            }
-
-            // crosswalk stripes where three or more streets meet
-            if (connectors.Count >= 3)
-            {
+                // double yellow no-passing line down the true centre,
+                // plus a dashed white lane divider on each side -- the
+                // "3-4 lane" arterial read, not just a wider single lane
                 var perp = new Vector3(dir.z, 0f, -dir.x);
-                for (var k = -2; k <= 2; k++)
+                foreach (var yOff in new[] { 0.3f, -0.3f })
+                    for (var d = 0; d < 3; d++)
+                    {
+                        var dash = b.SpawnPrim(PrimitiveType.Cube,
+                            center + dir * (2.2f + d * 2.9f) + perp * yOff + Vector3.up * 0.36f,
+                            new Vector3(0.28f, 0.05f, 1.5f), LanePaint(), host);
+                        dash.transform.rotation = rot;
+                    }
+                foreach (var wOff in new[] { 3.4f, -3.4f })
+                    for (var d = 0; d < 3; d++)
+                    {
+                        var dash = b.SpawnPrim(PrimitiveType.Cube,
+                            center + dir * (1.6f + d * 3.1f) + perp * wOff + Vector3.up * 0.36f,
+                            new Vector3(0.3f, 0.05f, 1.2f), CrossPaint(), host);
+                        dash.transform.rotation = rot;
+                    }
+            }
+            else
+            {
+                // ordinary single yellow center dashes
+                for (var d = 0; d < 3; d++)
                 {
-                    var stripe = b.SpawnPrim(PrimitiveType.Cube,
-                        center + dir * 7.2f + perp * (k * 1.5f) + Vector3.up * 0.36f,
-                        new Vector3(0.75f, 0.05f, 1.7f), CrossPaint(), host);
-                    stripe.transform.rotation = rot;
+                    var dash = b.SpawnPrim(PrimitiveType.Cube,
+                        center + dir * (2.2f + d * 2.9f) + Vector3.up * 0.36f,
+                        new Vector3(0.35f, 0.05f, 1.5f), LanePaint(), host);
+                    dash.transform.rotation = rot;
                 }
             }
         }
 
         // street furniture: quiet streets only (straights/corners/dead
-        // ends), never the middle of an intersection
+        // ends), never the middle of a roundabout
         if (connectors.Count > 2 || connectors.Count == 0) return;
         var axis = connectors[0].dir;
         var side = new Vector3(axis.z, 0f, -axis.x);
         var h = Hash(hex, 5);
 
-        // parked car on true straights, hugging the curb lane (road is
-        // 7.5 wide -> curb at 3.75; a 2.2-wide body centered at 2.5
-        // sits in the parking lane without straddling the sidewalk)
+        // curb/sidewalk offsets derived from the SAME road width this
+        // hex actually rendered at, so furniture sits at the curb
+        // whether this is a residential street or the wide arterial
+        // (previously fixed constants tuned only for the 7.5 m street --
+        // on a 14 m arterial a parked car would have sat mid-lane)
+        var hexRoadWidth = isArterialHex ? ArterialRoadWidth : RoadWidth;
+        var parkOffset = hexRoadWidth / 3f;
+        var curbLineOffset = (hexRoadWidth + 3.4f) * 0.5f + 0.75f;
+
+        // parked car on true straights, hugging the curb lane
         if (connectors.Count == 2 && h % 3 == 0)
-            SpawnCar(b, hex, center + side * (h % 2 == 0 ? 2.5f : -2.5f), connectors[0].angle, host);
+            SpawnCar(b, hex, center + side * (h % 2 == 0 ? parkOffset : -parkOffset), connectors[0].angle, host);
 
         // pole or hydrant or trash can on the sidewalk line
         var sideSign = (h >> 3) % 2 == 0 ? 1f : -1f;
-        var propSpot = center + side * (sideSign * 6.2f) + axis * (((h >> 5) % 7) - 3f);
+        var propSpot = center + side * (sideSign * curbLineOffset) + axis * (((h >> 5) % 7) - 3f);
         switch ((h >> 8) % 6)
         {
             case 0:   // streetlight: pole, arm reaching back over the road, warm bulb

@@ -136,10 +136,13 @@ board), or nav changes.
 - Hub-and-spoke tiles: a center pad plus a connector strip toward each
   road/bridge neighbor — straights, corners, T's, X's, and dead ends
   *emerge from adjacency*, seamlessly, with no tile catalog to break.
-- Sidewalk trim, yellow center dashes, crosswalk stripes at ≥3-way
-  intersections; deterministic street furniture: streetlights,
-  telephone poles, hydrants, trash cans, and pastel tail-finned 1950s
-  parked cars. All colliderless (clicks fall through to the ground).
+- Sidewalk trim, yellow center dashes (double yellow + a lane divider on
+  the wide Main Street arterial); ≥3-way intersections render as
+  European-style roundabouts, not crosswalk-striped X's (creator
+  direction, 2026-07 — see docs/12); deterministic street furniture:
+  streetlights, telephone poles, hydrants, trash cans, and pastel
+  tail-finned 1950s parked cars. All colliderless (clicks fall through
+  to the ground).
 
 **Verification** (no Editor in this environment): the entire gameplay
 layer stub-compiles against the real citygen-core/roster-client/

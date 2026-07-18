@@ -38,7 +38,53 @@ public sealed class TerrainField
     public const float WaterLevel = -0.55f;     // the flowing surface sheet sits here (RuntimeCityBuilder.BuildWaterBody); banks rise ABOVE it, the bed drops well below
     public const float ShoreLip = -0.28f;       // first ring of land: a low bank CREST just above the waterline, +-0.15 varied, so a real bank rises out of the water instead of the ground sliding flat under it
 
+    // How much more strongly a flat-locked hex's OWN height dominates the
+    // blend at its own center, relative to an ordinary hex's plain
+    // inverse-square weight (creator direction, 2026-07: "elevation is
+    // eating into the roads, road tiles should match the terrain
+    // perfectly" -- pavement/foundations were only pinned to exactly 0
+    // at the hex's dead CENTER sample; a non-flat neighbor (a hill, a
+    // roll) still bled its own height into the blend everywhere else in
+    // the hex, including out near its edge where the road/building
+    // geometry actually sits.
+    //
+    // This boost is DISTANCE-TAPERED (see FlatBoost), not a flat
+    // multiplier -- a flat multiplier looked right at the flat hex's own
+    // center and edge, but it cuts both ways: since the blend kernel is
+    // symmetric, the same boost also suppresses a NEIGHBOR's reading at
+    // the neighbor's OWN center (a hill 20 m away got measurably
+    // flattened just for bordering a road, confirmed by a throwaway
+    // verification harness before this taper was added -- a real
+    // regression an untapered boost would have shipped). Tapering the
+    // boost to fade out by TaperRadius keeps the flat hex dominant out
+    // to its own edge (~9-10 m, where road/building geometry actually
+    // reaches) while reverting to baseline well before the neighbor's
+    // own center 20 m away, so hills/rolls next to a road still read at
+    // their true height at THEIR center -- verified numerically, see the
+    // decision log.
+    private const float FlatDominance = 34f;
+    private const float FlatTaperRadius = 13f;   // metres; boost fades to 0 by here (quadratic, see FlatBoost) -- comfortably short of a neighbor's own 20m-away center
+
+    /// <summary>The blend weight multiplier for a flat-locked hex at
+    /// `dist` metres from its own center -- full FlatDominance at
+    /// dist=0, quadratically fading to 1 (no boost at all) by
+    /// FlatTaperRadius. Quadratic (not linear) so it stays close to full
+    /// strength out near the hex's own edge (~9-10 m, where road/
+    /// building geometry actually reaches) and only falls off sharply
+    /// past that -- both constants tuned against, and verified by, a
+    /// throwaway harness (see the decision log): comfortably suppresses
+    /// a neighbor's height bleed at a road's own outer geometry, while
+    /// NOT measurably suppressing that same neighbor's reading at ITS
+    /// OWN center 20 m away.</summary>
+    private static float FlatBoost(float dist)
+    {
+        var r = Mathf.Clamp01(dist / FlatTaperRadius);
+        var t = 1f - r * r;
+        return 1f + (FlatDominance - 1f) * t;
+    }
+
     private readonly Dictionary<HexCoord, float> _hexHeight = new Dictionary<HexCoord, float>();
+    private readonly HashSet<HexCoord> _flat;
     private readonly CityModel _city;
     private readonly Vector3 _origin;
 
@@ -54,6 +100,7 @@ public sealed class TerrainField
             foreach (var hex in b.Footprint) flat.Add(hex);
         foreach (var br in city.Bridges)
             foreach (var hex in br.Footprint) flat.Add(hex);
+        _flat = flat;
 
         var water = new HashSet<HexCoord>(city.Water);
         var ridges = new HashSet<HexCoord>(city.Ridges);
@@ -95,6 +142,7 @@ public sealed class TerrainField
         // inverse-square falloff; +12 keeps the containing hex from
         // becoming a spike at its exact center (softens toward plateaus)
         var w = 1f / (dx * dx + dz * dz + 12f);
+        if (_flat.Contains(hex)) w *= FlatBoost(Mathf.Sqrt(dx * dx + dz * dz));
         float h;
         if (!_hexHeight.TryGetValue(hex, out h)) h = 0f;
         sum += h * w;

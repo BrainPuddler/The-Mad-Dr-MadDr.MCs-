@@ -101,6 +101,23 @@ public class CityGeneratorTests
     }
 
     [Theory]
+    [InlineData("village")]
+    [InlineData("small_town")]
+    public void MainStreet_presets_have_a_nonempty_arterial_subset_of_roads(string presetName)
+    {
+        var m = CityGenerator.Generate(3u, PresetByName(presetName));
+        Assert.NotEmpty(m.ArterialRoads);
+        foreach (var h in m.ArterialRoads) Assert.Contains(h, m.Roads);
+    }
+
+    [Fact]
+    public void Grid_preset_has_no_distinguished_arterial()
+    {
+        var m = CityGenerator.Generate(3u, CityPreset.BigCity());
+        Assert.Empty(m.ArterialRoads);
+    }
+
+    [Theory]
     [InlineData("village", 3, 1)]     // 1.96 km2: round(1.5*1.96)=3 emitters, round(0.5*1.96)=1 hub
     [InlineData("small_town", 6, 2)]  // 4 km2:  6 emitters, 2 hubs
     [InlineData("big_city", 10, 6)]   // 25 km2: capped at docs/02's 10, hubs capped at 6

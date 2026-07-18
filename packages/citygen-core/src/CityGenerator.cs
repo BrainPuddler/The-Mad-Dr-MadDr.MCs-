@@ -53,12 +53,19 @@ namespace MadDr.CityGen
 
             // -- 2. road geometry (pure pattern, ignores water) ----------
             var roadGeom = new HashSet<HexCoord>();
+            var arterialGeom = new HashSet<HexCoord>();
+            var isMainStreet = preset.Pattern == RoadPattern.MainStreet;
             for (var row = 0; row < height; row++)
             {
                 for (var col = 0; col < width; col++)
                 {
                     var hex = HexCoord.FromOffset(col, row);
-                    if (IsRoad(preset, col, row)) roadGeom.Add(hex);
+                    if (!IsRoad(preset, col, row)) continue;
+                    roadGeom.Add(hex);
+                    // the ONE condition that makes a MainStreet hex the
+                    // arterial itself, not a perpendicular/residential
+                    // street -- see IsRoad's MainStreet case
+                    if (isMainStreet && row == height / 2) arterialGeom.Add(hex);
                 }
             }
 
@@ -73,6 +80,13 @@ namespace MadDr.CityGen
             foreach (var h in roadGeom)
                 if (!allWater.Contains(h)) roadSet.Add(h);
             roadSet.UnionWith(bridgeHexes);
+
+            // Same drown-or-bridge survival rule for the arterial subset,
+            // so Main Street crossing the river on a bridge is still
+            // Main Street on the far bank, not a downgrade to residential.
+            var arterialSet = new HashSet<HexCoord>();
+            foreach (var h in arterialGeom)
+                if (!allWater.Contains(h) || bridgeHexes.Contains(h)) arterialSet.Add(h);
 
             // Ridges never coincide with roads or water.
             var ridgeSet = new HashSet<HexCoord>();
@@ -100,11 +114,14 @@ namespace MadDr.CityGen
             var roadList = new List<HexCoord>(roadSet);
             roadList.Sort(CompareRQ);
 
+            var arterialList = new List<HexCoord>(arterialSet);
+            arterialList.Sort(CompareRQ);
+
             var ridgeList = new List<HexCoord>(ridgeSet);
             ridgeList.Sort(CompareRQ);
 
             return new CityModel(seed, preset.Name, width, height,
-                roadList, waterList, ridgeList, buildings, landmarks, bridges);
+                roadList, arterialList, waterList, ridgeList, buildings, landmarks, bridges);
         }
 
         // ---- terrain ----------------------------------------------------

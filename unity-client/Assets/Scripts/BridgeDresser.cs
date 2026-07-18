@@ -80,14 +80,14 @@ public static class BridgeDresser
                 // heading. An unrotated square reads as a static "diamond"
                 // wherever a bridge runs at an angle to world axes -- i.e.
                 // almost always, since hex grids don't align to world axes
-                var connectors = new List<(Vector3 dir, float angle)>();
+                var connectors = new List<(Vector3 dir, float angle, bool arterial)>();
                 foreach (var n in hex.Neighbors())
                 {
                     if (!network.Contains(n)) continue;
                     var to = builder.WorldOf(n) - center;
                     to.y = 0f;
                     if (to.sqrMagnitude < 1e-4f) continue;
-                    connectors.Add((to.normalized, Mathf.Atan2(to.x, to.z) * Mathf.Rad2Deg));
+                    connectors.Add((to.normalized, Mathf.Atan2(to.x, to.z) * Mathf.Rad2Deg, false));
                 }
 
                 // un-zigzag the SAME way RoadDresser does for approach
