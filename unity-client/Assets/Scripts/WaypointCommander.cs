@@ -51,6 +51,13 @@ public class WaypointCommander : MonoBehaviour
 
     private void Update()
     {
+        // the minimap runs its own OnGUI click handling (recenter camera /
+        // order the selection) using the SAME click -- without this guard
+        // the New Input System's Mouse.current (read below) has no idea
+        // OnGUI already claimed the click, so a minimap click would ALSO
+        // fire a world-space select/order underneath it.
+        if (Minimap.PointerOver) return;
+
         var mouse = Mouse.current;
         if (mouse == null || _builder == null) return;
         var cam = Camera.main;
@@ -184,6 +191,22 @@ public class WaypointCommander : MonoBehaviour
                 AssignFormation(_builder.FormationHexes(hex, _selected.Count), shift, hit.Value.point);
             _builder.SpawnWaypointMarker(_builder.WorldOf(hex));
         }
+    }
+
+    /// <summary>Programmatic equivalent of a ground right-click order, for
+    /// callers that already have a world point and aren't driving the
+    /// 3D cursor -- the minimap's right-click-to-order. Same single-
+    /// unit/formation/settle/marker behavior as a normal ground order
+    /// (see HandleOrders' ground branch, which this mirrors).</summary>
+    public void OrderSelectionTo(Vector3 worldPoint, bool queue)
+    {
+        PruneSelection();
+        if (_selected.Count == 0 || _builder == null) return;
+        var hex = _builder.HexAt(worldPoint);
+        if (!_builder.City.Contains(hex)) return;
+        if (_selected.Count == 1) _selected[0].OrderMove(hex, queue);
+        else AssignFormation(_builder.FormationHexes(hex, _selected.Count), queue, worldPoint);
+        _builder.SpawnWaypointMarker(_builder.WorldOf(hex));
     }
 
     /// <summary>Hand out formation slots to the selected group,

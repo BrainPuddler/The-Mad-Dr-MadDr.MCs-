@@ -141,6 +141,14 @@ public class RuntimeCityBuilder : MonoBehaviour
         if (bars == null) bars = gameObject.AddComponent<HealthBars>();
         bars.Init(this);
 
+        var fog = gameObject.GetComponent<FogOfWar>();
+        if (fog == null) fog = gameObject.AddComponent<FogOfWar>();
+        fog.Init(this);
+
+        var minimap = gameObject.GetComponent<Minimap>();
+        if (minimap == null) minimap = gameObject.AddComponent<Minimap>();
+        minimap.Init(this, commander, fog);
+
         _roster = gameObject.GetComponent<RosterFetcher>();
         if (_roster == null) _roster = gameObject.AddComponent<RosterFetcher>();
         _roster.baseUrl = baseUrl;
@@ -1311,6 +1319,14 @@ public class RuntimeCityBuilder : MonoBehaviour
     /// <summary>Every spawned monster -- the commander walks this for
     /// box-select and double-click select-all-of-type.</summary>
     public IReadOnlyList<MonsterAgent> Monsters { get { return _monsters; } }
+
+    /// <summary>Every spawned citizen -- the minimap plots these as
+    /// small cosmetic blips (docs/19, client-side crowd).</summary>
+    public IReadOnlyList<Citizen> Citizens { get { return _citizens; } }
+
+    /// <summary>Every spawned traffic car -- same minimap use as
+    /// Citizens above.</summary>
+    public IReadOnlyList<TrafficCar> TrafficCars { get { return _trafficCars; } }
 
     public MonsterAgent NearestMonsterTo(Vector3 position, float within)
     {
