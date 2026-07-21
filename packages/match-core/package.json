@@ -1,0 +1,9 @@
+{
+  "name": "com.maddr.match-core",
+  "version": "0.1.0",
+  "displayName": "MadDr Match Core",
+  "description": "Engine-agnostic deterministic match simulation for the RTS layer (docs/23): fixed-tick MatchState, PlayerState, faction defs, entity-ID allocation, and canonical bitwise-hashed serialization -- the pure (seed, command-stream) function docs/23 §11 lockstep 4v4 is built on. Pure C#, zero UnityEngine reference; built and tested standalone via dotnet (Tests~, hidden from Unity by the ~ suffix). References com.maddr.citygen-core.",
+  "unity": "6000.0",
+  "dependencies": { "com.maddr.citygen-core": "0.1.0" },
+  "author": { "name": "MadDr.MCs" }
+}

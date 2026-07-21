@@ -1,0 +1,14 @@
+{
+    "name": "MadDr.MatchCore",
+    "rootNamespace": "MadDr.MatchCore",
+    "references": [ "MadDr.CityGen" ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

@@ -30,6 +30,16 @@ decision log). Vision pillars: ownership of creations, no gacha.
   `unity-client/` (package.json + asmdef; xunit tests hidden from Unity
   in `Tests~/`, dotnet outputs in `bin~`/`obj~` — tilde dirs are
   invisible to Unity's importer, on purpose).
+- `packages/match-core` — engine-agnostic C# **deterministic match
+  simulation** for the RTS layer (docs/23): the pure
+  `(seed, command-stream) → state` fixed-tick function docs/23 §11
+  lockstep 4v4 is built on. Integer/fixed-point state, canonical
+  FNV-1a hash, `SimRng` (raw-uint sfc32, bit-identical to citygen's
+  stream). Same package conventions as citygen-core (asmdef,
+  `Tests~`, `bin~/obj~`); references citygen-core. **The unit sim is
+  being ported here out of the frame-driven Unity MonoBehaviours over
+  Phases 1.5+ — do not add gameplay decisions to `MonsterAgent.Update()`;
+  it becomes a pure interpolated view.**
 - `unity-client/` — the Unity project (docs/18): Unity **6000.3.13f1**,
   URP template, created by the creator 2026-07. References citygen-core
   via `file:` in `Packages/manifest.json`. No Editor exists in this
@@ -46,6 +56,11 @@ dependency).
 
 `citygen-core` (C#, requires the .NET 8 SDK): `dotnet test
 Tests~/CityGenCore.Tests.csproj` from `packages/citygen-core/`.
+
+`match-core` (C#, .NET 8): `dotnet test Tests~/MatchCore.Tests.csproj`
+from `packages/match-core/`; the determinism acceptance harness is
+`dotnet run --project Tools~/DetHarness` (prints the 10k-tick hash
+twice, must match).
 
 ## Invariants (do not break casually)
 

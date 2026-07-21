@@ -1,0 +1,11 @@
+<Project>
+  <!-- Redirect MSBuild outputs from bin/obj to bin~/obj~, so a stray
+       dotnet build never drops MadDr.MatchCore.dll where Unity's package
+       importer would pick it up alongside the compiled sources (duplicate
+       types). Tilde-suffixed paths are invisible to Unity's importer.
+       Identical rationale to packages/citygen-core. -->
+  <PropertyGroup>
+    <BaseOutputPath>$(MSBuildProjectDirectory)/bin~/</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildProjectDirectory)/obj~/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>
