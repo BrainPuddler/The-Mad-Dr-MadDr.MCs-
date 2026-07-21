@@ -48,6 +48,10 @@ public class RuntimeCityBuilder : MonoBehaviour
     [Range(0.05f, 1f)]
     public float trafficMovingPercent = 0.55f;
 
+    [Tooltip("How much clear space (meters) stays between two units' bodies once a group has settled around a shared destination waypoint -- how tightly they pack in around the click point. Added to the pair's own combined body radii (ApplySeparation), so this is extra daylight on top of however big the units themselves are, not the whole gap.")]
+    [Range(0f, 5f)]
+    public float groupSpacing = 1f;
+
     // live state
     private CityModel _city;
     private BattlefieldState _battlefield;
@@ -1556,20 +1560,21 @@ public class RuntimeCityBuilder : MonoBehaviour
         return best;
     }
 
-    /// <summary>How much clear space stays between two units' bodies once
-    /// separation stops pushing -- creator direction, 2026-07: "settled
-    /// units are still too close together, at least 1 meter apart" (the
-    /// original "settles exactly touching" design read as bodies stacked
-    /// with zero gap, worst right after a group creeps in via TickSettle).</summary>
-    private const float SeparationGap = 1f;
-
     /// <summary>Soft body separation so units never stand inside each other
     /// ("creatures should NOT walk through each other"), with at least
-    /// SeparationGap of daylight between their bodies once it stops
-    /// pushing. Each unit pushes HALF the overlap; the neighbor pushes
-    /// its own half next frame, so a pair settles at exactly Radius +
-    /// Radius + SeparationGap apart. Citizens are excluded on purpose --
-    /// they're prey, and monsters must be able to reach them.</summary>
+    /// <see cref="groupSpacing"/> of daylight between their bodies once it
+    /// stops pushing -- the Inspector-exposed knob for "how far apart do
+    /// monsters end up spaced around a shared destination waypoint"
+    /// (creator direction, 2026-07). Originally a hardcoded 1m constant
+    /// (creator direction, 2026-07: "settled units are still too close
+    /// together, at least 1 meter apart" -- the original "settles exactly
+    /// touching" design read as bodies stacked with zero gap, worst right
+    /// after a group creeps in via TickSettle); now a public field so a
+    /// developer can retune the pack-in tightness without touching code.
+    /// Each unit pushes HALF the overlap; the neighbor pushes its own half
+    /// next frame, so a pair settles at exactly Radius + Radius +
+    /// groupSpacing apart. Citizens are excluded on purpose -- they're
+    /// prey, and monsters must be able to reach them.</summary>
     public void ApplySeparation(UnitCombat self)
     {
         if (self == null) return;
@@ -1580,7 +1585,7 @@ public class RuntimeCityBuilder : MonoBehaviour
             if (c == null || c == self || !c.Alive) continue;
             var d = p - c.transform.position;
             d.y = 0f;
-            var minDist = self.Radius + c.Radius + SeparationGap;
+            var minDist = self.Radius + c.Radius + groupSpacing;
             var dist = d.magnitude;
             if (dist < minDist && dist > 1e-3f)
             {

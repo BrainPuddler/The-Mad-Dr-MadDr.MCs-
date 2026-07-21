@@ -521,9 +521,10 @@ public class MonsterAgent : MonoBehaviour
     /// <summary>Idle creep toward a shared group-move cluster point
     /// (see OrderMove's settleTarget overload). ApplySeparation -- already
     /// called unconditionally every frame below -- stops the creep once
-    /// SeparationGap of daylight opens up, so the group packs down from
-    /// its loose one-hex-apart walking spacing to a close (but never
-    /// overlapping) rest formation once everyone's stopped.
+    /// RuntimeCityBuilder.groupSpacing of daylight opens up (an
+    /// Inspector-tunable field, creator direction 2026-07), so the group
+    /// packs down from its loose one-hex-apart walking spacing to a close
+    /// (but never overlapping) rest formation once everyone's stopped.
     ///
     /// Speed is the creature's own physiology (a fraction of its walk
     /// speed, with a floor) rather than one flat "slow shuffle" constant
