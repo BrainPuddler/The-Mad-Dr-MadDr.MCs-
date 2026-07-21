@@ -211,18 +211,25 @@ public class WaypointCommander : MonoBehaviour
 
     /// <summary>Hand out formation slots to the selected group,
     /// nearest-slot-to-nearest-unit, so units mostly walk straight to
-    /// their spot instead of crossing paths. `clusterPoint` is where each
-    /// unit creeps toward once it arrives and stops -- the fix for a
-    /// stopped group looking too spread out (FormationHexes only
-    /// guarantees WALKING doesn't collide, a full hex apart). A single
-    /// GroupFacing token is shared across the whole group so they settle
-    /// facing one direction -- whichever unit gets to its slot first
-    /// (creator direction, 2026-07).</summary>
+    /// their spot instead of crossing paths. Once stopped, each unit
+    /// creeps to its OWN point on a ring AROUND `clusterPoint` (the
+    /// clicked waypoint) -- distinct per unit, computed in
+    /// <see cref="RingTarget"/> -- so the group distributes AROUND the
+    /// waypoint and leaves the marker itself clear (creator direction,
+    /// 2026-07: "They MUST distribute themselves around the waypoint NOT
+    /// ON the Waypoint"). The earlier design passed the SAME centre point
+    /// to every unit, so they all crept onto the marker and only body
+    /// separation held them apart -- a clump centred on the waypoint,
+    /// which is exactly what this replaces. A single GroupFacing token is
+    /// shared across the whole group so they settle facing one direction
+    /// -- whichever unit gets to its slot first (creator direction,
+    /// 2026-07).</summary>
     private void AssignFormation(System.Collections.Generic.List<MadDr.CityGen.HexCoord> slots, bool queue,
         Vector3 clusterPoint)
     {
         var facing = new MonsterAgent.GroupFacing();
         var remaining = new System.Collections.Generic.List<MonsterAgent>(_selected);
+        var ringIndex = 0;
         foreach (var slot in slots)
         {
             if (remaining.Count == 0) break;
@@ -239,8 +246,29 @@ public class WaypointCommander : MonoBehaviour
             if (best < 0) break;
             var unit = remaining[best];
             remaining.RemoveAt(best);
-            unit.OrderMove(slot, queue, clusterPoint, facing);
+            var settle = RingTarget(clusterPoint, ringIndex++, _builder.groupSpacing);
+            unit.OrderMove(slot, queue, settle, facing);
         }
+    }
+
+    /// <summary>The `index`-th distinct settle point on a ring around
+    /// `center`, laid out by the golden-angle phyllotaxis (sunflower)
+    /// pattern so any group size spreads evenly around the waypoint with
+    /// a CLEAR central hole -- nobody's target is the centre, so the
+    /// marker stays visible and units ring it instead of piling onto it.
+    /// `spacing` (RuntimeCityBuilder.groupSpacing) drives both the hole
+    /// size and the ring pitch, so the Inspector knob widens the whole
+    /// formation coherently. Body separation still enforces the exact
+    /// pairwise gap on top of this; the ring only seeds the distribution
+    /// off the centre.</summary>
+    private static Vector3 RingTarget(Vector3 center, int index, float spacing)
+    {
+        const float goldenAngle = 2.399963f;              // radians (~137.5 deg)
+        var hole = 2.5f + spacing;                         // first unit sits this far off the marker, never on it
+        var pitch = 2.5f + spacing;                        // radial growth per unit
+        var r = hole + pitch * Mathf.Sqrt(index);
+        var theta = index * goldenAngle;
+        return center + new Vector3(Mathf.Cos(theta) * r, 0f, Mathf.Sin(theta) * r);
     }
 
     // ---- selection set management -------------------------------------------
