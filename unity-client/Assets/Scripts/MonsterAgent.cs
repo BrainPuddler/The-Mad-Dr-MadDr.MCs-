@@ -101,6 +101,16 @@ public class MonsterAgent : MonoBehaviour
     /// perch order for these, an attack order for everyone else.</summary>
     public bool IsFlyer { get { return _canFly; } }
 
+    /// <summary>docs/25 Phase D: "wants to move and has a valid
+    /// destination" -- the signal DeadlockManager polls to find a unit
+    /// stalled in traffic. True while a grounded unit has an active path
+    /// leg it's actively trying to walk (the Move order, or the approach
+    /// leg of Attack/Eat/Perch before it's back in range/landed); false
+    /// once idle, holding weapon range, settling, perched, or airborne --
+    /// none of those are "stuck," they're doing exactly what they mean to
+    /// do.</summary>
+    public bool WantsToMove { get { return _path != null && !_flying; } }
+
     /// <summary>Standing (not flying) on an elevated surface -- a rooftop
     /// perch. Perched units hold their roost (no auto-engage) and any new
     /// move starts with a takeoff, since there's no walking off a roof.</summary>

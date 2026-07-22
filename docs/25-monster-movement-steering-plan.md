@@ -1,11 +1,11 @@
 # 25 — Monster Movement: Hybrid Steering + Deadlock Recovery Migration Plan
 
-Status: **Approved migration plan, Phases A-C implemented** (written 2026-07
+Status: **Approved migration plan, Phases A-D implemented** (written 2026-07
 after an analysis-only pass; creator approved the plan 2026-07 — "I approve
-the plan, now capture it"; Phases A, B, and C all landed 2026-07, Phases
-D-E not started) · Realizes a collision-behavior replacement for the
-Unity-side monster mover · Pillars served: 2 (*the battlefield breathes*),
-3 (*honest combat*).
+the plan, now capture it"; Phases A, B, C, and D all landed 2026-07, only
+Phase E (cleanup + tune) remains) · Realizes a collision-behavior
+replacement for the Unity-side monster mover · Pillars served: 2 (*the
+battlefield breathes*), 3 (*honest combat*).
 
 > **Status discipline.** This doc is a plan. No code has been written under
 > it yet. When Phase A (below) lands, update this doc's per-phase status
@@ -249,7 +249,28 @@ a docs/12 decision-log entry, per repo convention.
   grant temporary priority; blockers yield/sidestep into non-blocked hexes;
   release on progress. *Test:* a forced single-hex-corridor jam of N units
   clears within T seconds; solid buildings are never entered by a
-  sidestepping unit. **Status: not started.**
+  sidestepping unit. **Status: done (2026-07).** New `DeadlockManager.cs`,
+  polled every 1s from `RuntimeCityBuilder.Update()` (split from the
+  pre-existing traffic-car timer so it runs even with zero cars). New
+  `MonsterAgent.WantsToMove` and `UnitCombat.YieldTarget`/`YieldUntil` (the
+  plan's "priority/yield flag"); `SteerFollowPath` overrides the seek
+  direction toward an active yield target before calling `Combine`, so
+  separation/avoidance still apply normally to the redirected heading.
+  Grants at most one unit's blockers per poll pass (a harness caught that
+  granting every simultaneously-stalled unit in the SAME pass causes
+  mutual retreat, not resolution) via a rotating scan cursor (a harness
+  also caught that without rotation, whichever unit is scanned first
+  always wins, starving its partner). A genuinely different, harder case
+  -- a symmetric two-unit position swap through a fully sealed corridor,
+  goals on each other's original side -- did not reliably converge even
+  after both fixes; diagnosed as mutual-exclusion/rendezvous, not the
+  funnelling congestion docs/25 section 2 actually targets, and left as a
+  documented limitation rather than worked around. Verified: flightcheck
+  clean; a standalone harness (real `DeadlockManager.cs`, real
+  `HexCoord`/citygen-core, real math) confirmed the stall arithmetic,
+  0/300 randomized trials ever returning a blocked sidestep hex, and the
+  plan's own funnel-congestion acceptance scenario clearing within budget.
+  See docs/12 for the full writeup, including both bugs.
 - **Phase E — cleanup + tune.** Remove old `ApplySeparation`/`AvoidanceDir`
   entirely (no shims left); tune weights against the ring-settle and
   corridor-jam cases; final docs/12 entry closing this plan out.

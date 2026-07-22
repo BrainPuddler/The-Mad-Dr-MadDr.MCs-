@@ -338,3 +338,108 @@ the hard correction, not a replacement for it.
 
 Status: Phase C done. Phase D (`DeadlockManager`) and Phase E (cleanup +
 tune) remain not started.
+
+## 2026-07 — Monster movement steering: Phase D (`DeadlockManager`) implemented
+
+Executed docs/25's Phase D on explicit creator direction to continue
+straight through B and C into D in the same session. New
+`DeadlockManager.cs`: polled periodically (not every frame -- "rare-path
+only," per the approved architecture) from `RuntimeCityBuilder.Update()`
+on its own 1s timer, independent of the traffic-car timer that Update()
+already hosted (split that method so a scene with zero traffic cars still
+polls for monster deadlocks). For each unit with `MonsterAgent.WantsToMove`
+true (new property: has an active path leg, isn't airborne), tracks
+distance moved since the last poll; under `ProgressEpsilon` (1m) for
+`StallWindow` (2.5s) counts as stalled. A stalled unit's nearby neighbours
+(`YieldRadius`, 6m) each get a temporary sidestep target -- a neighbouring
+hex, filtered to the non-blocked set BEFORE any distance comparison (so a
+blocked hex is never even a candidate, not merely rejected after the
+fact), chosen to maximize distance from the stalled unit -- held for
+`YieldDuration` (3s) on new `UnitCombat.YieldTarget`/`YieldUntil` fields
+(the "per-unit priority/yield flag the steering controller honours" the
+architecture calls for). `RuntimeCityBuilder.SteerFollowPath` reads them:
+while a yield is active, the seek direction fed into
+`MonsterSteeringController.Combine` is overridden to point at the yield
+target instead of wherever the unit's own path was taking it -- separation
+and predictive avoidance still run normally against that redirected
+heading, so a yielding unit steps aside without shoving through anyone
+else. `DeadlockManager` itself never moves, paths, or re-orders the
+stalled unit -- "never becomes the primary mover" is satisfied by
+construction: it only ever writes a BLOCKER's yield fields.
+
+Two real bugs surfaced only once a standalone harness ran the actual
+grant-and-move loop over multiple cycles (not just single-call checks) --
+both are worth recording since they're the kind of thing that reads
+obviously wrong in hindsight but wasn't obvious from the code:
+
+1. **Mutual retreat.** The first draft granted yields to every unit that
+   crossed the stall threshold in a given poll pass. A head-on pair
+   jammed against each other both cross the threshold in the SAME pass,
+   so both got granted a "back away from the other" target simultaneously
+   -- an eternal synchronized retreat, net progress zero, positions
+   drifting apart forever. Fixed by granting at most ONE unit's blockers
+   per poll pass, matching the architecture's "grants ONE temporary
+   priority" wording literally (previously read as just descriptive
+   phrasing, not a load-bearing constraint).
+2. **Starvation.** Even with one grant per pass, always resolving
+   whichever unit happens to be scanned first (list order) meant one
+   side of a head-on pair permanently won every contested pass -- its
+   partner never got its own "I'm stalled, please yield to me" moment,
+   and kept getting shoved further and further past its OWN goal every
+   time the other re-stalled nearby. Fixed with a rotating scan cursor
+   (`_scanCursor`), the exact same fairness pattern
+   `RuntimeCityBuilder`'s traffic-wake cursor already uses elsewhere in
+   this file -- not a new idiom, an existing one applied here too.
+
+Even after both fixes, a symmetric two-unit position SWAP through a fully
+sealed single-file corridor (goals on each other's original side, so the
+yielding unit has to reverse and cross the SAME contested hex a second
+time) did not reliably converge -- at equal speed neither unit ever opens
+a durable gap, so the pair just migrates down the corridor as a single
+never-resolving unit. This was diagnosed as a genuinely different, harder
+problem (mutual exclusion / rendezvous, not funnelling) than what docs/25
+section 2 actually describes as the target case ("many units FUNNELLING
+through a one- or two-hex gap... in the SAME general direction"), and than
+what a lightweight "rare-path, never the primary mover" nudge is designed
+to solve -- resolving it properly would need the yielding unit to clear
+the WHOLE pinch in one grant (not one hex per grant) or a smarter
+sidestep heuristic aware of the blocker's own goal direction, neither of
+which is in scope here. Documented as a known limitation rather than
+silently working around it in the test: the acceptance scenario was
+rebuilt around docs/25's own stated problem (a same-direction funnel: N
+units converging on one passable hex toward a shared goal beyond it, not
+a two-way swap), which the current design handles correctly.
+
+- `MonsterAgent.cs`: new `WantsToMove` property; publishes nothing new
+  itself (DeadlockManager reads `Fighter`/`transform` directly) but is the
+  thing `RuntimeCityBuilder.Update()` polls over (`_monsters`, already
+  existed).
+- `UnitCombat.cs`: new `YieldTarget`/`YieldUntil` fields, doc-commented as
+  the plan's "priority/yield flag."
+- `RuntimeCityBuilder.cs`: implements new `IHexObstacleQuery`
+  (`CityContains`/`IsBlocked` -- ground-blocked set only, deliberately
+  conservative so a sidestep target is never water regardless of the
+  blocker's own amphibious-ness; `HexAt`/`WorldOf` already existed);
+  `Update()` split so the new deadlock-poll timer runs independent of the
+  pre-existing traffic-car timer; `SteerFollowPath` now checks for an
+  active yield before building its query, overriding the seek direction
+  when one is present.
+- Verified three ways, no Unity Editor available in this environment: (1)
+  flightcheck stub-compile clean; (2) a fresh standalone harness (real
+  `DeadlockManager.cs`, real `HexCoord`/citygen-core types via
+  `MadDr.CityGen.dll`, a small `IHexObstacleQuery` fake backed by an
+  actual hex grid, real Vector3/Mathf math) checked the stall-decision
+  arithmetic in isolation (fires exactly once per stall window, resets on
+  real progress) and `PickSidestepHex` against 300 randomized
+  blocker/stalled/blocked-pattern trials: 0 trials ever returned a
+  blocked hex, confirming "solid buildings are never entered by a
+  sidestepping unit" holds by construction, not by luck; (3) the same
+  harness ran `DeadlockManager.Poll` end-to-end against real
+  `MonsterAgent`-shaped units in a simple hand-rolled movement/separation
+  loop, confirming docs/25's own acceptance scenario (a same-direction
+  funnel through a one-hex pinch) clears within budget after the two bug
+  fixes above. No on-screen visual verification was performed or claimed.
+
+Status: Phase D done. Phase E (cleanup + tune -- remove any remaining
+shims, tune weights against ring-settle and corridor-jam cases, final
+docs/12 entry closing the plan) remains not started.

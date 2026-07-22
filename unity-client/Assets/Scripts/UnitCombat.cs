@@ -31,6 +31,19 @@ public class UnitCombat : MonoBehaviour
     /// stationary -- a safe, conservative default, not a bug.</summary>
     public Vector3 LastVelocity;
 
+    /// <summary>docs/25 Phase D: the "per-unit priority/yield flag the
+    /// steering controller honours" the migration plan's approved
+    /// architecture calls for. DeadlockManager sets these on a BLOCKER
+    /// (never on the stalled unit itself -- see that class's header) when
+    /// it's near a unit that's wanted to move and made no real progress for
+    /// a while; `RuntimeCityBuilder.SteerFollowPath` reads them and, while
+    /// `YieldUntil` hasn't passed, steers this unit toward `YieldTarget`
+    /// instead of wherever its own order was taking it, briefly. Null/0 the
+    /// rest of the time (the overwhelmingly common case) -- nothing reads
+    /// these unless DeadlockManager has actually granted a yield.</summary>
+    public Vector3? YieldTarget;
+    public float YieldUntil;
+
     private float _cooldown;
     private float _battleTimer;           // > 0 = "in battle" (fired or hit recently)
     private Action _onDied;

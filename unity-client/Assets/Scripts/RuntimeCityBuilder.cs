@@ -13,7 +13,7 @@ using UnityEngine;
 ///
 /// Hit Play: left-click your monster, right-click the world.
 /// </summary>
-public class RuntimeCityBuilder : MonoBehaviour
+public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 {
     public enum PresetChoice { Village, SmallTown, BigCity }
 
@@ -88,6 +88,13 @@ public class RuntimeCityBuilder : MonoBehaviour
     private readonly List<UnitCombat> _steerQueryBuffer = new List<UnitCombat>();
     private float _trafficCheckTimer;
     private int _trafficWakeCursor;
+
+    // docs/25 Phase D: rare-path stall detection + sidestep grants, polled
+    // from the same periodic Update() traffic already uses (see that
+    // method) -- not every frame, per the plan's "rare-path only" framing.
+    private readonly DeadlockManager _deadlockManager = new DeadlockManager();
+    private float _deadlockPollTimer;
+    private const float DeadlockPollInterval = 1f;
 
     public CityModel City { get { return _city; } }
     public int CityVersion { get { return _cityVersion; } }
@@ -178,38 +185,58 @@ public class RuntimeCityBuilder : MonoBehaviour
     private const float TrafficCheckInterval = 4f;
     private const float TrafficBandTolerance = 0.2f; // +-20% of trafficMovingPercent, creator direction
 
-    /// <summary>Docs/19 traffic field, corrective half: each car's OWN
-    /// independent park timer (rolled at Init/ParkHere) already targets
-    /// trafficMovingPercent on average, but a run of bad luck can drift
-    /// the LIVE fraction driving well below it for a while with nobody
-    /// due to depart soon. Rather than forcing an exact per-park-event
-    /// swap (too rigid -- creator direction: "the next car(s) do not
+    /// <summary>Two independent rare-path timers share this MonoBehaviour's
+    /// only Update(): (1) docs/19 traffic field, corrective half -- each
+    /// car's OWN independent park timer (rolled at Init/ParkHere) already
+    /// targets trafficMovingPercent on average, but a run of bad luck can
+    /// drift the LIVE fraction driving well below it for a while with
+    /// nobody due to depart soon. Rather than forcing an exact per-park-
+    /// event swap (too rigid -- creator direction: "the next car(s) do not
     /// have to start immediately, we can have more cars on longer
     /// journeys"), this periodically checks the measured fraction and,
-    /// only once it's dropped more than TrafficBandTolerance below
-    /// target, wakes ONE currently-parked car early -- a loose band, not
-    /// a lockstep swap. A rotating cursor spreads the early wake-ups
-    /// across the fleet instead of always picking the same car.</summary>
+    /// only once it's dropped more than TrafficBandTolerance below target,
+    /// wakes ONE currently-parked car early -- a loose band, not a
+    /// lockstep swap. A rotating cursor spreads the early wake-ups across
+    /// the fleet instead of always picking the same car. (2) docs/25 Phase
+    /// D -- polls DeadlockManager on its own separate interval, unguarded
+    /// by traffic-car count (monsters can jam each other with zero cars
+    /// anywhere nearby).</summary>
     private void Update()
     {
-        if (_trafficCars.Count == 0) return;
-        _trafficCheckTimer -= Time.deltaTime;
-        if (_trafficCheckTimer > 0f) return;
-        _trafficCheckTimer = TrafficCheckInterval;
-
-        var target = trafficMovingPercent;
-        var lowBand = target * (1f - TrafficBandTolerance);
-        if (TrafficMovingFraction >= lowBand) return;
-
-        var n = _trafficCars.Count;
-        for (var i = 0; i < n; i++)
+        if (_trafficCars.Count > 0)
         {
-            var idx = (_trafficWakeCursor + i) % n;
-            var c = _trafficCars[idx];
-            if (c == null || c.IsDriving) continue;
-            _trafficWakeCursor = (idx + 1) % n;
-            c.DepartNow();
-            break;   // one car per check -- see the "don't have to start immediately" note above
+            _trafficCheckTimer -= Time.deltaTime;
+            if (_trafficCheckTimer <= 0f)
+            {
+                _trafficCheckTimer = TrafficCheckInterval;
+
+                var target = trafficMovingPercent;
+                var lowBand = target * (1f - TrafficBandTolerance);
+                if (TrafficMovingFraction < lowBand)
+                {
+                    var n = _trafficCars.Count;
+                    for (var i = 0; i < n; i++)
+                    {
+                        var idx = (_trafficWakeCursor + i) % n;
+                        var c = _trafficCars[idx];
+                        if (c == null || c.IsDriving) continue;
+                        _trafficWakeCursor = (idx + 1) % n;
+                        c.DepartNow();
+                        break;   // one car per check -- see the "don't have to start immediately" note above
+                    }
+                }
+            }
+        }
+
+        // docs/25 Phase D: rare-path deadlock poll, independent of the
+        // traffic-car timer above (must still run in a scene with zero
+        // traffic cars -- monsters can jam each other with no cars
+        // anywhere nearby).
+        _deadlockPollTimer -= Time.deltaTime;
+        if (_deadlockPollTimer <= 0f)
+        {
+            _deadlockPollTimer = DeadlockPollInterval;
+            _deadlockManager.Poll(_monsters, DeadlockPollInterval, Time.time, this);
         }
     }
 
@@ -424,6 +451,14 @@ public class RuntimeCityBuilder : MonoBehaviour
         }
         return amphibious ? _blockedAmphibiousCache : _blockedGroundCache;
     }
+
+    // docs/25 Phase D: IHexObstacleQuery, the narrow slice DeadlockManager
+    // needs to pick a sidestep hex. IsBlocked deliberately always uses the
+    // GROUND (non-amphibious) blocked set -- a conservative choice so a
+    // sidestep target is never water, regardless of which creature is
+    // actually being asked to yield.
+    public bool CityContains(HexCoord hex) { return _city.Contains(hex); }
+    public bool IsBlocked(HexCoord hex) { return BlockedFor(false).Contains(hex); }
 
     /// <summary>Building height by tier -- the SAME numbers BuildBuildings
     /// renders with, so a flyer's "can I clear this roof" math can never
@@ -1641,9 +1676,9 @@ public class RuntimeCityBuilder : MonoBehaviour
     }
 
     /// <summary>FollowPath's steering entry point (docs/25 Phase B,
-    /// extended by Phase C), replacing the old plain AvoidanceDir call.
-    /// Rebuilds/queries the same neighbour grid Phase A introduced, then
-    /// hands the candidate list to MonsterSteeringController.Combine to
+    /// extended by Phases C and D), replacing the old plain AvoidanceDir
+    /// call. Rebuilds/queries the same neighbour grid Phase A introduced,
+    /// then hands the candidate list to MonsterSteeringController.Combine to
     /// blend seek against a softened separation force and (Phase C)
     /// time-to-collision predictive avoidance in one pass -- see that
     /// class's header for why (docs/25 section 2 root cause #1: seek and
@@ -1653,10 +1688,27 @@ public class RuntimeCityBuilder : MonoBehaviour
     /// `_maxCombatantSpeed` plus this unit's own speed could travel within
     /// `MonsterSteeringController.Horizon` seconds -- a purely spatial
     /// reach (Phase B's) would miss a fast-closing neighbour that's still
-    /// distant right now.</summary>
+    /// distant right now. Before any of that: if DeadlockManager (Phase D)
+    /// has granted this unit an active yield (`self.YieldUntil` still in
+    /// the future), the seek direction fed into Combine is overridden to
+    /// point at `self.YieldTarget` instead of wherever FollowPath's own
+    /// path node was -- separation/avoidance still run normally against
+    /// that redirected heading, so a yielding unit steps aside without
+    /// shoving through anyone else to get there. This is the "steering
+    /// controller honours [the] flag" half of the plan's architecture; the
+    /// grant/expiry bookkeeping lives entirely in DeadlockManager.</summary>
     public MonsterSteeringController.SteeringResult SteerFollowPath(UnitCombat self, Vector3 desiredDir, float speed)
     {
         if (self == null) return new MonsterSteeringController.SteeringResult { Direction = desiredDir, SpeedScale = 1f };
+
+        var effectiveDir = desiredDir;
+        if (self.YieldUntil > Time.time && self.YieldTarget.HasValue)
+        {
+            var toYield = self.YieldTarget.Value - self.transform.position;
+            toYield.y = 0f;
+            if (toYield.sqrMagnitude > 0.04f) effectiveDir = toYield.normalized;
+        }
+
         RebuildCombatantGridIfNeeded();
         _steerQueryBuffer.Clear();
         var closingReach = (speed + _maxCombatantSpeed) * MonsterSteeringController.Horizon;
@@ -1664,7 +1716,7 @@ public class RuntimeCityBuilder : MonoBehaviour
             + Mathf.Max(groupSpacing, MonsterSteeringController.AvoidancePadding)
             + closingReach;
         _combatantGrid.QueryRadius(self.transform.position, reach, _steerQueryBuffer);
-        return MonsterSteeringController.Combine(self, desiredDir, speed, _steerQueryBuffer, groupSpacing);
+        return MonsterSteeringController.Combine(self, effectiveDir, speed, _steerQueryBuffer, groupSpacing);
     }
 
     /// <summary>Distinct passable hexes clustered around `center`,
