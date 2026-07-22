@@ -131,3 +131,47 @@ Status: Living document. Open questions carry an ID, the docs they block, the li
 | 2026-07 | **Group-settle spacing exposed in the Inspector (creator direction: "expose the setting in the editor that sets the distance the monsters are spaced around the destination waypoint").** `RuntimeCityBuilder.ApplySeparation`'s "how much daylight stays between two units' bodies once a settled group stops packing in around a shared destination" was a hardcoded private `SeparationGap = 1f` constant (itself a 2026-07 creator fix for units settling exactly touching). Promoted to a public `[Range(0,5)] groupSpacing` field in the existing "Tuning" Inspector header, alongside citizenCount/trafficCarCount/etc.; `ApplySeparation` and its doc comment updated to reference it, plus the cross-reference in `MonsterAgent.TickSettle`'s doc comment. Mechanically unchanged (same formula, same default 1m, same "each unit pushes half the overlap so a pair settles at Radius+Radius+groupSpacing apart"), purely a code-to-Inspector promotion. Whole Unity layer compiles clean against the flightcheck harness; no stray references to the old constant name remain | [18](18-city-battlefields.md) |
 | 2026-07 | **Group waypoint arrival fixed: units now ring AROUND the waypoint instead of clumping ON it (creator correction: "monsters are NOT adhering to the spacing rules... They MUST distribute themselves around the waypoint NOT ON the Waypoint").** Root cause: `WaypointCommander.AssignFormation` passed the SAME shared cluster point (the exact clicked waypoint) as the settle target to EVERY unit in the group, so `MonsterAgent.TickSettle` crept them all onto that one point and only body separation (`ApplySeparation`) held them apart -- producing a tight clump centred on the marker, i.e. "on the waypoint." Fix: each unit now gets a DISTINCT settle target on a ring around the centre, via a new `RingTarget(center, index, spacing)` helper using golden-angle phyllotaxis (sunflower packing) with a CLEAR central hole -- nobody's target is the centre, so the marker stays visible and the group distributes around it. Both the hole radius and the ring pitch scale with the Inspector `groupSpacing` knob (2.5 + spacing each), so widening the spacing widens the whole formation coherently; body separation still enforces the exact pairwise gap on top. Verified numerically against the real formula across group sizes 2-16 and spacings 0/1/3: min radius always equals the hole (centre provably clear), and no two units share an angle (golden-angle guarantees angular spread, ~222deg max gap at N=2 = the two on opposite-ish sides, tightening to ~32deg by N=16). Single-unit moves are unchanged (nothing to distribute -- one unit on the point is correct). Whole Unity layer compiles clean against the flightcheck harness | [18](18-city-battlefields.md) |
 | 2026-07 | **docs/25 written and approved: hybrid steering + deadlock-recovery migration plan for monster movement (creator direction: analyze-only first -- "Do Not Write Code Yet" -- then "I approve the plan, now capture it").** Analysis-before-code exercise: inspected the actual movement architecture (no assumptions) and found movement is 100% transform-based, zero Rigidbody/CharacterController/physics on any monster -- `MonsterAgent.cs` owns the `_order` state machine AND does the actual `transform.position` writes (FollowPath/TickSettle/TickPerch/TickEat); `MonsterBody.cs` is a pure view that only consumes the RETURNED velocity to drive animation (stride/wingflap/lift), never writes XZ position -- that return-a-velocity contract is the one hard interface boundary the whole plan hangs off. Root cause of the reported collision/permanent-stuck behavior, pinned precisely: `RuntimeCityBuilder.ApplySeparation` (a hard positional overlap-resolver, O(N^2)) and `AvoidanceDir` (a positional ahead-cone heading deflection, O(N^2)) run in SEQUENCE not blended with seek, so a blocked unit's seek and separation fight every frame (oscillation), separation can shove a unit off its path line with no "blocked by units" re-path trigger (permanently wedged), there's no speed modulation (a blocked unit keeps applying full seek into the jam), and there's no deadlock DETECTION at all -- nothing notices a unit hasn't moved in N seconds. The just-shipped ring-settle fix already solved DESTINATION clumping; en-route corridor congestion through a 1-2 hex gap is the unsolved case this plan targets. Approved architecture: `MonsterSteeringController` (seek+separation-as-force+predictive avoidance+deadlock nudge, combined, replacing the two O(N^2) reaction scans at their existing call sites in FollowPath/Update -- never touches `_order`), a `SpatialGrid` uniform-grid neighbour system (cell size = one HexMeters, rebuilt once/frame, allocation-free) for the perf win, and a rare-path-only `DeadlockManager` (detects want-to-move+valid-destination+stalled-for-T, grants temporary priority, blockers yield/sidestep into non-blocked hexes, releases on progress -- never becomes the primary mover). No NavMesh, no A* (HexPathfinder stays the global router, untouched), no full boids, no per-frame sorting/allocation, per the creator's explicit performance constraints. Five independently-testable phases (A spatial grid perf-only parity, B steering-controller behavioral parity, C predictive avoidance + speed modulation, D deadlock manager, E cleanup+tune), each with its own numeric-harness test plan since there's no Editor to verify visually. Explicitly flagged forward-looking: this lives Unity-side today, not in the docs/23 match-core deterministic tick sim -- designing the math integer/fixed-point-friendly and neighbour-iteration-ordered now avoids a second rewrite when docs/23 SS13-A ports unit movement into that sim later. Status: PLAN ONLY -- no code written, no files modified; execution begins at Phase A on a future turn. docs/00 index row added (using docs/25, not 24 -- 24 is already reserved in docs/23 SS11 for the netcode protocol spec) | [25](25-monster-movement-steering-plan.md), [18](18-city-battlefields.md), [23](23-rts-master-build-plan.md) |
+
+## 2026-07 — Monster movement steering: Phase A (SpatialGrid) implemented
+
+Executed docs/25's Phase A on explicit creator direction ("Proceed with
+Phase 1 only. Make the minimum required changes. Do not implement future
+phases yet."). Scope was strictly the uniform-grid neighbour system, not
+Phases B-E.
+
+- New `unity-client/Assets/Scripts/SpatialGrid.cs`: a generic
+  (`SpatialGrid<T> where T : class`) uniform spatial hash over the XZ
+  plane, cell size = `HexCoord.HexMeters` (20m). `Clear()`/`Insert`/
+  `QueryRadius` only; cell `List<T>` instances are pooled across `Clear()`
+  calls so steady-state per-frame cost is allocation-free. Generic on
+  purpose: it lets the shipped class compile and run directly (via a
+  `<Compile Include>` file reference, not a reimplementation) in a
+  standalone console harness against plain test objects, no MonoBehaviour
+  runtime needed.
+- `RuntimeCityBuilder.cs`: added `_combatantGrid` +
+  `RebuildCombatantGridIfNeeded()` (lazy per-frame rebuild triggered from
+  inside `ApplySeparation`/`AvoidanceDir`, not `Update()`, so it has no
+  dependency on Unity's script execution order against
+  `MonsterAgent.Update()`); both methods now query the grid instead of
+  scanning `_combatants` directly. Every per-pair distance/push/deflection
+  calculation is byte-for-byte unchanged -- pure perf refactor, per docs/25
+  Phase A's "behaviour-identical to today" requirement.
+- `MonsterAgent.cs`: no changes. Its two call sites into
+  `ApplySeparation`/`AvoidanceDir` keep identical signatures.
+- Verified two ways, no Unity Editor available in this environment: (1)
+  the flightcheck stub-compile harness (Unity gameplay scripts +
+  citygen/roster/creature-mesh DLLs) compiles clean with the new file
+  added; (2) a standalone console harness compiling the real
+  `SpatialGrid.cs` against a real-math Vector3/Mathf stub confirmed
+  docs/25 Phase A's two explicit test requirements: grid neighbour set ==
+  brute-force neighbour set (0/200 mismatches across randomized layouts,
+  varying query centers and radii spanning the separation/avoidance call
+  sites' actual ranges), and per-query cost stays flat (~0.6-1.0ms) from
+  100 to 8000 units while brute-force scan cost grows roughly linearly
+  (9.6ms->6.5ms over the same range). No on-screen/visual verification was
+  performed or claimed.
+
+Status: Phase A done. Phases B (steering controller scaffold), C
+(predictive avoidance/speed modulation), D (`DeadlockManager`), E
+(cleanup) remain not started, per explicit creator instruction to
+implement only this phase.

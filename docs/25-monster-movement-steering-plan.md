@@ -1,10 +1,10 @@
 # 25 — Monster Movement: Hybrid Steering + Deadlock Recovery Migration Plan
 
-Status: **Approved migration plan, not yet implemented** (written 2026-07 after
-an analysis-only pass; creator approved the plan 2026-07 — "I approve the
-plan, now capture it") · Realizes a collision-behavior replacement for the
-Unity-side monster mover · Pillars served: 2 (*the battlefield breathes*), 3
-(*honest combat*).
+Status: **Approved migration plan, Phase A implemented** (written 2026-07
+after an analysis-only pass; creator approved the plan 2026-07 — "I approve
+the plan, now capture it"; Phase A landed 2026-07, Phases B-E not started) ·
+Realizes a collision-behavior replacement for the Unity-side monster mover ·
+Pillars served: 2 (*the battlefield breathes*), 3 (*honest combat*).
 
 > **Status discipline.** This doc is a plan. No code has been written under
 > it yet. When Phase A (below) lands, update this doc's per-phase status
@@ -191,7 +191,16 @@ a docs/12 decision-log entry, per repo convention.
   through it, behaviour-identical to today. *Test:* grid neighbour set ==
   brute-force neighbour set on random layouts; per-frame cost flat vs unit
   count (not growing `O(N²)`). *Risk: lowest — pure perf refactor, zero
-  behaviour change.* **Status: not started.**
+  behaviour change.* **Status: done (2026-07).** New `SpatialGrid.cs`
+  (generic, pooled, cell size = `HexCoord.HexMeters`); `RuntimeCityBuilder`'s
+  `ApplySeparation`/`AvoidanceDir` now query it (lazy per-frame rebuild, no
+  script-execution-order dependency) instead of scanning `_combatants`
+  directly — every per-pair math line unchanged. `MonsterAgent.cs` untouched.
+  Verified: flightcheck stub-compile clean; standalone harness compiling the
+  real `SpatialGrid.cs` shows 0/200 neighbour-set mismatches vs brute force
+  on randomized layouts, and query cost flat (~0.6-1.0ms) from 100 to 8000
+  units while brute-force scan cost grows roughly linearly (9.6ms->6.5ms,
+  N=100 low outlier is JIT warmup).
 - **Phase B — `MonsterSteeringController` scaffold, parity first.** Move
   seek + separation-as-force + the ported ahead-cone avoidance into one
   `Combine()` returning a steering velocity, called from `FollowPath`;

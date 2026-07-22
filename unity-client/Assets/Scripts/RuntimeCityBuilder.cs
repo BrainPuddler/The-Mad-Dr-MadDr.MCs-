@@ -73,6 +73,16 @@ public class RuntimeCityBuilder : MonoBehaviour
     private readonly List<Tank> _tanks = new List<Tank>();
     private readonly List<UnitCombat> _combatants = new List<UnitCombat>();
     private readonly List<TrafficCar> _trafficCars = new List<TrafficCar>();
+
+    // docs/25 Phase A: uniform-grid neighbour lookup behind ApplySeparation/
+    // AvoidanceDir, rebuilt lazily on first use each frame (checked via
+    // Time.frameCount rather than from Update(), so this has no dependency
+    // on script execution order against MonsterAgent.Update()).
+    private readonly SpatialGrid<UnitCombat> _combatantGrid = new SpatialGrid<UnitCombat>();
+    private int _combatantGridFrame = -1;
+    private float _maxCombatantRadius;
+    private readonly List<UnitCombat> _separationQueryBuffer = new List<UnitCombat>();
+    private readonly List<UnitCombat> _avoidanceQueryBuffer = new List<UnitCombat>();
     private float _trafficCheckTimer;
     private int _trafficWakeCursor;
 
@@ -1575,12 +1585,35 @@ public class RuntimeCityBuilder : MonoBehaviour
     /// next frame, so a pair settles at exactly Radius + Radius +
     /// groupSpacing apart. Citizens are excluded on purpose -- they're
     /// prey, and monsters must be able to reach them.</summary>
+    /// <summary>Rebuilds the docs/25 Phase A neighbour grid at most once per
+    /// frame -- lazily, on whichever of ApplySeparation/AvoidanceDir runs
+    /// first, so this has no dependency on Unity's per-component script
+    /// execution order. `_maxCombatantRadius` is computed in the same pass
+    /// (O(N), no extra scan) so query radii can grow to fit the largest
+    /// combatant without re-walking the list.</summary>
+    private void RebuildCombatantGridIfNeeded()
+    {
+        if (_combatantGridFrame == Time.frameCount) return;
+        _combatantGridFrame = Time.frameCount;
+        _combatantGrid.Clear();
+        _maxCombatantRadius = 0f;
+        foreach (var c in _combatants)
+        {
+            if (c == null || !c.Alive) continue;
+            _combatantGrid.Insert(c, c.transform.position);
+            if (c.Radius > _maxCombatantRadius) _maxCombatantRadius = c.Radius;
+        }
+    }
+
     public void ApplySeparation(UnitCombat self)
     {
         if (self == null) return;
+        RebuildCombatantGridIfNeeded();
         var p = self.transform.position;
         var moved = false;
-        foreach (var c in _combatants)
+        _separationQueryBuffer.Clear();
+        _combatantGrid.QueryRadius(p, self.Radius + _maxCombatantRadius + groupSpacing, _separationQueryBuffer);
+        foreach (var c in _separationQueryBuffer)
         {
             if (c == null || c == self || !c.Alive) continue;
             var d = p - c.transform.position;
@@ -1617,9 +1650,12 @@ public class RuntimeCityBuilder : MonoBehaviour
         fwd = fwd.normalized;
         var right = new Vector3(fwd.z, 0f, -fwd.x);   // fwd rotated -90 about up
         var pos = self.transform.position;
+        RebuildCombatantGridIfNeeded();
 
         var avoid = Vector3.zero;
-        foreach (var c in _combatants)
+        _avoidanceQueryBuffer.Clear();
+        _combatantGrid.QueryRadius(pos, self.Radius + _maxCombatantRadius + 4f, _avoidanceQueryBuffer);
+        foreach (var c in _avoidanceQueryBuffer)
         {
             if (c == null || c == self || !c.Alive) continue;
             var to = c.transform.position - pos;
