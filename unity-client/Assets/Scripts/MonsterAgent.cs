@@ -420,7 +420,14 @@ public class MonsterAgent : MonoBehaviour
         // actually standing in the crowd: an airborne flyer passing
         // overhead shouldn't shove ground units around, and a ground unit
         // walking past a building's base shouldn't shove a PERCHED flyer
-        // sideways off its roof
+        // sideways off its roof. Still unconditional even for a unit that
+        // just ran SteerFollowPath this frame (docs/25 Phase B) -- Combine's
+        // separation term is a SOFT early nudge folded into the heading, not
+        // a substitute for this hard "never actually overlap" correction; a
+        // standalone numeric harness confirmed dropping this call for
+        // path-following units lets two units driving straight at a shared
+        // destination interpenetrate, since a heading blend alone has no
+        // floor on how much overlap it will tolerate.
         if (_fighter != null && _builder != null && !_flying && !Perched)
             _builder.ApplySeparation(_fighter);
     }
@@ -797,12 +804,14 @@ public class MonsterAgent : MonoBehaviour
         }
 
         var dir = to / dist;
-        // arc around a unit sitting ahead so a faster creature overtakes a
-        // slower one instead of piling into its back (no-op when clear).
-        // Airborne units skip it: everyone else is on the ground plane
-        // far below, and dodging their shadows would bend flight paths
-        // for no reason.
-        var steer = !_flying && _builder != null && _fighter != null ? _builder.AvoidanceDir(_fighter, dir) : dir;
+        // docs/25 Phase B: SteerFollowPath blends seek against a softened
+        // separation nudge (ApplySeparation below still owns the hard
+        // never-overlap guarantee) and the ahead-cone avoidance -- a faster
+        // creature still overtakes a slower one instead of piling into its
+        // back (no-op when clear). Airborne units skip it: everyone else is
+        // on the ground plane far below, and dodging their shadows would
+        // bend flight paths for no reason.
+        var steer = !_flying && _builder != null && _fighter != null ? _builder.SteerFollowPath(_fighter, dir) : dir;
         var turnRate = _flying ? FlightTurnRate : GroundTurnRate;
         transform.rotation = Quaternion.Slerp(transform.rotation,
             Quaternion.LookRotation(steer, Vector3.up), dt * turnRate);

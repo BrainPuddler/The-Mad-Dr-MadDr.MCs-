@@ -75,14 +75,16 @@ public class RuntimeCityBuilder : MonoBehaviour
     private readonly List<TrafficCar> _trafficCars = new List<TrafficCar>();
 
     // docs/25 Phase A: uniform-grid neighbour lookup behind ApplySeparation/
-    // AvoidanceDir, rebuilt lazily on first use each frame (checked via
+    // SteerFollowPath, rebuilt lazily on first use each frame (checked via
     // Time.frameCount rather than from Update(), so this has no dependency
     // on script execution order against MonsterAgent.Update()).
     private readonly SpatialGrid<UnitCombat> _combatantGrid = new SpatialGrid<UnitCombat>();
     private int _combatantGridFrame = -1;
     private float _maxCombatantRadius;
     private readonly List<UnitCombat> _separationQueryBuffer = new List<UnitCombat>();
-    private readonly List<UnitCombat> _avoidanceQueryBuffer = new List<UnitCombat>();
+    // docs/25 Phase B: shared candidate buffer for SteerFollowPath's combined
+    // separation+avoidance query (was avoidance-only under Phase A/AvoidanceDir).
+    private readonly List<UnitCombat> _steerQueryBuffer = new List<UnitCombat>();
     private float _trafficCheckTimer;
     private int _trafficWakeCursor;
 
@@ -1586,7 +1588,7 @@ public class RuntimeCityBuilder : MonoBehaviour
     /// groupSpacing apart. Citizens are excluded on purpose -- they're
     /// prey, and monsters must be able to reach them.</summary>
     /// <summary>Rebuilds the docs/25 Phase A neighbour grid at most once per
-    /// frame -- lazily, on whichever of ApplySeparation/AvoidanceDir runs
+    /// frame -- lazily, on whichever of ApplySeparation/SteerFollowPath runs
     /// first, so this has no dependency on Unity's per-component script
     /// execution order. `_maxCombatantRadius` is computed in the same pass
     /// (O(N), no extra scan) so query radii can grow to fit the largest
@@ -1605,28 +1607,24 @@ public class RuntimeCityBuilder : MonoBehaviour
         }
     }
 
+    /// <summary>Hard positional correction -- unchanged since before docs/25
+    /// (now delegating its per-pair math to
+    /// MonsterSteeringController.SeparationForce, a pure extract, same
+    /// numbers). Still the ONLY thing enforcing "creatures should NOT walk
+    /// through each other" for every non-path-following tick: idle standing,
+    /// the group-settle creep, holding position in weapon range -- none of
+    /// those call FollowPath/SteerFollowPath, so none of them get the
+    /// docs/25 Phase B blend below. Also called directly by Tank.cs
+    /// (tanks are out of scope for the docs/25 migration; this stays their
+    /// separation too).</summary>
     public void ApplySeparation(UnitCombat self)
     {
         if (self == null) return;
         RebuildCombatantGridIfNeeded();
-        var p = self.transform.position;
-        var moved = false;
         _separationQueryBuffer.Clear();
-        _combatantGrid.QueryRadius(p, self.Radius + _maxCombatantRadius + groupSpacing, _separationQueryBuffer);
-        foreach (var c in _separationQueryBuffer)
-        {
-            if (c == null || c == self || !c.Alive) continue;
-            var d = p - c.transform.position;
-            d.y = 0f;
-            var minDist = self.Radius + c.Radius + groupSpacing;
-            var dist = d.magnitude;
-            if (dist < minDist && dist > 1e-3f)
-            {
-                p += d / dist * ((minDist - dist) * 0.5f);
-                moved = true;
-            }
-        }
-        if (moved) self.transform.position = new Vector3(p.x, self.transform.position.y, p.z);
+        _combatantGrid.QueryRadius(self.transform.position, self.Radius + _maxCombatantRadius + groupSpacing, _separationQueryBuffer);
+        var push = MonsterSteeringController.SeparationForce(self, _separationQueryBuffer, groupSpacing);
+        if (push.sqrMagnitude > 1e-8f) self.transform.position += push;   // push is XZ-only, y untouched
     }
 
     public void OnCombatantDied(UnitCombat c)
@@ -1634,48 +1632,25 @@ public class RuntimeCityBuilder : MonoBehaviour
         if (c != null) _combatants.Remove(c);
     }
 
-    /// <summary>Local collision-avoidance steer: perturb a unit's desired
-    /// direction to arc AROUND any unit sitting in front of it, so a
-    /// faster creature overtakes a slower one instead of shoving into its
-    /// back. Only things roughly ahead (within a forward cone) and close
-    /// count; the unit with clear space ahead (the one in front) isn't
-    /// deflected, so the asymmetry -- faster-from-behind goes around --
-    /// falls out of the geometry. Returns a NORMALIZED direction; equals
-    /// the input when nothing blocks.</summary>
-    public Vector3 AvoidanceDir(UnitCombat self, Vector3 desiredDir)
+    /// <summary>docs/25 Phase B: FollowPath's steering entry point,
+    /// replacing the old plain AvoidanceDir call. Rebuilds/queries the same
+    /// neighbour grid Phase A introduced, then hands the candidate list to
+    /// MonsterSteeringController.Combine to blend seek against a softened
+    /// separation force and the ported ahead-cone avoidance in one pass --
+    /// see that class's header for why (docs/25 section 2 root cause #1:
+    /// seek and separation used to fight sequentially instead of blending).
+    /// Query radius covers whichever of separation's or avoidance's own
+    /// reach is larger, since Combine needs the union of both from a single
+    /// candidate list. Returns a NORMALIZED direction; equals `desiredDir`
+    /// when nothing blocks (same contract the old AvoidanceDir had).</summary>
+    public Vector3 SteerFollowPath(UnitCombat self, Vector3 desiredDir)
     {
         if (self == null) return desiredDir;
-        var fwd = new Vector3(desiredDir.x, 0f, desiredDir.z);
-        if (fwd.sqrMagnitude < 1e-4f) return desiredDir;
-        fwd = fwd.normalized;
-        var right = new Vector3(fwd.z, 0f, -fwd.x);   // fwd rotated -90 about up
-        var pos = self.transform.position;
         RebuildCombatantGridIfNeeded();
-
-        var avoid = Vector3.zero;
-        _avoidanceQueryBuffer.Clear();
-        _combatantGrid.QueryRadius(pos, self.Radius + _maxCombatantRadius + 4f, _avoidanceQueryBuffer);
-        foreach (var c in _avoidanceQueryBuffer)
-        {
-            if (c == null || c == self || !c.Alive) continue;
-            var to = c.transform.position - pos;
-            to.y = 0f;
-            var dist = to.magnitude;
-            var reach = self.Radius + c.Radius + 4f;   // lookahead
-            if (dist < 1e-3f || dist > reach) continue;
-            var ahead = Vector3.Dot(to / dist, fwd);
-            if (ahead < 0.35f) continue;                // only things ~in front
-
-            // steer to the side away from the blocker (dead-ahead breaks to
-            // the left deterministically)
-            var onRight = Vector3.Dot(to, right);
-            var side = onRight > 0f ? -1f : 1f;
-            var strength = (reach - dist) / reach * ahead;
-            avoid += right * (side * strength);
-        }
-
-        if (avoid.sqrMagnitude < 1e-6f) return desiredDir;
-        return (fwd + avoid * 1.2f).normalized;
+        _steerQueryBuffer.Clear();
+        var reach = self.Radius + _maxCombatantRadius + Mathf.Max(groupSpacing, 4f);
+        _combatantGrid.QueryRadius(self.transform.position, reach, _steerQueryBuffer);
+        return MonsterSteeringController.Combine(self, desiredDir, _steerQueryBuffer, groupSpacing);
     }
 
     /// <summary>Distinct passable hexes clustered around `center`,

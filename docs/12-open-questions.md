@@ -175,3 +175,75 @@ Status: Phase A done. Phases B (steering controller scaffold), C
 (predictive avoidance/speed modulation), D (`DeadlockManager`), E
 (cleanup) remain not started, per explicit creator instruction to
 implement only this phase.
+
+## 2026-07 — Monster movement steering: Phase B (`MonsterSteeringController` scaffold) implemented
+
+Executed docs/25's Phase B, scoped as written: parity-first, not new
+capability. New `unity-client/Assets/Scripts/MonsterSteeringController.cs`
+-- a stateless static class (same dependency-free style as `SpatialGrid`,
+so it compiles in a standalone harness): `SeparationForce` (the old
+`ApplySeparation` per-pair math extracted verbatim, including its
+cumulative-push order -- each neighbour after the first is checked against
+the position already nudged by earlier neighbours in the SAME call, not the
+original position, since that's what the old inline loop actually did),
+`AvoidanceBias` (the old `AvoidanceDir` ahead-cone math extracted
+verbatim), and `Combine` (new: blends seek + a softened separation nudge +
+the avoidance bias into one heading for `MonsterAgent.FollowPath` to steer
+by, replacing the old bare `AvoidanceDir` call).
+
+Root cause #1 from the Phase-A-era analysis (seek and separation applied in
+*sequence*, not blended, so they fight every frame) is only partially
+addressed by design, on purpose: an early numeric-harness run proved a soft
+heading blend ALONE is not sufficient to guarantee two bodies never
+interpenetrate -- two units driving straight at a shared destination
+overlapped past their combined radii once `ApplySeparation`'s hard
+positional correction was skipped for path-following units. `Combine`'s
+separation term is therefore an earlier-reacting NUDGE layered on top of
+the heading choice, not a replacement for the hard correction --
+`RuntimeCityBuilder.ApplySeparation` keeps firing unconditionally every
+frame from `MonsterAgent.Update()`, completely unchanged in when/how it's
+called (still also `Tank.cs`'s own separation call, untouched, docs/25
+explicitly keeps tanks out of scope). Fully blending separation into a pure
+force with no standalone hard correction is deferred to Phase C
+(predictive avoidance + speed modulation), which is where the plan's own
+test criteria actually call for smooth head-on/crossing resolution rather
+than parity.
+
+- `RuntimeCityBuilder.cs`: `ApplySeparation` now delegates its per-pair math
+  to `MonsterSteeringController.SeparationForce` (pure extract, same
+  numbers) but is otherwise unchanged -- same call sites, same signature,
+  same unconditional per-frame call from both `MonsterAgent` and `Tank`.
+  `AvoidanceDir` is retired; its one call site (`MonsterAgent.FollowPath`)
+  is replaced by new `SteerFollowPath(self, desiredDir)`, which queries the
+  Phase-A neighbour grid (radius now covers whichever of separation's or
+  avoidance's own reach is larger, since `Combine` needs the union of both
+  from one candidate list) and calls `MonsterSteeringController.Combine`.
+- `MonsterAgent.cs`: one call-site rename (`AvoidanceDir` ->
+  `SteerFollowPath` inside `FollowPath`) plus an updated doc comment on the
+  `ApplySeparation` call in `Update()` explaining why it's still
+  unconditional post-Phase-B. State machine, flight, perch, eat, harvest,
+  group-facing, ring-settle: unchanged in logic (none of those paths call
+  `FollowPath`, so none of them touch `Combine`).
+- Verified two ways, no Unity Editor available in this environment: (1) the
+  flightcheck stub-compile harness compiles clean with the new file added;
+  (2) a standalone real-math console harness (fresh for this phase --
+  compiles the real `MonsterSteeringController.cs` against a real Vector3/
+  Mathf stub and a minimal `UnitCombat` stand-in, not the flightcheck
+  harness's dummy-math stubs) checked: `SeparationForce` is an EXACT match
+  (not just qualitative) against a hand-transcribed copy of the pre-Phase-B
+  inline math across 500 randomized neighbour configurations, 0 mismatches
+  above 1e-5 -- this is the function `Tank.cs`'s separation now runs
+  through too, so drift here would be a real regression, not a tuning
+  choice; scripted 2-unit scenarios (overtake, shared-destination approach,
+  co-linear same-speed follow) run against both the OLD sequential
+  pipeline (hand-transcribed `AvoidanceDir` + `ApplySeparation`, an
+  independent oracle) and the NEW `SteerFollowPath`/`Combine` pipeline
+  confirm: no interpenetration in either pipeline, the overtake asymmetry
+  (faster-from-behind arcs around, front unit undeflected) survives, and
+  co-linear same-speed following settles to a stable gap (<1.5m swing in
+  the final second) in both pipelines rather than oscillating. No on-screen
+  visual verification was performed or claimed.
+
+Status: Phase B done. Phase C (predictive avoidance + speed modulation,
+where separation actually becomes purely force-based) starts fresh on a
+future turn; D (`DeadlockManager`) and E (cleanup) remain not started.

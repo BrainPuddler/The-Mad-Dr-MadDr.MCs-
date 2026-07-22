@@ -1,10 +1,11 @@
 # 25 — Monster Movement: Hybrid Steering + Deadlock Recovery Migration Plan
 
-Status: **Approved migration plan, Phase A implemented** (written 2026-07
+Status: **Approved migration plan, Phases A-B implemented** (written 2026-07
 after an analysis-only pass; creator approved the plan 2026-07 — "I approve
-the plan, now capture it"; Phase A landed 2026-07, Phases B-E not started) ·
-Realizes a collision-behavior replacement for the Unity-side monster mover ·
-Pillars served: 2 (*the battlefield breathes*), 3 (*honest combat*).
+the plan, now capture it"; Phase A landed 2026-07, Phase B landed 2026-07,
+Phases C-E not started) · Realizes a collision-behavior replacement for the
+Unity-side monster mover · Pillars served: 2 (*the battlefield breathes*),
+3 (*honest combat*).
 
 > **Status discipline.** This doc is a plan. No code has been written under
 > it yet. When Phase A (below) lands, update this doc's per-phase status
@@ -207,7 +208,22 @@ a docs/12 decision-log entry, per repo convention.
   convert `ApplySeparation`'s position-edit into a blended force. Target:
   *behaviour parity* with today, not new capability yet. *Test:* scripted
   2-unit overtaking / shared-destination scenarios match current outcomes
-  numerically. **Status: not started.**
+  numerically. **Status: done (2026-07).** New `MonsterSteeringController.cs`
+  (`SeparationForce` + `AvoidanceBias`, both extracted verbatim from the old
+  inline math, plus new `Combine`); `RuntimeCityBuilder.SteerFollowPath`
+  replaces `AvoidanceDir` at `FollowPath`'s one call site. A numeric harness
+  found a soft heading blend alone does NOT stop two units driving straight
+  at each other from interpenetrating, so `ApplySeparation`'s hard
+  positional correction was deliberately kept unconditional (unchanged from
+  before this phase) rather than folded away — `Combine`'s separation term
+  is an earlier-reacting nudge on top of it, not a replacement; full
+  force-only separation is deferred to Phase C. Verified: flightcheck
+  stub-compile clean; a fresh standalone harness confirmed `SeparationForce`
+  exactly matches the old inline math (500/500 randomized trials, <1e-5
+  diff) and that scripted overtake / shared-destination / co-linear-follow
+  scenarios produce the same qualitative outcomes (no interpenetration,
+  overtake asymmetry preserved, stable settling) under both the old
+  sequential pipeline and the new blended one. docs/12 has the full entry.
 - **Phase C — predictive avoidance + speed modulation.** Add per-unit
   published last velocity; replace the ahead-cone with time-to-collision
   (RVO-lite) avoidance; slow seek when avoidance/separation dominate.
