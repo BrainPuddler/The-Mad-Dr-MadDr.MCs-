@@ -391,6 +391,12 @@ public class MonsterAgent : MonoBehaviour
             case OrderKind.Perch: velocity = TickPerch(dt); break;
             case OrderKind.Idle: velocity = TickSettle(dt); break;
         }
+        // docs/25 Phase C: publish this frame's velocity for neighbours'
+        // predictive avoidance to read (MonsterSteeringController.
+        // PredictiveAvoidance) -- set unconditionally, including zero while
+        // idle, so a stopped unit correctly reads as stationary rather than
+        // still carrying its last frame of movement.
+        if (_fighter != null) _fighter.LastVelocity = velocity;
 
         // terrain-follow: the movement ticks steer in XZ; the sculpted
         // ground supplies Y (docs/21). Flat-locked plots keep this 0 near
@@ -804,14 +810,24 @@ public class MonsterAgent : MonoBehaviour
         }
 
         var dir = to / dist;
-        // docs/25 Phase B: SteerFollowPath blends seek against a softened
+        // docs/25 Phase B/C: SteerFollowPath blends seek against a softened
         // separation nudge (ApplySeparation below still owns the hard
-        // never-overlap guarantee) and the ahead-cone avoidance -- a faster
-        // creature still overtakes a slower one instead of piling into its
-        // back (no-op when clear). Airborne units skip it: everyone else is
+        // never-overlap guarantee) and time-to-collision predictive
+        // avoidance -- a faster creature still overtakes a slower one
+        // instead of piling into its back (no-op when clear), and a heavily
+        // deflected unit's speedScale eases off instead of shoving at full
+        // speed (Phase C's speed-modulation requirement). Airborne units
+        // skip it entirely (steer = dir, speedScale = 1): everyone else is
         // on the ground plane far below, and dodging their shadows would
         // bend flight paths for no reason.
-        var steer = !_flying && _builder != null && _fighter != null ? _builder.SteerFollowPath(_fighter, dir) : dir;
+        var steer = dir;
+        var speedScale = 1f;
+        if (!_flying && _builder != null && _fighter != null)
+        {
+            var result = _builder.SteerFollowPath(_fighter, dir, speed);
+            steer = result.Direction;
+            speedScale = result.SpeedScale;
+        }
         var turnRate = _flying ? FlightTurnRate : GroundTurnRate;
         transform.rotation = Quaternion.Slerp(transform.rotation,
             Quaternion.LookRotation(steer, Vector3.up), dt * turnRate);
@@ -832,9 +848,10 @@ public class MonsterAgent : MonoBehaviour
             return nose * speed;
         }
 
-        var step = Mathf.Min(speed * dt, dist);
+        var scaledSpeed = speed * speedScale;
+        var step = Mathf.Min(scaledSpeed * dt, dist);
         transform.position += steer * step;
-        return steer * speed;
+        return steer * scaledSpeed;
     }
 
     private const int FarHexThreshold = 5;      // ~100m straight-line (20m hex) counts as "far"

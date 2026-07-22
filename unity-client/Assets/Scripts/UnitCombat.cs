@@ -20,6 +20,17 @@ public class UnitCombat : MonoBehaviour
     public float AimHeight = 1.5f;       // aim point above the transform origin
     public WeaponProfile Weapon;
 
+    /// <summary>docs/25 Phase C: this unit's XZ velocity as of its owner's
+    /// last Update() -- the "neighbours' last-known velocity" the
+    /// migration plan's predictive-avoidance layer needs, published here so
+    /// MonsterSteeringController can read a neighbour's velocity through
+    /// the same UnitCombat handle separation/targeting already use, no new
+    /// per-neighbour lookup. MonsterAgent writes it every frame (including
+    /// zero when idle); Tank.cs never sets it (docs/25 keeps tanks out of
+    /// scope for this plan) so a tank predictively reads as momentarily
+    /// stationary -- a safe, conservative default, not a bug.</summary>
+    public Vector3 LastVelocity;
+
     private float _cooldown;
     private float _battleTimer;           // > 0 = "in battle" (fired or hit recently)
     private Action _onDied;

@@ -247,3 +247,94 @@ than parity.
 Status: Phase B done. Phase C (predictive avoidance + speed modulation,
 where separation actually becomes purely force-based) starts fresh on a
 future turn; D (`DeadlockManager`) and E (cleanup) remain not started.
+
+## 2026-07 — Monster movement steering: Phase C (predictive avoidance + speed modulation) implemented
+
+Executed docs/25's Phase C on explicit creator direction to continue
+straight through B into C in the same session. Replaced Phase B's
+ahead-cone `AvoidanceBias` (removed -- nothing else called it) with
+`MonsterSteeringController.PredictiveAvoidance`, a time-to-collision
+(RVO-lite) check: for each neighbour, predicts the closest approach
+assuming both self and the neighbour keep their current velocity, and only
+reacts if that closest approach is inside their combined radii AND within
+a 2.5s horizon -- something merely nearby but on a diverging or
+non-closing course contributes nothing. This needed a new published
+per-unit `LastVelocity` field on `UnitCombat` (the "neighbours' last-known
+velocity" docs/25's approved architecture called for) -- `MonsterAgent`
+writes it every frame unconditionally (including zero while idle);
+`Tank.cs` never sets it, so a tank predictively reads as momentarily
+stationary, a safe default given tanks stay out of scope for this plan.
+`Combine` also now returns a speed scale (a new `SteeringResult` struct,
+`Direction` + `SpeedScale`) computed from how aligned the chosen heading
+still is with the original seek direction -- a unit fighting a strong
+deflection eases its own throttle instead of shoving full-speed into
+whatever's ahead, floored so steering alone never fully stops a unit
+(that escalation stays DeadlockManager's job, Phase D).
+
+Contrary to the "separation actually becomes purely force-based" framing
+in the Phase B status line above: it does NOT, and that's deliberate, not
+a missed step. `RuntimeCityBuilder.ApplySeparation`'s hard positional
+correction is still completely unchanged and still fires unconditionally
+every frame -- Phase B's own harness already proved a soft blend alone
+lets two closing bodies interpenetrate, and nothing about adding
+prediction on top of that changes that finding. `Combine`'s separation
+term stays what it was in Phase B: an earlier-reacting nudge layered on
+the hard correction, not a replacement for it.
+
+- `MonsterSteeringController.cs`: new `PredictiveAvoidance` (replacing
+  `AvoidanceBias`), new `SteeringResult` struct, `Combine` now takes the
+  caller's actual speed (needed to build a velocity estimate for the TTC
+  math, not just a direction) and returns direction + speed scale instead
+  of a bare direction.
+- `UnitCombat.cs`: new public `LastVelocity` field, doc-commented with the
+  Tank.cs caveat above.
+- `RuntimeCityBuilder.cs`: `RebuildCombatantGridIfNeeded` now also tracks
+  `_maxCombatantSpeed` (from each live combatant's `LastVelocity`, same
+  single-pass O(N) style as `_maxCombatantRadius`); `SteerFollowPath`'s
+  query reach now adds however far a neighbour closing at
+  `_maxCombatantSpeed` plus this unit's own speed could travel within the
+  predictive horizon -- Phase B's purely spatial reach would have missed a
+  fast-closing neighbour that's still distant right now. `ApplySeparation`
+  itself: unchanged.
+- `MonsterAgent.cs`: publishes `LastVelocity` unconditionally right after
+  the order-dispatch switch; `FollowPath` now threads `speed` into
+  `SteerFollowPath`, reads back `SteeringResult.SpeedScale`, and applies it
+  to both the actual step distance and the returned (animation-driving)
+  velocity, so a slowed-down unit visibly strides slower too, not just
+  moves slower. Flying is still a full opt-out (steer = raw seek dir,
+  speedScale = 1) -- unchanged from Phase B.
+- A standalone numeric harness (extended from Phase B's) caught a real bug
+  before it shipped: the first `PredictiveAvoidance` draft computed
+  relative velocity as `selfVel - neighbourVelocity` instead of
+  `neighbourVelocity - selfVel`, the wrong sign relative to `relPos`'s
+  other-minus-self convention -- every genuinely closing pair produced a
+  negative predicted time-to-collision and got silently discarded as
+  "already past," so predictive avoidance never fired for the exact case
+  it exists for. A "blocked unit slows" test (speedScale pinned at 1 the
+  whole approach) caught it directly; fixed and re-verified. A second,
+  smaller bug in the same pass: the "already inside the buffer, that's
+  SeparationForce's job" skip used the PADDED combined radius instead of
+  the bare body radius, leaving a dead zone just outside actual contact
+  where neither predictive avoidance nor separation reacted -- also fixed.
+- Verified two ways, no Unity Editor available in this environment: (1)
+  flightcheck stub-compile clean; (2) the standalone harness (real
+  `MonsterSteeringController.cs`, real Vector3/Mathf math) reconfirmed
+  `SeparationForce` parity (500/500 trials) and added four new checks, all
+  passing after the two fixes above: a head-on pair (small lateral offset
+  to avoid the exact-zero degenerate case) never interpenetrates and
+  passes each other within budget; a 90-degree crossing pair never
+  interpenetrates and both reach their goals; a unit approaching a single
+  stationary blocker in open space never interpenetrates, reaches its
+  goal, starts and ends at full speed scale, and measurably eases off
+  (speedScale dips below 0.98, never floors below `MinSpeedScale`) while
+  passing it. A first draft of that last scenario used a tight
+  three-obstacle corridor and caught the steering blend permanently
+  wedging a unit in a three-way local minimum with no way out -- correct
+  behaviour for a phase that explicitly excludes deadlock recovery
+  (Phase D's whole job), but not what "a blocked unit slows" is meant to
+  isolate, so the scenario was simplified to a single obstacle with open
+  space to arc around. No on-screen visual verification was performed or
+  claimed.
+
+Status: Phase C done. Phase D (`DeadlockManager`) and Phase E (cleanup +
+tune) remain not started.

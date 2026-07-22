@@ -1,9 +1,9 @@
 # 25 — Monster Movement: Hybrid Steering + Deadlock Recovery Migration Plan
 
-Status: **Approved migration plan, Phases A-B implemented** (written 2026-07
+Status: **Approved migration plan, Phases A-C implemented** (written 2026-07
 after an analysis-only pass; creator approved the plan 2026-07 — "I approve
-the plan, now capture it"; Phase A landed 2026-07, Phase B landed 2026-07,
-Phases C-E not started) · Realizes a collision-behavior replacement for the
+the plan, now capture it"; Phases A, B, and C all landed 2026-07, Phases
+D-E not started) · Realizes a collision-behavior replacement for the
 Unity-side monster mover · Pillars served: 2 (*the battlefield breathes*),
 3 (*honest combat*).
 
@@ -228,7 +228,23 @@ a docs/12 decision-log entry, per repo convention.
   published last velocity; replace the ahead-cone with time-to-collision
   (RVO-lite) avoidance; slow seek when avoidance/separation dominate.
   *Test:* head-on and 90°-crossing pairs resolve smoothly without overlap; a
-  blocked unit slows rather than shoving. **Status: not started.**
+  blocked unit slows rather than shoving. **Status: done (2026-07).** New
+  `UnitCombat.LastVelocity` (published by `MonsterAgent` every frame,
+  never set by `Tank.cs` -- a tank predictively reads as stationary, a
+  safe default); `MonsterSteeringController.PredictiveAvoidance` replaces
+  `AvoidanceBias` with a proper TTC check (closest-approach time and
+  distance from both units' current velocities, only reacting within a
+  2.5s horizon); `Combine` now returns a `SteeringResult` (direction +
+  speed scale, the scale from how aligned the chosen heading still is with
+  the seek direction, floored so steering alone never fully stops a unit).
+  `ApplySeparation` itself is unchanged -- still the hard, unconditional
+  never-overlap guarantee; only the softer blend layered on top of it
+  changed. A standalone harness caught and fixed a real relative-velocity
+  sign bug (predictive avoidance never fired at all until corrected) and a
+  smaller dead-zone bug between the padded and bare-body radius checks;
+  after both fixes, head-on/90°-crossing/single-blocker scenarios all
+  clear without interpenetration, with a measurable speed ease-off around
+  the blocker that recovers once clear. See docs/12 for the full writeup.
 - **Phase D — `DeadlockManager`.** Detect stalled-but-wanting-to-move units;
   grant temporary priority; blockers yield/sidestep into non-blocked hexes;
   release on progress. *Test:* a forced single-hex-corridor jam of N units

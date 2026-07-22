@@ -81,6 +81,7 @@ public class RuntimeCityBuilder : MonoBehaviour
     private readonly SpatialGrid<UnitCombat> _combatantGrid = new SpatialGrid<UnitCombat>();
     private int _combatantGridFrame = -1;
     private float _maxCombatantRadius;
+    private float _maxCombatantSpeed;   // docs/25 Phase C: widens SteerFollowPath's query for fast-closing neighbours
     private readonly List<UnitCombat> _separationQueryBuffer = new List<UnitCombat>();
     // docs/25 Phase B: shared candidate buffer for SteerFollowPath's combined
     // separation+avoidance query (was avoidance-only under Phase A/AvoidanceDir).
@@ -1590,20 +1591,27 @@ public class RuntimeCityBuilder : MonoBehaviour
     /// <summary>Rebuilds the docs/25 Phase A neighbour grid at most once per
     /// frame -- lazily, on whichever of ApplySeparation/SteerFollowPath runs
     /// first, so this has no dependency on Unity's per-component script
-    /// execution order. `_maxCombatantRadius` is computed in the same pass
-    /// (O(N), no extra scan) so query radii can grow to fit the largest
-    /// combatant without re-walking the list.</summary>
+    /// execution order. `_maxCombatantRadius`/`_maxCombatantSpeed` are
+    /// computed in the same pass (O(N), no extra scan) so query radii can
+    /// grow to fit the largest/fastest combatant without re-walking the
+    /// list -- `_maxCombatantSpeed` (docs/25 Phase C, from each unit's
+    /// published `LastVelocity`) is what lets SteerFollowPath's query
+    /// reach far enough to catch a neighbour that's still distant but
+    /// closing fast, which a purely spatial reach would miss.</summary>
     private void RebuildCombatantGridIfNeeded()
     {
         if (_combatantGridFrame == Time.frameCount) return;
         _combatantGridFrame = Time.frameCount;
         _combatantGrid.Clear();
         _maxCombatantRadius = 0f;
+        _maxCombatantSpeed = 0f;
         foreach (var c in _combatants)
         {
             if (c == null || !c.Alive) continue;
             _combatantGrid.Insert(c, c.transform.position);
             if (c.Radius > _maxCombatantRadius) _maxCombatantRadius = c.Radius;
+            var speed = c.LastVelocity.magnitude;
+            if (speed > _maxCombatantSpeed) _maxCombatantSpeed = speed;
         }
     }
 
@@ -1632,25 +1640,31 @@ public class RuntimeCityBuilder : MonoBehaviour
         if (c != null) _combatants.Remove(c);
     }
 
-    /// <summary>docs/25 Phase B: FollowPath's steering entry point,
-    /// replacing the old plain AvoidanceDir call. Rebuilds/queries the same
-    /// neighbour grid Phase A introduced, then hands the candidate list to
-    /// MonsterSteeringController.Combine to blend seek against a softened
-    /// separation force and the ported ahead-cone avoidance in one pass --
-    /// see that class's header for why (docs/25 section 2 root cause #1:
-    /// seek and separation used to fight sequentially instead of blending).
-    /// Query radius covers whichever of separation's or avoidance's own
-    /// reach is larger, since Combine needs the union of both from a single
-    /// candidate list. Returns a NORMALIZED direction; equals `desiredDir`
-    /// when nothing blocks (same contract the old AvoidanceDir had).</summary>
-    public Vector3 SteerFollowPath(UnitCombat self, Vector3 desiredDir)
+    /// <summary>FollowPath's steering entry point (docs/25 Phase B,
+    /// extended by Phase C), replacing the old plain AvoidanceDir call.
+    /// Rebuilds/queries the same neighbour grid Phase A introduced, then
+    /// hands the candidate list to MonsterSteeringController.Combine to
+    /// blend seek against a softened separation force and (Phase C)
+    /// time-to-collision predictive avoidance in one pass -- see that
+    /// class's header for why (docs/25 section 2 root cause #1: seek and
+    /// separation used to fight sequentially instead of blending). Query
+    /// reach now covers three things at once: separation's own range, the
+    /// avoidance padding, and however far a neighbour closing at
+    /// `_maxCombatantSpeed` plus this unit's own speed could travel within
+    /// `MonsterSteeringController.Horizon` seconds -- a purely spatial
+    /// reach (Phase B's) would miss a fast-closing neighbour that's still
+    /// distant right now.</summary>
+    public MonsterSteeringController.SteeringResult SteerFollowPath(UnitCombat self, Vector3 desiredDir, float speed)
     {
-        if (self == null) return desiredDir;
+        if (self == null) return new MonsterSteeringController.SteeringResult { Direction = desiredDir, SpeedScale = 1f };
         RebuildCombatantGridIfNeeded();
         _steerQueryBuffer.Clear();
-        var reach = self.Radius + _maxCombatantRadius + Mathf.Max(groupSpacing, 4f);
+        var closingReach = (speed + _maxCombatantSpeed) * MonsterSteeringController.Horizon;
+        var reach = self.Radius + _maxCombatantRadius
+            + Mathf.Max(groupSpacing, MonsterSteeringController.AvoidancePadding)
+            + closingReach;
         _combatantGrid.QueryRadius(self.transform.position, reach, _steerQueryBuffer);
-        return MonsterSteeringController.Combine(self, desiredDir, _steerQueryBuffer, groupSpacing);
+        return MonsterSteeringController.Combine(self, desiredDir, speed, _steerQueryBuffer, groupSpacing);
     }
 
     /// <summary>Distinct passable hexes clustered around `center`,
