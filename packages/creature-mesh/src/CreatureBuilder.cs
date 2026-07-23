@@ -764,6 +764,11 @@ namespace MadDr.CreatureMesh
 
             var sensP = new Vec3(head.HR.X * 0.52, head.TopY, head.HC.Z - 0.1);
             var eyeP = new Vec3(0, head.HC.Y + head.HR.Y * 0.2, head.HC.Z + head.HR.Z * 0.62);
+            // how far up the chest(levels[2])->shoulder(levels[3]) span the
+            // Back mount sits -- 0.5 was the exact midpoint; raised per
+            // creator correction, 2026-07 (see the Back socket's own
+            // comment below).
+            const double BackBlend = 0.85;
             return new Sockets
             {
                 Hand = new Sock
@@ -786,10 +791,18 @@ namespace MadDr.CreatureMesh
                 // derived from this exact normal so the two can't drift
                 // apart. atan2(Y,-Z): the tilt away from straight-back
                 // (Nrm=(0,0,-1) would be tilt=0) toward this normal.
+                //
+                // Blended toward the shoulder level (levels[3]) rather than
+                // the exact chest/shoulder midpoint -- creator correction,
+                // 2026-07: "need to be higher up on the back." Still the
+                // SAME rear-surface interpolation between the two levels
+                // (not an arbitrary extra offset), just biased further up
+                // it, so the mount stays seated on the actual sloped
+                // surface at every blend value.
                 Back = new Sock
                 {
-                    P = new Vec3(0, (levels[2].Y + levels[3].Y) * 0.5,
-                        ((levels[2].Z - levels[2].Rz) + (levels[3].Z - levels[3].Rz)) * 0.5 * 0.95),
+                    P = new Vec3(0, levels[2].Y + (levels[3].Y - levels[2].Y) * BackBlend,
+                        ((levels[2].Z - levels[2].Rz) + ((levels[3].Z - levels[3].Rz) - (levels[2].Z - levels[2].Rz)) * BackBlend) * 0.95),
                     Nrm = new Vec3(0, 0.5, -0.87).Norm(),
                     Mirror = false,
                     PackTilt = Math.Atan2(0.5, 0.87),

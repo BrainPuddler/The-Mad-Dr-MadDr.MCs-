@@ -1654,6 +1654,10 @@ function planAvian(mb, o) {
 
   const sensP = [head.hR[0]*0.52, head.topY, head.hC[2]-0.1];
   const eyeP  = [0, head.hC[1]+head.hR[1]*0.2, head.hC[2]+head.hR[2]*0.62];
+  // how far up the chest(levels[2])->shoulder(levels[3]) span the back
+  // mount sits -- 0.5 was the exact midpoint; raised per creator
+  // correction, 2026-07 (see the back socket's own comment below).
+  const backBlend = 0.85;
   return {
     hand:   { p: [ch.rx*0.85, ch.y+0.2, ch.z+0.2], nrm: V.norm([1, 0.1, 0.3]), mirror: true, tiny: true },
     leg:    { p: [Math.max(0.6, levels[0].rx*0.55), o.legLen, levels[0].z*0.3],
@@ -1668,8 +1672,13 @@ function planAvian(mb, o) {
     // pack's own "up the spine" axis parallel to that slope instead of
     // world-vertical (creator report, 2026-07), derived from this exact
     // normal so the two can't drift apart.
-    back:   { p: [0, (levels[2].y + levels[3].y) * 0.5,
-                  ((levels[2].z - levels[2].rz) + (levels[3].z - levels[3].rz)) * 0.5 * 0.95],
+    //
+    // Blended toward the shoulder level (levels[3]) via backBlend rather
+    // than the exact chest/shoulder midpoint -- still the SAME rear-
+    // surface interpolation between the two levels, just biased further
+    // up it, so the mount stays seated on the actual sloped surface.
+    back:   { p: [0, levels[2].y + (levels[3].y - levels[2].y) * backBlend,
+                  ((levels[2].z - levels[2].rz) + ((levels[3].z - levels[3].rz) - (levels[2].z - levels[2].rz)) * backBlend) * 0.95],
               nrm: V.norm([0, 0.5, -0.87]), mirror: false, out: 1, anim: BREATH_T,
               packTilt: Math.atan2(0.5, 0.87) },
   };

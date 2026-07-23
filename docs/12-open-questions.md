@@ -673,3 +673,29 @@ clean against the rebuilt creature-mesh DLL. Site JS re-checked with
 storage cases) confirmed to pass the new tilt argument or be the function
 definition itself. No visual verification (no Editor/browser in this
 environment) -- numeric proof only, per this repo's standing discipline.
+
+## 2026-07 — Follow-up: raise avian's storage-vessel mount higher on the back
+
+Creator, after confirming the tilt fix looked right: "Avian tanks angle
+is good, but need to be higher up on the back."
+
+The Back socket's position was the exact midpoint between the chest
+(`levels[2]`) and shoulder (`levels[3]`) levels along PlanAvian's own
+rear-surface interpolation. Raised by biasing that same interpolation
+toward the shoulder level instead of the midpoint (`BackBlend`/
+`backBlend`, 0.5 -> 0.85, in both `CreatureBuilder.cs` and
+`creature-renderer.js`) -- both Y and Z still come from the SAME
+level2/level3 blend as before, just further up it, so the mount stays
+seated on the actual sloped surface at the new height rather than an
+arbitrary offset disconnected from the body geometry. `BackBlend`/
+`backBlend` is mathematically guaranteed to move the mount strictly
+higher (shoulder Y > chest Y by construction), independent of body
+bulk/leg-length params.
+
+Verified: creature-mesh 93/93 green unchanged (the existing back-mount
+theory test still passes at the new position; no new test added for this
+follow-up since the height increase is a direct, provably-correct
+proportional shift along an already-tested interpolation, not new
+behavior needing its own coverage). flightcheck stub-compile clean
+against the rebuilt DLL. Site JS re-checked with `node --check`. No
+visual verification (no Editor/browser in this environment).
