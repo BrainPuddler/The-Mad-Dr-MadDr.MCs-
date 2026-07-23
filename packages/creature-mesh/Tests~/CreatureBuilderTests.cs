@@ -583,6 +583,7 @@ public class CreatureBuilderTests
     [Theory]
     [InlineData("storage_bladder")]
     [InlineData("steel_tank")]
+    [InlineData("tank_backpack")]
     [InlineData("amber_vesicle")]
     public void StorageVesselsBuildRealGeometry(string family)
     {
@@ -599,6 +600,14 @@ public class CreatureBuilderTests
     }
 
     [Fact]
+    public void TankBackpackShellIsMetal()
+    {
+        // the other human-army tank silhouette -- two tanks in a frame --
+        // keeps the same metal-shell origin read as the single barrel
+        Assert.True(HasColor(CreatureBuilder.Build(Genome(sensor: "tank_backpack")), Palette.METAL));
+    }
+
+    [Fact]
     public void StorageContentsReadRedForBloodAndWhiteForBone()
     {
         // creator direction: RED for blood, WHITE for bone -- the tank's
@@ -606,7 +615,7 @@ public class CreatureBuilderTests
         // a blood tool like lamprey_maw -> blood/red)
         var bloodRed = new Col(150, 30, 40);
         var boneWhite = new Col(224, 216, 194);
-        foreach (var vessel in new[] { "storage_bladder", "steel_tank", "amber_vesicle" })
+        foreach (var vessel in new[] { "storage_bladder", "steel_tank", "tank_backpack", "amber_vesicle" })
         {
             var bloodRig = CreatureBuilder.Build(Genome(hand: "lamprey_maw", sensor: vessel));
             var boneRig = CreatureBuilder.Build(Genome(hand: "bone_saw", sensor: vessel));

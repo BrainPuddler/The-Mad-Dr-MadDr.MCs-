@@ -84,6 +84,23 @@ export class Rng {
     return arr[this.int(arr.length)]!;
   }
 
+  /** Weighted choice -- one next() draw, same cost as choice(), so it
+   * doesn't shift how many random numbers anything called afterward
+   * consumes. Falls back to plain uniform choice if every weight is
+   * non-positive (guards a caller passing an all-zero weight list). */
+  weightedChoice<T>(arr: readonly T[], weights: readonly number[]): T {
+    if (arr.length === 0) throw new Error("weightedChoice from empty array");
+    let total = 0;
+    for (const w of weights) total += w;
+    if (total <= 0) return this.choice(arr);
+    let r = this.next() * total;
+    for (let i = 0; i < arr.length; i++) {
+      r -= weights[i] ?? 0;
+      if (r < 0) return arr[i]!;
+    }
+    return arr[arr.length - 1]!;
+  }
+
   bool(p = 0.5): boolean {
     return this.next() < p;
   }

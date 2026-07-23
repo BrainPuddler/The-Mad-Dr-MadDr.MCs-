@@ -498,3 +498,74 @@ Fix:
 
 Verified: flightcheck stub-compile clean. No visual verification (no
 Editor in this environment).
+
+## 2026-07 — Reinstate double-tank backpack as tank_backpack; weighted storage preference
+
+Creator direction: "the Lab and Game... Human faction should statistically
+prefer double tank backpacks, single tank, over skin pustules, in that
+order." Two things had to be found before this could be built: "double
+tank backpack" meant the ORIGINAL `steel_tank` geometry (a rectangular
+frame plate with two cylinder tanks inset, one per side) from before it
+was redesigned to a single barrel (commit e9dff23, "human monsters always
+use the cylinder backpack with proper orientation") -- the creator
+confirmed: "Two tanks on either side of a rectangular backpack." "Skin
+pustules" is `storage_bladder`, described in its own commit as "pus-filled
+sacs... bulging out through the skin." "Human faction" is docs/17's Human
+Army spawn pool, which mixes `origins: ['organic', 'tech']` for a
+creature's whole genome -- meaning the sensor slot already competes
+`storage_bladder` (organic) against the tech tanks on a flat uniform draw
+today, exactly the mismatch reported.
+
+Changes:
+- `genome-core/catalog.ts`: reinstated the old geometry as a new,
+  separate family `tank_backpack` (tech, sensor homolog) alongside the
+  current single-barrel `steel_tank` -- not a replacement, both exist and
+  breed independently. Added an optional `weight` field to `PartFamily`
+  (default 1, i.e. today's plain uniform choice, unchanged for every
+  family that doesn't set one): `tank_backpack: 4`, `steel_tank: 2`,
+  `storage_bladder: 1` explicitly. Nothing else touched -- antenna/horn/
+  sensor_mast/amber_vesicle stay at the implicit default.
+- `genome-core/rng.ts`: new `Rng.weightedChoice` -- one `next()` draw
+  (same cost as the existing uniform `choice`), so it doesn't shift how
+  many random numbers anything called afterward consumes.
+- `genome-core/operators.ts`: `randomAllele` (initial spawn generation)
+  now calls `weightedChoice` instead of plain `choice`. Mutation's
+  family-jump was deliberately left untouched -- tech parts never mutate
+  at all (short-circuited earlier in `mutate()`, docs/17's "tech never
+  mutates"), so a tank-vs-tank or tank-vs-pustule weight comparison can
+  only ever actually matter at initial generation, never at a jump.
+- Verified mathematically and by build: for a PURE ORGANIC pool (the
+  default `randomGenome` uses, and what `golden.txt` actually exercises),
+  every candidate keeps weight 1, so `weightedChoice` collapses to
+  exactly the same index as the old `choice` for the same draw -- the
+  golden test passed UNCHANGED, no `test:update-golden` needed, because
+  this change is a genuine no-op on the tested path. A 20,000-draw
+  statistical check of the mixed organic+tech pool (matching the Human
+  spawn pool) landed almost exactly on the intended ratio:
+  `tank_backpack` ~40.6%, `steel_tank` ~19.9%, everything else (including
+  `storage_bladder`) ~10% each -- double tank > single tank > pustule, in
+  that order, as asked.
+- `genome-core/harvest.ts` + `roster-client/Harvest.cs` (C# twin, kept in
+  lockstep): added `tank_backpack` to `STORAGE_FAMILIES` (capacity 85 --
+  two tanks beat one, short of a flat doubling) and to `Harvest.cs`'s
+  girth/length `Express` mirror (same bounds as `steel_tank`).
+- `creature-mesh/CreatureBuilder.cs` + `site/creature-renderer.js` (both
+  renderers, lockstep): new `tank_backpack` case restoring the exact
+  pre-e9dff23 geometry (frame plate, two inset tanks, contents-coloured
+  end caps + sight gauge, corner rivets), reusing the same `PackP`/`PackR`
+  mount frame `steel_tank` already uses so per-plan orientation (vertical
+  on upright bodies, flat-on-top on crab/arachnid/serpentine/blob) carries
+  over for free.
+- `docs/22-economy-system.md`: storage family table + battlefield-render
+  prose updated to four families and the new weighting.
+
+Tests: creature-mesh 86 green (was 84 -- two new: `TankBackpackShellIsMetal`
+plus a new `StorageVesselsBuildRealGeometry` InlineData case;
+`StorageContentsReadRedForBloodAndWhiteForBone`'s loop also covers the new
+family); roster-client 56 green (unchanged); genome-core 51 green
+including the unchanged golden digest; mutator-service 28 green
+(genome-core rebuilt and reinstalled as its `file:` dependency). Vendored
+`site/lib/*.js` recopied from the genome-core build per the repo's
+documented workflow; node --check clean. Whole-Unity-layer compile not
+re-run this turn (no unity-client script changed) -- creature-mesh/
+roster-client compiling clean covers the packages that did change.

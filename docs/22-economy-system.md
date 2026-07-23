@@ -173,7 +173,22 @@ Ordinary hands still gather (claws, pincers, chain blades tear at corpses at red
 | --- | --- | --- |
 | `storage_bladder` | organic | a translucent distended sac that visibly sloshes as it fills |
 | `steel_tank` | tech | a single riveted cylinder tank — filler cap, sight gauge showing the blood level, strapped to the back like a scuba tank — the human-army look |
+| `tank_backpack` | tech | a riveted rectangular backpack frame with two cylinder tanks inset side by side — the human-army's other tank silhouette |
 | `amber_vesicle` | biotech | clustered amber vesicles fused along the spine, each faintly glowing — the alien look |
+
+**Statistically weighted, not evenly split (creator direction, 2026-07).**
+Where a mixed-origin pool competes for the sensor slot (the Human Army spawn
+pool mixes organic+tech, [17](17-factions.md)), issued equipment should read
+as issued: `tank_backpack` draws 4× as often as a uniform pick, `steel_tank`
+2×, `storage_bladder` at the plain 1× everyone else gets — double tank beats
+single tank beats the organic sac, in that order. A `weight` field on
+`PartFamily` (default 1, i.e. unchanged uniform choice) and `Rng.
+weightedChoice` (one draw, same cost as the old uniform `choice`) carry
+this; only these two tech families are weighted, `antenna`/`horn`/
+`sensor_mast`/`amber_vesicle` are untouched. Organic-only generation (the
+Mad Doctors' own pool, `randomGenome`'s default) never sees a weight
+difference — every organic sensor family is still 1× — so the golden
+lineage digest did **not** need regenerating this time.
 
 Capacity = base + body bulk + the vessel's expressed size; the **blob plan gets a ×1.5 bonus** — an amorphous body *is* a bag ("blob body storage capacity"). Onboard capacity from §2 and vessel capacity pool together.
 
@@ -184,7 +199,7 @@ All of it is ordinary genetics end to end: these families mutate, splice, canali
 **Battlefield-side, now wired in (Unity):**
 
 - **`harvest.ts` has a C# twin** — `roster-client/Harvest.cs`, golden-verified against the real JS (the same Locomotion/Weapon discipline), so the Lab preview and the battlefield agree on gather rate, carry capacity, and how much a load slows a carrier.
-- **The six families render on the battlefield** — `creature-mesh` gained real geometry for all of them (sucker-mouth-with-tooth-rings, saw blade on a boom, pulsing siphon tubes, plus the three storage vessels below), so a bred harvester looks like one in the field, not a default stub. **Every body plan declares its own `back` socket** (position + outward surface normal), so the mount is exact per-plan, never a generic guess. A shared **pack frame** (`packP`/`packR` in the Lab, `PackP`/`PackR` in Unity — local axes *across* / *along* / *out of the surface*) lets one geometry definition orient correctly whether the back normal points backward (upright bodies: tetrapod, winged, avian, treant, floater → pack stands vertical) or upward (low horizontal bodies: crab, arachnid, serpentine, blob → pack lies flat on top, away from the tail). Their form reads by origin and their contents by resource: the **tech `steel_tank` is a single cylinder barrel strapped to the mount** — mostly proud of the hide with a saddle collar seating it against the body, the classic scuba/oxygen-tank silhouette (solid/functional, not embedded); the organic `storage_bladder` is **pus-filled sacs half-sunk in the trunk, bulging out through the skin**; the biotech `amber_vesicle` is a **cluster fused into the back, swelling through the hide**. Across all three the **contents read RED for blood / WHITE for bone** by the harvest tool — a glance tells you what a hauler carries.
+- **All seven families render on the battlefield** — `creature-mesh` gained real geometry for all of them (sucker-mouth-with-tooth-rings, saw blade on a boom, pulsing siphon tubes, plus the four storage vessels below), so a bred harvester looks like one in the field, not a default stub. **Every body plan declares its own `back` socket** (position + outward surface normal), so the mount is exact per-plan, never a generic guess. A shared **pack frame** (`packP`/`packR` in the Lab, `PackP`/`PackR` in Unity — local axes *across* / *along* / *out of the surface*) lets one geometry definition orient correctly whether the back normal points backward (upright bodies: tetrapod, winged, avian, treant, floater → pack stands vertical) or upward (low horizontal bodies: crab, arachnid, serpentine, blob → pack lies flat on top, away from the tail). Their form reads by origin and their contents by resource: the **tech `steel_tank` is a single cylinder barrel strapped to the mount** — mostly proud of the hide with a saddle collar seating it against the body, the classic scuba/oxygen-tank silhouette (solid/functional, not embedded); **`tank_backpack` is the other tech silhouette** — a riveted rectangular frame plate seated flat against the mount (inner half sunk into the body) with two cylinder tanks inset into the frame, one per side (this is the ORIGINAL `steel_tank` geometry, reinstated 2026-07 as its own family alongside the single-barrel redesign rather than replaced by it); the organic `storage_bladder` is **pus-filled sacs half-sunk in the trunk, bulging out through the skin**; the biotech `amber_vesicle` is a **cluster fused into the back, swelling through the hide**. Across all four the **contents read RED for blood / WHITE for bone** by the harvest tool — a glance tells you what a hauler carries.
 - **Gather / carry / weight is live in `MonsterAgent`** — a harvester that eats a citizen strips a load into its onboard tank scaled by its blood-gather rate (a lamprey-and-tank build is a real hauler); the carried load **slows the carrier via the exact `Harvest` speed factors — floored, and doubled for flyers** (the creator's weight rule, made real); and the player hauls a laden harvester back near its spawn, where it **banks automatically** into the session wallet and its speed recovers. Auto on arrival, but the hauling is the player's call — no unit ever walks off on its own.
 
 Still design-only (the larger docs/22 build-out): dedicated storage structures, medics, factories, and the full onboard blood/bone/brain pools of §2 — the harvester's single pooled `_carriedLoad` here is the first working slice of that system.

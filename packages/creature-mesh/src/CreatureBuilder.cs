@@ -1660,6 +1660,48 @@ namespace MadDr.CreatureMesh
                     }
                     break;
                 }
+                case "tank_backpack":
+                {
+                    // tech: the OTHER classic silhouette -- a riveted
+                    // rectangular frame plate seated flat against the
+                    // mount (inner half sunk into the body) with TWO
+                    // cylinder tanks inset into the frame, one per side,
+                    // so it reads as a real two-tank backpack rig rather
+                    // than steel_tank's single scuba barrel. End caps +
+                    // gauge show the contents (RED blood / WHITE bone).
+                    var top = n.Y > 0.6;
+                    var contents = store;
+                    var plW = 0.95 + 0.5 * girth;    // half-width across the body
+                    var plH = 1.1 + 0.7 * len;       // half-length along the spine
+                    const double plT = 0.34;          // plate half-thickness
+                    // plate centre sunk so the inner half seats in the body
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -plT * 0.55),
+                        PackR(top, plW, plH, plT), Palette.METDK, 0.7, 0, 12);
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -plT * 0.15),
+                        PackR(top, plW * 0.9, plH * 0.9, plT * 0.5), Palette.METAL, 0.75, 0, 12); // face panel
+                    // two tanks inset into the frame, outer face just proud
+                    var tR = plW * 0.34;
+                    var tHalf = plH * 0.66;
+                    foreach (var sx in Sides)
+                    {
+                        var tx = plW * 0.42 * sx;
+                        Prims.Tube(mb,
+                            new[] { PackP(s, top, tx, -tHalf, 0.02), PackP(s, top, tx, tHalf, 0.02) },
+                            new[] { tR, tR }, Palette.METAL, 0.78, 0, 12, 2);
+                        Prims.Ellipsoid(mb, PackP(s, top, tx, tHalf, 0.02), PackR(top, tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8); // end caps = contents
+                        Prims.Ellipsoid(mb, PackP(s, top, tx, -tHalf, 0.02), PackR(top, tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8);
+                        Prims.Ellipsoid(mb, PackP(s, top, tx, tHalf + 0.12, 0.02), new Vec3(0.14, 0.14, 0.14), Palette.METDK, 0.6, 0, 5); // filler cap
+                    }
+                    // a sight gauge strip down the frame's centre, contents-coloured
+                    Prims.Tube(mb, new[] { PackP(s, top, 0, -tHalf * 0.8, 0.05), PackP(s, top, 0, tHalf * 0.8, 0.05) },
+                        new[] { 0.08, 0.08 }, contents, 0.4, 0.4, 6);
+                    // corner rivets -- the functional-hardware read
+                    foreach (var sx in Sides)
+                        foreach (var sy in Sides)
+                            Prims.Ellipsoid(mb, PackP(s, top, plW * 0.86 * sx, plH * 0.82 * sy, 0.04),
+                                new Vec3(0.07, 0.07, 0.07), Palette.METDK, 0.8, 0, 4);
+                    break;
+                }
                 case "amber_vesicle":
                 {
                     // biotech: a cluster of vesicles fused INTO the body,

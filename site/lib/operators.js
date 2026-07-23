@@ -7,7 +7,7 @@
  * that pass validation (closure is enforced by tests).
  */
 import { BRAIN_TIERS, GENOME_VERSION, HEART_TIERS, SLOT_NAMES, clamp01, heartVigor, } from "./genome.js";
-import { BODY_PLANS, familiesInClass, homologOf, originOf, } from "./catalog.js";
+import { BODY_PLANS, familiesInClass, homologOf, originOf, weightOf, } from "./catalog.js";
 import { viability } from "./energy.js";
 const DEFAULTS = {
     rate: 0.45,
@@ -20,7 +20,8 @@ const DEFAULTS = {
 const FEED_BOOST = 3;
 // ---- random generation -------------------------------------------------------
 export function randomAllele(slot, rng, origins = ["organic"]) {
-    const family = rng.choice(familiesInClass(slot, origins));
+    const families = familiesInClass(slot, origins);
+    const family = rng.weightedChoice(families, families.map(weightOf));
     return { family, params: sixOf(() => rng.next()) };
 }
 export function randomBody(rng, plan) {

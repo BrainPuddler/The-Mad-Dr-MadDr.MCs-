@@ -61,6 +61,7 @@ export const HARVEST_TOOLS: Readonly<Record<string, GatherSpec>> = {
 export const STORAGE_FAMILIES: Readonly<Record<string, number>> = {
   storage_bladder: 60,
   steel_tank: 70,
+  tank_backpack: 85, // two tanks beat one, short of a flat doubling
   amber_vesicle: 55,
 };
 

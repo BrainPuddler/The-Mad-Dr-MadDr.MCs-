@@ -74,6 +74,7 @@ namespace MadDr.RosterClient
         {
             { "storage_bladder", 60 },
             { "steel_tank", 70 },
+            { "tank_backpack", 85 },
             { "amber_vesicle", 55 },
         };
 
@@ -179,6 +180,9 @@ namespace MadDr.RosterClient
                     if (axis == Axis.Girth) { lo = 0.4; hi = 1.0; } else { lo = 0.2; hi = 0.8; }
                     break;
                 case "steel_tank":
+                    if (axis == Axis.Girth) { lo = 0.35; hi = 0.9; } else { lo = 0.3; hi = 0.9; }
+                    break;
+                case "tank_backpack":
                     if (axis == Axis.Girth) { lo = 0.35; hi = 0.9; } else { lo = 0.3; hi = 0.9; }
                     break;
                 case "amber_vesicle": if (axis == Axis.Girth) { lo = 0.3; hi = 0.9; } break;

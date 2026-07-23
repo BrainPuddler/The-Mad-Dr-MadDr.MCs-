@@ -2159,6 +2159,34 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       }
       break;
     }
+    case 'tank_backpack': {
+      // tech: the OTHER classic silhouette -- a riveted rectangular frame
+      // plate seated flat against the mount (inner half sunk into the
+      // body) with TWO cylinder tanks inset into the frame, one per side,
+      // so it reads as a real two-tank backpack rig rather than
+      // steel_tank's single scuba barrel. End caps + gauge show the
+      // contents (RED blood / WHITE bone, o.store).
+      const top = N[1] > 0.6;
+      const store = o.store ?? BLOOD_RED;
+      const plW = (0.95 + 0.5*girth);
+      const plH = (1.1 + 0.7*len);
+      const plT = 0.34;
+      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.55), packR(top, plW, plH, plT), METDK, 0.7, 0, 12);
+      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.15), packR(top, plW*0.9, plH*0.9, plT*0.5), METAL, 0.75, 0, 12);   // face panel
+      const tR = plW*0.34, tHalf = plH*0.66;
+      for (const sx of [1, -1]) {
+        const tx = plW*0.42*sx;
+        tube(mb, [packP(S, top, tx, -tHalf, 0.02), packP(S, top, tx, tHalf, 0.02)], [tR, tR], METAL, 0.78, 0, 12, 2);
+        ellipsoid(mb, packP(S, top, tx, tHalf, 0.02), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8);   // caps = contents
+        ellipsoid(mb, packP(S, top, tx, -tHalf, 0.02), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8);
+        ellipsoid(mb, packP(S, top, tx, tHalf + 0.12, 0.02), [0.14, 0.14, 0.14], METDK, 0.6, 0, 5);   // filler cap
+      }
+      // sight gauge strip down the frame centre, contents-coloured
+      tube(mb, [packP(S, top, 0, -tHalf*0.8, 0.05), packP(S, top, 0, tHalf*0.8, 0.05)], [0.08, 0.08], store, 0.4, 0.4, 6);
+      for (const sx of [1, -1]) for (const sy of [1, -1])   // corner rivets
+        ellipsoid(mb, packP(S, top, plW*0.86*sx, plH*0.82*sy, 0.04), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
+      break;
+    }
     case 'amber_vesicle': {
       // biotech: a cluster of vesicles fused INTO the body, half-sunk and
       // swelling out through the hide, glowing with their contents (RED

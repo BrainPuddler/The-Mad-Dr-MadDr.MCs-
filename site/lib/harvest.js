@@ -40,6 +40,7 @@ export const HARVEST_TOOLS = {
 export const STORAGE_FAMILIES = {
     storage_bladder: 60,
     steel_tank: 70,
+    tank_backpack: 85, // two tanks beat one, short of a flat doubling
     amber_vesicle: 55,
 };
 // v0.1 tuning knobs ----------------------------------------------------------

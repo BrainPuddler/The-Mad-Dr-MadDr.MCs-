@@ -109,15 +109,31 @@ export const FAMILIES = {
     // sensor homolog so it breeds within the existing Hox grammar -- no new
     // slot, no schema change; the trade is real: a tank on your back is a
     // sensor you don't have.
+    //
+    // Weighted per creator direction (docs/17, Human Army spawn pool mixes
+    // organic+tech): issued equipment should statistically read as issued --
+    // tank_backpack (hardware) > steel_tank (hardware) > storage_bladder
+    // (flesh), in that order -- not the flat 1:1:1 draw a mixed origin pool
+    // gets by default. Only these three are touched; antenna/horn/sensor_mast
+    // (regular senses) and amber_vesicle (the alien vessel) keep the
+    // implicit default weight of 1.
     storage_bladder: {
         homolog: "sensor", origin: "organic",
         bounds: bounds({ girth: [0.4, 1.0], length: [0.2, 0.8] }),
         invariants: "a translucent distended dorsal sac, membrane-veined, that visibly sloshes as it fills",
+        weight: 1,
     },
     steel_tank: {
         homolog: "sensor", origin: "tech",
         bounds: bounds({ girth: [0.35, 0.9], length: [0.3, 0.9], curl: [0.0, 0.2] }),
         invariants: "a riveted steel dorsal tank with a filler cap and a sight gauge; sloshes dully when struck",
+        weight: 2,
+    },
+    tank_backpack: {
+        homolog: "sensor", origin: "tech",
+        bounds: bounds({ girth: [0.35, 0.9], length: [0.3, 0.9], curl: [0.0, 0.2] }),
+        invariants: "a riveted rectangular steel backpack frame, one cylinder tank inset on each side, filler caps and a sight gauge; sloshes dully when struck",
+        weight: 4,
     },
     amber_vesicle: {
         homolog: "sensor", origin: "biotech",
@@ -260,6 +276,14 @@ export function originOf(family) {
     if (!f)
         throw new Error(`unknown part family: ${family}`);
     return f.origin;
+}
+/** Relative pick weight for random family selection -- 1 (plain uniform)
+ * for every family that doesn't declare its own. */
+export function weightOf(family) {
+    const f = FAMILIES[family];
+    if (!f)
+        throw new Error(`unknown part family: ${family}`);
+    return f.weight ?? 1;
 }
 export function isVestigial(family) {
     return FAMILIES[family]?.vestigial === true;

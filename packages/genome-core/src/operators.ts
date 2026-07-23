@@ -34,6 +34,7 @@ import {
   familiesInClass,
   homologOf,
   originOf,
+  weightOf,
   type Origin,
 } from "./catalog.js";
 import { viability } from "./energy.js";
@@ -75,7 +76,8 @@ export function randomAllele(
   rng: Rng,
   origins: readonly Origin[] = ["organic"],
 ): PartAllele {
-  const family = rng.choice(familiesInClass(slot, origins));
+  const families = familiesInClass(slot, origins);
+  const family = rng.weightedChoice(families, families.map(weightOf));
   return { family, params: sixOf(() => rng.next()) };
 }
 
