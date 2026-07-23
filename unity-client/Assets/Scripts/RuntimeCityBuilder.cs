@@ -503,6 +503,24 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     private Dictionary<HexCoord, float> _roofCache;
     private int _roofCacheVersion = -1;
 
+    /// <summary>Rebuilds `_roofCache` (standing-building footprint hex ->
+    /// roof height) if the city has changed since the last build. Shared by
+    /// `SurfaceHeightAt` and `InsideBuildingFootprint` -- both need exactly
+    /// "which hexes currently have a standing building on them," just for
+    /// different questions (how tall / does this point land inside).</summary>
+    private void EnsureRoofCache()
+    {
+        if (_roofCacheVersion == _cityVersion && _roofCache != null) return;
+        _roofCache = new Dictionary<HexCoord, float>();
+        foreach (var b in _battlefield.Buildings)
+        {
+            if (!b.BlocksMovement) continue;
+            var h = HeightForTier(b.Building.Tier);
+            foreach (var hex in b.Building.Footprint) _roofCache[hex] = h;
+        }
+        _roofCacheVersion = _cityVersion;
+    }
+
     /// <summary>The standing surface at a world position: a STANDING
     /// building's roof height on its footprint hexes, 0 (street level)
     /// everywhere else -- including on rubble, so a perch whose building
@@ -511,19 +529,51 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// dictionary hit, not a building-list walk.</summary>
     public float SurfaceHeightAt(Vector3 worldPos)
     {
-        if (_roofCacheVersion != _cityVersion || _roofCache == null)
-        {
-            _roofCache = new Dictionary<HexCoord, float>();
-            foreach (var b in _battlefield.Buildings)
-            {
-                if (!b.BlocksMovement) continue;
-                var h = HeightForTier(b.Building.Tier);
-                foreach (var hex in b.Building.Footprint) _roofCache[hex] = h;
-            }
-            _roofCacheVersion = _cityVersion;
-        }
+        EnsureRoofCache();
         float height;
         return _roofCache.TryGetValue(HexAt(worldPos), out height) ? height : 0f;
+    }
+
+    // Half the square footprint SpawnCube actually renders a building
+    // cube at (localScale.x/z = HexCoord.HexMeters * 0.9, axis-aligned, no
+    // rotation) -- NOT the hex's own inradius. A hex's circumradius
+    // (~11.55m) is smaller than this cube's half-diagonal (~12.73m), so a
+    // building's rendered corners poke a bit past its own hex boundary
+    // into a neighbouring hex's space. Anything treating "this hex isn't
+    // in the blocked set" as "this exact point is clear" can be fooled by
+    // that overhang -- see InsideBuildingFootprint's own header for where
+    // this bit a real call site.
+    private const float BuildingFootprintHalfExtent = (float)(HexCoord.HexMeters * 0.9) / 2f;
+
+    /// <summary>True if `worldPos` falls inside any standing building's
+    /// ACTUAL rendered footprint -- checks the candidate's own hex plus its
+    /// six neighbours (the only hexes close enough for a building cube to
+    /// reach, per `BuildingFootprintHalfExtent`'s comment), not a hex-set
+    /// membership test alone. Exists because docs/12 (2026-07) traced a
+    /// real bug to exactly this gap: `MonsterAgent.TickSettle`'s per-step
+    /// "is the next step's hex blocked" check let a unit creeping toward a
+    /// group ring-settle target (its radius grows with group size, with no
+    /// upper bound tied to the city layout) walk into a building's
+    /// corner overhang without the step's own hex ever being flagged
+    /// blocked. Cheap (<=7 dictionary lookups), meant for occasional
+    /// spot-picking/step-validation call sites, not a per-frame-per-unit
+    /// hot path.</summary>
+    public bool InsideBuildingFootprint(Vector3 worldPos)
+    {
+        EnsureRoofCache();
+        var hex = HexAt(worldPos);
+        if (BuildingCovers(hex, worldPos)) return true;
+        foreach (var n in hex.Neighbors())
+            if (BuildingCovers(n, worldPos)) return true;
+        return false;
+    }
+
+    private bool BuildingCovers(HexCoord hex, Vector3 worldPos)
+    {
+        if (!_roofCache.ContainsKey(hex)) return false;
+        var c = WorldOf(hex);
+        return Mathf.Abs(worldPos.x - c.x) <= BuildingFootprintHalfExtent
+            && Mathf.Abs(worldPos.z - c.z) <= BuildingFootprintHalfExtent;
     }
 
     // ---- terrain ---------------------------------------------------------------

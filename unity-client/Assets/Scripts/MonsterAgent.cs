@@ -559,7 +559,18 @@ public class MonsterAgent : MonoBehaviour
     /// natural features"): each step is checked against the SAME blocked-
     /// hex set pathfinding uses (buildings, water) before committing, so a
     /// unit settling toward the group never clips into one -- it just
-    /// stops dead at the boundary and gives up the creep for good.</summary>
+    /// stops dead at the boundary and gives up the creep for good. Hex
+    /// membership alone isn't quite enough, though: a building's rendered
+    /// footprint (RuntimeCityBuilder.InsideBuildingFootprint's header
+    /// explains why) is wider than its own hex and can overhang into a
+    /// NEIGHBOURING hex that the blocked-hex set never flags -- exactly the
+    /// gap a ring-settle target (its radius grows with group size,
+    /// unbounded by anything in the city) can walk a creeping unit into.
+    /// So a step is also rejected once it lands inside that overhang, not
+    /// just once it lands in a blocked hex. Ground-only (`!_flying`) --
+    /// a flyer's own altitude-aware Blocked() already decides what it can
+    /// clear; this XZ footprint check has no notion of altitude and would
+    /// wrongly ground a flyer passing safely above a short building.</summary>
     private Vector3 TickSettle(float dt)
     {
         if (_settleTarget.HasValue && _builder != null)
@@ -576,7 +587,8 @@ public class MonsterAgent : MonoBehaviour
                 var next = transform.position + dir * step;
 
                 var hex = _builder.HexAt(next);
-                if (_builder.City.Contains(hex) && !Blocked().Contains(hex))
+                var clipsBuilding = !_flying && _builder.InsideBuildingFootprint(next);
+                if (_builder.City.Contains(hex) && !Blocked().Contains(hex) && !clipsBuilding)
                 {
                     transform.rotation = Quaternion.Slerp(transform.rotation,
                         Quaternion.LookRotation(dir, Vector3.up), dt * 4f);

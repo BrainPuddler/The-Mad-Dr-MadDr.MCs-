@@ -443,3 +443,58 @@ a two-way swap), which the current design handles correctly.
 Status: Phase D done. Phase E (cleanup + tune -- remove any remaining
 shims, tune weights against ring-settle and corridor-jam cases, final
 docs/12 entry closing the plan) remains not started.
+
+## 2026-07 — Fix: group ring-settle could walk a unit into a building overhang
+
+Creator report: "units picking parking spots... sometimes end up within a
+building... they must ALWAYS be cognisant of their environment."
+
+Diagnosis (two candidates were checked, one falsified before fixing the
+real one):
+
+- First suspected `TrafficCar.ParkHere`'s fixed +-2.5m curb offset landing
+  in a neighbouring building. Built a standalone harness sweeping every
+  heading (0-360 degrees) and both offset signs against every real hex
+  neighbour direction (`MadDr.CityGen.HexCoord`): 0/864 configurations ever
+  reached a building, because a building's rendered footprint is at
+  minimum ~7.3m from the ROAD hex's own center (hex spacing 20m minus the
+  building cube's ~12.73m half-diagonal), well past a 2.5m offset. This
+  theory was geometrically impossible and no code was changed here.
+- The real, reachable bug: `MonsterAgent.TickSettle`'s per-step check
+  (`!Blocked().Contains(hex)`) is hex-membership only. A building's
+  rendered cube (SpawnCube's localScale = HexCoord.HexMeters * 0.9,
+  axis-aligned, no rotation) has a half-diagonal (~12.73m) LARGER than a
+  hex's own circumradius (~11.55m), so it overhangs past its own hex
+  boundary into a neighbour's space -- a neighbour hex that is never
+  itself in the blocked set. `WaypointCommander.RingTarget` (the group
+  ring-settle target a unit creeps toward once idle) has an UNBOUNDED
+  radius that grows with group size (`r = hole + pitch * sqrt(index)`),
+  so a large group ordered near a building can produce ring targets whose
+  straight-line steps land in that overhang -- the per-step check waves
+  them through because the step's own hex was never flagged blocked.
+
+Verified with a standalone harness compiling the real `RingTarget` (copied
+verbatim from `WaypointCommander.cs`) and the real hex-cube-overlap math
+against the real `HexCoord` (`MadDr.CityGen.dll`): for a 60-unit group
+ring-settling next to one building, 7 of 60 targets were geometrically
+inside the building's real footprint; the OLD hex-only check would have
+let 1 of those 7 through untouched (the reachable bug, reproduced); the
+NEW check catches all 7.
+
+Fix:
+- `RuntimeCityBuilder.cs`: extracted the existing `SurfaceHeightAt` roof
+  cache into a shared `EnsureRoofCache()`; added `InsideBuildingFootprint
+  (Vector3)`, checking a world position against the actual rendered
+  footprint of the candidate hex AND its six neighbours (not hex
+  membership alone), using the same roof cache so no extra bookkeeping.
+- `MonsterAgent.cs`: `TickSettle`'s per-step check now also rejects a step
+  that clips a building's footprint (`!_flying &&
+  _builder.InsideBuildingFootprint(next)`), on top of the existing
+  hex-blocked check. Ground-only -- a flyer's own altitude-aware
+  `Blocked()` already governs what it can clear, and this XZ-only check
+  has no altitude awareness of its own.
+- `TrafficCar.cs`: unchanged -- the originally-suspected bug there was
+  disproven, not fixed.
+
+Verified: flightcheck stub-compile clean. No visual verification (no
+Editor in this environment).
