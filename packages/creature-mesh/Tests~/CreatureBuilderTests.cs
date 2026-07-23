@@ -631,6 +631,64 @@ public class CreatureBuilderTests
         Assert.True(HasColor(CreatureBuilder.Build(Genome(hand: "ichor_siphon")), Palette.ICHOR));
     }
 
+    /// <summary>Isolates the vertices a storage vessel adds to `plan` by
+    /// diffing against a `sensor_stub` baseline build (set difference on
+    /// rounded position, not chunk index -- sensor is built BEFORE eye/leg,
+    /// so a chunk-index offset would silently include unrelated eye/leg
+    /// geometry once the two builds' chunk counts diverge).</summary>
+    private static (double minY, double zAtMinY, double maxY, double zAtMaxY) VesselYZExtent(string plan, string family)
+    {
+        var baseline = CreatureBuilder.Build(Genome(plan: plan, hand: "lamprey_maw", sensor: "sensor_stub"));
+        var r = CreatureBuilder.Build(Genome(plan: plan, hand: "lamprey_maw", sensor: family));
+        var baseVerts = new System.Collections.Generic.HashSet<(double, double, double)>();
+        foreach (var c in baseline.Chunks)
+            for (var i = 0; i < c.VertexCount; i++)
+                baseVerts.Add((System.Math.Round(c.Positions[i * 3], 4), System.Math.Round(c.Positions[i * 3 + 1], 4), System.Math.Round(c.Positions[i * 3 + 2], 4)));
+        double minY = double.PositiveInfinity, maxY = double.NegativeInfinity, zAtMinY = 0, zAtMaxY = 0;
+        foreach (var c in r.Chunks)
+            for (var i = 0; i < c.VertexCount; i++)
+            {
+                var y = c.Positions[i * 3 + 1];
+                var z = c.Positions[i * 3 + 2];
+                var key = (System.Math.Round(c.Positions[i * 3], 4), System.Math.Round(y, 4), System.Math.Round(z, 4));
+                if (baseVerts.Contains(key)) continue;
+                if (y < minY) { minY = y; zAtMinY = z; }
+                if (y > maxY) { maxY = y; zAtMaxY = z; }
+            }
+        return (minY, zAtMinY, maxY, zAtMaxY);
+    }
+
+    [Fact]
+    public void AvianStorageVesselTiltsParallelToTheSlopedBack()
+    {
+        // avian's back genuinely slopes (PlanAvian's torso leans forward
+        // as it rises), so a correctly tilted pack's Z should shift with
+        // Y across its own geometry, and shift TOWARD the body (less far
+        // back) at the top -- matching the body leaning away from it up
+        // there, exactly like the "other bodies stay untouched" test below
+        // proves an untilted pack does NOT.
+        var (minY, zAtMinY, maxY, zAtMaxY) = VesselYZExtent("avian", "steel_tank");
+        Assert.True(maxY > minY, "no steel_tank geometry found on avian");
+        var dz = zAtMaxY - zAtMinY;
+        Assert.True(dz > 0.03, $"avian's tank shows no measurable tilt (dz={dz})");
+    }
+
+    [Theory]
+    [InlineData("tetrapod")]
+    [InlineData("winged")]
+    [InlineData("treant")]
+    public void OtherPlansStorageVesselStaysUntilted(string plan)
+    {
+        // regression guard for the avian-only tilt fix: every other
+        // vertical-mount plan's pack geometry must be BIT-IDENTICAL to
+        // before PackTilt existed -- Z must not vary with Y at all (their
+        // Sock.PackTilt is left at its default 0, which is algebraically
+        // the exact original untitled formula, not just visually close).
+        var (minY, zAtMinY, maxY, zAtMaxY) = VesselYZExtent(plan, "steel_tank");
+        Assert.True(maxY > minY, $"no steel_tank geometry found on {plan}");
+        Assert.Equal(zAtMinY, zAtMaxY, 6); // exact, not approximate
+    }
+
     [Theory]
     [InlineData("storage_bladder")]
     [InlineData("steel_tank")]

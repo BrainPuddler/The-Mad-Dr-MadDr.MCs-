@@ -457,8 +457,17 @@ function dorsalSock(sockets) {
 // VERTICALLY (along = +Y, out = -Z); a horizontal body's top-mount (crab,
 // arachnid -- normal points up) lays it HORIZONTALLY on the shell like an
 // actual backpack. Positive `o` is OUT of the body; negative sinks in.
-function packP(S, top, a, l, o) {
-  return top ? [S[0] + a, S[1] + o, S[2] + l] : [S[0] + a, S[1] + l, S[2] - o];
+//
+// `tilt` (sock.packTilt, undefined/0 for every plan except avian) rotates
+// the vertical mount's (l, o) pair around the across-axis before mapping
+// to world Y/Z -- at tilt=0 this is algebraically identical to the
+// untilted mapping. Top-mounted (horizontal) packs ignore tilt: no
+// top-mounted plan sets it, and a sideways-lying pack has no "up the
+// spine" to tilt (creature-mesh C# twin: CreatureBuilder.PackP).
+function packP(S, top, a, l, o, tilt = 0) {
+  if (top) return [S[0] + a, S[1] + o, S[2] + l];
+  const cl = Math.cos(tilt), sl = Math.sin(tilt);
+  return [S[0] + a, S[1] + l*cl + o*sl, S[2] + l*sl - o*cl];
 }
 function packR(top, a, l, o) {
   return top ? [a, o, l] : [a, l, o];
@@ -1652,10 +1661,17 @@ function planAvian(mb, o) {
     sensor: { p: sensP, nrm: ellipN(sensP, head.hC, head.hR), mirror: true, out: 1, anim: BREATH_H, gait: HEADBOB },
     eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
     // the raptor's sloped upper back, between chest and shoulders -- high
-    // and forward, well clear of the tail counterbalance (docs/22)
+    // and forward, well clear of the tail counterbalance (docs/22).
+    // Unlike every other plan's back, this one is genuinely SLOPED (the
+    // torso leans forward as it rises, hence the Y component in the
+    // normal below) rather than near-vertical -- packTilt keeps a mounted
+    // pack's own "up the spine" axis parallel to that slope instead of
+    // world-vertical (creator report, 2026-07), derived from this exact
+    // normal so the two can't drift apart.
     back:   { p: [0, (levels[2].y + levels[3].y) * 0.5,
                   ((levels[2].z - levels[2].rz) + (levels[3].z - levels[3].rz)) * 0.5 * 0.95],
-              nrm: V.norm([0, 0.5, -0.87]), mirror: false, out: 1, anim: BREATH_T },
+              nrm: V.norm([0, 0.5, -0.87]), mirror: false, out: 1, anim: BREATH_T,
+              packTilt: Math.atan2(0.5, 0.87) },
   };
 }
 
@@ -1803,6 +1819,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
   // the rig: parts leave the body along the surface normal at the socket,
   // so nothing buries into a chest or skewers a dome on extreme morphs
   const N = sock.nrm ? V.norm([side * sock.nrm[0], sock.nrm[1], sock.nrm[2]]) : [side, 0, 0];
+  const packTilt = sock.packTilt ?? 0;   // 0 for every plan except avian's back socket
   mb.setAnim(sock.anim ?? ANIM0);   // parts ride whatever their mount does
   mb.setGait(sock.gait ?? GAIT0);
   // joint hardware (limbJoint) is placed per family below, sized from the
@@ -2120,11 +2137,11 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       for (let i = 0; i < nBlob; i++) {
         const t = i / (nBlob - 1 || 1) - 0.5;
         const r = blobR * (0.8 + 0.35 * Math.abs(Math.sin(i*1.7)));
-        const c = packP(S, top, t*blobR*0.9, t*blobR*0.5, -r*0.45);   // sunk ~45% in
+        const c = packP(S, top, t*blobR*0.9, t*blobR*0.5, -r*0.45, packTilt);   // sunk ~45% in
         ellipsoid(mb, c, packR(top, r, r*0.95, r*1.05), store, 0.3, 0.1, 10,
           null, (tt) => [0, 0, 0.05, i*1.6 + tt*1.1]);   // each sac throbs
         mb.setAlpha(0.5);
-        ellipsoid(mb, packP(S, top, t*blobR*0.9, t*blobR*0.5, -r*0.15),
+        ellipsoid(mb, packP(S, top, t*blobR*0.9, t*blobR*0.5, -r*0.15, packTilt),
           packR(top, r*0.82, r*0.78, r*0.5), o.skin, 0.35, 0, 9, o.skinFn);
         mb.setAlpha(1);
       }
@@ -2142,20 +2159,20 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       const tHalf = (1.05 + 0.75*len);   // barrel half-length along the spine
       const sink = tR*0.18;              // strapped-on, not embedded
       // saddle collar seats the tank against the body
-      ellipsoid(mb, packP(S, top, 0, 0, -sink*2.2), packR(top, tR*1.15, tR*0.4, tR*0.5), METAL, 0.5, 0, 10);
+      ellipsoid(mb, packP(S, top, 0, 0, -sink*2.2, packTilt), packR(top, tR*1.15, tR*0.4, tR*0.5), METAL, 0.5, 0, 10);
       // the barrel itself
-      tube(mb, [packP(S, top, 0, -tHalf, -sink), packP(S, top, 0, tHalf, -sink)], [tR, tR], METAL, 0.78, 0, 14, 2);
+      tube(mb, [packP(S, top, 0, -tHalf, -sink, packTilt), packP(S, top, 0, tHalf, -sink, packTilt)], [tR, tR], METAL, 0.78, 0, 14, 2);
       // contents-coloured end caps
-      ellipsoid(mb, packP(S, top, 0, tHalf, -sink), packR(top, tR*0.95, tR*0.35, tR*0.95), store, 0.5, 0.15, 10);
-      ellipsoid(mb, packP(S, top, 0, -tHalf, -sink), packR(top, tR*0.95, tR*0.35, tR*0.95), store, 0.5, 0.15, 10);
+      ellipsoid(mb, packP(S, top, 0, tHalf, -sink, packTilt), packR(top, tR*0.95, tR*0.35, tR*0.95), store, 0.5, 0.15, 10);
+      ellipsoid(mb, packP(S, top, 0, -tHalf, -sink, packTilt), packR(top, tR*0.95, tR*0.35, tR*0.95), store, 0.5, 0.15, 10);
       // filler / valve cap
-      ellipsoid(mb, packP(S, top, 0, tHalf + 0.16, -sink), [0.15, 0.15, 0.15], METDK, 0.6, 0, 6);
+      ellipsoid(mb, packP(S, top, 0, tHalf + 0.16, -sink, packTilt), [0.15, 0.15, 0.15], METDK, 0.6, 0, 6);
       // sight gauge running along the barrel, contents-coloured
-      tube(mb, [packP(S, top, tR*0.55, -tHalf*0.75, -sink), packP(S, top, tR*0.55, tHalf*0.75, -sink)], [0.08, 0.08], store, 0.4, 0.4, 6);
+      tube(mb, [packP(S, top, tR*0.55, -tHalf*0.75, -sink, packTilt), packP(S, top, tR*0.55, tHalf*0.75, -sink, packTilt)], [0.08, 0.08], store, 0.4, 0.4, 6);
       // strap rivets -- the functional-hardware read
       for (const sx of [1, -1]) {
-        ellipsoid(mb, packP(S, top, tR*0.85*sx, -tHalf*0.5, -sink*1.6), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
-        ellipsoid(mb, packP(S, top, tR*0.85*sx, tHalf*0.5, -sink*1.6), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
+        ellipsoid(mb, packP(S, top, tR*0.85*sx, -tHalf*0.5, -sink*1.6, packTilt), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
+        ellipsoid(mb, packP(S, top, tR*0.85*sx, tHalf*0.5, -sink*1.6, packTilt), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
       }
       break;
     }
@@ -2171,20 +2188,20 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       const plW = (0.95 + 0.5*girth);
       const plH = (1.1 + 0.7*len);
       const plT = 0.34;
-      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.55), packR(top, plW, plH, plT), METDK, 0.7, 0, 12);
-      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.15), packR(top, plW*0.9, plH*0.9, plT*0.5), METAL, 0.75, 0, 12);   // face panel
+      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.55, packTilt), packR(top, plW, plH, plT), METDK, 0.7, 0, 12);
+      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.15, packTilt), packR(top, plW*0.9, plH*0.9, plT*0.5), METAL, 0.75, 0, 12);   // face panel
       const tR = plW*0.34, tHalf = plH*0.66;
       for (const sx of [1, -1]) {
         const tx = plW*0.42*sx;
-        tube(mb, [packP(S, top, tx, -tHalf, 0.02), packP(S, top, tx, tHalf, 0.02)], [tR, tR], METAL, 0.78, 0, 12, 2);
-        ellipsoid(mb, packP(S, top, tx, tHalf, 0.02), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8);   // caps = contents
-        ellipsoid(mb, packP(S, top, tx, -tHalf, 0.02), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8);
-        ellipsoid(mb, packP(S, top, tx, tHalf + 0.12, 0.02), [0.14, 0.14, 0.14], METDK, 0.6, 0, 5);   // filler cap
+        tube(mb, [packP(S, top, tx, -tHalf, 0.02, packTilt), packP(S, top, tx, tHalf, 0.02, packTilt)], [tR, tR], METAL, 0.78, 0, 12, 2);
+        ellipsoid(mb, packP(S, top, tx, tHalf, 0.02, packTilt), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8);   // caps = contents
+        ellipsoid(mb, packP(S, top, tx, -tHalf, 0.02, packTilt), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8);
+        ellipsoid(mb, packP(S, top, tx, tHalf + 0.12, 0.02, packTilt), [0.14, 0.14, 0.14], METDK, 0.6, 0, 5);   // filler cap
       }
       // sight gauge strip down the frame centre, contents-coloured
-      tube(mb, [packP(S, top, 0, -tHalf*0.8, 0.05), packP(S, top, 0, tHalf*0.8, 0.05)], [0.08, 0.08], store, 0.4, 0.4, 6);
+      tube(mb, [packP(S, top, 0, -tHalf*0.8, 0.05, packTilt), packP(S, top, 0, tHalf*0.8, 0.05, packTilt)], [0.08, 0.08], store, 0.4, 0.4, 6);
       for (const sx of [1, -1]) for (const sy of [1, -1])   // corner rivets
-        ellipsoid(mb, packP(S, top, plW*0.86*sx, plH*0.82*sy, 0.04), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
+        ellipsoid(mb, packP(S, top, plW*0.86*sx, plH*0.82*sy, 0.04, packTilt), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
       break;
     }
     case 'amber_vesicle': {
@@ -2198,7 +2215,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       for (let i = 0; i < nV; i++) {
         const t = i / (nV - 1 || 1) - 0.5;
         const r = vR * (0.7 + 0.35 * Math.abs(Math.sin(i*1.3)));
-        const p = packP(S, top, Math.sin(i*2.4)*vR*0.7, t*vR*2.4, -r*0.4);   // sunk ~40% in
+        const p = packP(S, top, Math.sin(i*2.4)*vR*0.7, t*vR*2.4, -r*0.4, packTilt);   // sunk ~40% in
         mb.setAlpha(0.82);
         ellipsoid(mb, p, packR(top, r, r*0.95, r*1.05), store, 0.25, 0.45, 8, null,
           (tt) => [0, 0, 0.05, i*1.9 + tt*1.1]);   // each vesicle breathes

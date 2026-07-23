@@ -777,13 +777,22 @@ namespace MadDr.CreatureMesh
                 Eye = EyeSock(eyeP, head),
                 // the raptor's sloped upper back, between chest and
                 // shoulders -- high and forward, well clear of the tail
-                // counterbalance at the body's low rear
+                // counterbalance at the body's low rear. Unlike every other
+                // plan's back, this one is genuinely SLOPED (the torso
+                // leans forward as it rises, hence the Y component in the
+                // normal below) rather than near-vertical -- PackTilt keeps
+                // a mounted pack's own "up the spine" axis parallel to that
+                // slope instead of world-vertical (creator report, 2026-07),
+                // derived from this exact normal so the two can't drift
+                // apart. atan2(Y,-Z): the tilt away from straight-back
+                // (Nrm=(0,0,-1) would be tilt=0) toward this normal.
                 Back = new Sock
                 {
                     P = new Vec3(0, (levels[2].Y + levels[3].Y) * 0.5,
                         ((levels[2].Z - levels[2].Rz) + (levels[3].Z - levels[3].Rz)) * 0.5 * 0.95),
                     Nrm = new Vec3(0, 0.5, -0.87).Norm(),
                     Mirror = false,
+                    PackTilt = Math.Atan2(0.5, 0.87),
                 },
                 Leg = new LegSocketInfo
                 {
@@ -1184,6 +1193,19 @@ namespace MadDr.CreatureMesh
             public bool Tiny;
             public double FaceR;
             public double ArmCapLen = double.PositiveInfinity;
+            /// <summary>Radians the storage-pack frame's "vertical" mount
+            /// (PackP/PackR, topMount=false) rotates around the across-axis
+            /// before mapping to world space -- 0 (the default every OTHER
+            /// plan leaves this at) reproduces the exact original world-Y/-Z
+            /// mapping, bit-for-bit. Only avian's Back socket sets this: its
+            /// torso silhouette leans forward as it rises (PlanAvian's lathe
+            /// levels), so the back surface itself is sloped, not vertical --
+            /// a pack rendered with the old fixed world-axis frame floated at
+            /// the wrong angle relative to the actual body (creator report,
+            /// 2026-07: "It need to tilt... Parallel to the angle of the
+            /// geometry of the back"). No other plan's pack looked wrong, so
+            /// no other plan's Sock sets this.</summary>
+            public double PackTilt;
         }
 
         private static bool IsStorageVessel(string family)
@@ -1200,12 +1222,20 @@ namespace MadDr.CreatureMesh
         // horizontal body's top-mount lays it HORIZONTALLY on the shell
         // (along = +Z, out = +Y), like an actual backpack. Positive `o`
         // is always OUT of the body; negative `o` sinks into the trunk.
+        //
+        // `tilt` (Sock.PackTilt) rotates the vertical mount's (along, out)
+        // pair around the across-axis before mapping to world Y/Z -- at
+        // tilt=0 (every plan except avian) this is algebraically identical
+        // to the untilted mapping, not just visually close. Top-mounted
+        // (horizontal) packs ignore tilt entirely: no top-mounted plan sets
+        // it, and a sideways-lying pack has no "up the spine" to tilt.
 
-        private static Vec3 PackP(Vec3 s, bool topMount, double a, double l, double o)
+        private static Vec3 PackP(Vec3 s, bool topMount, double a, double l, double o, double tilt = 0)
         {
-            return topMount
-                ? new Vec3(s.X + a, s.Y + o, s.Z + l)
-                : new Vec3(s.X + a, s.Y + l, s.Z - o);
+            if (topMount) return new Vec3(s.X + a, s.Y + o, s.Z + l);
+            var cl = Math.Cos(tilt);
+            var sl = Math.Sin(tilt);
+            return new Vec3(s.X + a, s.Y + l * cl + o * sl, s.Z + l * sl - o * cl);
         }
 
         private static Vec3 PackR(bool topMount, double a, double l, double o)
@@ -1276,6 +1306,7 @@ namespace MadDr.CreatureMesh
             // the rig: parts leave the body along the surface normal at the
             // socket, so nothing buries into a chest on extreme morphs
             var n = new Vec3(side * sock.Nrm.X, sock.Nrm.Y, sock.Nrm.Z).Norm();
+            var packTilt = sock.PackTilt; // 0 for every plan except avian's Back socket
 
             switch (family)
             {
@@ -1615,10 +1646,10 @@ namespace MadDr.CreatureMesh
                         var t = (double)i / Math.Max(nBlob - 1, 1) - 0.5;
                         var r = blobR * (0.8 + 0.35 * Math.Abs(Math.Sin(i * 1.7)));
                         // centre sunk ~45% in, so ~55% bulges out of the hide
-                        var c = PackP(s, top, t * blobR * 0.9, t * blobR * 0.5, -r * 0.45);
+                        var c = PackP(s, top, t * blobR * 0.9, t * blobR * 0.5, -r * 0.45, packTilt);
                         Prims.Ellipsoid(mb, c, PackR(top, r, r * 0.95, r * 1.05), contents, 0.3, 0.1, 10);
                         // a taut skin membrane over the outer (bulging) face
-                        Prims.Ellipsoid(mb, PackP(s, top, t * blobR * 0.9, t * blobR * 0.5, -r * 0.15),
+                        Prims.Ellipsoid(mb, PackP(s, top, t * blobR * 0.9, t * blobR * 0.5, -r * 0.15, packTilt),
                             PackR(top, r * 0.82, r * 0.78, r * 0.5), skin, 0.35, 0, 9);
                     }
                     break;
@@ -1637,26 +1668,26 @@ namespace MadDr.CreatureMesh
                     var tHalf = 1.05 + 0.75 * len;  // barrel half-length along the spine
                     var sink = tR * 0.18;            // strapped-on, not embedded
                     // saddle collar seats the tank against the body
-                    Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -sink * 2.2),
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -sink * 2.2, packTilt),
                         PackR(top, tR * 1.15, tR * 0.4, tR * 0.5), Palette.METAL, 0.5, 0, 10);
                     // the barrel itself
                     Prims.Tube(mb,
-                        new[] { PackP(s, top, 0, -tHalf, -sink), PackP(s, top, 0, tHalf, -sink) },
+                        new[] { PackP(s, top, 0, -tHalf, -sink, packTilt), PackP(s, top, 0, tHalf, -sink, packTilt) },
                         new[] { tR, tR }, Palette.METAL, 0.78, 0, 14, 2);
                     // contents-coloured end caps
-                    Prims.Ellipsoid(mb, PackP(s, top, 0, tHalf, -sink), PackR(top, tR * 0.95, tR * 0.35, tR * 0.95), contents, 0.5, 0.15, 10);
-                    Prims.Ellipsoid(mb, PackP(s, top, 0, -tHalf, -sink), PackR(top, tR * 0.95, tR * 0.35, tR * 0.95), contents, 0.5, 0.15, 10);
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, tHalf, -sink, packTilt), PackR(top, tR * 0.95, tR * 0.35, tR * 0.95), contents, 0.5, 0.15, 10);
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, -tHalf, -sink, packTilt), PackR(top, tR * 0.95, tR * 0.35, tR * 0.95), contents, 0.5, 0.15, 10);
                     // filler / valve cap
-                    Prims.Ellipsoid(mb, PackP(s, top, 0, tHalf + 0.16, -sink), new Vec3(0.15, 0.15, 0.15), Palette.METDK, 0.6, 0, 6);
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, tHalf + 0.16, -sink, packTilt), new Vec3(0.15, 0.15, 0.15), Palette.METDK, 0.6, 0, 6);
                     // a sight gauge running along the barrel, contents-coloured
-                    Prims.Tube(mb, new[] { PackP(s, top, tR * 0.55, -tHalf * 0.75, -sink), PackP(s, top, tR * 0.55, tHalf * 0.75, -sink) },
+                    Prims.Tube(mb, new[] { PackP(s, top, tR * 0.55, -tHalf * 0.75, -sink, packTilt), PackP(s, top, tR * 0.55, tHalf * 0.75, -sink, packTilt) },
                         new[] { 0.08, 0.08 }, contents, 0.4, 0.4, 6);
                     // strap rivets -- the functional-hardware read
                     foreach (var sx in Sides)
                     {
-                        Prims.Ellipsoid(mb, PackP(s, top, tR * 0.85 * sx, -tHalf * 0.5, -sink * 1.6),
+                        Prims.Ellipsoid(mb, PackP(s, top, tR * 0.85 * sx, -tHalf * 0.5, -sink * 1.6, packTilt),
                             new Vec3(0.07, 0.07, 0.07), Palette.METDK, 0.8, 0, 4);
-                        Prims.Ellipsoid(mb, PackP(s, top, tR * 0.85 * sx, tHalf * 0.5, -sink * 1.6),
+                        Prims.Ellipsoid(mb, PackP(s, top, tR * 0.85 * sx, tHalf * 0.5, -sink * 1.6, packTilt),
                             new Vec3(0.07, 0.07, 0.07), Palette.METDK, 0.8, 0, 4);
                     }
                     break;
@@ -1676,9 +1707,9 @@ namespace MadDr.CreatureMesh
                     var plH = 1.1 + 0.7 * len;       // half-length along the spine
                     const double plT = 0.34;          // plate half-thickness
                     // plate centre sunk so the inner half seats in the body
-                    Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -plT * 0.55),
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -plT * 0.55, packTilt),
                         PackR(top, plW, plH, plT), Palette.METDK, 0.7, 0, 12);
-                    Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -plT * 0.15),
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -plT * 0.15, packTilt),
                         PackR(top, plW * 0.9, plH * 0.9, plT * 0.5), Palette.METAL, 0.75, 0, 12); // face panel
                     // two tanks inset into the frame, outer face just proud
                     var tR = plW * 0.34;
@@ -1687,19 +1718,19 @@ namespace MadDr.CreatureMesh
                     {
                         var tx = plW * 0.42 * sx;
                         Prims.Tube(mb,
-                            new[] { PackP(s, top, tx, -tHalf, 0.02), PackP(s, top, tx, tHalf, 0.02) },
+                            new[] { PackP(s, top, tx, -tHalf, 0.02, packTilt), PackP(s, top, tx, tHalf, 0.02, packTilt) },
                             new[] { tR, tR }, Palette.METAL, 0.78, 0, 12, 2);
-                        Prims.Ellipsoid(mb, PackP(s, top, tx, tHalf, 0.02), PackR(top, tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8); // end caps = contents
-                        Prims.Ellipsoid(mb, PackP(s, top, tx, -tHalf, 0.02), PackR(top, tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8);
-                        Prims.Ellipsoid(mb, PackP(s, top, tx, tHalf + 0.12, 0.02), new Vec3(0.14, 0.14, 0.14), Palette.METDK, 0.6, 0, 5); // filler cap
+                        Prims.Ellipsoid(mb, PackP(s, top, tx, tHalf, 0.02, packTilt), PackR(top, tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8); // end caps = contents
+                        Prims.Ellipsoid(mb, PackP(s, top, tx, -tHalf, 0.02, packTilt), PackR(top, tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8);
+                        Prims.Ellipsoid(mb, PackP(s, top, tx, tHalf + 0.12, 0.02, packTilt), new Vec3(0.14, 0.14, 0.14), Palette.METDK, 0.6, 0, 5); // filler cap
                     }
                     // a sight gauge strip down the frame's centre, contents-coloured
-                    Prims.Tube(mb, new[] { PackP(s, top, 0, -tHalf * 0.8, 0.05), PackP(s, top, 0, tHalf * 0.8, 0.05) },
+                    Prims.Tube(mb, new[] { PackP(s, top, 0, -tHalf * 0.8, 0.05, packTilt), PackP(s, top, 0, tHalf * 0.8, 0.05, packTilt) },
                         new[] { 0.08, 0.08 }, contents, 0.4, 0.4, 6);
                     // corner rivets -- the functional-hardware read
                     foreach (var sx in Sides)
                         foreach (var sy in Sides)
-                            Prims.Ellipsoid(mb, PackP(s, top, plW * 0.86 * sx, plH * 0.82 * sy, 0.04),
+                            Prims.Ellipsoid(mb, PackP(s, top, plW * 0.86 * sx, plH * 0.82 * sy, 0.04, packTilt),
                                 new Vec3(0.07, 0.07, 0.07), Palette.METDK, 0.8, 0, 4);
                     break;
                 }
@@ -1718,7 +1749,7 @@ namespace MadDr.CreatureMesh
                         var t = (double)i / Math.Max(nV - 1, 1) - 0.5;
                         var r = vR * (0.7 + 0.35 * Math.Abs(Math.Sin(i * 1.3)));
                         // sunk ~40% into the body, bulging out the rest
-                        var p = PackP(s, top, Math.Sin(i * 2.4) * vR * 0.7, t * vR * 2.4, -r * 0.4);
+                        var p = PackP(s, top, Math.Sin(i * 2.4) * vR * 0.7, t * vR * 2.4, -r * 0.4, packTilt);
                         Prims.Ellipsoid(mb, p, PackR(top, r, r * 0.95, r * 1.05), contents, 0.25, 0.45, 8);
                     }
                     break;

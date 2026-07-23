@@ -607,3 +607,69 @@ stub-compile clean against the rebuilt creature-mesh DLL. No visual
 verification (no Editor in this environment) -- the back-mount assertion
 (geometry's minZ well behind the body) is the closest available proxy for
 "is this actually on the back."
+
+## 2026-07 — Fix: storage vessels rendered untilted on avian's sloped back
+
+Creator report: "On everything they look good BUT on the AVIAN body
+torso. It need to tilt and be centred on the back. Parallel to the angle
+of the geometry of the back. DO NOT change the position or orientation on
+the other bodies, Just the AVIAN."
+
+Root cause: the shared storage-pack frame (`PackP`/`PackR` in
+creature-mesh, `packP`/`packR` in the site renderer) maps a vessel's local
+(across, along, out) coordinates to world space using two FIXED world-axis
+orientations selected by a single boolean (`topMount`) -- "vertical"
+(along=+Y, out=-Z) for upright backs, "horizontal" (along=+Z, out=+Y) for
+low bodies like crab/arachnid. It never looks at the mount socket's actual
+normal beyond that one threshold check. Every "vertical" plan's back
+socket has SOME small Y-component in its normal (a slight tilt, e.g. 0.10
+-0.15), but only avian's is large (0.5, in
+`Nrm = (0, 0.5, -0.87)`) because avian's whole torso genuinely leans
+forward as it rises (PlanAvian's lathe levels) -- so avian is the one
+plan where the fixed world-vertical pack visibly mismatches the actual
+sloped surface underneath it.
+
+Fix, scoped to avian only per the explicit instruction not to touch
+anything else:
+- Added an optional `PackTilt` field to `Sock` (creature-mesh C#) /
+  `packTilt` property (site JS), defaulting to 0/undefined for every
+  plan -- left unset everywhere except avian's `Back` socket.
+- `PackP`/`packP` now accept a `tilt` parameter (default 0) and rotate
+  the (along, out) pair around the across-axis before mapping to world
+  Y/Z. At tilt=0 this reduces ALGEBRAICALLY to the exact original
+  formula (cos(0)=1, sin(0)=0) -- not just visually close, bit-identical
+  -- so every plan besides avian is provably unaffected.
+- Avian's `Back` socket sets `PackTilt`/`packTilt` to
+  `atan2(0.5, 0.87)`, derived directly from its own existing normal
+  (rather than a second hand-tuned constant that could drift from it).
+- Threaded the tilt through all four storage families' `PackP`/`packP`
+  call sites in both renderers (creature-mesh C# + site JS, lockstep) --
+  `Prims.Ellipsoid`/`ellipsoid` themselves have no rotation, so an
+  ellipsoid's own bounding shape stays axis-aligned even though its
+  CENTRE now sits on the tilted spine; `Tube`/`tube` primitives (the
+  dominant barrel/frame geometry) DO visually tilt, since their
+  orientation comes entirely from the two tilted endpoint positions, not
+  a separate rotation matrix. A documented, honest limitation, not
+  silently glossed over.
+
+Verified numerically (creature-mesh): a vertex-set diff against a
+`sensor_stub` baseline isolates the vessel's own added geometry (naive
+chunk-index diffing was tried first and discarded -- sensor is built
+BEFORE eye/leg, so a chunk-count mismatch between the two builds silently
+pulled in unrelated eye geometry and produced meaningless numbers; caught
+by actually inspecting the probe's output, not assumed correct). Avian's
+isolated tank geometry shows Z shifting with Y in the predicted direction
+(the top of the tank sits closer to the body, matching the torso leaning
+away from it up there) -- dz > 0 confirmed nonzero. Tetrapod/winged/treant
+show dz = 0.000 EXACTLY (not approximately) across the same probe,
+confirming PackTilt=0 truly reproduces the untouched original math for
+every other plan.
+
+Tests: creature-mesh 93 green (was 89 -- new
+`AvianStorageVesselTiltsParallelToTheSlopedBack` plus a 3-case
+`OtherPlansStorageVesselStaysUntilted` theory). flightcheck stub-compile
+clean against the rebuilt creature-mesh DLL. Site JS re-checked with
+`node --check`; every `packP` call site in the file (not just the four
+storage cases) confirmed to pass the new tilt argument or be the function
+definition itself. No visual verification (no Editor/browser in this
+environment) -- numeric proof only, per this repo's standing discipline.
