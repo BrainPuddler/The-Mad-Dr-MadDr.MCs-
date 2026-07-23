@@ -429,7 +429,7 @@ const SLOT_NAMES = ['hand', 'sensor', 'eye', 'leg'];
 // harvester storage vessels (docs/22): tanks that mount on the BACK, not
 // the head. Their contents read RED for blood / WHITE for bone, set by the
 // harvest tool (bone-dominant tools store bone; everything else, blood).
-const STORAGE_FAMILIES = new Set(['storage_bladder', 'steel_tank', 'amber_vesicle']);
+const STORAGE_FAMILIES = new Set(['storage_bladder', 'steel_tank', 'tank_backpack', 'amber_vesicle']);
 const STORE_IS_BONE = new Set(['bone_saw', 'chain_blade', 'pincer']);
 const BLOOD_RED = [150, 30, 40];
 const BONE_WHITE = [224, 216, 194];
@@ -1817,7 +1817,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     laser_array: ['chitin', 0.5], photon_blaster: ['chitin', 0.6],
     lamprey_maw: ['slick', 0.85], bone_saw: ['none', 0], ichor_siphon: ['slick', 0.7],
     antenna: ['ridge', 0.35], horn: ['ridge', 0.55], sensor_mast: ['none', 0],
-    storage_bladder: ['slick', 0.6], steel_tank: ['none', 0], amber_vesicle: ['slick', 0.5],
+    storage_bladder: ['slick', 0.6], steel_tank: ['none', 0], tank_backpack: ['none', 0], amber_vesicle: ['slick', 0.5],
     sensor_stub: ['warts', 0.3],
     bug_eyes: ['none', 0], cyclops_eye: ['none', 0], stalk_eyes: ['none', 0],
     optic_visor: ['none', 0], eye_socket: ['warts', 0.3],

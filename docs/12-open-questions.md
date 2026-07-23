@@ -569,3 +569,41 @@ including the unchanged golden digest; mutator-service 28 green
 documented workflow; node --check clean. Whole-Unity-layer compile not
 re-run this turn (no unity-client script changed) -- creature-mesh/
 roster-client compiling clean covers the packages that did change.
+
+## 2026-07 — Fix: tank_backpack mounted on the head, and mirrored to two
+
+Creator report, immediately after tank_backpack shipped: "The backpack is
+showing up in on the head and two of them. I needs be mounted on the back.
+Position the same as the other canisters."
+
+Root cause: both renderers decide which socket a "sensor" allele mounts at
+via a small hardcoded family list (`IsStorageVessel` in
+`creature-mesh/CreatureBuilder.cs`, the `STORAGE_FAMILIES` Set in
+`site/creature-renderer.js`) -- membership routes a family to the single,
+unmirrored dorsal `back` socket every plan declares; everything else falls
+through to the DEFAULT sensor socket, which is head-mounted AND mirrored
+(paired, like antenna/horn). `tank_backpack`'s new render case was added
+to both files' `switch`/`case` geometry, but never added to either
+dispatcher list -- so it fell through to the head+paired default, exactly
+matching the report (on the head, and two of them).
+
+Fix: added `tank_backpack` to both lists (one line each). Re-verified with
+creature-mesh's existing back-mount test, now parameterized across all
+four storage families (`storage_bladder`/`steel_tank`/`tank_backpack`/
+`amber_vesicle`) instead of hardcoding just `steel_tank` -- the narrower
+version would not have caught this, and won't catch the same class of bug
+for a FIFTH storage family later either, which is the actual point of
+widening it. (A second attempted regression test asserting the vessel
+isn't mirrored, by checking for X-negated vertex twins, was written, run,
+and thrown out: it failed on every family including correctly-mounted
+ones, because a creature's whole body -- legs, arms -- is already
+bilaterally symmetric, so the signal doesn't isolate the vessel at all.
+Caught before it shipped by actually running the new test, not just
+reasoning about it.)
+
+Verified: creature-mesh 89 green (was 86 -- the parameterized theory adds
+3 net cases over the single `steel_tank`-only fact it replaced); flightcheck
+stub-compile clean against the rebuilt creature-mesh DLL. No visual
+verification (no Editor in this environment) -- the back-mount assertion
+(geometry's minZ well behind the body) is the closest available proxy for
+"is this actually on the back."

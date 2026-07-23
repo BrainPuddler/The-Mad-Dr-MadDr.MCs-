@@ -1188,7 +1188,8 @@ namespace MadDr.CreatureMesh
 
         private static bool IsStorageVessel(string family)
         {
-            return family == "storage_bladder" || family == "steel_tank" || family == "amber_vesicle";
+            return family == "storage_bladder" || family == "steel_tank" || family == "tank_backpack"
+                || family == "amber_vesicle";
         }
 
         // ---- storage-pack frame -------------------------------------------------

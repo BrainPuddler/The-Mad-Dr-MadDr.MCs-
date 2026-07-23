@@ -631,18 +631,27 @@ public class CreatureBuilderTests
         Assert.True(HasColor(CreatureBuilder.Build(Genome(hand: "ichor_siphon")), Palette.ICHOR));
     }
 
-    [Fact]
-    public void StorageVesselMountsOnTheBackNotTheHead()
+    [Theory]
+    [InlineData("storage_bladder")]
+    [InlineData("steel_tank")]
+    [InlineData("tank_backpack")]
+    [InlineData("amber_vesicle")]
+    public void StorageVesselMountsOnTheBackNotTheHead(string family)
     {
         // a tank must sit on the BACK (behind the torso, -Z), not up on the
         // head where sense organs go -- so its geometry should extend well
-        // behind the body's mid-plane
-        var r = CreatureBuilder.Build(Genome(hand: "lamprey_maw", sensor: "steel_tank"));
+        // behind the body's mid-plane. Parameterized across every storage
+        // family on purpose: a new family missing from IsStorageVessel's
+        // list falls through to the default head-mounted (and PAIRED)
+        // sensor socket instead of the single dorsal one -- exactly the
+        // "on the head and two of them" bug tank_backpack shipped with
+        // when only steel_tank was covered here.
+        var r = CreatureBuilder.Build(Genome(hand: "lamprey_maw", sensor: family));
         double minZ = double.PositiveInfinity;
         foreach (var c in r.Chunks)
             for (var i = 0; i < c.VertexCount; i++)
                 minZ = System.Math.Min(minZ, c.Positions[i * 3 + 2]);
-        Assert.True(minZ < -0.8, $"storage vessel is not behind the body (minZ={minZ})");
+        Assert.True(minZ < -0.8, $"{family} is not behind the body (minZ={minZ})");
     }
 
     [Theory]
