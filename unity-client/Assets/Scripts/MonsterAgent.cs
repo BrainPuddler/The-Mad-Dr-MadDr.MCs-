@@ -31,7 +31,7 @@ using UnityEngine;
 /// </summary>
 public class MonsterAgent : MonoBehaviour
 {
-    private enum OrderKind { Idle, Move, AttackBuilding, AttackUnit, EatCitizen, Perch }
+    private enum OrderKind { Idle, Move, AttackBuilding, AttackUnit, EatCitizen, Perch, SpecialAttack }
 
     /// <summary>Shared "which way does the group face" token for a squad
     /// move order (see OrderMove's groupFacing overload). Stays unlocked
@@ -68,6 +68,14 @@ public class MonsterAgent : MonoBehaviour
     private UnitCombat _targetUnit;
     private Vector3? _settleTarget;   // shared cluster point to creep toward once idle (group moves only)
     private GroupFacing _groupFacing; // shared arrival-facing token for a group move (see GroupFacing)
+
+    // docs/26 (Special Attacks System) -- Phase 1-3: state-machine wiring
+    // only, no ability effect resolution yet (that's WebAttackAbility,
+    // a later phase). _activeSpecialAttack is the SAME SpecialAttackInstance
+    // object as one entry in _fighter.Abilities (not a copy), so triggering
+    // its cooldown here is the unit's actual, persistent cooldown state.
+    private SpecialAttackInstance _activeSpecialAttack;
+    private UnitCombat _targetSpecialAttackUnit;
 
     private List<Vector3> _path;      // world-space nodes for the current leg
     private int _pathIndex;
@@ -135,6 +143,7 @@ public class MonsterAgent : MonoBehaviour
                 case OrderKind.AttackUnit: return "ATTACKING" + air + " a unit";
                 case OrderKind.EatCitizen: return "hunting a citizen";
                 case OrderKind.Perch: return "flying to a rooftop perch";
+                case OrderKind.SpecialAttack: return "using " + (_activeSpecialAttack?.Definition != null ? _activeSpecialAttack.Definition.AbilityName : "a special attack");
                 default: return Perched ? "perched on a rooftop" : "idle";
             }
         }
@@ -286,6 +295,26 @@ public class MonsterAgent : MonoBehaviour
         _order = OrderKind.AttackUnit;
     }
 
+    /// <summary>docs/26 (Special Attacks System): use `ability` on `unit`
+    /// once in range. `ability` must be one of THIS unit's own
+    /// `_fighter.Abilities` entries (same object, not a copy) so its
+    /// cooldown actually persists -- callers (today: nothing yet: this is
+    /// Phase 1-3 wiring only, the AI decision layer that calls this is a
+    /// later phase) are expected to have already checked `ability.IsReady`
+    /// before issuing the order; TickSpecialAttack does not re-check it,
+    /// the same way TickAttackUnit doesn't re-check ReadyToFire before
+    /// approaching (only before actually firing).</summary>
+    public void OrderSpecialAttack(SpecialAttackInstance ability, UnitCombat unit)
+    {
+        if (ability == null || ability.Definition == null || unit == null) return;
+        ClearTargets();
+        _waypoints.Clear();
+        _path = null;
+        _activeSpecialAttack = ability;
+        _targetSpecialAttackUnit = unit;
+        _order = OrderKind.SpecialAttack;
+    }
+
     /// <summary>Fly to a building and land ON its roof (creator
     /// direction, 2026-07: "they should be able to land on the
     /// building"). Winged only -- the commander routes a roof-click here
@@ -310,6 +339,8 @@ public class MonsterAgent : MonoBehaviour
         _settleTarget = null;   // any fresh order cancels a pending group-settle creep
         _groupFacing = null;    // and any pending group-arrival facing agreement
         _perchApproach = false;
+        _activeSpecialAttack = null;
+        _targetSpecialAttackUnit = null;
     }
 
     /// <summary>The single place _order becomes Idle. Flight is only ever
@@ -399,6 +430,7 @@ public class MonsterAgent : MonoBehaviour
             case OrderKind.AttackUnit: velocity = TickAttackUnit(dt); break;
             case OrderKind.EatCitizen: velocity = TickEat(dt); break;
             case OrderKind.Perch: velocity = TickPerch(dt); break;
+            case OrderKind.SpecialAttack: velocity = TickSpecialAttack(dt); break;
             case OrderKind.Idle: velocity = TickSettle(dt); break;
         }
         // docs/25 Phase C: publish this frame's velocity for neighbours'
@@ -700,6 +732,54 @@ public class MonsterAgent : MonoBehaviour
         return FollowPath(dt, RunOrWalkSpeed());
     }
 
+    /// <summary>docs/26 (Special Attacks System), Phase 1-3: approach into
+    /// range exactly like TickAttackUnit, then trigger the ability's
+    /// cooldown and return to idle. Deliberately NO effect resolution
+    /// yet -- no projectile, no area query, no damage/status/capture --
+    /// this phase only proves the OrderKind/Tick/velocity-return contract
+    /// and that a cooldown started here actually persists on
+    /// _fighter.Abilities through the order returning to Idle afterward.
+    /// The real effect (WebAttackAbility) hooks in here later by replacing
+    /// the single TriggerCooldown() line below with an actual cast.</summary>
+    private Vector3 TickSpecialAttack(float dt)
+    {
+        if (_activeSpecialAttack == null || _activeSpecialAttack.Definition == null
+            || _targetSpecialAttackUnit == null || !_targetSpecialAttackUnit.Alive)
+        {
+            _activeSpecialAttack = null;
+            _targetSpecialAttackUnit = null;
+            GoIdle();
+            return Vector3.zero;
+        }
+
+        var range = _activeSpecialAttack.Definition.Range;
+        var to = _targetSpecialAttackUnit.AimPoint - transform.position;
+        to.y = 0f;
+        var dist = to.magnitude;
+
+        if (dist <= range * 0.9f)
+        {
+            _path = null;
+            var dir = dist > 0.01f ? to / dist : transform.forward;
+            transform.rotation = Quaternion.Slerp(transform.rotation,
+                Quaternion.LookRotation(dir, Vector3.up), dt * 6f);
+            _activeSpecialAttack.TriggerCooldown();
+            _activeSpecialAttack = null;
+            _targetSpecialAttackUnit = null;
+            GoIdle();
+            return Vector3.zero;
+        }
+
+        var targHex = _builder.HexAt(_targetSpecialAttackUnit.transform.position);
+        if (_path == null || targHex.DistanceTo(_pathGoalHex) > 1)
+        {
+            _path = ComputePath(targHex);
+            if (_path == null) return Vector3.zero;
+        }
+        RecomputeIfCityChanged();
+        return FollowPath(dt, RunOrWalkSpeed());
+    }
+
     private Vector3 Muzzle()
     {
         var h = _body != null ? _body.BodyHeight : 1.5f;
@@ -728,6 +808,8 @@ public class MonsterAgent : MonoBehaviour
         _targetUnit = null;
         _targetBuilding = null;
         _targetCitizen = null;
+        _activeSpecialAttack = null;
+        _targetSpecialAttackUnit = null;
         _path = null;
         if (_selectionRing != null) _selectionRing.gameObject.SetActive(false);
         if (_builder != null) _builder.OnCombatantDied(_fighter);

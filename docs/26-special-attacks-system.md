@@ -1,0 +1,211 @@
+# 26 — Special Attacks System (enemy AI)
+
+Status: **Approved architecture, Phases 1–3 implemented** (design produced
+2026-07 via a research-then-design pass over the existing combat/AI
+architecture before any code was written; creator approved "pure Unity"
++ ScriptableObject-based definitions before implementation began) ·
+Extends [04-combat-model.md](04-combat-model.md)'s combat design and
+[16-brains-behavior-command.md](16-brains-behavior-command.md)'s
+threshold-crossing AI pattern · Pillars served: 3 (*honest combat*).
+
+## 0. Problem statement
+
+A modular framework so different enemy types can equip reusable special
+abilities (cooldown-gated, area-of-effect-capable, target-classifying) —
+worked example: an Arachnid Web Attack that pulls and consumes
+human-scale targets, but only slows heavy/armored ones.
+
+## 1. Architectural decision (read before touching this system)
+
+Two forks were resolved by direct creator decision before implementation:
+
+- **Where the system lives**: today's actual, playable combat is entirely
+  Unity `MonoBehaviour`s (`UnitCombat`, `MonsterAgent`, `WeaponFx`,
+  `Projectile`). `packages/match-core` (the future deterministic RTS sim,
+  docs/23) has **zero unit/combat code today** — confirmed empty, not a
+  placeholder. CLAUDE.md's own directive says not to add gameplay
+  decisions to `MonsterAgent.Update()`, since the unit sim is meant to
+  port there eventually. Presented as a genuine fork (build portable-
+  core-now vs. pure-Unity vs. wait-for-match-core); **creator chose pure
+  Unity** — build directly against the existing MonoBehaviour
+  architecture, no engine-agnostic abstraction layer. A future
+  match-core port, if it happens, is accepted as a real rewrite at that
+  time, not hedged against now.
+- **`SpecialAttackDefinition` format**: plain C# class (matching
+  `WeaponProfile`/`HarvestProfile`) vs. `ScriptableObject`. **Creator
+  chose ScriptableObject** — the first ScriptableObject asset type in
+  this codebase (every existing stat block is a plain class instead).
+  Chosen for Inspector-editable, drag-and-drop-equippable designer
+  content; the tradeoff (no existing precedent to follow, less friendly
+  to this project's "verify with a standalone C# harness, no Editor
+  available" testing discipline) was surfaced and accepted.
+
+## 2. Current architecture (as researched, 2026-07)
+
+Researched via parallel deep-dives before any design was proposed:
+
+- **Cooldown idiom** (`UnitCombat._cooldown`, `MonsterAgent._attackCooldown`,
+  `RuntimeCityBuilder`'s `_trafficCheckTimer`/`_deadlockPollTimer`): a
+  plain private `float`, decremented by `Time.deltaTime` once per
+  `Update()`, reloaded to a duration on trigger, gated by a `<= 0f`
+  check. No coroutines, no `Time.time` deadline stamps, no
+  `InvokeRepeating` anywhere in the project. This is the ONE idiom every
+  new cooldown in this system must match — `SpecialAttackInstance.Tick`
+  is a direct copy of this shape.
+- **`WeaponProfile`/`WeaponFx`/`Projectile`**: one weapon per unit,
+  instant (beam/melee/flame) or projectile (bolt/bullet/spore) kinds,
+  cadence-gated through `UnitCombat.TryFire`/`TryFireAtPoint`.
+  `Projectile` already does true per-frame homing and fizzles gracefully
+  if its target dies mid-flight — the reusable pattern for a web
+  projectile, not something to reinvent.
+- **`MonsterAgent`'s `_order` state machine**: `OrderKind` enum,
+  `Update()` dispatches to one `Tick*(dt)` method per kind, and **every**
+  `Tick*` must return the frame's `Vector3` velocity — `MonsterBody`
+  consumes it for footstep/wing animation and `MonsterSteeringController`
+  reads it (via `UnitCombat.LastVelocity`) for neighbours' predictive
+  avoidance (docs/25). Any new order must honor this contract exactly.
+- **`TickEat`/consumption**: today's only "consume a target" mechanic —
+  approach within 3m, then a single-frame `RuntimeCityBuilder.
+  OnCitizenEaten` call (wallet credit + `Object.Destroy`). No capture
+  state, no pull, no multi-frame hold exists anywhere today — a web
+  attack's capture/pull is genuinely new territory, not an extension of
+  something that already exists.
+- **`YieldTarget`/`YieldUntil`** (docs/25 Phase D): the closest existing
+  "temporary externally-imposed movement override" precedent, but it's
+  position-snapshot-only and only read inside `SteerFollowPath` (i.e.
+  only for a unit already path-following) — a live, moving "pulled
+  toward my captor" effect needs its own state, following the *shape* of
+  this precedent (expiry-driven, single-writer) rather than reusing the
+  fields directly.
+- **Hex/spatial**: `HexCoord.Range(n)` (filled-disc hex query) is the
+  city-generation/dressing convention (landmark auras, railyard radius);
+  combat/steering already uses **meter-radius** queries via
+  `SpatialGrid<UnitCombat>.QueryRadius` (bounding-square, caller does the
+  exact-circle filter — docs/25's own convention). A web attack's AoE
+  should follow the combat convention, not the dressing one.
+- **No existing precedent anywhere** for: line-of-sight/occlusion checks
+  (all targeting today assumes unobstructed range), area-of-effect
+  combat, status effects/crowd control, or a mass/weight classification
+  stat (`UnitCombat.Radius` is the only existing quantitative
+  differentiator; tanks are simply bigger/tougher, not flagged "heavy").
+- **Genome/catalog**: every `hand`-homolog weapon family is a purely
+  cosmetic + stat-multiplier part; no existing family carries a special
+  mechanic. `arachnid` is a body-plan only, with zero weapon/ability
+  special-casing anywhere — a web attack is unmodeled territory, not an
+  extension of anything arachnid-specific already in the catalog.
+
+## 3. Approved architecture
+
+```
+UnitCombat (existing, extended)
+  + Mass (float)                          -- continuous, not a per-species tag
+  + Abilities (List<SpecialAttackInstance>) -- ticked unconditionally in Update()
+
+SpecialAttackDefinition : ScriptableObject (NEW)
+  -- Name, Description, Cooldown, Range, AreaOfEffect, ValidTargets
+     (TargetFilter flags), EffectType, AI use requirements, VFX/SFX hooks
+
+SpecialAttackInstance (NEW, plain C# -- per-unit runtime state)
+  -- Definition + CooldownRemaining, IsReady, Tick(dt), TriggerCooldown()
+  -- identical decrement/reload/gate idiom to UnitCombat._cooldown
+
+MonsterAgent (existing, extended)
+  + OrderKind.SpecialAttack + TickSpecialAttack(dt) + OrderSpecialAttack(...)
+  -- follows the EXACT Order*/Tick*/velocity-return contract every other
+     order already uses
+
+WebAttackAbility (Phase 4+, not yet built)
+  -- the first concrete effect: projectile -> AoE query via SpatialGrid ->
+     Mass-threshold branch -> capture-and-pull (human-class) or slow
+     status (heavy-class)
+```
+
+**Mass classification** (design question: tags vs. components vs.
+interfaces vs. stats): a continuous `float Mass` on `UnitCombat`,
+populated at `Configure()` time from the same plan-mass table
+`packages/roster-client`'s `Combat.Profile` already computes for HP
+(Tank sets `mass: 10f` explicitly — see `Tank.cs`, the project's one
+concrete "heavy" example today). Effects branch on **thresholds** over
+this value, so a new enemy type is classified correctly for free from
+its own genome-derived mass, with no new per-type lookup table to
+maintain — matches docs/16's established pattern of deriving behavioral
+quantities as pure functions of existing stats rather than authoring new
+per-type flags.
+
+## 4. Files touched
+
+**Modified:**
+- `UnitCombat.cs` — `Mass` field, `Abilities` list, ability cooldown
+  ticking in `Update()`, `Configure(...)` gains an optional `mass = 1f`
+  trailing parameter (every existing call site unaffected).
+- `MonsterAgent.cs` — `OrderKind.SpecialAttack`, `_activeSpecialAttack`/
+  `_targetSpecialAttackUnit` fields, `OrderSpecialAttack(...)`,
+  `TickSpecialAttack(dt)`, wired into the `Update()` dispatch switch,
+  `ClearTargets()`, `OnDied()`, and the debug `OrderDescription` string.
+- `Tank.cs` — explicit `mass: 10f` on its `Configure(...)` call, the
+  concrete heavy-target example.
+
+**New** (created only as each phase below executes):
+`SpecialAttackDefinition.cs`, `SpecialAttackInstance.cs` (Phase 1);
+`WebAttackAbility.cs`, `CaptureState.cs` (Phase 4+, not yet created).
+
+**Explicitly untouched:** `WeaponProfile`/`WeaponFx` (additive parallel
+system, not a modification of the existing weapon path),
+`packages/genome-core` (abilities are equipped data, not bred genome
+traits, for this first version), `packages/match-core` (per §1).
+
+## 5. Risks & edge cases (full list; see design-doc discussion for detail)
+
+Multiple targets caught in one web; target escapes before pull
+completes; ability interrupted (captor dies mid-cast); enemy dies during
+cooldown (no cleanup needed — `SpecialAttackInstance` lives on
+`UnitCombat`, destroyed with the unit, same as `_cooldown` today); no
+save/load system exists yet in this project (not applicable); no
+networking layer exists yet (not applicable, flagged forward-looking
+only); pulling a target must reuse the `TickSettle`/
+`InsideBuildingFootprint` precedent (hex-membership alone isn't
+sufficient — this exact gap was a real, separately-fixed bug this
+session), not just `Blocked()`.
+
+## 6. Phased implementation plan
+
+- **Phase 1 — `SpecialAttackDefinition` + `SpecialAttackInstance`.** Pure
+  data/runtime classes, zero integration. **Status: done (2026-07).**
+- **Phase 2 — `UnitCombat.Mass` + `Abilities` list + cooldown ticking.**
+  **Status: done (2026-07).**
+- **Phase 3 — `MonsterAgent` state-machine wiring**
+  (`OrderKind.SpecialAttack`/`TickSpecialAttack`/`OrderSpecialAttack`),
+  approach-then-trigger-cooldown-then-idle, **no real ability effect
+  yet** — proves the contract before any effect exists. **Status: done
+  (2026-07).** Verified: flightcheck stub-compile clean (including a new
+  `ScriptableObject`/`CreateAssetMenuAttribute`/`TextAreaAttribute`/
+  `AudioClip` stub, since this is the first ScriptableObject in the
+  project); a standalone harness compiling the real
+  `SpecialAttackDefinition.cs`/`SpecialAttackInstance.cs` confirmed the
+  cooldown state machine directly: reload-on-trigger, frame-rate-
+  independent accumulation across irregular `dt` steps (not a fixed-step
+  simulation), and that two units sharing one `SpecialAttackDefinition`
+  asset do NOT share a cooldown (per-instance, not per-definition or
+  global — the design brief's explicit requirement).
+- **Phase 4 — `WebAttackAbility` targeting + AoE resolution only** (no
+  pull, no consume yet — logs what it would do). **Status: not started.**
+- **Phase 5 — heavy-target slow effect** (the simpler branch, no new
+  state machine). **Status: not started.**
+- **Phase 6 — `CaptureState` + pull-toward-captor** for human-class
+  targets (the riskiest step — new interruptible multi-frame state).
+  **Status: not started.**
+- **Phase 7 — consume-on-arrival**, wired into `OnCitizenEaten` for
+  citizens; parallel path designed (not yet built) for non-`Citizen`
+  captured targets. **Status: not started.**
+- **Phase 8 — AI decision heuristic** (`EvaluateBestAbility`-equivalent:
+  distance, weighted target count in AoE, cooldown state, a minimum
+  usefulness threshold), added last once the ability is fully functional
+  and can be triggered/tested without it. **Status: not started.**
+
+## v0.1 tuning appendix
+
+To be filled in as Phase 4+ lands: Web Attack cooldown/range/AoE radius,
+the Mass threshold separating "human-class" from "heavy-class", pull
+speed, capture duration, slow-status magnitude/duration for heavy
+targets. All placeholders until playtested, per this repo's general v0.1
+numbers policy.

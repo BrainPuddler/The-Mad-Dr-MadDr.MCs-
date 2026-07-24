@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using MadDr.RosterClient;
 using UnityEngine;
 
@@ -19,6 +20,23 @@ public class UnitCombat : MonoBehaviour
     public float Radius = 1.5f;          // separation + body half-width
     public float AimHeight = 1.5f;       // aim point above the transform origin
     public WeaponProfile Weapon;
+
+    /// <summary>docs/26 (Special Attacks System): how heavy this unit
+    /// reads to a mass-classifying effect (e.g. a web attack's human-vs-
+    /// heavy branch) -- a continuous stat, not a per-species tag, so a
+    /// new enemy type is classified correctly for free from whatever
+    /// already sets its Radius/MaxHealth, with no new per-type lookup
+    /// table to maintain. Default 1 (citizen/light-monster scale); Tank
+    /// sets a heavier value explicitly (see Tank.cs).</summary>
+    public float Mass = 1f;
+
+    /// <summary>docs/26: this unit's equipped special attacks, each with
+    /// its OWN independent runtime cooldown (SpecialAttackInstance) --
+    /// ticked unconditionally in Update() below, exactly like _cooldown,
+    /// so a cooldown keeps counting down through any AI state change on
+    /// the owning MonsterAgent, not just while that ability's own order
+    /// is active.</summary>
+    public readonly List<SpecialAttackInstance> Abilities = new List<SpecialAttackInstance>();
 
     /// <summary>docs/25 Phase C: this unit's XZ velocity as of its owner's
     /// last Update() -- the "neighbours' last-known velocity" the
@@ -56,7 +74,7 @@ public class UnitCombat : MonoBehaviour
     public UnitCombat LastAttacker { get; private set; }
 
     public void Configure(string faction, float maxHp, float radius, float aimHeight,
-        WeaponProfile weapon, Action onDied)
+        WeaponProfile weapon, Action onDied, float mass = 1f)
     {
         Faction = faction;
         MaxHealth = maxHp;
@@ -64,6 +82,7 @@ public class UnitCombat : MonoBehaviour
         Radius = radius;
         AimHeight = aimHeight;
         Weapon = weapon;
+        Mass = mass;
         _onDied = onDied;
         _dead = false;
     }
@@ -123,5 +142,6 @@ public class UnitCombat : MonoBehaviour
         var dt = Time.deltaTime;
         if (_cooldown > 0f) _cooldown -= dt;
         if (_battleTimer > 0f) _battleTimer -= dt;
+        for (var i = 0; i < Abilities.Count; i++) Abilities[i].Tick(dt);
     }
 }

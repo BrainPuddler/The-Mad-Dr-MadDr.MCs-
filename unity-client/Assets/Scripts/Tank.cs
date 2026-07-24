@@ -54,7 +54,12 @@ public class Tank : MonoBehaviour
         BuildModel(flame);
         _combat = gameObject.AddComponent<UnitCombat>();
         var weapon = flame ? WeaponProfile.TankFlamethrower() : WeaponProfile.TankCannon();
-        _combat.Configure("human", flame ? 150f : 210f, 2.6f * Scale, 1.4f * Scale, weapon, OnDied);
+        // docs/26: a tank is this project's one concrete "heavy target"
+        // today -- armored, on treads, built bigger/tougher than a
+        // citizen or monster (see the Scale-based HP/Radius bump right
+        // above). A mass-classifying special attack (e.g. a web attack's
+        // human-vs-heavy branch) should read this as heavy, not pullable.
+        _combat.Configure("human", flame ? 150f : 210f, 2.6f * Scale, 1.4f * Scale, weapon, OnDied, mass: 10f);
     }
 
     private void Update()

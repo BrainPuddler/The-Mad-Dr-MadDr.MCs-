@@ -804,3 +804,76 @@ flightcheck stub-compile clean against the rebuilt DLL. Site JS
 `node --check` clean; ported the identical formula. No visual
 verification (no Editor/browser in this environment) -- verified via the
 primitive-level geometric proof above instead.
+
+## 2026-07 — Special Attacks System: design + Phase 1-3 (docs/26)
+
+Creator direction: design a modular special-attacks framework for enemy
+AI (worked example: an Arachnid Web Attack -- capture/pull human-scale
+targets, slow heavy ones), following an explicit "understand the
+architecture, inspect before proposing, plan, identify risks, wait for
+approval" process -- no code until the design was reviewed.
+
+Research (four parallel deep-dives, no code written) established: the
+project's one cooldown idiom (Time.deltaTime-decremented float, reload-
+on-trigger, `<= 0f` gate -- UnitCombat._cooldown, MonsterAgent.
+_attackCooldown, RuntimeCityBuilder's poll timers all match); that
+`packages/match-core` (the future deterministic RTS sim) has genuinely
+zero unit/combat code today, in tension with CLAUDE.md's own "don't add
+gameplay decisions to MonsterAgent.Update()" directive; that no
+capture/pull/AoE/status-effect/mass-classification mechanic exists
+anywhere in the current combat system (TickEat's "consume" is a single-
+frame contact trigger, not a multi-frame capture state); and that
+`YieldTarget`/`YieldUntil` (docs/25 Phase D) is the closest existing
+"temporary externally-imposed movement override" precedent but is
+snapshot-position-only and path-gated, not directly reusable for a
+moving captor.
+
+Two genuine architectural forks were surfaced and put to the creator
+rather than decided silently: (1) build against the current Unity
+MonoBehaviour architecture vs. an engine-agnostic-friendly core (matching
+the MonsterSteeringController/DeadlockManager/SpatialGrid precedent from
+docs/25) vs. waiting for match-core -- **creator chose pure Unity, no
+portability layer**; (2) SpecialAttackDefinition as a plain C# class
+(matching WeaponProfile) vs. a ScriptableObject -- **creator chose
+ScriptableObject**, the first one in this codebase.
+
+Implemented Phases 1-3 of the resulting plan (see docs/26 for the full
+architecture, files-touched list, and remaining Phase 4-8 roadmap):
+- `SpecialAttackDefinition.cs` (new, ScriptableObject): name/description/
+  cooldown/range/AoE/valid-targets/effect-type/AI-use-requirements/VFX-
+  SFX hooks.
+- `SpecialAttackInstance.cs` (new, plain C#): per-unit runtime cooldown
+  state, wrapping a (possibly shared) Definition -- Tick/IsReady/
+  TriggerCooldown, identical idiom to UnitCombat._cooldown.
+- `UnitCombat.cs`: `Mass` field (continuous, populated from the same
+  plan-mass table `Combat.Profile` already computes for HP -- not a
+  per-species tag table) and `Abilities` list, ticked unconditionally in
+  Update() so a cooldown counts down through any AI state change, not
+  just while that ability's own order is active. `Configure(...)` gained
+  an optional `mass = 1f` trailing parameter; every existing call site is
+  unaffected.
+- `Tank.cs`: explicit `mass: 10f` -- the project's one concrete "heavy
+  target" example.
+- `MonsterAgent.cs`: `OrderKind.SpecialAttack`, `OrderSpecialAttack(...)`,
+  `TickSpecialAttack(dt)` (approach into range exactly like
+  TickAttackUnit, then TriggerCooldown and return to Idle -- no ability
+  EFFECT yet, deliberately, per the phased plan), wired into the
+  Update() dispatch switch, ClearTargets(), OnDied(), and the debug
+  OrderDescription string.
+
+Verified: flightcheck stub-compile clean (added ScriptableObject/
+CreateAssetMenuAttribute/TextAreaAttribute/AudioClip to the shared Unity
+stub -- the first time this project needed them). A standalone harness
+compiling the real SpecialAttackDefinition.cs/SpecialAttackInstance.cs
+directly confirmed the cooldown state machine: reload-on-trigger exactly
+to Definition.Cooldown; correct accumulation across irregular (non-
+fixed-step) dt values, matching real Time.deltaTime variance rather than
+assuming a frame rate; and -- the requirement most worth checking twice
+-- two units sharing one SpecialAttackDefinition ASSET do not share a
+cooldown, since each has its own SpecialAttackInstance. No visual
+verification (no Editor in this environment).
+
+Status: Phases 1-3 done (state-machine wiring only). Phase 4
+(WebAttackAbility targeting + AoE resolution, no capture/consume yet) is
+next, explicitly not started this session per the "small, safe,
+independently testable steps" plan docs/26 lays out.
