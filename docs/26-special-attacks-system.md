@@ -1,6 +1,6 @@
 # 26 — Special Attacks System (enemy AI)
 
-Status: **Approved architecture, Phases 1–5 implemented** (design produced
+Status: **Approved architecture, Phases 1–6 implemented** (design produced
 2026-07 via a research-then-design pass over the existing combat/AI
 architecture before any code was written; creator approved "pure Unity"
 + ScriptableObject-based definitions before implementation began) ·
@@ -139,15 +139,24 @@ per-type flags.
   ticking in `Update()`, `Configure(...)` gains an optional `mass = 1f`
   trailing parameter (every existing call site unaffected); Phase 5 adds
   `IsPossessed` (default false), `_slowRemaining`/`_slowMultiplier`
-  (ticked in `Update()`), `SpeedMultiplier`, `ApplySlow(...)`.
+  (ticked in `Update()`), `SpeedMultiplier`, `ApplySlow(...)`; Phase 6
+  adds `IsCaptured`, `Captor`, `Capture(...)`, `TickCapture(dt)` (owns
+  one `CaptureState`).
 - `MonsterAgent.cs` — `OrderKind.SpecialAttack`, `_activeSpecialAttack`/
   `_targetSpecialAttackUnit` fields, `OrderSpecialAttack(...)`,
   `TickSpecialAttack(dt)`, wired into the `Update()` dispatch switch,
   `ClearTargets()`, `OnDied()`, and the debug `OrderDescription` string;
-  Phase 5 multiplies `_fighter.SpeedMultiplier` into `RunOrWalkSpeed()`.
+  Phase 5 multiplies `_fighter.SpeedMultiplier` into `RunOrWalkSpeed()`;
+  Phase 6 adds an `IsCaptured` check + `TickCaptured(dt)`, run instead of
+  the `_order` switch while true.
 - `Tank.cs` — explicit `mass: 10f` on its `Configure(...)` call, the
   concrete heavy-target example; Phase 5 multiplies
-  `_combat.SpeedMultiplier` into the hull-movement line.
+  `_combat.SpeedMultiplier` into the hull-movement line; Phase 6 adds the
+  same `IsCaptured` check at the top of `Update()` (inert today — a tank
+  is always heavy, never captured).
+- `Citizen.cs` — Phase 6: its own `Capture(...)` + `_capture` field
+  (a `Citizen` has no `UnitCombat`, so it can't share one), checked at
+  the top of `Update()` ahead of even the flee logic.
 - `Projectile.cs` — one additive `OnArrive` hook (Phase 4), existing
   callers unaffected.
 - `RuntimeCityBuilder.cs` — `QueryCombatantsInRadius` (Phase 4), a thin
@@ -155,12 +164,14 @@ per-type flags.
 - `WebAttackAbility.cs` — Phase 5: `HeavySlowMultiplier`/
   `HeavySlowDuration` constants; the heavy branch now calls
   `c.ApplySlow(...)` instead of only logging; `ShouldCatchCombatant`'s
-  friendly-fire check now respects `IsPossessed`.
+  friendly-fire check now respects `IsPossessed`. Phase 6: adds
+  `CapturePullSpeed`; both the combatant and citizen non-heavy branches
+  now call `.Capture(...)` instead of only logging.
 
 **New:**
 `SpecialAttackDefinition.cs`, `SpecialAttackInstance.cs` (Phase 1);
 `WebAttackAbility.cs` (Phase 4 — targeting/classification only);
-`CaptureState.cs` (Phase 6, not yet created).
+`CaptureState.cs` (Phase 6).
 
 **Explicitly untouched:** `WeaponProfile`/`WeaponFx` (additive parallel
 system, not a modification of the existing weapon path),
@@ -277,12 +288,71 @@ session), not just `Blocked()`.
   attack's friendly-fire logic later. Verified via the harness's
   `CheckCatchDecision_PossessedAllyNotExcluded` (a possessed ally in
   range IS caught; an ordinary unpossessed ally in range still is not).
-- **Phase 6 — `CaptureState` + pull-toward-captor** for human-class
+- **Phase 6 — `CaptureState` + pull-toward-captor** for non-heavy
   targets (the riskiest step — new interruptible multi-frame state).
-  **Status: not started.**
+  **Status: done (2026-07).** New `CaptureState.cs`: a small standalone
+  class (`Captor`, `Speed`, `Active` = captor non-null-and-alive,
+  `Begin(captor, speed)`, `TickPull(transform, dt)` — moves toward the
+  captor at `Speed`, clamped, and simply stops once within
+  `ArriveRadius` rather than consuming or overshooting). It is
+  deliberately its own class rather than fields on `UnitCombat`,
+  because the identical pull logic has to be usable by `Citizen` too —
+  confirmed by Phase 4's research that `Citizen` carries no `UnitCombat`
+  component at all, so it can't share one. `UnitCombat` gained
+  `IsCaptured`/`Captor`/`Capture(captor, speed)`/`TickCapture(dt)`
+  (owns one `CaptureState` instance); `Citizen` gained its own separate
+  `Capture(...)` and a `_capture` field checked at the very top of its
+  `Update()` — capture overrides even fleeing, since a caught citizen is
+  being dragged, not choosing to run. Re-capturing an already-captured
+  target (a second web lands on it) simply retargets to the newest
+  captor — last web wins, no stacking, v0.1. Auto-release needs no
+  explicit cleanup call: `IsCaptured`/`Active` read the captor's live
+  `Alive` state, so a captor's death is reflected the very next check
+  (the exact "ability interrupted — captor dies mid-cast" risk from §5,
+  handled for free).
+
+  `WebAttackAbility.ResolveImpact`'s non-heavy branch (both the
+  `UnitCombat` combatant loop and the separate `Citizen` linear scan) now
+  calls `.Capture(caster, CapturePullSpeed)` (a new v0.1 placeholder
+  constant, 6 m/s) instead of only logging.
+
+  Consistent with Phase 5's "apply to all monsters" lesson: the
+  capture check was wired generically into every mover, not just
+  Citizen. `MonsterAgent.Update()` checks `_fighter.IsCaptured` right
+  after its existing death check and, while true, calls a new
+  `TickCaptured(dt)` (derives a velocity from actual displacement,
+  since `CaptureState.TickPull` moves the transform directly rather
+  than returning an intended direction*speed like the other `Tick*`
+  methods) INSTEAD of running the `_order` state machine — the paused
+  order is never touched, so it resumes automatically once released.
+  `Tank.cs` got the same check at the top of its `Update()`. Both are
+  reachable only in edge cases today (an ordinary monster is never a
+  valid target of its own faction's web — see "Possessed units and
+  friendly fire" above — so only a *possessed* monster caught by its
+  own side could ever be captured; a Tank's Mass is always 10, always
+  heavy, so it is never captured either) — kept anyway so a future
+  possessed unit or a lighter vehicle isn't a special case later,
+  mirroring the same "inert today, real hook" precedent as
+  `IsPossessed` itself.
+
+  Verified: flightcheck stub-compile clean across every touched file.
+  `webattackverify` gained 6 new checks against the real
+  `UnitCombat.cs`/`CaptureState.cs`: `Capture()` sets `IsCaptured`/
+  `Captor`; `IsCaptured` reads false the instant the captor dies (no
+  stuck pull toward a corpse); `TickCapture` closes exactly `Speed *
+  dt` toward the captor without overshooting; it holds position once
+  within `ArriveRadius` instead of overshooting past the captor;
+  re-capture retargets to the newest captor; and the non-heavy branch's
+  effect (capture) is confirmed mutually exclusive with the heavy
+  branch's effect (slow) on the same catch. All 21 checks (15 from
+  Phases 4-5, 6 new) pass.
 - **Phase 7 — consume-on-arrival**, wired into `OnCitizenEaten` for
   citizens; parallel path designed (not yet built) for non-`Citizen`
-  captured targets. **Status: not started.**
+  captured targets. **Status: not started.** A captured target that
+  reaches its captor today just holds position there (visibly
+  restrained, following if the captor itself moves) — this is an
+  expected, temporary, documented gap, not a bug: Phase 6's own scope
+  was capture + pull only, per this plan.
 - **Phase 8 — AI decision heuristic** (`EvaluateBestAbility`-equivalent:
   distance, weighted target count in AoE, cooldown state, a minimum
   usefulness threshold), added last once the ability is fully functional
@@ -290,10 +360,12 @@ session), not just `Blocked()`.
 
 ## v0.1 tuning appendix
 
-To be filled in as Phase 6+ lands: Web Attack cooldown/range/AoE radius,
-the Mass threshold separating "human-class" from "heavy-class" (`
-WebAttackAbility.HeavyMassThreshold = 3f`), pull speed, capture duration.
-Phase 5 placeholders now set: `WebAttackAbility.HeavySlowMultiplier =
-0.35f` (heavy targets move at 35% speed while caught),
-`HeavySlowDuration = 3f` seconds. All placeholders until playtested, per
-this repo's general v0.1 numbers policy.
+To be filled in as Phase 7+ lands: Web Attack cooldown/range/AoE radius.
+Placeholders set so far: `WebAttackAbility.HeavyMassThreshold = 3f` (the
+Mass threshold separating "non-heavy" from "heavy-class"),
+`HeavySlowMultiplier = 0.35f` / `HeavySlowDuration = 3f` (Phase 5 — a
+heavy target moves at 35% speed for 3s while caught), `CapturePullSpeed
+= 6f` m/s (Phase 6 — how fast a non-heavy target is dragged toward its
+captor), `CaptureState.ArriveRadius = 1.5f` (how close counts as
+"arrived," held there until Phase 7 wires consumption). All placeholders
+until playtested, per this repo's general v0.1 numbers policy.

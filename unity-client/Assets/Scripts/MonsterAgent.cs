@@ -387,6 +387,28 @@ public class MonsterAgent : MonoBehaviour
             return;
         }
 
+        // docs/26 Phase 6: a captured (non-heavy) monster is dragged
+        // toward its captor instead of running its own order -- reachable
+        // today only via a POSSESSED monster caught by its own side's web
+        // (ordinary monsters are never valid targets of their own
+        // faction's attack; see docs/26 "Possessed units and friendly
+        // fire"). The paused order resumes automatically once released
+        // (captor dies or a future phase ends the capture), since this
+        // never touches `_order`.
+        if (_fighter != null && _fighter.IsCaptured)
+        {
+            var moved = TickCaptured(dt);
+            _fighter.LastVelocity = moved;
+            if (_builder != null)
+            {
+                var pos = transform.position;
+                var gy = _builder.GroundHeightAt(pos);
+                if (!Mathf.Approximately(pos.y, gy)) transform.position = new Vector3(pos.x, gy, pos.z);
+            }
+            if (_body != null) _body.UpdateLocomotion(moved, dt);
+            return;
+        }
+
         // idle units auto-acquire -- retaliate against whoever hit them, or
         // engage the nearest enemy in aggro range -- so the tank fight is
         // self-driving without the player microing every unit. A PERCHED
@@ -867,6 +889,22 @@ public class MonsterAgent : MonoBehaviour
     }
 
     // ---- movement mechanics --------------------------------------------------
+
+    /// <summary>docs/26 Phase 6: advances this unit's capture-pull and
+    /// derives a velocity from the actual displacement (rather than an
+    /// intended direction*speed, like the Tick* methods above) since
+    /// `CaptureState.TickPull` moves the transform directly -- matching
+    /// how Citizen.MoveToward's callers never separately compute a
+    /// velocity either.</summary>
+    private Vector3 TickCaptured(float dt)
+    {
+        var before = transform.position;
+        _fighter.TickCapture(dt);
+        if (dt <= 0.0001f) return Vector3.zero;
+        var moved = transform.position - before;
+        moved.y = 0f;
+        return moved / dt;
+    }
 
     private float RunOrWalkSpeed()
     {

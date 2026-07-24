@@ -67,6 +67,20 @@ public class Tank : MonoBehaviour
         if (_combat == null || !_combat.Alive || _builder == null) return;
         var dt = Time.deltaTime;
 
+        // docs/26 Phase 6: a captured (non-heavy) unit is dragged toward
+        // its captor instead of acting on its own -- inert for a Tank
+        // today (Mass=10 always reads heavy, so WebAttackAbility never
+        // captures one), kept generic and symmetric with MonsterAgent so
+        // a future lighter vehicle isn't a special case.
+        if (_combat.IsCaptured)
+        {
+            _combat.TickCapture(dt);
+            var cp = transform.position;
+            var cgy = _builder.GroundHeightAt(cp);
+            if (!Mathf.Approximately(cp.y, cgy)) transform.position = new Vector3(cp.x, cgy, cp.z);
+            return;
+        }
+
         var target = _builder.NearestEnemyOf(_combat, _aggro);
         if (target != null)
         {

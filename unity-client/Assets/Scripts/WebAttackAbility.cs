@@ -37,6 +37,10 @@ public static class WebAttackAbility
     public const float HeavySlowMultiplier = 0.35f;
     public const float HeavySlowDuration = 3f;
 
+    /// <summary>docs/26 Phase 6: how fast a caught non-heavy target is
+    /// dragged toward its captor. Another v0.1 placeholder.</summary>
+    public const float CapturePullSpeed = 6f;
+
     /// <summary>Spawns the web bolt and wires its arrival to
     /// <see cref="ResolveImpact"/>. `targetPoint` is a SNAPSHOT (the
     /// target's position at the moment of casting) -- the bolt does not
@@ -85,7 +89,9 @@ public static class WebAttackAbility
             }
             else
             {
-                Debug.Log("[WebAttack] caught " + c.name + " (mass=" + c.Mass + ") -> CAPTURE+PULL (human-class, Phase 6)");
+                c.Capture(caster, CapturePullSpeed);
+                Debug.Log("[WebAttack] caught " + c.name + " (mass=" + c.Mass + ") -> CAPTURE+PULL toward "
+                    + caster.name + " (no consume yet, Phase 7)");
             }
         }
 
@@ -104,7 +110,8 @@ public static class WebAttackAbility
                 var d = citizen.transform.position - impactPoint;
                 d.y = 0f;
                 if (d.magnitude > radius) continue;
-                Debug.Log("[WebAttack] caught citizen " + citizen.name + " -> CAPTURE+PULL (human-class, Phase 6)");
+                citizen.Capture(caster, CapturePullSpeed);
+                Debug.Log("[WebAttack] caught citizen " + citizen.name + " -> CAPTURE+PULL toward " + caster.name + " (no consume yet, Phase 7)");
             }
         }
     }

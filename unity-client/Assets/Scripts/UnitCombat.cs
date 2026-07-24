@@ -84,6 +84,12 @@ public class UnitCombat : MonoBehaviour
     private float _slowRemaining;
     private float _slowMultiplier = 1f;
 
+    /// <summary>docs/26 Phase 6: this unit's "being pulled toward a
+    /// captor" state, or null when not caught. Lives on UnitCombat (not
+    /// MonsterAgent/Tank) for the same reason Mass/SpeedMultiplier do --
+    /// so any combatant type gets it for free.</summary>
+    private CaptureState _capture;
+
     public bool Alive { get { return !_dead && Health > 0f; } }
     public bool InBattle { get { return _battleTimer > 0f; } }
     public float HealthFraction { get { return Mathf.Clamp01(Health / Mathf.Max(1f, MaxHealth)); } }
@@ -112,6 +118,36 @@ public class UnitCombat : MonoBehaviour
             _slowMultiplier = multiplier;
             _slowRemaining = duration;
         }
+    }
+
+    /// <summary>True while this unit is being dragged toward a captor
+    /// (e.g. a web attack's non-heavy branch). The owning mover
+    /// (MonsterAgent/Tank) checks this at the top of its own Update() and
+    /// calls TickCapture INSTEAD of its own AI/movement while true --
+    /// mirroring how Citizen overrides its own Update() the same way.
+    /// Self-healing: reads live off the captor's Alive state, so a dead
+    /// captor's victim is released the very next check with no separate
+    /// cleanup call needed.</summary>
+    public bool IsCaptured { get { return _capture != null && _capture.Active; } }
+    public UnitCombat Captor { get { return _capture != null ? _capture.Captor : null; } }
+
+    /// <summary>Begin being pulled toward `captor`. Re-capturing an
+    /// already-captured unit (a second web lands on it) simply retargets
+    /// to the newest captor -- last web wins, no stacking, v0.1.</summary>
+    public void Capture(UnitCombat captor, float speed)
+    {
+        if (_capture == null) _capture = new CaptureState();
+        _capture.Begin(captor, speed);
+    }
+
+    /// <summary>Advances the pull one frame. No-op once the captor has
+    /// died (and releases the capture so IsCaptured reads false from
+    /// then on).</summary>
+    public void TickCapture(float dt)
+    {
+        if (_capture == null) return;
+        if (!_capture.Active) { _capture = null; return; }
+        _capture.TickPull(transform, dt);
     }
 
     public void Configure(string faction, float maxHp, float radius, float aimHeight,

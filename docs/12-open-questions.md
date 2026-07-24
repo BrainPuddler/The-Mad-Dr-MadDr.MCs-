@@ -1003,3 +1003,72 @@ new) pass.
 
 Next: Phase 6 (`CaptureState` + pull-toward-captor for human-class
 targets — the riskiest step, new interruptible multi-frame state).
+
+## Special Attacks System Phase 6: CaptureState + pull-toward-captor (2026-07)
+
+Creator direction: "Do it" (continue to the next approved phase in the
+docs/26 plan). Phase 6 delivers the riskier of the two remaining
+branches: a caught non-heavy target is now actually dragged toward its
+captor, not just logged.
+
+New `CaptureState.cs`: `Captor`, `Speed`, `Active` (captor non-null and
+alive), `Begin(captor, speed)`, `TickPull(transform, dt)` (moves toward
+the captor at `Speed`, clamped so it never overshoots, and simply stops
+once within `ArriveRadius` — consumption is explicitly out of scope for
+this phase, see below). Built as its own standalone class rather than
+fields directly on `UnitCombat`, because the identical pull logic has to
+work for `Citizen` too — Phase 4's research already established that
+`Citizen` carries no `UnitCombat` component at all, so it can't share
+one. `UnitCombat` gained `IsCaptured`/`Captor`/`Capture(...)`/
+`TickCapture(dt)` (owns one `CaptureState`); `Citizen` gained its own
+separate `Capture(...)` + a `_capture` field, checked at the very top of
+`Update()` ahead of even its flee logic (capture overrides everything —
+a caught citizen is being dragged, not choosing to run).
+
+Auto-release needed no explicit cleanup call: `IsCaptured`/`Active` read
+the captor's live `Alive` state directly, so a captor's death is
+reflected the very next check — the "ability interrupted, captor dies
+mid-cast" risk from docs/26 §5, handled for free by construction rather
+than by a separate event/callback.
+
+Generic-to-all-monsters (same lesson as Phase 5): the capture check was
+wired into every mover, not just Citizen. `MonsterAgent.Update()` checks
+`_fighter.IsCaptured` right after its existing death check and runs a
+new `TickCaptured(dt)` instead of the `_order` switch while true — the
+paused order is never touched, so whatever the unit was doing resumes
+automatically once released. `Tank.cs` got the identical check at the
+top of its own `Update()`. Both are reachable only in edge cases today
+(an ordinary monster is never a valid target of its own faction's web —
+see the Phase 5 possessed-unit entry above — so only a *possessed*
+monster caught by its own side could ever be captured; a Tank's Mass is
+always 10, always heavy, so it's never captured either) but were wired
+anyway, matching the same "inert today, real hook" precedent as
+`IsPossessed`.
+
+`WebAttackAbility.ResolveImpact`'s non-heavy branch (both the
+`UnitCombat` combatant loop and the `Citizen` linear scan) now calls
+`.Capture(caster, CapturePullSpeed)` (new placeholder, 6 m/s) instead of
+only logging.
+
+Explicitly NOT built this phase (by design, per the existing phase
+boundary, not an oversight): consumption on arrival. A captured target
+that reaches its captor holds position there today — visibly restrained,
+still following if the captor moves — until Phase 7 wires the actual
+eat/destroy step (trivial for citizens, reusing the existing
+`OnCitizenEaten`; genuinely new design work for a non-Citizen captured
+target, since no generic "consume a UnitCombat" path exists yet).
+
+Verified: flightcheck stub-compile clean across every touched file
+(`UnitCombat.cs`, `CaptureState.cs`, `MonsterAgent.cs`, `Tank.cs`,
+`Citizen.cs`, `WebAttackAbility.cs`). `webattackverify` gained 6 new
+checks against the real shipped files: `Capture()` sets `IsCaptured`/
+`Captor`; `IsCaptured` reads false the instant the captor dies; a tick
+closes exactly `Speed * dt` toward the captor without overshooting; it
+holds position once within `ArriveRadius`; re-capture retargets to the
+newest captor (last web wins, no stacking); and the non-heavy branch's
+capture effect is confirmed mutually exclusive with the heavy branch's
+slow effect on the same catch. All 21 checks (15 from Phases 4-5, 6 new)
+pass.
+
+Next: Phase 7 (consume-on-arrival, wired into `OnCitizenEaten` for
+citizens; the non-Citizen path remains a real open design question).

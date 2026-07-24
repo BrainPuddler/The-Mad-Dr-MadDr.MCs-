@@ -31,6 +31,22 @@ public class Citizen : MonoBehaviour
     private float _repickTimer;
     private int _stepSalt;
 
+    /// <summary>docs/26 Phase 6: this citizen's own CaptureState -- a
+    /// Citizen has no UnitCombat component (confirmed via grep, not
+    /// assumed), so it can't share UnitCombat's copy and owns one
+    /// directly instead. Null until something calls Capture().</summary>
+    private CaptureState _capture;
+
+    /// <summary>Begin being dragged toward `captor`, overriding this
+    /// citizen's own flee/walk AI in Update() until the captor dies
+    /// (auto-release) or a future phase wires consumption on
+    /// arrival.</summary>
+    public void Capture(UnitCombat captor, float speed)
+    {
+        if (_capture == null) _capture = new CaptureState();
+        _capture.Begin(captor, speed);
+    }
+
     public void Init(RuntimeCityBuilder builder, HexCoord home)
     {
         _builder = builder;
@@ -52,6 +68,23 @@ public class Citizen : MonoBehaviour
     private void Update()
     {
         var dt = Time.deltaTime;
+
+        // captured overrides everything, even fleeing -- a caught citizen
+        // is being dragged, not choosing to run (docs/26 Phase 6)
+        if (_capture != null)
+        {
+            if (!_capture.Active)
+            {
+                _capture = null;   // captor died mid-drag -- released, resume normal AI below
+            }
+            else
+            {
+                _capture.TickPull(transform, dt);
+                var cp = transform.position;
+                transform.position = new Vector3(cp.x, _builder.GroundHeightAt(cp) + 0.9f, cp.z);
+                return;
+            }
+        }
 
         // flee: any monster close by overrides everything -- panic runs
         // anywhere open, ignoring sidewalks (creator: "avoiding monsters,
