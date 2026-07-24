@@ -13,9 +13,11 @@ using UnityEngine;
 /// PHASE 4 targeting + classification landed on its own first (logged
 /// via Debug.Log, no effects) specifically so it could be proven correct
 /// before any harder work touched it. PHASE 5 adds the heavy-target
-/// branch's real effect (UnitCombat.ApplySlow) on top of that same
-/// query; the human-class branch is still logged only (Phases 6-7 add
-/// capture/pull/consume).
+/// branch's real effect (UnitCombat.ApplySlow); PHASE 6 the non-heavy
+/// branch's capture/pull; PHASE 7 consume-on-arrival for citizens.
+/// PHASE 8 (MonsterAgent.EvaluateBestAbility) scores candidate targets
+/// using CountCatchable below, reusing this same query/classification
+/// logic to decide WHETHER to cast at all.
 ///
 /// Stateless -- one caster can have this resolver called for it any
 /// number of times; all per-cast state lives on the spawned Projectile
@@ -114,6 +116,38 @@ public static class WebAttackAbility
                 Debug.Log("[WebAttack] caught citizen " + citizen.name + " -> CAPTURE+PULL toward " + caster.name + " (no consume yet, Phase 7)");
             }
         }
+    }
+
+    /// <summary>docs/26 Phase 8: how many combatants + citizens would be
+    /// caught if this ability landed at `impactPoint` right now -- the
+    /// "weighted target count in AoE" the AI decision heuristic scores
+    /// candidate anchors by. Runs the exact same query + the exact same
+    /// `ShouldCatchCombatant`/`MatchesFilter` decisions `ResolveImpact`
+    /// uses, so the heuristic can never disagree with what actually
+    /// happens on impact -- just tallies instead of applying effects.</summary>
+    public static int CountCatchable(RuntimeCityBuilder builder, UnitCombat caster,
+        SpecialAttackDefinition definition, Vector3 impactPoint)
+    {
+        if (builder == null || caster == null || definition == null) return 0;
+        var radius = Mathf.Max(0.01f, definition.AreaOfEffect);
+        var count = 0;
+
+        var combatants = new List<UnitCombat>();
+        builder.QueryCombatantsInRadius(impactPoint, radius, combatants);
+        foreach (var c in combatants)
+            if (ShouldCatchCombatant(c, caster, definition, impactPoint)) count++;
+
+        if (MatchesFilter(TargetFilter.Human, definition.ValidTargets))
+        {
+            foreach (var citizen in builder.Citizens)
+            {
+                if (citizen == null) continue;
+                var d = citizen.transform.position - impactPoint;
+                d.y = 0f;
+                if (d.magnitude <= radius) count++;
+            }
+        }
+        return count;
     }
 
     /// <summary>True at or above <see cref="HeavyMassThreshold"/>. Pure

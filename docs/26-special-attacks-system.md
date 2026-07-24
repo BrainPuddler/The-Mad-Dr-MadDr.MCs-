@@ -1,6 +1,6 @@
 # 26 — Special Attacks System (enemy AI)
 
-Status: **Approved architecture, Phases 1–7 implemented** (design produced
+Status: **Approved architecture, Phases 1–8 implemented** (design produced
 2026-07 via a research-then-design pass over the existing combat/AI
 architecture before any code was written; creator approved "pure Unity"
 + ScriptableObject-based definitions before implementation began) ·
@@ -149,7 +149,10 @@ per-type flags.
   `ClearTargets()`, `OnDied()`, and the debug `OrderDescription` string;
   Phase 5 multiplies `_fighter.SpeedMultiplier` into `RunOrWalkSpeed()`;
   Phase 6 adds an `IsCaptured` check + `TickCaptured(dt)`, run instead of
-  the `_order` switch while true.
+  the `_order` switch while true; Phase 8 adds `EvaluateBestAbility(...)`
+  and wires it into `AcquireTarget` ahead of retaliation/engage, and
+  narrows `AcquireTarget`'s old all-or-nothing weapon guard so a
+  weaponless special-attack-only creature could still use one.
 - `Tank.cs` — explicit `mass: 10f` on its `Configure(...)` call, the
   concrete heavy-target example; Phase 5 multiplies
   `_combat.SpeedMultiplier` into the hull-movement line; Phase 6 adds the
@@ -169,7 +172,9 @@ per-type flags.
   `c.ApplySlow(...)` instead of only logging; `ShouldCatchCombatant`'s
   friendly-fire check now respects `IsPossessed`. Phase 6: adds
   `CapturePullSpeed`; both the combatant and citizen non-heavy branches
-  now call `.Capture(...)` instead of only logging.
+  now call `.Capture(...)` instead of only logging. Phase 8: adds
+  `CountCatchable(...)`, reusing `ResolveImpact`'s own query/
+  classification logic to score candidate targets for the AI heuristic.
 
 **New:**
 `SpecialAttackDefinition.cs`, `SpecialAttackInstance.cs` (Phase 1);
@@ -403,11 +408,86 @@ session), not just `Blocked()`.
 - **Phase 8 — AI decision heuristic** (`EvaluateBestAbility`-equivalent:
   distance, weighted target count in AoE, cooldown state, a minimum
   usefulness threshold), added last once the ability is fully functional
-  and can be triggered/tested without it. **Status: not started.**
+  and can be triggered/tested without it. **Status: done (2026-07) — the
+  last phase in this plan.**
+
+  New `WebAttackAbility.CountCatchable(builder, caster, definition,
+  impactPoint)`: runs the exact same query + the exact same
+  `ShouldCatchCombatant`/`MatchesFilter` decisions `ResolveImpact` itself
+  uses, but tallies instead of applying effects -- so the AI heuristic
+  can never pick a target the resolver would then fail to catch, and
+  never drift out of sync with it (one query implementation, read by
+  both the "would this land" question and the "how good would it be"
+  question).
+
+  New `MonsterAgent.EvaluateBestAbility(out ability, out anchor)`: for
+  every equipped ability that's off cooldown (**cooldown state**), scans
+  combatants within that ability's own `Range` of this unit
+  (**distance**) via `QueryCombatantsInRadius`, and considers each one a
+  candidate anchor -- using `ShouldCatchCombatant` at the candidate's OWN
+  position (`impactPoint = candidate.position`) to check firing there
+  would even catch it at all. Every anchor that passes is scored by
+  `CountCatchable` (**weighted target count in AoE**) at that position;
+  only a score clearing the ability's own `Definition.MinTargetsInArea`
+  (**minimum usefulness threshold** -- a Phase 1 field left unused until
+  now) is accepted, and the highest-scoring ability+anchor across every
+  equipped ability wins. Wired into `AcquireTarget` ahead of both
+  retaliation (`LastAttacker`) and the plain nearest-enemy engage: a
+  special attack that clears its own bar is treated as more valuable
+  (**tactical value**) than a single regular shot at whoever's nearest or
+  last hit this unit.
+
+  `AcquireTarget`'s old guard (`if (_fighter == null || _fighter.Weapon
+  == null || !_fighter.Weapon.CanAttack) return;`) was narrowed to just
+  `if (_fighter == null) return;` up front, with the `Weapon`/`CanAttack`
+  check moved down to guard only the plain-attack fallback -- so a
+  future special-attack-only creature with no conventional weapon can
+  still use its ability. Behaviorally inert today: no monster anywhere
+  is actually equipped with a `SpecialAttackInstance` yet (`Abilities` is
+  always empty), because equipping one means dragging a
+  `SpecialAttackDefinition` ScriptableObject asset onto a creature in the
+  Unity Editor -- a creator/Editor-side task with no code path, and (per
+  §1's Fork 2) the entire reason ScriptableObject was chosen over a plain
+  class in the first place. `EvaluateBestAbility` is fully built,
+  fully tested, and will start doing real work the moment a creature is
+  actually equipped with one.
+
+  Verified: flightcheck stub-compile clean. `webattackverify` gained 3
+  new checks against the real `WebAttackAbility.CountCatchable` (needed
+  a small stub upgrade: `RuntimeCityBuilder`'s
+  `QueryCombatantsInRadius`/`Citizens` are now settable and genuinely
+  radius-filtered, rather than always returning empty, so a scene can
+  actually be populated without a real spatial grid): tallies every
+  valid combatant in range; excludes an ally/out-of-range/dead
+  combatant while still counting the one valid target; and citizens
+  count only when `ValidTargets` allows `Human`. `EvaluateBestAbility`
+  itself is a private `MonsterAgent` method that needs a live
+  `Transform`/`_builder`/`_fighter` to exercise -- consistent with this
+  session's standing discipline, only `CountCatchable` (the pure/query
+  logic it depends on) is harness-tested directly; the decision method
+  itself is straight-line composition of already-tested pieces, same as
+  `ResolveImpact` was never tested directly either. All 25 checks (22
+  from Phases 4-7, 3 new) pass.
+
+**All 8 phases of this plan are now implemented.** What's real and
+working today, end to end: a monster with an equipped, ready
+`SpecialAttackInstance` will autonomously choose to fire it (over
+retaliating/engaging normally) whenever a candidate target's AoE would
+catch enough valid targets to clear the ability's own usefulness bar; a
+Web Attack bolt travels to that snapshot position, and on arrival heavy
+targets are slowed (visibly, on any monster or Tank) while non-heavy
+targets are dragged toward the caster and eaten on arrival if they're a
+`Citizen`. Three follow-ups remain, all flagged above rather than
+hidden: (1) no creature is actually equipped with a
+`SpecialAttackDefinition` yet -- that's a creator/Editor drag-and-drop
+step outside any phase in this plan; (2) a non-Citizen consume path is
+designed but not built, since nothing testable exists to build it
+against; (3) web-captured citizens don't credit the eating monster's
+harvest tank the way a direct chase-and-eat order does.
 
 ## v0.1 tuning appendix
 
-To be filled in as Phase 8 lands: Web Attack cooldown/range/AoE radius.
+To be filled in as playtesting begins: Web Attack cooldown/range/AoE radius.
 Placeholders set so far: `WebAttackAbility.HeavyMassThreshold = 3f` (the
 Mass threshold separating "non-heavy" from "heavy-class"),
 `HeavySlowMultiplier = 0.35f` / `HeavySlowDuration = 3f` (Phase 5 — a

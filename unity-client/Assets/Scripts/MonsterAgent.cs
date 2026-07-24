@@ -298,12 +298,13 @@ public class MonsterAgent : MonoBehaviour
     /// <summary>docs/26 (Special Attacks System): use `ability` on `unit`
     /// once in range. `ability` must be one of THIS unit's own
     /// `_fighter.Abilities` entries (same object, not a copy) so its
-    /// cooldown actually persists -- callers (today: nothing yet: this is
-    /// Phase 1-3 wiring only, the AI decision layer that calls this is a
-    /// later phase) are expected to have already checked `ability.IsReady`
-    /// before issuing the order; TickSpecialAttack does not re-check it,
-    /// the same way TickAttackUnit doesn't re-check ReadyToFire before
-    /// approaching (only before actually firing).</summary>
+    /// cooldown actually persists -- called by `AcquireTarget` via
+    /// `EvaluateBestAbility` (Phase 8) once an ability clears its own
+    /// usefulness bar; callers are expected to have already checked
+    /// `ability.IsReady` before issuing the order (EvaluateBestAbility
+    /// does); TickSpecialAttack does not re-check it, the same way
+    /// TickAttackUnit doesn't re-check ReadyToFire before approaching
+    /// (only before actually firing).</summary>
     public void OrderSpecialAttack(SpecialAttackInstance ability, UnitCombat unit)
     {
         if (ability == null || ability.Definition == null || unit == null) return;
@@ -504,11 +505,74 @@ public class MonsterAgent : MonoBehaviour
 
     private void AcquireTarget()
     {
-        if (_fighter == null || _fighter.Weapon == null || !_fighter.Weapon.CanAttack) return;
+        if (_fighter == null) return;
+
+        // docs/26 Phase 8: a special attack that clears its own
+        // usefulness bar takes priority over plain retaliation/engage --
+        // a real tactical opportunity (several targets in one AoE) is
+        // presumably worth more than a single regular shot at whoever
+        // last hit this unit or is merely nearest.
+        SpecialAttackInstance bestAbility;
+        UnitCombat bestAnchor;
+        if (EvaluateBestAbility(out bestAbility, out bestAnchor))
+        {
+            OrderSpecialAttack(bestAbility, bestAnchor);
+            return;
+        }
+
+        if (_fighter.Weapon == null || !_fighter.Weapon.CanAttack) return;
         var attacker = _fighter.LastAttacker;
         if (attacker != null && attacker.Alive) { OrderAttackUnit(attacker); return; }
         var enemy = _builder.NearestEnemyOf(_fighter, 130f);
         if (enemy != null) OrderAttackUnit(enemy);
+    }
+
+    /// <summary>docs/26 Phase 8: picks the best ready special attack +
+    /// anchor target to use right now, or false if none clears its own
+    /// usefulness bar. For each equipped ability that's off cooldown
+    /// (cooldown state), scans combatants within the ability's own Range
+    /// of this unit (distance) and considers each one as a candidate
+    /// anchor -- an enemy (or possessed "ally") this ability could be
+    /// aimed at, using `WebAttackAbility.ShouldCatchCombatant` at the
+    /// candidate's OWN position (impactPoint = candidate.position) to
+    /// decide whether firing there would even catch it at all. For every
+    /// anchor that passes, `WebAttackAbility.CountCatchable` scores it by
+    /// how many combatants + citizens the AoE would actually catch there
+    /// (weighted target count) -- reusing the resolver's own query/
+    /// classification logic so this heuristic can never pick a target the
+    /// resolver would then fail to catch. Only a score that clears the
+    /// ability's own `Definition.MinTargetsInArea` (minimum usefulness
+    /// threshold, a Phase 1 field left unused until now) is accepted; the
+    /// highest-scoring ability+anchor across every equipped ability
+    /// wins.</summary>
+    private bool EvaluateBestAbility(out SpecialAttackInstance ability, out UnitCombat anchor)
+    {
+        ability = null;
+        anchor = null;
+        if (_fighter == null || _builder == null) return false;
+
+        var bestScore = 0;
+        var nearby = new List<UnitCombat>();
+        for (var i = 0; i < _fighter.Abilities.Count; i++)
+        {
+            var candidate = _fighter.Abilities[i];
+            if (candidate == null || !candidate.IsReady || candidate.Definition == null) continue;
+            var def = candidate.Definition;
+
+            _builder.QueryCombatantsInRadius(transform.position, (float)def.Range, nearby);
+            foreach (var enemy in nearby)
+            {
+                if (!WebAttackAbility.ShouldCatchCombatant(enemy, _fighter, def, enemy.transform.position)) continue;
+                var score = WebAttackAbility.CountCatchable(_builder, _fighter, def, enemy.transform.position);
+                if (score > bestScore && score >= def.MinTargetsInArea)
+                {
+                    bestScore = score;
+                    ability = candidate;
+                    anchor = enemy;
+                }
+            }
+        }
+        return ability != null;
     }
 
     private Vector3 TickMove(float dt)

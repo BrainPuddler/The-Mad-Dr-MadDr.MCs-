@@ -1124,3 +1124,69 @@ limit as every other Unity behaviour this session).
 Next: Phase 8 (AI decision heuristic -- `EvaluateBestAbility`-equivalent:
 distance, weighted target count in AoE, cooldown state, a minimum
 usefulness threshold), the last phase in the approved plan.
+
+## Special Attacks System Phase 8: AI decision heuristic -- plan complete (2026-07)
+
+Creator direction: "Do it" (continue to the last approved phase). This
+closes the docs/26 phased plan: all 8 phases are now implemented.
+
+New `WebAttackAbility.CountCatchable(builder, caster, definition,
+impactPoint)`: runs the exact same query and the exact same
+`ShouldCatchCombatant`/`MatchesFilter` decisions `ResolveImpact` itself
+uses, but tallies instead of applying effects, so the AI heuristic can
+never pick a target the resolver would then fail to catch -- one query
+implementation backs both "would this land" and "how good would it be."
+
+New `MonsterAgent.EvaluateBestAbility(out ability, out anchor)`: for
+every equipped ability off cooldown, scans combatants within that
+ability's own Range via `QueryCombatantsInRadius`, treats each as a
+candidate anchor (validated with `ShouldCatchCombatant` at the
+candidate's own position), scores every valid anchor with
+`CountCatchable`, and accepts only a score clearing the ability's own
+`Definition.MinTargetsInArea` -- a Phase 1 field that had gone unused
+until now. The highest-scoring ability+anchor across every equipped
+ability wins. Wired into `AcquireTarget` ahead of both retaliation
+(`LastAttacker`) and the plain nearest-enemy engage: a special attack
+that clears its own bar is treated as more valuable than a single
+regular shot at whoever's nearest or last hit this unit.
+
+`AcquireTarget`'s old all-or-nothing guard (`_fighter == null ||
+_fighter.Weapon == null || !_fighter.Weapon.CanAttack`) was narrowed to
+just `_fighter == null` up front, moving the weapon check down to guard
+only the plain-attack fallback -- so a future special-attack-only
+creature with no conventional weapon could still use its ability.
+Behaviorally inert today for every existing monster (this refactor
+changes nothing observable), since `Abilities` is empty everywhere --
+see below.
+
+Explicitly noted, not hidden: no monster anywhere is actually equipped
+with a `SpecialAttackInstance` yet. Equipping one means dragging a
+`SpecialAttackDefinition` ScriptableObject asset onto a creature in the
+Unity Editor -- a creator/Editor-side step with no code path, and (per
+docs/26 Fork 2) the entire reason ScriptableObject was chosen over a
+plain class in the first place. `EvaluateBestAbility` is fully built and
+fully tested; it starts doing real work the moment a creature is
+actually equipped.
+
+Verified: flightcheck stub-compile clean. `webattackverify` gained 3 new
+checks against the real `WebAttackAbility.CountCatchable` -- needed a
+small stub upgrade first: `RuntimeCityBuilder`'s
+`QueryCombatantsInRadius`/`Citizens` are now settable and genuinely
+radius-filtered (were previously hardcoded to always return empty), so a
+scene can actually be populated without a real spatial grid. Checks:
+tallies every valid combatant in range; excludes an ally/out-of-
+range/dead combatant while still counting the one valid target; citizens
+count only when `ValidTargets` allows `Human`. `EvaluateBestAbility`
+itself needs a live `Transform`/`_builder`/`_fighter` to exercise and
+wasn't tested directly, matching this session's standing discipline --
+only the pure/query logic it composes (`CountCatchable`) is
+harness-tested, the same way `ResolveImpact` itself was never tested
+directly either. All 25 checks (22 from Phases 4-7, 3 new) pass.
+
+**docs/26's 8-phase plan is complete.** Three follow-ups remain, all
+flagged in the doc rather than hidden: no creature is actually equipped
+with a special attack yet (an Editor-side task outside this plan); the
+non-Citizen consume path is designed but not built (nothing testable
+exists to build it against); web-captured citizens don't credit the
+eating monster's harvest tank (Citizen has no back-reference to the
+capturing MonsterAgent).
