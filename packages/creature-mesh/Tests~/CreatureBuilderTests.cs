@@ -744,4 +744,55 @@ public class CreatureBuilderTests
         // metal reads as ~2 chunks (face-panel gloss + tank gloss)
         Assert.True(metalChunks >= 2, $"{plan}: expected the tank's metal parts, found {metalChunks}");
     }
+
+    // ---- docs/25-adjacent: Prims.Ellipsoid tilt (avian's back mount only) ----
+
+    private static (double[] p, double[] n) EllipsoidPoleVertex(double tilt)
+    {
+        // the "pole" (i=0, th=0 -> sy=1, sr=0) is the single vertex every
+        // longitude line (j) collapses onto -- exactly the point a flat
+        // disc-shaped cap (a squashed sphere, r.Y small) presents as its
+        // own flat face centre, so its normal is the clearest, least
+        // ambiguous read on "which way is this cap actually facing."
+        var mb = new Builder();
+        var r = new Vec3(1.0, 0.3, 1.0);
+        Prims.Ellipsoid(mb, new Vec3(0, 0, 0), r, Palette.METAL, 0.5, 0, 6, tilt);
+        var chunk = mb.Chunks[0];
+        return (new[] { chunk.Positions[0], chunk.Positions[1], chunk.Positions[2] },
+                new[] { chunk.Normals[0], chunk.Normals[1], chunk.Normals[2] });
+    }
+
+    [Fact]
+    public void EllipsoidTiltZeroReproducesTheUntiltedShapeExactly()
+    {
+        // every plan except avian leaves Sock.PackTilt at its default 0 --
+        // this must be byte-identical to a plain axis-aligned ellipsoid,
+        // not merely close, or every other body type's geometry shifts
+        var (pFlat, nFlat) = EllipsoidPoleVertex(0);
+        Assert.Equal(0.3, pFlat[1], 10);   // pole sits at +r.Y on the Y axis
+        Assert.Equal(0.0, pFlat[2], 10);   // and exactly on the Y axis -- no Z component
+        Assert.Equal(1.0, nFlat[1], 10);   // normal points straight along +Y
+        Assert.Equal(0.0, nFlat[2], 10);
+    }
+
+    [Fact]
+    public void EllipsoidTiltRotatesTheCapToFaceAlongTheTiltedAxis()
+    {
+        // avian's own derived tilt (docs/12, 2026-07): atan2(0.5, 0.87).
+        // A cap built with this tilt should face along the SAME (Y,Z)
+        // direction PackP itself moves the cap's centre along -- proving
+        // the cap and the tube it closes off are finally facing the same
+        // way, not just co-located.
+        var tilt = System.Math.Atan2(0.5, 0.87);
+        var (p, n) = EllipsoidPoleVertex(tilt);
+        var expectedDirY = System.Math.Cos(tilt);
+        var expectedDirZ = System.Math.Sin(tilt);
+        Assert.Equal(0.3 * expectedDirY, p[1], 6);
+        Assert.Equal(0.3 * expectedDirZ, p[2], 6);
+        Assert.Equal(expectedDirY, n[1], 6);
+        Assert.Equal(expectedDirZ, n[2], 6);
+        // sanity: this is a REAL rotation away from the untilted case, not
+        // a no-op that happens to pass the equality checks above by luck
+        Assert.True(System.Math.Abs(n[2]) > 0.4, $"cap normal barely rotated (n.Z={n[2]:F3})");
+    }
 }

@@ -753,3 +753,54 @@ MeshB.vert -> shader` consumption path rather than by a live render --
 consistent with this repo's standing "no visual verification available"
 discipline. Every plan's `back` socket now sets both `anim` and `gait`,
 confirmed by re-grepping all nine after the fix.
+
+## 2026-07 — Fix: tilted-tank caps/collar/plate were still axis-aligned (avian only)
+
+Creator: "Now the alignment on the top and bottom of the Single tank is
+misaligned and the mounting disk on the double tank (the actual double
+tanks are perfect do not alter), On the Avian body, ONLY the Avian
+torso, DO NOT touch the other body types."
+
+Root cause: this is the exact limitation flagged (but not yet fixed) in
+the earlier avian-tilt entry above. `PackP` correctly moves a part's
+CENTRE onto avian's sloped back, but every cap/collar/plate on a tank is
+drawn with `Prims.Ellipsoid`/`ellipsoid()`, which had no rotation concept
+at all -- an ellipsoid's own SHAPE stayed aligned to world Y/Z regardless
+of where its centre moved to. On steel_tank this reads as the top and
+bottom end caps sitting at an angle to the barrel instead of flush
+across it ("alignment on the top and bottom... misaligned"); on
+tank_backpack the equivalent piece is the frame plate/end-cap geometry
+("the mounting disk"). The TUBE-based barrels themselves (both tanks'
+actual cylinders) were never wrong -- a `Tube`'s orientation comes
+entirely from its two endpoint positions, both already correctly moved
+by `PackP`'s tilt -- which is exactly why the creator could tell the
+double tank's own barrels were "perfect" while something else on it
+wasn't.
+
+Fix: added the same kind of provably-safe optional parameter used for
+`PackTilt` itself, this time to the shared `Prims.Ellipsoid`/
+`ellipsoid()` primitive (`tilt = 0`, rotating the ellipsoid's own (Y,Z)
+shape around the across-axis before mapping to world space). Derived by
+hand so tilt=0 reduces ALGEBRAICALLY to the exact original per-vertex
+expressions (not approximately -- confirmed token-for-token, and by 93
+existing tests across the whole renderer staying green unchanged, since
+this primitive is used by essentially every piece of geometry in the
+game, not just tanks). Threaded `packTilt` through every `Ellipsoid` call
+in all four storage families (steel_tank, tank_backpack, storage_bladder,
+amber_vesicle) in both renderers; deliberately left every `Tube` call
+untouched, matching "the actual double tanks are perfect do not alter."
+
+Verified with two new direct tests against `Prims.Ellipsoid` itself
+(bypassing the whole avian body, so the check is exact, not
+inferred from an assembled mesh): `EllipsoidTiltZeroReproducesThe
+UntiltedShapeExactly` confirms tilt=0 is byte-identical to the pre-fix
+shape; `EllipsoidTiltRotatesTheCapToFaceAlongTheTiltedAxis` confirms
+that at avian's own derived tilt angle, a cap's position AND normal
+rotate to face the SAME (Y,Z) direction `PackP` moves the cap's centre
+along -- i.e. the cap and the tube it closes off are finally facing the
+same way, not just co-located. creature-mesh 95 green (was 93). Diffed
+the C# change and confirmed every `Prims.Tube` call line is untouched.
+flightcheck stub-compile clean against the rebuilt DLL. Site JS
+`node --check` clean; ported the identical formula. No visual
+verification (no Editor/browser in this environment) -- verified via the
+primitive-level geometric proof above instead.

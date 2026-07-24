@@ -162,11 +162,24 @@ namespace MadDr.CreatureMesh
     /// dial can come later with the perf pass).</summary>
     public static class Prims
     {
-        public static void Ellipsoid(Builder mb, Vec3 c, Vec3 r, Col col, double gloss = 0.25, double emis = 0, int seg = 14)
+        public static void Ellipsoid(Builder mb, Vec3 c, Vec3 r, Col col, double gloss = 0.25, double emis = 0, int seg = 14, double tilt = 0)
         {
             var chunk = mb.Begin(col, gloss, emis);
             var la = seg;
             var lo = (int)Math.Round(seg * 1.6);
+            // `tilt` rotates the ellipsoid's own (Y,Z) shape around the
+            // across-axis (X) to match PackP's rotation (CreatureBuilder.cs)
+            // -- default 0 reproduces the exact untilted mapping below,
+            // algebraically (ct=1, st=0 collapses every wy/wz to the plain
+            // u*r it replaces), so every existing caller is unaffected.
+            // Needed because a caller can move an ellipsoid's CENTER onto a
+            // tilted mount (PackP already does that) without this: the
+            // shape itself stayed axis-aligned to world space regardless,
+            // so a flat cap on a tilted tube read as visibly misaligned
+            // with the barrel it was meant to close off (creator report,
+            // 2026-07, avian only).
+            var ct = Math.Cos(tilt);
+            var st = Math.Sin(tilt);
             var rows = new int[la + 1][];
             for (var i = 0; i <= la; i++)
             {
@@ -178,8 +191,19 @@ namespace MadDr.CreatureMesh
                 {
                     var ph = (double)j / lo * Math.PI * 2;
                     var u = new Vec3(sr * Math.Cos(ph), sy, sr * Math.Sin(ph));
-                    var p = new Vec3(c.X + u.X * r.X, c.Y + u.Y * r.Y, c.Z + u.Z * r.Z);
-                    var n = new Vec3(u.X / r.X, u.Y / r.Y, u.Z / r.Z);
+                    // this Y/Z convention (out = -(u.Z*r.Z)) matches PackP's
+                    // own "-o" sign so tilt=0 reduces to +u.Z*r.Z, the exact
+                    // original expression -- see the header comment above
+                    var along = u.Y * r.Y;
+                    var outp = -(u.Z * r.Z);
+                    var wy = along * ct + outp * st;
+                    var wz = along * st - outp * ct;
+                    var p = new Vec3(c.X + u.X * r.X, c.Y + wy, c.Z + wz);
+                    var nAlong = u.Y / r.Y;
+                    var nOut = -(u.Z / r.Z);
+                    var nwy = nAlong * ct + nOut * st;
+                    var nwz = nAlong * st - nOut * ct;
+                    var n = new Vec3(u.X / r.X, nwy, nwz);
                     rows[i][j] = mb.Vert(chunk, p, n);
                 }
             }

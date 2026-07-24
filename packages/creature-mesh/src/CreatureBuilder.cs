@@ -1660,10 +1660,10 @@ namespace MadDr.CreatureMesh
                         var r = blobR * (0.8 + 0.35 * Math.Abs(Math.Sin(i * 1.7)));
                         // centre sunk ~45% in, so ~55% bulges out of the hide
                         var c = PackP(s, top, t * blobR * 0.9, t * blobR * 0.5, -r * 0.45, packTilt);
-                        Prims.Ellipsoid(mb, c, PackR(top, r, r * 0.95, r * 1.05), contents, 0.3, 0.1, 10);
+                        Prims.Ellipsoid(mb, c, PackR(top, r, r * 0.95, r * 1.05), contents, 0.3, 0.1, 10, packTilt);
                         // a taut skin membrane over the outer (bulging) face
                         Prims.Ellipsoid(mb, PackP(s, top, t * blobR * 0.9, t * blobR * 0.5, -r * 0.15, packTilt),
-                            PackR(top, r * 0.82, r * 0.78, r * 0.5), skin, 0.35, 0, 9);
+                            PackR(top, r * 0.82, r * 0.78, r * 0.5), skin, 0.35, 0, 9, packTilt);
                     }
                     break;
                 }
@@ -1682,16 +1682,16 @@ namespace MadDr.CreatureMesh
                     var sink = tR * 0.18;            // strapped-on, not embedded
                     // saddle collar seats the tank against the body
                     Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -sink * 2.2, packTilt),
-                        PackR(top, tR * 1.15, tR * 0.4, tR * 0.5), Palette.METAL, 0.5, 0, 10);
+                        PackR(top, tR * 1.15, tR * 0.4, tR * 0.5), Palette.METAL, 0.5, 0, 10, packTilt);
                     // the barrel itself
                     Prims.Tube(mb,
                         new[] { PackP(s, top, 0, -tHalf, -sink, packTilt), PackP(s, top, 0, tHalf, -sink, packTilt) },
                         new[] { tR, tR }, Palette.METAL, 0.78, 0, 14, 2);
                     // contents-coloured end caps
-                    Prims.Ellipsoid(mb, PackP(s, top, 0, tHalf, -sink, packTilt), PackR(top, tR * 0.95, tR * 0.35, tR * 0.95), contents, 0.5, 0.15, 10);
-                    Prims.Ellipsoid(mb, PackP(s, top, 0, -tHalf, -sink, packTilt), PackR(top, tR * 0.95, tR * 0.35, tR * 0.95), contents, 0.5, 0.15, 10);
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, tHalf, -sink, packTilt), PackR(top, tR * 0.95, tR * 0.35, tR * 0.95), contents, 0.5, 0.15, 10, packTilt);
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, -tHalf, -sink, packTilt), PackR(top, tR * 0.95, tR * 0.35, tR * 0.95), contents, 0.5, 0.15, 10, packTilt);
                     // filler / valve cap
-                    Prims.Ellipsoid(mb, PackP(s, top, 0, tHalf + 0.16, -sink, packTilt), new Vec3(0.15, 0.15, 0.15), Palette.METDK, 0.6, 0, 6);
+                    Prims.Ellipsoid(mb, PackP(s, top, 0, tHalf + 0.16, -sink, packTilt), new Vec3(0.15, 0.15, 0.15), Palette.METDK, 0.6, 0, 6, packTilt);
                     // a sight gauge running along the barrel, contents-coloured
                     Prims.Tube(mb, new[] { PackP(s, top, tR * 0.55, -tHalf * 0.75, -sink, packTilt), PackP(s, top, tR * 0.55, tHalf * 0.75, -sink, packTilt) },
                         new[] { 0.08, 0.08 }, contents, 0.4, 0.4, 6);
@@ -1699,9 +1699,9 @@ namespace MadDr.CreatureMesh
                     foreach (var sx in Sides)
                     {
                         Prims.Ellipsoid(mb, PackP(s, top, tR * 0.85 * sx, -tHalf * 0.5, -sink * 1.6, packTilt),
-                            new Vec3(0.07, 0.07, 0.07), Palette.METDK, 0.8, 0, 4);
+                            new Vec3(0.07, 0.07, 0.07), Palette.METDK, 0.8, 0, 4, packTilt);
                         Prims.Ellipsoid(mb, PackP(s, top, tR * 0.85 * sx, tHalf * 0.5, -sink * 1.6, packTilt),
-                            new Vec3(0.07, 0.07, 0.07), Palette.METDK, 0.8, 0, 4);
+                            new Vec3(0.07, 0.07, 0.07), Palette.METDK, 0.8, 0, 4, packTilt);
                     }
                     break;
                 }
@@ -1721,9 +1721,9 @@ namespace MadDr.CreatureMesh
                     const double plT = 0.34;          // plate half-thickness
                     // plate centre sunk so the inner half seats in the body
                     Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -plT * 0.55, packTilt),
-                        PackR(top, plW, plH, plT), Palette.METDK, 0.7, 0, 12);
+                        PackR(top, plW, plH, plT), Palette.METDK, 0.7, 0, 12, packTilt);
                     Prims.Ellipsoid(mb, PackP(s, top, 0, 0, -plT * 0.15, packTilt),
-                        PackR(top, plW * 0.9, plH * 0.9, plT * 0.5), Palette.METAL, 0.75, 0, 12); // face panel
+                        PackR(top, plW * 0.9, plH * 0.9, plT * 0.5), Palette.METAL, 0.75, 0, 12, packTilt); // face panel
                     // two tanks inset into the frame, outer face just proud
                     var tR = plW * 0.34;
                     var tHalf = plH * 0.66;
@@ -1733,9 +1733,9 @@ namespace MadDr.CreatureMesh
                         Prims.Tube(mb,
                             new[] { PackP(s, top, tx, -tHalf, 0.02, packTilt), PackP(s, top, tx, tHalf, 0.02, packTilt) },
                             new[] { tR, tR }, Palette.METAL, 0.78, 0, 12, 2);
-                        Prims.Ellipsoid(mb, PackP(s, top, tx, tHalf, 0.02, packTilt), PackR(top, tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8); // end caps = contents
-                        Prims.Ellipsoid(mb, PackP(s, top, tx, -tHalf, 0.02, packTilt), PackR(top, tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8);
-                        Prims.Ellipsoid(mb, PackP(s, top, tx, tHalf + 0.12, 0.02, packTilt), new Vec3(0.14, 0.14, 0.14), Palette.METDK, 0.6, 0, 5); // filler cap
+                        Prims.Ellipsoid(mb, PackP(s, top, tx, tHalf, 0.02, packTilt), PackR(top, tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8, packTilt); // end caps = contents
+                        Prims.Ellipsoid(mb, PackP(s, top, tx, -tHalf, 0.02, packTilt), PackR(top, tR * 0.95, tR * 0.4, tR * 0.95), contents, 0.5, 0.15, 8, packTilt);
+                        Prims.Ellipsoid(mb, PackP(s, top, tx, tHalf + 0.12, 0.02, packTilt), new Vec3(0.14, 0.14, 0.14), Palette.METDK, 0.6, 0, 5, packTilt); // filler cap
                     }
                     // a sight gauge strip down the frame's centre, contents-coloured
                     Prims.Tube(mb, new[] { PackP(s, top, 0, -tHalf * 0.8, 0.05, packTilt), PackP(s, top, 0, tHalf * 0.8, 0.05, packTilt) },
@@ -1744,7 +1744,7 @@ namespace MadDr.CreatureMesh
                     foreach (var sx in Sides)
                         foreach (var sy in Sides)
                             Prims.Ellipsoid(mb, PackP(s, top, plW * 0.86 * sx, plH * 0.82 * sy, 0.04, packTilt),
-                                new Vec3(0.07, 0.07, 0.07), Palette.METDK, 0.8, 0, 4);
+                                new Vec3(0.07, 0.07, 0.07), Palette.METDK, 0.8, 0, 4, packTilt);
                     break;
                 }
                 case "amber_vesicle":
@@ -1763,7 +1763,7 @@ namespace MadDr.CreatureMesh
                         var r = vR * (0.7 + 0.35 * Math.Abs(Math.Sin(i * 1.3)));
                         // sunk ~40% into the body, bulging out the rest
                         var p = PackP(s, top, Math.Sin(i * 2.4) * vR * 0.7, t * vR * 2.4, -r * 0.4, packTilt);
-                        Prims.Ellipsoid(mb, p, PackR(top, r, r * 0.95, r * 1.05), contents, 0.25, 0.45, 8);
+                        Prims.Ellipsoid(mb, p, PackR(top, r, r * 0.95, r * 1.05), contents, 0.25, 0.45, 8, packTilt);
                     }
                     break;
                 }

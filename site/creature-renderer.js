@@ -195,10 +195,20 @@ class MeshB {
 let _detail = 1;
 function segFor(n, floor) { return Math.max(floor, Math.round(n * _detail)); }
 
-function ellipsoid(mb, c, r, col, gloss = 0.25, emis = 0, seg = 14, colorFn = null, animFn = null) {
+// `tilt` rotates the ellipsoid's own (Y,Z) shape around the across-axis
+// (X) to match packP's rotation -- default 0 reproduces the exact
+// untilted mapping below, algebraically (ct=1, st=0 collapses every
+// wy/wz to the plain u*r it replaces), so every existing caller is
+// unaffected. Needed because a caller can move an ellipsoid's CENTER
+// onto a tilted mount (packP already does that) without this: the shape
+// itself stayed axis-aligned to world space regardless, so a flat cap on
+// a tilted tube read as visibly misaligned with the barrel it was meant
+// to close off (creator report, 2026-07, avian only).
+function ellipsoid(mb, c, r, col, gloss = 0.25, emis = 0, seg = 14, colorFn = null, animFn = null, tilt = 0) {
   seg = segFor(seg, 3);
   const prevAnim = mb.anim;
   const la = seg, lo = Math.round(seg * 1.6);
+  const ct = Math.cos(tilt), st = Math.sin(tilt);
   const rows = [];
   for (let i = 0; i <= la; i++) {
     const th = (i / la) * Math.PI;
@@ -207,8 +217,14 @@ function ellipsoid(mb, c, r, col, gloss = 0.25, emis = 0, seg = 14, colorFn = nu
     for (let j = 0; j <= lo; j++) {
       const ph = (j / lo) * Math.PI * 2;
       const u = [sr * Math.cos(ph), sy, sr * Math.sin(ph)];
-      const p = [c[0] + u[0]*r[0], c[1] + u[1]*r[1], c[2] + u[2]*r[2]];
-      const n = V.norm([u[0]/r[0], u[1]/r[1], u[2]/r[2]]);
+      // this Y/Z convention (out = -(u[2]*r[2])) matches packP's own "-o"
+      // sign so tilt=0 reduces to +u[2]*r[2], the exact original expression
+      const along = u[1]*r[1], out = -(u[2]*r[2]);
+      const wy = along*ct + out*st, wz = along*st - out*ct;
+      const p = [c[0] + u[0]*r[0], c[1] + wy, c[2] + wz];
+      const nAlong = u[1]/r[1], nOut = -(u[2]/r[2]);
+      const nwy = nAlong*ct + nOut*st, nwz = nAlong*st - nOut*ct;
+      const n = V.norm([u[0]/r[0], nwy, nwz]);
       if (animFn) mb.setAnim(animFn(u));
       row.push(mb.vert(p, n, colorFn ? colorFn(u) : col, gloss, emis));
     }
@@ -2155,10 +2171,10 @@ function buildPart(mb, slot, family, params, side, sock, o) {
         const r = blobR * (0.8 + 0.35 * Math.abs(Math.sin(i*1.7)));
         const c = packP(S, top, t*blobR*0.9, t*blobR*0.5, -r*0.45, packTilt);   // sunk ~45% in
         ellipsoid(mb, c, packR(top, r, r*0.95, r*1.05), store, 0.3, 0.1, 10,
-          null, (tt) => [0, 0, 0.05, i*1.6 + tt*1.1]);   // each sac throbs
+          null, (tt) => [0, 0, 0.05, i*1.6 + tt*1.1], packTilt);   // each sac throbs
         mb.setAlpha(0.5);
         ellipsoid(mb, packP(S, top, t*blobR*0.9, t*blobR*0.5, -r*0.15, packTilt),
-          packR(top, r*0.82, r*0.78, r*0.5), o.skin, 0.35, 0, 9, o.skinFn);
+          packR(top, r*0.82, r*0.78, r*0.5), o.skin, 0.35, 0, 9, o.skinFn, null, packTilt);
         mb.setAlpha(1);
       }
       break;
@@ -2175,20 +2191,20 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       const tHalf = (1.05 + 0.75*len);   // barrel half-length along the spine
       const sink = tR*0.18;              // strapped-on, not embedded
       // saddle collar seats the tank against the body
-      ellipsoid(mb, packP(S, top, 0, 0, -sink*2.2, packTilt), packR(top, tR*1.15, tR*0.4, tR*0.5), METAL, 0.5, 0, 10);
+      ellipsoid(mb, packP(S, top, 0, 0, -sink*2.2, packTilt), packR(top, tR*1.15, tR*0.4, tR*0.5), METAL, 0.5, 0, 10, null, null, packTilt);
       // the barrel itself
       tube(mb, [packP(S, top, 0, -tHalf, -sink, packTilt), packP(S, top, 0, tHalf, -sink, packTilt)], [tR, tR], METAL, 0.78, 0, 14, 2);
       // contents-coloured end caps
-      ellipsoid(mb, packP(S, top, 0, tHalf, -sink, packTilt), packR(top, tR*0.95, tR*0.35, tR*0.95), store, 0.5, 0.15, 10);
-      ellipsoid(mb, packP(S, top, 0, -tHalf, -sink, packTilt), packR(top, tR*0.95, tR*0.35, tR*0.95), store, 0.5, 0.15, 10);
+      ellipsoid(mb, packP(S, top, 0, tHalf, -sink, packTilt), packR(top, tR*0.95, tR*0.35, tR*0.95), store, 0.5, 0.15, 10, null, null, packTilt);
+      ellipsoid(mb, packP(S, top, 0, -tHalf, -sink, packTilt), packR(top, tR*0.95, tR*0.35, tR*0.95), store, 0.5, 0.15, 10, null, null, packTilt);
       // filler / valve cap
-      ellipsoid(mb, packP(S, top, 0, tHalf + 0.16, -sink, packTilt), [0.15, 0.15, 0.15], METDK, 0.6, 0, 6);
+      ellipsoid(mb, packP(S, top, 0, tHalf + 0.16, -sink, packTilt), [0.15, 0.15, 0.15], METDK, 0.6, 0, 6, null, null, packTilt);
       // sight gauge running along the barrel, contents-coloured
       tube(mb, [packP(S, top, tR*0.55, -tHalf*0.75, -sink, packTilt), packP(S, top, tR*0.55, tHalf*0.75, -sink, packTilt)], [0.08, 0.08], store, 0.4, 0.4, 6);
       // strap rivets -- the functional-hardware read
       for (const sx of [1, -1]) {
-        ellipsoid(mb, packP(S, top, tR*0.85*sx, -tHalf*0.5, -sink*1.6, packTilt), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
-        ellipsoid(mb, packP(S, top, tR*0.85*sx, tHalf*0.5, -sink*1.6, packTilt), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
+        ellipsoid(mb, packP(S, top, tR*0.85*sx, -tHalf*0.5, -sink*1.6, packTilt), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4, null, null, packTilt);
+        ellipsoid(mb, packP(S, top, tR*0.85*sx, tHalf*0.5, -sink*1.6, packTilt), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4, null, null, packTilt);
       }
       break;
     }
@@ -2204,20 +2220,20 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       const plW = (0.95 + 0.5*girth);
       const plH = (1.1 + 0.7*len);
       const plT = 0.34;
-      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.55, packTilt), packR(top, plW, plH, plT), METDK, 0.7, 0, 12);
-      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.15, packTilt), packR(top, plW*0.9, plH*0.9, plT*0.5), METAL, 0.75, 0, 12);   // face panel
+      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.55, packTilt), packR(top, plW, plH, plT), METDK, 0.7, 0, 12, null, null, packTilt);
+      ellipsoid(mb, packP(S, top, 0, 0, -plT*0.15, packTilt), packR(top, plW*0.9, plH*0.9, plT*0.5), METAL, 0.75, 0, 12, null, null, packTilt);   // face panel
       const tR = plW*0.34, tHalf = plH*0.66;
       for (const sx of [1, -1]) {
         const tx = plW*0.42*sx;
         tube(mb, [packP(S, top, tx, -tHalf, 0.02, packTilt), packP(S, top, tx, tHalf, 0.02, packTilt)], [tR, tR], METAL, 0.78, 0, 12, 2);
-        ellipsoid(mb, packP(S, top, tx, tHalf, 0.02, packTilt), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8);   // caps = contents
-        ellipsoid(mb, packP(S, top, tx, -tHalf, 0.02, packTilt), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8);
-        ellipsoid(mb, packP(S, top, tx, tHalf + 0.12, 0.02, packTilt), [0.14, 0.14, 0.14], METDK, 0.6, 0, 5);   // filler cap
+        ellipsoid(mb, packP(S, top, tx, tHalf, 0.02, packTilt), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8, null, null, packTilt);   // caps = contents
+        ellipsoid(mb, packP(S, top, tx, -tHalf, 0.02, packTilt), packR(top, tR*0.95, tR*0.4, tR*0.95), store, 0.5, 0.15, 8, null, null, packTilt);
+        ellipsoid(mb, packP(S, top, tx, tHalf + 0.12, 0.02, packTilt), [0.14, 0.14, 0.14], METDK, 0.6, 0, 5, null, null, packTilt);   // filler cap
       }
       // sight gauge strip down the frame centre, contents-coloured
       tube(mb, [packP(S, top, 0, -tHalf*0.8, 0.05, packTilt), packP(S, top, 0, tHalf*0.8, 0.05, packTilt)], [0.08, 0.08], store, 0.4, 0.4, 6);
       for (const sx of [1, -1]) for (const sy of [1, -1])   // corner rivets
-        ellipsoid(mb, packP(S, top, plW*0.86*sx, plH*0.82*sy, 0.04, packTilt), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4);
+        ellipsoid(mb, packP(S, top, plW*0.86*sx, plH*0.82*sy, 0.04, packTilt), [0.07, 0.07, 0.07], METDK, 0.8, 0, 4, null, null, packTilt);
       break;
     }
     case 'amber_vesicle': {
@@ -2234,7 +2250,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
         const p = packP(S, top, Math.sin(i*2.4)*vR*0.7, t*vR*2.4, -r*0.4, packTilt);   // sunk ~40% in
         mb.setAlpha(0.82);
         ellipsoid(mb, p, packR(top, r, r*0.95, r*1.05), store, 0.25, 0.45, 8, null,
-          (tt) => [0, 0, 0.05, i*1.9 + tt*1.1]);   // each vesicle breathes
+          (tt) => [0, 0, 0.05, i*1.9 + tt*1.1], packTilt);   // each vesicle breathes
         mb.setAlpha(1);
         mb.glow(p, store, 6);
       }
