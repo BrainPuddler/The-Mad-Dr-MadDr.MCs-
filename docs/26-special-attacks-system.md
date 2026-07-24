@@ -1,6 +1,7 @@
 # 26 — Special Attacks System (enemy AI)
 
-Status: **Approved architecture, Phases 1–8 implemented** (design produced
+Status: **Approved architecture, Phases 1–8 implemented + Phase 9
+(secondary attacks for all races)** (design produced
 2026-07 via a research-then-design pass over the existing combat/AI
 architecture before any code was written; creator approved "pure Unity"
 + ScriptableObject-based definitions before implementation began) ·
@@ -135,6 +136,8 @@ per-type flags.
 ## 4. Files touched
 
 **Modified:**
+- `SpecialAttackDefinition.cs` — Phase 9: new `Stun` enum value on
+  `SpecialAttackEffectType`; new `DamageAmount`/`StunDuration` fields.
 - `UnitCombat.cs` — `Mass` field, `Abilities` list, ability cooldown
   ticking in `Update()`, `Configure(...)` gains an optional `mass = 1f`
   trailing parameter (every existing call site unaffected); Phase 5 adds
@@ -142,7 +145,9 @@ per-type flags.
   (ticked in `Update()`), `SpeedMultiplier`, `ApplySlow(...)`; Phase 6
   adds `IsCaptured`, `Captor`, `Capture(...)`, `TickCapture(dt)` (owns
   one `CaptureState`); Phase 7: `TickCapture` now returns whether the
-  victim arrived this frame.
+  victim arrived this frame. Phase 9: `_stunRemaining`, `IsStunned`,
+  `ApplyStun(...)` (ticked in `Update()`); `SpeedMultiplier` reads 0 and
+  `ReadyToFire` reads false while stunned.
 - `MonsterAgent.cs` — `OrderKind.SpecialAttack`, `_activeSpecialAttack`/
   `_targetSpecialAttackUnit` fields, `OrderSpecialAttack(...)`,
   `TickSpecialAttack(dt)`, wired into the `Update()` dispatch switch,
@@ -155,12 +160,16 @@ per-type flags.
   weaponless special-attack-only creature could still use one. Follow-up:
   extracts `CreditHarvestForEatenCitizen()` out of `TickEat` and adds
   public `NotifyCapturedCitizenEaten()` so a web-captured citizen credits
-  the harvest tank too.
+  the harvest tank too. Phase 9: `EvaluateBestAbility` gains a self-anchor
+  case for `Stun`-type abilities; `TickSpecialAttack` dispatches
+  `Damage`/`Stun` to the new `SpecialAttackResolver`; `Init` equips every
+  monster with `SecondaryAttackCatalog.ForMonster(handFamily)`.
 - `Tank.cs` — explicit `mass: 10f` on its `Configure(...)` call, the
   concrete heavy-target example; Phase 5 multiplies
   `_combat.SpeedMultiplier` into the hull-movement line; Phase 6 adds the
   same `IsCaptured` check at the top of `Update()` (inert today — a tank
-  is always heavy, never captured).
+  is always heavy, never captured). Phase 9: `Init` equips every Tank
+  with `SecondaryAttackCatalog.Flamethrower()`.
 - `Citizen.cs` — Phase 6: its own `Capture(...)` + `_capture` field
   (a `Citizen` has no `UnitCombat`, so it can't share one), checked at
   the top of `Update()` ahead of even the flee logic; Phase 7: calls
@@ -183,7 +192,8 @@ per-type flags.
 **New:**
 `SpecialAttackDefinition.cs`, `SpecialAttackInstance.cs` (Phase 1);
 `WebAttackAbility.cs` (Phase 4 — targeting/classification only);
-`CaptureState.cs` (Phase 6).
+`CaptureState.cs` (Phase 6); `SpecialAttackResolver.cs`,
+`SecondaryAttackCatalog.cs` (Phase 9).
 
 **Explicitly untouched:** `WeaponProfile`/`WeaponFx` (additive parallel
 system, not a modification of the existing weapon path),
@@ -499,22 +509,142 @@ session), not just `Blocked()`.
   `ResolveImpact` was never tested directly either. All 25 checks (22
   from Phases 4-7, 3 new) pass.
 
-**All 8 phases of this plan are now implemented.** What's real and
-working today, end to end: a monster with an equipped, ready
-`SpecialAttackInstance` will autonomously choose to fire it (over
-retaliating/engaging normally) whenever a candidate target's AoE would
-catch enough valid targets to clear the ability's own usefulness bar; a
-Web Attack bolt travels to that snapshot position, and on arrival heavy
-targets are slowed (visibly, on any monster or Tank) while non-heavy
-targets are dragged toward the caster and eaten (with full harvest-tank
-credit, same as a direct chase-and-eat kill) on arrival if they're a
-`Citizen`. Two follow-ups remain, both flagged above rather than hidden
-(the harvest-tank credit gap originally listed here was closed in a
-2026-07 follow-up, see above): (1) no creature is actually equipped with
-a `SpecialAttackDefinition` yet -- that's a creator/Editor drag-and-drop
-step outside any phase in this plan; (2) a non-Citizen consume path is
-designed but not built, since nothing testable exists to build it
-against.
+**All 8 phases of this plan were implemented as scoped to the Web
+Attack worked example.** What's real and working today, end to end: a
+monster with an equipped, ready `SpecialAttackInstance` will
+autonomously choose to fire it (over retaliating/engaging normally)
+whenever a candidate target's AoE would catch enough valid targets to
+clear the ability's own usefulness bar; a Web Attack bolt travels to
+that snapshot position, and on arrival heavy targets are slowed
+(visibly, on any monster or Tank) while non-heavy targets are dragged
+toward the caster and eaten (with full harvest-tank credit, same as a
+direct chase-and-eat kill) on arrival if they're a `Citizen`.
+
+- **Phase 9 — secondary attacks for all races.** Creator direction,
+  2026-07: "Roll secondary attacks for all races into the lab and all
+  monsters. Humans get flamethrowers (damage only). Aliens get psionic
+  attack, short tractor beam is the same as web. mad dr. Ground stomp
+  stun effect. With hooks for a bunch of future additions." **Status:
+  done for Unity/all monsters+Tanks (2026-07); explicitly not done for
+  "the Lab" (site/) -- see below.**
+
+  This closed follow-up (1) from the paragraph above ("no creature is
+  actually equipped with a `SpecialAttackDefinition` yet") for good: it
+  turns out that assumption was simply wrong for CODE-authored
+  definitions. `ScriptableObject.CreateInstance<T>()` is a normal
+  runtime API, not an Editor-only operation -- only hand-authored
+  Inspector *assets* need the Editor. New `SecondaryAttackCatalog.cs`
+  builds one shared `SpecialAttackDefinition` instance per kind this way
+  and every monster/Tank is equipped with one automatically at spawn,
+  with zero Editor involvement:
+  - **Humans (`Tank.cs`)** -- `Flamethrower()`: `EffectType.Damage` only
+    (creator: "damage only"), no pull/slow/stun. Every Tank gets this as
+    its SECONDARY attack regardless of which PRIMARY weapon it rolled
+    (`WeaponProfile.TankFlamethrower`/`TankCannon`, unrelated and
+    untouched) -- two independent flamethrower-flavored things, not the
+    same system.
+  - **Alien-tech-handed monsters** -- `PsionicTractorBeam()`:
+    `EffectType.PullAndConsume`, literally the SAME mechanic as Web
+    Attack (creator: "short tractor beam is the same as web") at a
+    shorter Range/AreaOfEffect, since `WebAttackAbility`'s resolver was
+    never actually web-specific -- it's parameterized entirely by
+    `definition`. "Alien" is derived from the SAME hand-family strings
+    already driving `Combat.WeaponFor` in roster-client
+    (`laser_array`/`photon_blaster`/`plasma_lance` -- the exact families
+    from the creator's earlier "aliens laser and photonic blasters"
+    direction, confirmed in `packages/genome-core/src/catalog.ts` as an
+    existing, named part-family group under `origin: "biotech"`), so a
+    monster's weapon and its secondary attack always read as
+    thematically consistent for free -- no new gene.
+  - **Everything else (the Mad Doctor's default creature)** --
+    `GroundStomp()`: a new `SpecialAttackEffectType.Stun` (creator:
+    "Ground stomp stun effect"), self-centered (`Range = 0`, resolves at
+    the caster's own feet the instant it triggers -- see
+    `MonsterAgent.TickSpecialAttack`'s Stun-type dispatch and
+    `EvaluateBestAbility`'s self-anchor special case below).
+  - `SecondaryAttackCatalog.ForMonster(handFamily)` is the single switch
+    point mapping hand family -> ability; wired into `MonsterAgent.Init`
+    right after `_fighter.Configure(...)`, keyed on
+    `creature.Genome.Slots.Hand.Family` (already-synced genome data, no
+    schema change).
+
+  **New effect type + resolver ("hooks for a bunch of future
+  additions").** `SpecialAttackEffectType` gained `Stun`;
+  `SpecialAttackDefinition` gained `DamageAmount`/`StunDuration`. Rather
+  than a third near-duplicate of `WebAttackAbility`'s Launch/
+  ResolveImpact for each new flavor, a new `SpecialAttackResolver.cs`
+  handles every INSTANT (non-projectile) effect through one shared
+  `ResolveInstant(builder, caster, definition, originPoint)` +
+  `ApplyEffect` switch on `EffectType` -- reusing
+  `WebAttackAbility.ShouldCatchCombatant`/`MatchesFilter` (already
+  generic, not web-specific) for the catch/classify step. Adding a 5th
+  kind is one enum value + one `ApplyEffect` case + (if it needs new
+  tunable numbers) a field on `SpecialAttackDefinition` -- no new
+  ability class, unless the delivery mechanism itself differs (a
+  travelling projectile still belongs with `WebAttackAbility.Launch`).
+  `MonsterAgent.TickSpecialAttack` now dispatches on `EffectType`:
+  `PullAndConsume` launches a projectile (Web Attack, Psionic Tractor
+  Beam); `Damage` resolves instantly at the target's position
+  (Flamethrower); `Stun` resolves instantly at the CASTER's own position
+  (Ground Stomp).
+
+  **`UnitCombat` stun state**, mirroring the slow-status pair (docs/26
+  Phase 5) but deliberately separate rather than reusing
+  `SpeedMultiplier = 0` as "a slow": stun is binary (`ApplyStun` just
+  takes the longer remaining duration on reapplication -- there's no
+  "weaker stun" to protect against the way `ApplySlow` protects a
+  stronger slow) and also halts FIRING (`ReadyToFire` now additionally
+  requires `!IsStunned`), which a slow never does. `SpeedMultiplier`
+  reads `0` while stunned, overriding any active slow entirely (a frozen
+  unit doesn't "slowly" move) -- reusing the exact same
+  `RunOrWalkSpeed()`/Tank-hull-movement plumbing Phase 5 already wired,
+  so movement halts automatically with no new mover-side code.
+
+  **`EvaluateBestAbility`'s self-anchor case.** A self-centered ability
+  (`EffectType.Stun`) has no target position to anchor scoring on, so
+  it's scored once against this unit's OWN position and, if it clears
+  `MinTargetsInArea`, `anchor` is set to `_fighter` itself -- not a real
+  target, just a non-null `UnitCombat` so `OrderSpecialAttack`'s
+  existing contract is satisfied. `TickSpecialAttack`'s approach-distance
+  check against a self-anchor then naturally reads as "already in range"
+  (distance to self is exactly zero) and fires immediately -- no
+  separate no-travel-needed special case needed in the approach logic
+  itself.
+
+  **Verified**: flightcheck stub-compile clean across every touched and
+  new file (needed one stub addition: `ScriptableObject.CreateInstance<T>()`,
+  since this is the first code anywhere that builds a ScriptableObject
+  at runtime rather than only compiling its class definition).
+  `webattackverify` gained 8 new checks against the real shipped files:
+  stun halts both movement (`SpeedMultiplier == 0`) and firing
+  (`ReadyToFire == false`) on an otherwise-ready armed unit; stun
+  reapplication takes the longer duration, never the shorter; stun
+  overrides an active slow; `SpecialAttackResolver.ResolveInstant`
+  applies Damage only to in-range opposing targets (out-of-range and
+  same-faction untouched) and Stun only to in-range targets (the caster
+  never stuns itself); and `SecondaryAttackCatalog.ForMonster` correctly
+  routes all three alien-tech hand families to the Psionic Tractor Beam
+  (confirmed `PullAndConsume`), every other hand family (including
+  unarmed) to Ground Stomp (confirmed `Stun`, `Range == 0`), and
+  Flamethrower confirmed `Damage`-only. All 33 checks (25 from Phases
+  4-8, 8 new) pass.
+
+  **Explicitly NOT done: "into the Lab."** Read narrowly (literally
+  adding to `site/`, the browser test bench) rather than as a colloquial
+  "roll out broadly": the Lab has zero combat-simulation or attack-
+  display code today (confirmed by research before starting this work --
+  it's purely a creature-appearance/roster gallery), and genome-core has
+  no weapon/attack twin at all (`Combat.WeaponFor`'s hand-family switch
+  exists only in `roster-client` C#, never duplicated into TypeScript,
+  unlike Locomotion/Harvest which DO have genome-core twins). Adding a
+  Lab-side "this creature's secondary attack" display would mean
+  inventing a first-of-its-kind combat-stat twin in genome-core purely
+  for display purposes -- a real, separable follow-up, not attempted
+  here without further direction on what the Lab should actually show.
+  The classification rule itself (`SecondaryAttackCatalog.ForMonster`'s
+  hand-family switch) is trivial to mirror into TypeScript whenever that
+  direction is given, since it keys off data the Lab already has
+  (`Slots.Hand.Family`).
 
 ## v0.1 tuning appendix
 

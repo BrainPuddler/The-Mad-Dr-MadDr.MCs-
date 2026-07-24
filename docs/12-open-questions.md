@@ -1242,3 +1242,96 @@ plan completed. Two remain, both genuinely out of scope for code alone:
 no creature is actually equipped with a special attack yet (an
 Editor-side task), and the non-Citizen consume path is designed but not
 built (nothing testable exists to build it against).
+
+## Special Attacks System Phase 9: secondary attacks for all races (2026-07)
+
+Creator direction: "Roll secondary attacks for all races into the lab
+and all monsters. Humans get flamethrowers (damage only). Aliens get
+psionic attack, short tractor beam is the same as web. mad dr. Ground
+stomp stun effect. With hooks for a bunch of future additions."
+
+Researched before writing any code: "Alien" is a real, established
+faction in design docs (docs/17-factions.md) and match-core's
+FactionDef.cs (FactionId.MadDoctor/HumanArmy/AlienHive), but the LIVE
+Unity battle code only ever had two faction strings, "monster"/"human" --
+no alien unit exists in the actual game. FactionId.MadDoctor turned out
+to BE the player's own monster faction, not a separate in-game unit --
+there's no standalone "Mad Doctor" combatant to build. So "Aliens" and
+"Mad Dr" here read as FLAVORS of the existing monster population, not
+new live factions: Combat.WeaponFor (roster-client) already classifies a
+monster's hand family into alien-tech weapons
+(laser_array/photon_blaster/plasma_lance -- confirmed as a real, named
+group in packages/genome-core/src/catalog.ts, origin: "biotech") vs
+organic ones, so that SAME signal was reused to decide which secondary
+attack a monster gets, with zero new genes and zero new faction plumbing.
+
+Implementation:
+- New `SpecialAttackEffectType.Stun` + `SpecialAttackDefinition.
+  DamageAmount`/`StunDuration` fields.
+- New `UnitCombat` stun state (`IsStunned`/`ApplyStun`), separate from
+  the Phase 5 slow pair since stun is binary (no magnitude to protect on
+  reapplication) and also gates `ReadyToFire` (a slow never stops
+  firing). `SpeedMultiplier` reads 0 while stunned, overriding any
+  active slow, and reuses the exact Phase 5 mover plumbing
+  (RunOrWalkSpeed/Tank hull movement) with zero new mover-side code.
+- New `SpecialAttackResolver.cs`: one shared `ResolveInstant(...)` +
+  `ApplyEffect` switch for every non-projectile effect (Damage, Stun),
+  reusing `WebAttackAbility`'s already-generic `ShouldCatchCombatant`/
+  `MatchesFilter` for the catch/classify step instead of duplicating it.
+  This is the "hooks for a bunch of future additions" piece: adding a
+  5th effect kind is one enum value + one switch case + (if needed) a
+  new tunable field, not a new ability class.
+- New `SecondaryAttackCatalog.cs`: builds `Flamethrower()` (Damage only),
+  `PsionicTractorBeam()` (PullAndConsume -- literally the same mechanic
+  Web Attack already uses, just a shorter-range/AoE definition, since
+  WebAttackAbility's resolver was never actually web-specific), and
+  `GroundStomp()` (Stun, self-centered, Range=0) via
+  `ScriptableObject.CreateInstance<T>()`. `ForMonster(handFamily)` is
+  the single switch routing alien-tech hands to Psionic, everything
+  else to Ground Stomp.
+- Wired equip into `Tank.Init()` (every Tank gets Flamethrower) and
+  `MonsterAgent.Init()` (every monster gets
+  `SecondaryAttackCatalog.ForMonster(creature.Genome.Slots.Hand.Family)`).
+- `MonsterAgent.TickSpecialAttack` now dispatches on `EffectType`
+  (PullAndConsume -> projectile via WebAttackAbility.Launch; Damage ->
+  instant at the target's position; Stun -> instant at the CASTER's own
+  position). `EvaluateBestAbility` gained a self-anchor branch for
+  Stun-type abilities (scores against this unit's own position, sets
+  `anchor = _fighter`) since there's no target position to anchor a
+  self-centered ability's scoring on; `TickSpecialAttack`'s existing
+  approach-distance check against a self-anchor naturally reads as
+  "already in range" with no separate special case needed there.
+
+**Corrects a standing assumption in this doc**: docs/26 previously said
+equipping a `SpecialAttackDefinition` needed an Editor drag-and-drop
+step, unavailable in this environment. That was only true for
+hand-authored Inspector *assets* -- `ScriptableObject.CreateInstance<T>()`
+is a normal runtime API call, so code-built definitions (this catalog)
+needed no Editor at all. Every Tank and every monster is now actually,
+really equipped -- the long-flagged "nothing is equipped yet" gap is
+closed.
+
+**Explicitly NOT done: "into the Lab."** Read narrowly (site/, the
+browser test bench itself) rather than as "roll this out broadly": the
+Lab has zero combat-simulation or attack-display code today (confirmed
+via research before implementation -- it's purely a creature-appearance/
+roster gallery), and `Combat.WeaponFor`'s hand-family logic has no
+genome-core TypeScript twin at all, unlike Locomotion/Harvest which DO.
+Building a Lab-side "this creature's secondary attack" display would
+mean inventing that twin from scratch purely for a display feature --
+a real, separable follow-up, not attempted without further direction on
+what the Lab should actually show. The classification rule itself is
+trivial to port whenever that direction comes, since it keys off data
+(`Slots.Hand.Family`) the Lab already has.
+
+Verified: flightcheck stub-compile clean across every touched/new file
+(one stub addition needed: `ScriptableObject.CreateInstance<T>()`, the
+first code anywhere to build a ScriptableObject at runtime rather than
+only compile its class). `webattackverify` gained 8 new checks: stun
+halts both movement and firing on an otherwise-ready armed unit; stun
+reapplication takes the longer duration; stun overrides an active slow;
+`SpecialAttackResolver.ResolveInstant` applies Damage/Stun only to
+in-range opposing targets; and `SecondaryAttackCatalog.ForMonster`
+routes all three alien-tech hand families to Psionic and everything else
+(including unarmed) to Ground Stomp, with Flamethrower confirmed
+Damage-only. All 33 checks (25 from Phases 4-8, 8 new) pass.

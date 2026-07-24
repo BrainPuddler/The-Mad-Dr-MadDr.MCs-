@@ -90,6 +90,14 @@ public class UnitCombat : MonoBehaviour
     /// so any combatant type gets it for free.</summary>
     private CaptureState _capture;
 
+    /// <summary>docs/26 Phase 9 (Ground Stomp): a frozen-solid timer,
+    /// deliberately separate from the slow-status pair above rather than
+    /// reusing SpeedMultiplier=0 as a "slow" -- stun is binary (no
+    /// magnitude to weigh stronger/weaker on reapplication, unlike
+    /// ApplySlow) and also halts FIRING, not just movement, which a slow
+    /// never does.</summary>
+    private float _stunRemaining;
+
     public bool Alive { get { return !_dead && Health > 0f; } }
     public bool InBattle { get { return _battleTimer > 0f; } }
     public float HealthFraction { get { return Mathf.Clamp01(Health / Mathf.Max(1f, MaxHealth)); } }
@@ -97,10 +105,31 @@ public class UnitCombat : MonoBehaviour
     public UnitCombat LastAttacker { get; private set; }
 
     /// <summary>1 = normal speed; less than 1 while a slow status is
-    /// active. Every mover (MonsterAgent.RunOrWalkSpeed, Tank.Update)
-    /// multiplies its own speed by this -- so the effect applies to any
-    /// unit that reads it, not just whichever caster first used it.</summary>
-    public float SpeedMultiplier { get { return _slowRemaining > 0f ? _slowMultiplier : 1f; } }
+    /// active; exactly 0 while stunned (stun overrides slow entirely --
+    /// a frozen unit doesn't "slowly" move). Every mover
+    /// (MonsterAgent.RunOrWalkSpeed, Tank.Update) multiplies its own
+    /// speed by this -- so the effect applies to any unit that reads it,
+    /// not just whichever caster first used it.</summary>
+    public float SpeedMultiplier
+    {
+        get
+        {
+            if (_stunRemaining > 0f) return 0f;
+            return _slowRemaining > 0f ? _slowMultiplier : 1f;
+        }
+    }
+
+    /// <summary>True while frozen by a stun effect (e.g. Ground Stomp) --
+    /// can't move (see SpeedMultiplier) or fire (see ReadyToFire).</summary>
+    public bool IsStunned { get { return _stunRemaining > 0f; } }
+
+    /// <summary>Apply (or refresh) a stun. Binary, so reapplication just
+    /// takes the longer remaining duration -- there's no "weaker stun"
+    /// to protect against the way ApplySlow protects a stronger slow.</summary>
+    public void ApplyStun(float duration)
+    {
+        _stunRemaining = Mathf.Max(_stunRemaining, duration);
+    }
 
     /// <summary>Apply (or refresh) a slow status. Never lets a weaker/
     /// shorter reapplication water down a stronger one already running:
@@ -167,7 +196,7 @@ public class UnitCombat : MonoBehaviour
         _dead = false;
     }
 
-    public bool ReadyToFire { get { return _cooldown <= 0f && Weapon != null && Weapon.CanAttack; } }
+    public bool ReadyToFire { get { return _cooldown <= 0f && !IsStunned && Weapon != null && Weapon.CanAttack; } }
 
     public bool InRange(Vector3 point)
     {
@@ -223,6 +252,7 @@ public class UnitCombat : MonoBehaviour
         if (_cooldown > 0f) _cooldown -= dt;
         if (_battleTimer > 0f) _battleTimer -= dt;
         if (_slowRemaining > 0f) { _slowRemaining -= dt; if (_slowRemaining <= 0f) _slowMultiplier = 1f; }
+        if (_stunRemaining > 0f) _stunRemaining -= dt;
         for (var i = 0; i < Abilities.Count; i++) Abilities[i].Tick(dt);
     }
 }

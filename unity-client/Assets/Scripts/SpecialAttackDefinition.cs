@@ -35,6 +35,12 @@ public class SpecialAttackDefinition : ScriptableObject
     public TargetFilter ValidTargets = TargetFilter.All;
     public SpecialAttackEffectType EffectType = SpecialAttackEffectType.Damage;
 
+    [Header("Effect magnitude")]
+    [Tooltip("Damage effect type only.")]
+    public float DamageAmount = 20f;
+    [Tooltip("Stun effect type only -- seconds a caught target is frozen (can't move or fire).")]
+    public float StunDuration = 2f;
+
     [Header("AI use requirements")]
     [Tooltip("The AI won't use this ability unless at least this many valid, weighted targets are within the area of effect at the chosen impact point.")]
     public int MinTargetsInArea = 1;
@@ -71,11 +77,20 @@ public enum TargetFilter
 
 /// <summary>What a special attack DOES once it resolves against a valid
 /// target. Extensible -- add a case here, then a matching branch wherever
-/// an ability resolver switches on EffectType (see WebAttackAbility for
-/// the first concrete implementation, docs/26 Phase 4+).</summary>
+/// an ability resolver switches on EffectType: `WebAttackAbility` handles
+/// `PullAndConsume` (its heavy-target sub-branch also applies
+/// `SlowStatus` internally as a per-target classification, not a
+/// separate effect type of its own); `SpecialAttackResolver` handles
+/// `Damage` and `Stun` (docs/26 Phase 9) as instant, non-projectile AoE
+/// resolutions. Adding a 5th kind is: one enum value here, one case in
+/// `SpecialAttackResolver.ApplyEffect`, and (if it needs new tunable
+/// numbers) a field on `SpecialAttackDefinition` above -- no new
+/// ability class required unless the delivery mechanism itself differs
+/// (projectile vs instant).</summary>
 public enum SpecialAttackEffectType
 {
     Damage,
     PullAndConsume,
     SlowStatus,
+    Stun,
 }

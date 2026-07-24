@@ -205,6 +205,12 @@ public class MonsterAgent : MonoBehaviour
         var aim = Mathf.Max(1f, _body.BodyHeight);
         _fighter.Configure("monster", (float)prof.MaxHealth, Mathf.Max(1f, _body.BodyHeight * 0.55f),
             aim, prof.Weapon, OnDied);
+        // docs/26 Phase 9: every monster carries a secondary attack too,
+        // chosen purely from its existing hand-family gene (no new
+        // gene) -- alien-tech hands get the Psionic Tractor Beam, every
+        // other creature (the Mad Doctor's default) gets Ground Stomp.
+        _fighter.Abilities.Add(new SpecialAttackInstance(
+            SecondaryAttackCatalog.ForMonster(creature.Genome.Slots.Hand.Family)));
 
         // selection ring: a flat disc at the feet, toggled by the commander
         var ring = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -544,7 +550,19 @@ public class MonsterAgent : MonoBehaviour
     /// ability's own `Definition.MinTargetsInArea` (minimum usefulness
     /// threshold, a Phase 1 field left unused until now) is accepted; the
     /// highest-scoring ability+anchor across every equipped ability
-    /// wins.</summary>
+    /// wins.
+    ///
+    /// docs/26 Phase 9: a SELF-CENTERED ability (Stun -- e.g. Ground
+    /// Stomp, which resolves at this unit's own feet, not a target's) is
+    /// scored differently: there's no target position to anchor on, so
+    /// it's scored once against this unit's OWN position and, if it
+    /// passes, `anchor` is set to `_fighter` itself -- not a real target,
+    /// just a non-null UnitCombat so `OrderSpecialAttack`'s existing
+    /// contract (which requires one) is satisfied. `TickSpecialAttack`'s
+    /// approach-distance check against `_targetSpecialAttackUnit` then
+    /// naturally reads as "already in range" (distance to self is
+    /// zero) and fires immediately, with no separate no-travel-needed
+    /// special case required there.</summary>
     private bool EvaluateBestAbility(out SpecialAttackInstance ability, out UnitCombat anchor)
     {
         ability = null;
@@ -558,6 +576,18 @@ public class MonsterAgent : MonoBehaviour
             var candidate = _fighter.Abilities[i];
             if (candidate == null || !candidate.IsReady || candidate.Definition == null) continue;
             var def = candidate.Definition;
+
+            if (def.EffectType == SpecialAttackEffectType.Stun)
+            {
+                var selfScore = WebAttackAbility.CountCatchable(_builder, _fighter, def, transform.position);
+                if (selfScore > bestScore && selfScore >= def.MinTargetsInArea)
+                {
+                    bestScore = selfScore;
+                    ability = candidate;
+                    anchor = _fighter;
+                }
+                continue;
+            }
 
             _builder.QueryCombatantsInRadius(transform.position, (float)def.Range, nearby);
             foreach (var enemy in nearby)
@@ -849,17 +879,26 @@ public class MonsterAgent : MonoBehaviour
             var dir = dist > 0.01f ? to / dist : transform.forward;
             transform.rotation = Quaternion.Slerp(transform.rotation,
                 Quaternion.LookRotation(dir, Vector3.up), dt * 6f);
-            // docs/26 Phase 4: cast the actual ability -- cooldown starts
-            // at DEPLOYMENT (this moment), not at impact, matching
+            // docs/26 Phase 4/9: cast the actual ability -- cooldown
+            // starts at DEPLOYMENT (this moment), not at impact, matching
             // UnitCombat.TryFire only reloading _cooldown once a shot
             // actually goes out. Which resolver runs is keyed on
-            // Definition.EffectType; only PullAndConsume (Web Attack) has
-            // a resolver so far -- an unrecognised EffectType still
-            // consumes the cooldown (the cast attempt happened) but has
-            // no effect, rather than silently doing nothing forever.
-            if (_activeSpecialAttack.Definition.EffectType == SpecialAttackEffectType.PullAndConsume)
-                WebAttackAbility.Launch(_builder, _fighter, _activeSpecialAttack.Definition,
-                    _targetSpecialAttackUnit.transform.position, Muzzle());
+            // Definition.EffectType: PullAndConsume (Web Attack, Psionic
+            // Tractor Beam) launches a travelling projectile that resolves
+            // on arrival; Damage (Flamethrower) and Stun (Ground Stomp)
+            // resolve INSTANTLY, no projectile -- Stun centers on this
+            // unit's own position (a stomp happens at the caster's feet,
+            // not the target's), everything else centers on the target's.
+            // An unrecognised EffectType still consumes the cooldown (the
+            // cast attempt happened) but has no effect, rather than
+            // silently doing nothing forever.
+            var def = _activeSpecialAttack.Definition;
+            if (def.EffectType == SpecialAttackEffectType.PullAndConsume)
+                WebAttackAbility.Launch(_builder, _fighter, def, _targetSpecialAttackUnit.transform.position, Muzzle());
+            else if (def.EffectType == SpecialAttackEffectType.Damage)
+                SpecialAttackResolver.ResolveInstant(_builder, _fighter, def, _targetSpecialAttackUnit.transform.position);
+            else if (def.EffectType == SpecialAttackEffectType.Stun)
+                SpecialAttackResolver.ResolveInstant(_builder, _fighter, def, transform.position);
             _activeSpecialAttack.TriggerCooldown();
             _activeSpecialAttack = null;
             _targetSpecialAttackUnit = null;

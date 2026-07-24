@@ -60,6 +60,12 @@ public class Tank : MonoBehaviour
         // above). A mass-classifying special attack (e.g. a web attack's
         // human-vs-heavy branch) should read this as heavy, not pullable.
         _combat.Configure("human", flame ? 150f : 210f, 2.6f * Scale, 1.4f * Scale, weapon, OnDied, mass: 10f);
+        // docs/26 Phase 9: every Tank carries the human faction's
+        // secondary attack regardless of which primary weapon it rolled
+        // ("Humans get flamethrowers (damage only)") -- distinct from the
+        // primary WeaponProfile.TankFlamethrower() half of tanks already
+        // carry as their MAIN gun.
+        _combat.Abilities.Add(new SpecialAttackInstance(SecondaryAttackCatalog.Flamethrower()));
     }
 
     private void Update()
