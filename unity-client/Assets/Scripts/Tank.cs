@@ -93,7 +93,10 @@ public class Tank : MonoBehaviour
                     var hullLook = Quaternion.LookRotation(steer, Vector3.up);
                     transform.rotation = Quaternion.Slerp(transform.rotation, hullLook, dt * HullTurnRate);
                     var align = Mathf.Clamp01(Vector3.Dot(transform.forward, steer));
-                    transform.position += transform.forward * (_speed * align * dt);
+                    // docs/26 Phase 5: a caught heavy target (a tank is
+                    // this project's concrete example) visibly slows too --
+                    // same UnitCombat.SpeedMultiplier every mover reads.
+                    transform.position += transform.forward * (_speed * align * dt * _combat.SpeedMultiplier);
                 }
                 // boxed in on every probed direction: hold position (hull
                 // keeps its current heading) and keep range-checking next

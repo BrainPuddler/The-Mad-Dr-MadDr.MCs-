@@ -948,3 +948,58 @@ verification (no Editor in this environment).
 
 Status: Phases 1-4 done. Phase 5 (heavy-target slow effect, the simpler
 of the two remaining branches) is next.
+
+## Special Attacks System Phase 5: heavy-target slow + possessed-unit friendly fire (2026-07)
+
+Creator direction: "continue phase 5. Make sure it applies to all
+monsters. Obviously friendly fire has no effect, unless the unit is
+possessed. Which should be in the design docs!" Two requirements, both
+addressed:
+
+**Generic to all monsters.** The slow-status mechanic was deliberately
+built on `UnitCombat` (`_slowRemaining`/`_slowMultiplier`,
+`SpeedMultiplier` property, `ApplySlow(multiplier, duration)` — takes
+the stronger multiplier and the longer remaining duration on
+reapplication, so a weak reapplication can never dilute an active
+stronger slow), not on `MonsterAgent` or `Tank` individually. Every
+mover reads the same `SpeedMultiplier`: `MonsterAgent.RunOrWalkSpeed()`
+now multiplies in `_fighter.SpeedMultiplier` (covers every bred/genome
+monster with zero per-species wiring), and `Tank.cs`'s own
+hull-movement line multiplies in `_combat.SpeedMultiplier` (a tank is
+this project's one concrete heavy-target example, so it visibly slows
+too). `WebAttackAbility.ResolveImpact`'s heavy branch now calls
+`c.ApplySlow(HeavySlowMultiplier, HeavySlowDuration)` (new v0.1
+placeholder constants: 0.35x speed for 3s) instead of only logging.
+
+**Possessed units and friendly fire.** The existing no-friendly-fire-
+capture rule in `WebAttackAbility.ShouldCatchCombatant` was
+`if (c.Faction == caster.Faction) return false;` — read literally,
+"same faction is always safe." The creator's direction reframes it as
+"an ally is safe unless it's no longer really an ally." Added
+`UnitCombat.IsPossessed` (default `false`, fully behavior-inert today —
+nothing sets it true anywhere) and changed the check to
+`if (c.Faction == caster.Faction && !c.IsPossessed) return false;`, so a
+possessed same-faction unit WOULD be caught by its own side's web. No
+possession/mind-control mechanic is being built now — this is a
+forward-compatible hook plus a documented rule, connecting to the
+creator's earlier, separate direction on record ("Mad Doctor Biological
+strength, mind control on very big brain units") so a future
+mind-control ability doesn't require revisiting every special attack's
+friendly-fire logic. Documented in docs/26 under "Possessed units and
+friendly fire."
+
+Verified: flightcheck stub-compile clean across `UnitCombat.cs`,
+`WebAttackAbility.cs`, `MonsterAgent.cs`, `Tank.cs`. The `webattackverify`
+harness (compiling the real shipped files, not a reimplementation)
+gained 7 new checks: default-unaffected `SpeedMultiplier`, applying a
+slow reduces it, a weaker reapplication doesn't dilute an active
+stronger one, a stronger reapplication does deepen it, reapplication
+takes the longer remaining duration (read via reflection since
+`_slowRemaining` is intentionally private — no test-only field added to
+shipped code), `WebAttackAbility`'s heavy-branch constants actually
+compose with `ApplySlow`, and a possessed same-faction unit IS caught
+while an ordinary ally still is not. All 15 checks (8 from Phase 4, 7
+new) pass.
+
+Next: Phase 6 (`CaptureState` + pull-toward-captor for human-class
+targets — the riskiest step, new interruptible multi-frame state).

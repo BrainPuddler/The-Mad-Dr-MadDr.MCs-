@@ -62,16 +62,57 @@ public class UnitCombat : MonoBehaviour
     public Vector3? YieldTarget;
     public float YieldUntil;
 
+    /// <summary>docs/26 Phase 5: true for a unit under (future) mind-
+    /// control -- nothing sets this yet (no possession mechanic exists),
+    /// but the field exists now so friendly-fire exclusions have
+    /// somewhere to check "is this actually still an ally?" without a
+    /// later breaking change. Default false is fully behavior-inert.
+    /// See docs/26 "Possessed units and friendly fire."</summary>
+    public bool IsPossessed;
+
     private float _cooldown;
     private float _battleTimer;           // > 0 = "in battle" (fired or hit recently)
     private Action _onDied;
     private bool _dead;
+
+    /// <summary>docs/26 Phase 5: generic slow-status timer, deliberately
+    /// on UnitCombat (not MonsterAgent or Tank) so it applies to every
+    /// unit type uniformly -- a bred monster, a Tank, or anything added
+    /// later -- with each mover reading SpeedMultiplier from its own
+    /// movement-speed calculation. Same Time.deltaTime-decrement idiom
+    /// as _cooldown/_battleTimer above.</summary>
+    private float _slowRemaining;
+    private float _slowMultiplier = 1f;
 
     public bool Alive { get { return !_dead && Health > 0f; } }
     public bool InBattle { get { return _battleTimer > 0f; } }
     public float HealthFraction { get { return Mathf.Clamp01(Health / Mathf.Max(1f, MaxHealth)); } }
     public Vector3 AimPoint { get { return transform.position + Vector3.up * AimHeight; } }
     public UnitCombat LastAttacker { get; private set; }
+
+    /// <summary>1 = normal speed; less than 1 while a slow status is
+    /// active. Every mover (MonsterAgent.RunOrWalkSpeed, Tank.Update)
+    /// multiplies its own speed by this -- so the effect applies to any
+    /// unit that reads it, not just whichever caster first used it.</summary>
+    public float SpeedMultiplier { get { return _slowRemaining > 0f ? _slowMultiplier : 1f; } }
+
+    /// <summary>Apply (or refresh) a slow status. Never lets a weaker/
+    /// shorter reapplication water down a stronger one already running:
+    /// takes the lower multiplier and the longer remaining duration.</summary>
+    public void ApplySlow(float multiplier, float duration)
+    {
+        multiplier = Mathf.Clamp01(multiplier);
+        if (_slowRemaining > 0f)
+        {
+            _slowMultiplier = Mathf.Min(_slowMultiplier, multiplier);
+            _slowRemaining = Mathf.Max(_slowRemaining, duration);
+        }
+        else
+        {
+            _slowMultiplier = multiplier;
+            _slowRemaining = duration;
+        }
+    }
 
     public void Configure(string faction, float maxHp, float radius, float aimHeight,
         WeaponProfile weapon, Action onDied, float mass = 1f)
@@ -142,6 +183,7 @@ public class UnitCombat : MonoBehaviour
         var dt = Time.deltaTime;
         if (_cooldown > 0f) _cooldown -= dt;
         if (_battleTimer > 0f) _battleTimer -= dt;
+        if (_slowRemaining > 0f) { _slowRemaining -= dt; if (_slowRemaining <= 0f) _slowMultiplier = 1f; }
         for (var i = 0; i < Abilities.Count; i++) Abilities[i].Tick(dt);
     }
 }

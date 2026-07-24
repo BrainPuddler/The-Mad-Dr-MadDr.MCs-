@@ -876,7 +876,11 @@ public class MonsterAgent : MonoBehaviour
         var speed = farToGo && mayRun
             ? _profile.RunMetersPerSecond(_builder.speedDisplayMultiplier)
             : _profile.WalkMetersPerSecond(_builder.speedDisplayMultiplier);
-        return (float)speed * LoadFactor();
+        // docs/26 Phase 5: a caught heavy target reads its slow status
+        // straight off _fighter -- generic to every monster, no per-type
+        // wiring needed (see UnitCombat.SpeedMultiplier).
+        var slow = _fighter != null ? _fighter.SpeedMultiplier : 1f;
+        return (float)speed * LoadFactor() * slow;
     }
 
     /// <summary>Speed multiplier for the carried harvest load (docs/22):

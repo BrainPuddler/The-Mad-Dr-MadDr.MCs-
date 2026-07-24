@@ -1,6 +1,6 @@
 # 26 — Special Attacks System (enemy AI)
 
-Status: **Approved architecture, Phases 1–4 implemented** (design produced
+Status: **Approved architecture, Phases 1–5 implemented** (design produced
 2026-07 via a research-then-design pass over the existing combat/AI
 architecture before any code was written; creator approved "pure Unity"
 + ScriptableObject-based definitions before implementation began) ·
@@ -137,17 +137,25 @@ per-type flags.
 **Modified:**
 - `UnitCombat.cs` — `Mass` field, `Abilities` list, ability cooldown
   ticking in `Update()`, `Configure(...)` gains an optional `mass = 1f`
-  trailing parameter (every existing call site unaffected).
+  trailing parameter (every existing call site unaffected); Phase 5 adds
+  `IsPossessed` (default false), `_slowRemaining`/`_slowMultiplier`
+  (ticked in `Update()`), `SpeedMultiplier`, `ApplySlow(...)`.
 - `MonsterAgent.cs` — `OrderKind.SpecialAttack`, `_activeSpecialAttack`/
   `_targetSpecialAttackUnit` fields, `OrderSpecialAttack(...)`,
   `TickSpecialAttack(dt)`, wired into the `Update()` dispatch switch,
-  `ClearTargets()`, `OnDied()`, and the debug `OrderDescription` string.
+  `ClearTargets()`, `OnDied()`, and the debug `OrderDescription` string;
+  Phase 5 multiplies `_fighter.SpeedMultiplier` into `RunOrWalkSpeed()`.
 - `Tank.cs` — explicit `mass: 10f` on its `Configure(...)` call, the
-  concrete heavy-target example.
+  concrete heavy-target example; Phase 5 multiplies
+  `_combat.SpeedMultiplier` into the hull-movement line.
 - `Projectile.cs` — one additive `OnArrive` hook (Phase 4), existing
   callers unaffected.
 - `RuntimeCityBuilder.cs` — `QueryCombatantsInRadius` (Phase 4), a thin
   public wrapper over the existing docs/25 neighbour grid.
+- `WebAttackAbility.cs` — Phase 5: `HeavySlowMultiplier`/
+  `HeavySlowDuration` constants; the heavy branch now calls
+  `c.ApplySlow(...)` instead of only logging; `ShouldCatchCombatant`'s
+  friendly-fire check now respects `IsPossessed`.
 
 **New:**
 `SpecialAttackDefinition.cs`, `SpecialAttackInstance.cs` (Phase 1);
@@ -217,7 +225,58 @@ session), not just `Blocked()`.
   matching, in-range/out-of-range, caster self-exclusion, no-friendly-
   fire-capture, dead-target exclusion, and category mismatch -- all pass.
 - **Phase 5 — heavy-target slow effect** (the simpler branch, no new
-  state machine). **Status: not started.**
+  state machine). **Status: done (2026-07).** The mechanic lives on
+  `UnitCombat` (not `MonsterAgent` or `Tank`) specifically because the
+  creator asked that it "apply to all monsters" — putting it on the
+  shared combatant class means every mover reads the same
+  `SpeedMultiplier`, with zero per-species wiring: `_slowRemaining`/
+  `_slowMultiplier` fields ticked in `Update()` alongside the existing
+  `_cooldown`/`_battleTimer` timers (same `Time.deltaTime`-decrement
+  idiom), a public `SpeedMultiplier` property (1 = unaffected), and
+  `ApplySlow(multiplier, duration)` which takes the STRONGER multiplier
+  and the LONGER remaining duration on reapplication, so a weak
+  reapplication can never dilute an already-active stronger slow.
+  `WebAttackAbility.ResolveImpact`'s heavy branch now calls
+  `c.ApplySlow(HeavySlowMultiplier, HeavySlowDuration)` (two new v0.1
+  placeholder constants, 0.35x speed for 3s, same "unbalanced on
+  purpose" status as `HeavyMassThreshold`) instead of only logging.
+  Both consumers of movement speed were updated to multiply in
+  `SpeedMultiplier`: `MonsterAgent.RunOrWalkSpeed()` (covers every
+  bred/genome monster automatically — this is the "all monsters" half of
+  the requirement) and `Tank.cs`'s own hull-movement line (a tank is
+  this project's one concrete heavy-target example, so it must visibly
+  slow too, not just monsters). Verified: flightcheck stub-compile clean
+  (`UnitCombat.cs`/`WebAttackAbility.cs`/`MonsterAgent.cs`/`Tank.cs` all
+  compile); the `webattackverify` harness gained 6 new checks driven
+  directly against the real `UnitCombat.cs` (default-unaffected,
+  applying a slow reduces `SpeedMultiplier`, a weaker reapplication
+  doesn't dilute a stronger active one, a stronger reapplication does
+  deepen it, reapplication takes the longer remaining duration — read
+  via reflection since `_slowRemaining` is intentionally private, no
+  test-only field added to shipped code — and that
+  `WebAttackAbility`'s heavy-branch constants actually compose with
+  `ApplySlow`); all pass alongside the existing 8 Phase 4 checks and one
+  new possessed-unit check (below).
+
+  **Possessed units and friendly fire** (creator direction, 2026-07:
+  "friendly fire has no effect, unless the unit is possessed — which
+  should be in the design docs"): the existing no-friendly-fire-capture
+  rule in `ShouldCatchCombatant` (`if (c.Faction == caster.Faction)
+  return false;`) is not actually "same faction is always safe" — it's
+  "an ally is safe unless it's no longer really an ally." `UnitCombat`
+  gained a new `public bool IsPossessed` field (default `false`,
+  completely behavior-inert today) and the friendly-fire check now reads
+  `if (c.Faction == caster.Faction && !c.IsPossessed) return false;`, so
+  a possessed same-faction unit IS caught by its own side's web despite
+  matching faction. **No possession/mind-control mechanic exists yet** —
+  nothing anywhere sets `IsPossessed = true`; this is a forward-
+  compatible hook plus a documented rule, added now specifically so a
+  future mind-control ability (this connects to the creator's earlier,
+  separate direction: "Mad Doctor Biological strength, mind control on
+  very big brain units") doesn't require revisiting every special
+  attack's friendly-fire logic later. Verified via the harness's
+  `CheckCatchDecision_PossessedAllyNotExcluded` (a possessed ally in
+  range IS caught; an ordinary unpossessed ally in range still is not).
 - **Phase 6 — `CaptureState` + pull-toward-captor** for human-class
   targets (the riskiest step — new interruptible multi-frame state).
   **Status: not started.**
@@ -231,8 +290,10 @@ session), not just `Blocked()`.
 
 ## v0.1 tuning appendix
 
-To be filled in as Phase 4+ lands: Web Attack cooldown/range/AoE radius,
-the Mass threshold separating "human-class" from "heavy-class", pull
-speed, capture duration, slow-status magnitude/duration for heavy
-targets. All placeholders until playtested, per this repo's general v0.1
-numbers policy.
+To be filled in as Phase 6+ lands: Web Attack cooldown/range/AoE radius,
+the Mass threshold separating "human-class" from "heavy-class" (`
+WebAttackAbility.HeavyMassThreshold = 3f`), pull speed, capture duration.
+Phase 5 placeholders now set: `WebAttackAbility.HeavySlowMultiplier =
+0.35f` (heavy targets move at 35% speed while caught),
+`HeavySlowDuration = 3f` seconds. All placeholders until playtested, per
+this repo's general v0.1 numbers policy.

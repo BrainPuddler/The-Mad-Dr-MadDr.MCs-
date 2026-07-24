@@ -10,12 +10,12 @@ using UnityEngine;
 /// arrival query everyone within the ability's AreaOfEffect and classify
 /// each by mass.
 ///
-/// PHASE 4 SCOPE ONLY: targeting + classification, logged via Debug.Log
-/// -- no pull, no capture, no slow, no damage yet (Phases 5-7 add those
-/// on top of this same query, which is why this phase is worth landing
-/// and checking on its own: the targeting/classification logic is fully
-/// exercised and provably correct before any of the harder multi-frame
-/// capture-state work touches it).
+/// PHASE 4 targeting + classification landed on its own first (logged
+/// via Debug.Log, no effects) specifically so it could be proven correct
+/// before any harder work touched it. PHASE 5 adds the heavy-target
+/// branch's real effect (UnitCombat.ApplySlow) on top of that same
+/// query; the human-class branch is still logged only (Phases 6-7 add
+/// capture/pull/consume).
 ///
 /// Stateless -- one caster can have this resolver called for it any
 /// number of times; all per-cast state lives on the spawned Projectile
@@ -30,6 +30,12 @@ public static class WebAttackAbility
     /// everything else defaults to 1, so 3 cleanly separates them without
     /// being tuned against anything real yet.</summary>
     public const float HeavyMassThreshold = 3f;
+
+    /// <summary>docs/26 Phase 5: how much a caught heavy target's move
+    /// speed is cut, and for how long -- v0.1 placeholders, same
+    /// unbalanced-on-purpose status as HeavyMassThreshold above.</summary>
+    public const float HeavySlowMultiplier = 0.35f;
+    public const float HeavySlowDuration = 3f;
 
     /// <summary>Spawns the web bolt and wires its arrival to
     /// <see cref="ResolveImpact"/>. `targetPoint` is a SNAPSHOT (the
@@ -71,8 +77,16 @@ public static class WebAttackAbility
         {
             if (!ShouldCatchCombatant(c, caster, definition, impactPoint)) continue;
             var heavy = IsHeavy(c.Mass);
-            Debug.Log("[WebAttack] caught " + c.name + " (mass=" + c.Mass + ") -> "
-                + (heavy ? "SLOW (heavy target, no pull/consume)" : "CAPTURE+PULL (human-class, Phase 6)"));
+            if (heavy)
+            {
+                c.ApplySlow(HeavySlowMultiplier, HeavySlowDuration);
+                Debug.Log("[WebAttack] caught " + c.name + " (mass=" + c.Mass + ") -> SLOW x"
+                    + HeavySlowMultiplier + " for " + HeavySlowDuration + "s (heavy target, no pull/consume)");
+            }
+            else
+            {
+                Debug.Log("[WebAttack] caught " + c.name + " (mass=" + c.Mass + ") -> CAPTURE+PULL (human-class, Phase 6)");
+            }
         }
 
         // citizens -- a SEPARATE pool with no combat component and no
@@ -113,18 +127,22 @@ public static class WebAttackAbility
 
     /// <summary>The full "would this ability's AoE catch this combatant"
     /// decision: alive, not the caster itself, not a same-faction ally
-    /// (no friendly-fire capture), within the EXACT circular radius (the
-    /// caller's grid query already narrowed to a bounding-square
-    /// superset), and of a category this ability's ValidTargets actually
-    /// wants. Pure and side-effect-free (unlike ResolveImpact, which also
-    /// logs/plays FX) -- exposed so this decision is directly testable
-    /// against real UnitCombat instances without needing a live
-    /// RuntimeCityBuilder/SpatialGrid at all.</summary>
+    /// (no friendly-fire capture -- UNLESS that ally is possessed; see
+    /// docs/26 "Possessed units and friendly fire"), within the EXACT
+    /// circular radius (the caller's grid query already narrowed to a
+    /// bounding-square superset), and of a category this ability's
+    /// ValidTargets actually wants. Pure and side-effect-free (unlike
+    /// ResolveImpact, which also logs/plays FX) -- exposed so this
+    /// decision is directly testable against real UnitCombat instances
+    /// without needing a live RuntimeCityBuilder/SpatialGrid at all.</summary>
     public static bool ShouldCatchCombatant(UnitCombat c, UnitCombat caster,
         SpecialAttackDefinition definition, Vector3 impactPoint)
     {
         if (c == null || !c.Alive || c == caster) return false;
-        if (c.Faction == caster.Faction) return false; // no friendly-fire capture
+        // no friendly-fire capture -- except a possessed same-faction
+        // unit isn't really an ally anymore (docs/26 Phase 5). No system
+        // sets IsPossessed yet, so this exception is currently inert.
+        if (c.Faction == caster.Faction && !c.IsPossessed) return false;
         var d = c.transform.position - impactPoint;
         d.y = 0f;
         if (d.magnitude > Mathf.Max(0.01f, definition.AreaOfEffect)) return false;
