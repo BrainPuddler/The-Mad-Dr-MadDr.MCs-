@@ -699,3 +699,57 @@ proportional shift along an already-tested interpolation, not new
 behavior needing its own coverage). flightcheck stub-compile clean
 against the rebuilt DLL. Site JS re-checked with `node --check`. No
 visual verification (no Editor/browser in this environment).
+
+## 2026-07 — Fix (Lab only): storage vessels missing their body's gait channel
+
+Creator: "Verify that that is true of the Avian body and tank combo(s) and
+pustules. In the lab it is certainly not parented properly." (Following up
+on a claim that Unity-side rendering correctly parents the tank under the
+torso.)
+
+Verified both halves precisely rather than assuming either:
+
+- **Unity**: confirmed clean. `packages/creature-mesh` (the C# package
+  Unity's `MonsterBody.cs` calls) has NO per-vertex animation-channel
+  concept at all (grepped for `SetAnim`/`SetGait`/`.anim`/`.gait` across
+  every `.cs` file in the package -- zero hits). `MonsterBody.cs` animates
+  the whole rigid body mesh (torso, head, hands, eyes, AND the storage
+  vessel, all one merged static mesh) via a single `_torso` Transform's
+  `localPosition`/`localRotation` (walk bob, flight lean/bank, hover,
+  blob squash) -- since the vessel is a rigid descendant of that Transform
+  with no independent positioning anywhere else in the file, it's carried
+  along automatically. This part of the report was correct as stated.
+- **The Lab (`site/creature-renderer.js`)**: the creator's report was also
+  correct, and the mechanism is different from Unity entirely -- this
+  renderer bakes a `[anim0..3]`/`[gait0..3]` value into every VERTEX
+  (`MeshB.vert`), consumed by the vertex shader to compute the
+  breathing/locomotion deformation live. `buildPart` sets these from
+  `sock.anim`/`sock.gait` (defaulting to a literal zero channel,
+  `ANIM0`/`GAIT0`, if the socket doesn't specify one) BEFORE emitting the
+  part's own geometry. The `back` socket (storage vessels) on 4 of the 9
+  body plans set `anim` but never `gait`, or set neither: **avian**
+  (missing `gait` -- the one directly reported), **winged** (missing
+  `gait`), **treant** (missing `gait`), **serpentine** (missing BOTH --
+  arguably the worst case, since serpentine's whole body is permanently
+  mid-slither, never at rest, so a channel-less vessel would hover
+  visibly motionless while the coil animates under it). The other 5 plans
+  (tetrapod, blob, crab, arachnid, floater) already correctly paired
+  `anim` with a matching `gait` on their own `back` socket -- this was
+  never a systemic design gap, just 4 plans that missed the pattern the
+  other 5 already established.
+
+Fix: added the missing `gait` (and, for serpentine, `anim` too) to each
+of the 4 plans' `back` socket, copying the EXACT value that plan's own
+torso/coil already uses for `mb.setGait(...)` in the region the vessel
+mounts to (avian/winged: `[0,0,0,0.1]`; treant: `[0,0,0,0.03]`;
+serpentine: `anim: SWAY_H, gait: [0,0,5.0,0.30]`, matching what its own
+hand/sensor/eye sockets already do) -- not invented numbers.
+
+Verified: `node --check` clean. No headless WebGL harness exists in this
+environment (the module exports only browser entry points, not the
+internal plan builders, and rendering needs a live canvas context), so
+this was verified by tracing the exact `sock.gait -> mb.setGait ->
+MeshB.vert -> shader` consumption path rather than by a live render --
+consistent with this repo's standing "no visual verification available"
+discipline. Every plan's `back` socket now sets both `anim` and `gait`,
+confirmed by re-grepping all nine after the fix.

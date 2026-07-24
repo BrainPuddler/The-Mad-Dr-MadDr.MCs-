@@ -1394,9 +1394,14 @@ function planSerpentine(mb, o) {
     eye:    { p: sEyeP, nrm: ellipN(sEyeP, hC, hR), mirror: false, faceR: hR[0],
               anim: SWAY_H, gait: [0, 0, 5.0, 0.30] },
     // cargo strapped flat on TOP of the thickest coil, where the neck
-    // rises -- never floating behind the S-curve (docs/22)
+    // rises -- never floating behind the S-curve (docs/22). Rides the
+    // exact same anim/gait as hand/sensor/eye above, not left at the
+    // default zero channels -- serpentine's whole body is CONSTANTLY
+    // animated (the slither is its signature motion, never at rest), so
+    // a vessel with no channel at all would visibly hover motionless
+    // while the coil slithers under it.
     back:   { p: [neckBase[0]*0.75, neckBase[1] + baseR*0.5, neckBase[2]*0.75],
-              nrm: [0, 1, 0], mirror: false, out: 1 },
+              nrm: [0, 1, 0], mirror: false, out: 1, anim: SWAY_H, gait: [0, 0, 5.0, 0.30] },
   };
 }
 
@@ -1494,7 +1499,8 @@ function planWinged(mb, o) {
     // vertical pack low on the back, BELOW the wing roots so it never
     // collides with the membranes (docs/22)
     back:   { p: [0, (waistY + levels[2].y) * 0.5, levels[2].z - levels[2].rz * 0.92],
-              nrm: V.norm([0, 0.15, -1]), mirror: false, out: 1, anim: BREATH_B },
+              nrm: V.norm([0, 0.15, -1]), mirror: false, out: 1, anim: BREATH_B,
+              gait: [0, 0, 0, 0.1] },   // matches the torso's own gait channel above
   };
 }
 
@@ -1680,6 +1686,7 @@ function planAvian(mb, o) {
     back:   { p: [0, levels[2].y + (levels[3].y - levels[2].y) * backBlend,
                   ((levels[2].z - levels[2].rz) + ((levels[3].z - levels[3].rz) - (levels[2].z - levels[2].rz)) * backBlend) * 0.95],
               nrm: V.norm([0, 0.5, -0.87]), mirror: false, out: 1, anim: BREATH_T,
+              gait: [0, 0, 0, 0.1],   // matches the main lathe's own gait channel (see mb.setGait above) -- without this a mounted vessel doesn't ride the body's locomotion bob at all, and visibly detaches from the torso while walking (creator report, 2026-07)
               packTilt: Math.atan2(0.5, 0.87) },
   };
 }
@@ -1729,7 +1736,7 @@ function planTreant(mb, o) {
     eye:    { p: eyeP, nrm: ellipN(eyeP, head.hC, head.hR), mirror: false, faceR: head.hR[0], anim: BREATH_H, gait: HEADBOB },
     // vertical trunk: a pack strapped flat to the bark, mid-height
     back:   { p: [0, levels[2].y, -levels[2].rz * 0.95], nrm: V.norm([0, 0.1, -1]),
-              mirror: false, out: 1, anim: BREATH_T },
+              mirror: false, out: 1, anim: BREATH_T, gait: [0, 0, 0, 0.03] },   // matches the trunk's own gait channel above
   };
 }
 
