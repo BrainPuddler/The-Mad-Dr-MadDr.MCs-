@@ -39,8 +39,7 @@ public class Citizen : MonoBehaviour
 
     /// <summary>Begin being dragged toward `captor`, overriding this
     /// citizen's own flee/walk AI in Update() until the captor dies
-    /// (auto-release) or a future phase wires consumption on
-    /// arrival.</summary>
+    /// (auto-release) or it arrives and is eaten (docs/26 Phase 7).</summary>
     public void Capture(UnitCombat captor, float speed)
     {
         if (_capture == null) _capture = new CaptureState();
@@ -70,7 +69,15 @@ public class Citizen : MonoBehaviour
         var dt = Time.deltaTime;
 
         // captured overrides everything, even fleeing -- a caught citizen
-        // is being dragged, not choosing to run (docs/26 Phase 6)
+        // is being dragged, not choosing to run (docs/26 Phase 6); once it
+        // arrives at its captor, it's eaten (Phase 7) -- reusing the same
+        // OnCitizenEaten a chased-and-caught citizen already goes through,
+        // so wallet credit/gore FX/despawn are identical either way. NOTE
+        // (docs/26, flagged not hidden): a web-captured citizen does NOT
+        // fill the eating monster's harvest tank the way a direct chase-
+        // and-eat order does (docs/22) -- that credit is wired on the
+        // MonsterAgent/HarvestProfile side of TickEat, which this path
+        // never touches; a real gap, follow-up not attempted here.
         if (_capture != null)
         {
             if (!_capture.Active)
@@ -79,9 +86,10 @@ public class Citizen : MonoBehaviour
             }
             else
             {
-                _capture.TickPull(transform, dt);
+                var arrived = _capture.TickPull(transform, dt);
                 var cp = transform.position;
                 transform.position = new Vector3(cp.x, _builder.GroundHeightAt(cp) + 0.9f, cp.z);
+                if (arrived) _builder.OnCitizenEaten(this);
                 return;
             }
         }

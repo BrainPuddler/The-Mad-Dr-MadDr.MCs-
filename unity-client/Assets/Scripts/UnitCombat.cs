@@ -140,14 +140,17 @@ public class UnitCombat : MonoBehaviour
         _capture.Begin(captor, speed);
     }
 
-    /// <summary>Advances the pull one frame. No-op once the captor has
-    /// died (and releases the capture so IsCaptured reads false from
-    /// then on).</summary>
-    public void TickCapture(float dt)
+    /// <summary>Advances the pull one frame; returns true once arrived
+    /// at the captor. No-op (returns false) once the captor has died
+    /// (and releases the capture so IsCaptured reads false from then
+    /// on). docs/26 Phase 7: no generic "consume a UnitCombat" path
+    /// exists yet, so callers don't act on the returned value today --
+    /// see docs/26's "non-Citizen consume path" design note.</summary>
+    public bool TickCapture(float dt)
     {
-        if (_capture == null) return;
-        if (!_capture.Active) { _capture = null; return; }
-        _capture.TickPull(transform, dt);
+        if (_capture == null) return false;
+        if (!_capture.Active) { _capture = null; return false; }
+        return _capture.TickPull(transform, dt);
     }
 
     public void Configure(string faction, float maxHp, float radius, float aimHeight,

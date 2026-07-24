@@ -9,10 +9,12 @@ using UnityEngine;
 /// grep, not assumed). UnitCombat owns one instance for a combatant
 /// target; Citizen owns a separate one for itself.
 ///
-/// v0.1 scope: pull only. Reaching the captor holds the victim there
-/// (TickPull stops once within ArriveRadius, and resumes closing the gap
-/// if the captor itself walks further away) -- actual consumption on
-/// arrival is Phase 7's job, not this class's.
+/// v0.1 scope: pull + report arrival. Reaching the captor holds the
+/// victim there (TickPull stops once within ArriveRadius, and resumes
+/// closing the gap if the captor itself walks further away); TickPull
+/// returns true once arrived so a caller can act on it (docs/26 Phase 7:
+/// Citizen does, consuming itself -- MonsterAgent/Tank don't yet, since
+/// no generic "consume a UnitCombat" path exists).
 /// </summary>
 public sealed class CaptureState
 {
@@ -35,15 +37,16 @@ public sealed class CaptureState
 
     /// <summary>Moves `self` toward the captor at Speed, never
     /// overshooting -- the same MoveToward idiom Citizen already uses
-    /// for its own locomotion.</summary>
-    public void TickPull(Transform self, float dt)
+    /// for its own locomotion. Returns true once within ArriveRadius.</summary>
+    public bool TickPull(Transform self, float dt)
     {
-        if (!Active) return;
+        if (!Active) return false;
         var to = Captor.transform.position - self.position;
         to.y = 0f;
         var dist = to.magnitude;
-        if (dist <= ArriveRadius) return;
+        if (dist <= ArriveRadius) return true;
         var dir = dist > 0.0001f ? to / dist : Vector3.zero;
         self.position += dir * Mathf.Min(Speed * dt, dist);
+        return false;
     }
 }

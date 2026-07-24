@@ -1072,3 +1072,55 @@ pass.
 
 Next: Phase 7 (consume-on-arrival, wired into `OnCitizenEaten` for
 citizens; the non-Citizen path remains a real open design question).
+
+## Special Attacks System Phase 7: consume-on-arrival for captured citizens (2026-07)
+
+Creator direction: "Proceed" (continue to the next approved phase).
+Phase 7 closes the loop Phase 6 deliberately left open: a captured
+target that reaches its captor no longer just sits there.
+
+`CaptureState.TickPull` now returns `true` once the victim is within
+`ArriveRadius` (was `void`); `UnitCombat.TickCapture` and `Citizen`'s own
+capture branch both propagate this. `Citizen.Update()` acts on it
+directly: the instant a dragged citizen arrives, it calls
+`_builder.OnCitizenEaten(this)` -- the exact same method a chased-and-
+caught citizen already goes through via `MonsterAgent.TickEat`, so
+wallet credit (Blood 2 / Bones 1 / Brains 1), blood-splatter FX, and
+despawn are identical either way. No new consumption logic was needed
+for citizens -- just wiring the existing, already-tested method to a new
+trigger.
+
+Flagged, not hidden: a web-captured citizen does NOT fill the eating
+monster's harvest tank the way a direct chase-and-eat order does
+(docs/22's `_carriedLoad` credit lives inside `MonsterAgent.TickEat`
+specifically). `Citizen` has no reference back to the capturing
+`MonsterAgent` -- only to the `UnitCombat` it's being pulled toward -- so
+crediting this would need a new back-reference or an owner-lookup on
+`RuntimeCityBuilder`. Not attempted here; logged as a real follow-up,
+matching this project's existing convention (e.g. `Tank.SpawnWreck`'s
+"visual breakdown only" note) rather than silently under-scoping it.
+
+Non-Citizen consume path: designed, not built, exactly per the existing
+phase-7 boundary. No light, non-heavy `UnitCombat` target exists
+anywhere in the project to build and test this against today (a Tank is
+always heavy; an ordinary monster is never a valid target of its own
+faction's web -- only a possessed one, per the Phase 5 note). Building
+it now would be untestable premature generality. The designed shape:
+`UnitCombat.TickCapture` already returns the same arrival signal
+`Citizen` uses; the owning mover (`MonsterAgent.TickCaptured`, or a
+future `Tank` equivalent) would read `true` and apply lethal damage to
+itself via its own existing `TakeDamage`, routing through the
+already-correct death/`_onDied`/wreck-cleanup path -- no second, parallel
+destroy path needed on `UnitCombat` itself.
+
+Verified: flightcheck stub-compile clean (`CaptureState.cs`,
+`UnitCombat.cs`, `Citizen.cs`). `webattackverify` gained one new check:
+`TickCapture` returns false while still approaching and true once within
+`ArriveRadius` -- the exact signal `Citizen.Update()` acts on. All 22
+checks (21 from Phases 4-6, 1 new) pass. No live-scene test exists for
+the citizen-eaten trigger itself (same compile+pure-logic verification
+limit as every other Unity behaviour this session).
+
+Next: Phase 8 (AI decision heuristic -- `EvaluateBestAbility`-equivalent:
+distance, weighted target count in AoE, cooldown state, a minimum
+usefulness threshold), the last phase in the approved plan.

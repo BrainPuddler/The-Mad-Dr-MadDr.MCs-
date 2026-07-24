@@ -1,6 +1,6 @@
 # 26 — Special Attacks System (enemy AI)
 
-Status: **Approved architecture, Phases 1–6 implemented** (design produced
+Status: **Approved architecture, Phases 1–7 implemented** (design produced
 2026-07 via a research-then-design pass over the existing combat/AI
 architecture before any code was written; creator approved "pure Unity"
 + ScriptableObject-based definitions before implementation began) ·
@@ -141,7 +141,8 @@ per-type flags.
   `IsPossessed` (default false), `_slowRemaining`/`_slowMultiplier`
   (ticked in `Update()`), `SpeedMultiplier`, `ApplySlow(...)`; Phase 6
   adds `IsCaptured`, `Captor`, `Capture(...)`, `TickCapture(dt)` (owns
-  one `CaptureState`).
+  one `CaptureState`); Phase 7: `TickCapture` now returns whether the
+  victim arrived this frame.
 - `MonsterAgent.cs` — `OrderKind.SpecialAttack`, `_activeSpecialAttack`/
   `_targetSpecialAttackUnit` fields, `OrderSpecialAttack(...)`,
   `TickSpecialAttack(dt)`, wired into the `Update()` dispatch switch,
@@ -156,7 +157,9 @@ per-type flags.
   is always heavy, never captured).
 - `Citizen.cs` — Phase 6: its own `Capture(...)` + `_capture` field
   (a `Citizen` has no `UnitCombat`, so it can't share one), checked at
-  the top of `Update()` ahead of even the flee logic.
+  the top of `Update()` ahead of even the flee logic; Phase 7: calls
+  `_builder.OnCitizenEaten(this)` the instant its capture-tick reports
+  arrival.
 - `Projectile.cs` — one additive `OnArrive` hook (Phase 4), existing
   callers unaffected.
 - `RuntimeCityBuilder.cs` — `QueryCombatantsInRadius` (Phase 4), a thin
@@ -348,11 +351,55 @@ session), not just `Blocked()`.
   Phases 4-5, 6 new) pass.
 - **Phase 7 — consume-on-arrival**, wired into `OnCitizenEaten` for
   citizens; parallel path designed (not yet built) for non-`Citizen`
-  captured targets. **Status: not started.** A captured target that
-  reaches its captor today just holds position there (visibly
-  restrained, following if the captor itself moves) — this is an
-  expected, temporary, documented gap, not a bug: Phase 6's own scope
-  was capture + pull only, per this plan.
+  captured targets. **Status: done (2026-07) for citizens; non-Citizen
+  path designed, not built.**
+
+  `CaptureState.TickPull` now returns `true` once the victim is within
+  `ArriveRadius` (previously `void`) — `UnitCombat.TickCapture` and
+  `Citizen`'s own capture branch both propagate this. `Citizen.Update()`
+  reads it directly: the instant a dragged citizen arrives, it calls
+  `_builder.OnCitizenEaten(this)` — the SAME method a chased-and-caught
+  citizen already goes through via `MonsterAgent.TickEat`, so wallet
+  credit (Blood 2 / Bones 1 / Brains 1), the blood-splatter FX, and
+  despawn are identical either way; no new consumption path needed for
+  citizens, just wiring the existing one to a new trigger.
+
+  **Known, flagged (not hidden) gap**: a web-captured citizen does NOT
+  fill the eating monster's harvest tank the way a direct chase-and-eat
+  order does (docs/22's `_carriedLoad`/`HarvestProfile.GatherBlood`
+  credit lives inside `MonsterAgent.TickEat` specifically, which this
+  path never runs). Citizen has no reference back to the capturing
+  MonsterAgent to credit it — only to the `UnitCombat` it's being pulled
+  toward — so wiring this would need a new UnitCombat→MonsterAgent
+  back-reference or an owner-lookup on `RuntimeCityBuilder`. Not
+  attempted here; a real follow-up, matching this project's convention
+  of flagging known gaps rather than papering over them (see e.g.
+  `Tank.SpawnWreck`'s "visual breakdown only" note).
+
+  **Non-Citizen consume path (designed, not built)**: no light,
+  non-heavy `UnitCombat` target exists anywhere in the project today to
+  build and test this against (Tank is always heavy; a monster is only
+  ever a valid web target of its own faction if possessed, per the
+  Phase 5 note above) — building an untestable path now would be
+  exactly the kind of premature generality this project's engineering
+  discipline avoids. The shape it would take, so a future light unit
+  doesn't require revisiting this design: `UnitCombat.TickCapture`
+  already returns `true` on arrival, matching `Citizen`'s own signal;
+  the owning mover (`MonsterAgent.TickCaptured` / a future `Tank`
+  equivalent) would read that return value and, on `true`, apply lethal
+  damage to itself via its own `TakeDamage` (routing through the
+  existing death/`_onDied`/wreck-cleanup path for free, exactly as any
+  other kill does) rather than inventing a second destroy path — no new
+  `Consume()` method needed on `UnitCombat` itself.
+
+  Verified: flightcheck stub-compile clean (`CaptureState.cs`,
+  `UnitCombat.cs`, `Citizen.cs`). `webattackverify` gained one new
+  check confirming `TickCapture` returns `false` while still approaching
+  and `true` once within `ArriveRadius` — the exact signal
+  `Citizen.Update()` acts on. All 22 checks (21 from Phases 4-6, 1 new)
+  pass. (No live-scene test exists for the citizen-eaten trigger itself,
+  same "compile + pure-logic" verification limit as every other Unity
+  behaviour this session — see standing verification discipline.)
 - **Phase 8 — AI decision heuristic** (`EvaluateBestAbility`-equivalent:
   distance, weighted target count in AoE, cooldown state, a minimum
   usefulness threshold), added last once the ability is fully functional
@@ -360,12 +407,13 @@ session), not just `Blocked()`.
 
 ## v0.1 tuning appendix
 
-To be filled in as Phase 7+ lands: Web Attack cooldown/range/AoE radius.
+To be filled in as Phase 8 lands: Web Attack cooldown/range/AoE radius.
 Placeholders set so far: `WebAttackAbility.HeavyMassThreshold = 3f` (the
 Mass threshold separating "non-heavy" from "heavy-class"),
 `HeavySlowMultiplier = 0.35f` / `HeavySlowDuration = 3f` (Phase 5 — a
 heavy target moves at 35% speed for 3s while caught), `CapturePullSpeed
 = 6f` m/s (Phase 6 — how fast a non-heavy target is dragged toward its
 captor), `CaptureState.ArriveRadius = 1.5f` (how close counts as
-"arrived," held there until Phase 7 wires consumption). All placeholders
-until playtested, per this repo's general v0.1 numbers policy.
+"arrived" — now eaten-on-arrival for citizens, Phase 7). All
+placeholders until playtested, per this repo's general v0.1 numbers
+policy.
