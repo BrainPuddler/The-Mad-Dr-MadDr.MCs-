@@ -1,6 +1,6 @@
 # 26 — Special Attacks System (enemy AI)
 
-Status: **Approved architecture, Phases 1–3 implemented** (design produced
+Status: **Approved architecture, Phases 1–4 implemented** (design produced
 2026-07 via a research-then-design pass over the existing combat/AI
 architecture before any code was written; creator approved "pure Unity"
 + ScriptableObject-based definitions before implementation began) ·
@@ -144,10 +144,15 @@ per-type flags.
   `ClearTargets()`, `OnDied()`, and the debug `OrderDescription` string.
 - `Tank.cs` — explicit `mass: 10f` on its `Configure(...)` call, the
   concrete heavy-target example.
+- `Projectile.cs` — one additive `OnArrive` hook (Phase 4), existing
+  callers unaffected.
+- `RuntimeCityBuilder.cs` — `QueryCombatantsInRadius` (Phase 4), a thin
+  public wrapper over the existing docs/25 neighbour grid.
 
-**New** (created only as each phase below executes):
+**New:**
 `SpecialAttackDefinition.cs`, `SpecialAttackInstance.cs` (Phase 1);
-`WebAttackAbility.cs`, `CaptureState.cs` (Phase 4+, not yet created).
+`WebAttackAbility.cs` (Phase 4 — targeting/classification only);
+`CaptureState.cs` (Phase 6, not yet created).
 
 **Explicitly untouched:** `WeaponProfile`/`WeaponFx` (additive parallel
 system, not a modification of the existing weapon path),
@@ -188,7 +193,29 @@ session), not just `Blocked()`.
   asset do NOT share a cooldown (per-instance, not per-definition or
   global — the design brief's explicit requirement).
 - **Phase 4 — `WebAttackAbility` targeting + AoE resolution only** (no
-  pull, no consume yet — logs what it would do). **Status: not started.**
+  pull, no consume yet — logs what it would do). **Status: done
+  (2026-07).** New `WebAttackAbility.cs`: `Launch` spawns a non-homing
+  `Projectile` at a SNAPSHOT of the target's position (an AoE resolves at
+  a location, not on whichever unit is still standing there when it
+  lands); `Projectile` gained a small additive `OnArrive` hook (fires on
+  arrival with the impact position, existing callers unaffected since
+  they never set it) so a non-damage effect can resolve without touching
+  `WeaponFx`. On arrival: queries `RuntimeCityBuilder.
+  QueryCombatantsInRadius` (new, thin wrapper over the existing docs/25
+  neighbour grid -- no second grid) for monsters/tanks, and linearly
+  scans `RuntimeCityBuilder.Citizens` for citizens (no spatial grid
+  exists for them -- confirmed by research, not assumed -- so this
+  matches the project's existing citizen-scanning convention,
+  `DistanceAhead`). The actual decision logic
+  (`ShouldCatchCombatant`/`IsHeavy`/`MatchesFilter`) is exposed as pure,
+  independently-testable static functions rather than inlined, since this
+  phase's whole point is that targeting/classification is proven correct
+  before any harder capture-state work builds on it. Verified: flightcheck
+  clean; a standalone harness compiling the real `WebAttackAbility.cs`
+  drove 8 checks directly against real `UnitCombat` instances -- the mass
+  boundary (exactly at threshold IS heavy, matching `>=`), filter
+  matching, in-range/out-of-range, caster self-exclusion, no-friendly-
+  fire-capture, dead-target exclusion, and category mismatch -- all pass.
 - **Phase 5 — heavy-target slow effect** (the simpler branch, no new
   state machine). **Status: not started.**
 - **Phase 6 — `CaptureState` + pull-toward-captor** for human-class

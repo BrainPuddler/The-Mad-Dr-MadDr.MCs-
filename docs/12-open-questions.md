@@ -877,3 +877,74 @@ Status: Phases 1-3 done (state-machine wiring only). Phase 4
 (WebAttackAbility targeting + AoE resolution, no capture/consume yet) is
 next, explicitly not started this session per the "small, safe,
 independently testable steps" plan docs/26 lays out.
+
+## 2026-07 — Special Attacks System Phase 4: Web Attack targeting + AoE
+
+Continuing docs/26's phased plan (creator: "continue").
+
+Implemented Phase 4 -- `WebAttackAbility` targeting + area-of-effect
+resolution only, deliberately no pull/capture/consume/slow effect yet
+(that's Phases 5-7): the phase's whole point is that targeting and
+target-classification are proven correct in isolation before any harder
+multi-frame capture-state work is built on top of them.
+
+- `Projectile.cs`: one additive `OnArrive` hook (a `System.Action<Vector3>`
+  fired once at arrival, before the object is destroyed, with the real
+  impact position). Every existing caller (`WeaponFx`) never sets it, so
+  every shot fired today is completely unaffected -- purely an extension
+  point for a non-homing effect that needs to do something on arrival
+  beyond "damage the one target," which the existing `_homing` branch
+  already owns.
+- `WebAttackAbility.cs` (new): `Launch` spawns a non-homing web bolt at a
+  SNAPSHOT of the target's position at cast time (an area effect resolves
+  at a location once it lands, not on whichever single unit happens to
+  still be standing there -- it does NOT track the target after launch,
+  unlike a normal weapon shot). On arrival (`ResolveImpact`): queries
+  `RuntimeCityBuilder.QueryCombatantsInRadius` (new, thin wrapper over
+  the EXISTING docs/25 neighbour grid -- no second grid built) for
+  monsters/tanks, and linearly scans `RuntimeCityBuilder.Citizens` for
+  citizens -- confirmed by the original research pass, not assumed, that
+  `Citizen` carries no `UnitCombat` at all and has no spatial grid of its
+  own, so this matches the project's existing citizen-scanning
+  convention (`DistanceAhead`) rather than inventing a citizen grid for
+  one ability.
+- The actual decision logic is three small PURE functions, deliberately
+  pulled out of `ResolveImpact`'s side-effecting body so they're directly
+  testable: `IsHeavy(mass)` (the mass-threshold check), `MatchesFilter
+  (category, filter)` (plain flag membership), and `ShouldCatchCombatant`
+  (alive, not the caster itself, not a same-faction ally -- no
+  friendly-fire capture -- within the exact circular radius, and of a
+  category the ability's `ValidTargets` actually allows). A first draft
+  of `ShouldCatchCombatant`'s equivalent inline logic had a real bug,
+  caught before it shipped by writing the standalone harness rather than
+  just reading the code: it checked "does the filter allow EITHER
+  Human OR Monster at all" instead of "does the filter allow the
+  category THIS specific combatant represents" -- meaning a Human-only
+  web would have wrongly caught monsters too, as long as the Human flag
+  happened to also be set. Fixed to map each combatant to its actual
+  category (`Faction == "human" -> TargetFilter.Human`, else `Monster`)
+  before checking the filter.
+- `MonsterAgent.TickSpecialAttack`: on reaching range, now actually casts
+  (`WebAttackAbility.Launch`, keyed off `Definition.EffectType ==
+  PullAndConsume`) instead of only triggering the cooldown -- cooldown
+  still starts at the moment of casting/deployment, matching
+  `UnitCombat.TryFire`'s own "reload only once a shot actually goes out"
+  timing, and the task brief's own "after deployment... enters cooldown
+  state" wording.
+
+Verified: flightcheck stub-compile clean (0 warnings), including new
+`ScriptableObject`/`AudioClip`/`AudioSource`/`Object.Instantiate` stub
+additions the shared harness needed for the first time. A standalone
+harness compiling the real `WebAttackAbility.cs` (plus the real
+`UnitCombat.cs`/`Projectile.cs`/`WeaponFx.cs`, with lightweight
+placeholder `RuntimeCityBuilder`/`Citizen` types since this phase's
+tests never call into either) drove 8 checks directly against real
+`UnitCombat` instances: the mass boundary is exactly `>=` (not `>`);
+filter matching; in-range vs. out-of-range; the caster is never caught
+by its own web; no friendly-fire capture; a dead target is excluded;
+and a target whose category the filter disallows is excluded (this is
+the exact check that caught the bug described above). No visual
+verification (no Editor in this environment).
+
+Status: Phases 1-4 done. Phase 5 (heavy-target slow effect, the simpler
+of the two remaining branches) is next.

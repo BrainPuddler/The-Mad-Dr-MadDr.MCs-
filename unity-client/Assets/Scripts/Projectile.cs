@@ -18,6 +18,16 @@ public class Projectile : MonoBehaviour
     private float _speed;
     private float _life = 4f;    // backstop so a stray shot never lives forever
 
+    /// <summary>docs/26: fires exactly once, at the moment this
+    /// projectile reaches its goal or times out -- BEFORE the object is
+    /// destroyed, so `transform.position` is still the real impact point.
+    /// Existing callers (WeaponFx) never set this, so damage/homing
+    /// behavior is completely unchanged for every shot fired today --
+    /// purely an additive hook for a non-homing effect (a web bolt) that
+    /// needs to do something on arrival beyond "damage the one target,"
+    /// which the `_homing` branch below already owns.</summary>
+    public System.Action<Vector3> OnArrive;
+
     public void Init(UnitCombat source, UnitCombat target, Vector3 point, float damage, float speed)
     {
         _source = source;
@@ -41,6 +51,7 @@ public class Projectile : MonoBehaviour
         if (dist <= step || dist < 0.5f || _life <= 0f)
         {
             if (_homing && _target != null && _target.Alive) _target.TakeDamage(_damage, _source);
+            if (OnArrive != null) OnArrive(transform.position);
             Object.Destroy(gameObject);
             return;
         }

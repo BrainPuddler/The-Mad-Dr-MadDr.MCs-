@@ -1700,6 +1700,20 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         }
     }
 
+    /// <summary>docs/26: everyone in `_combatants` within `radius` of
+    /// `center`, via the SAME lazily-rebuilt neighbour grid ApplySeparation/
+    /// SteerFollowPath already use -- for a special attack's
+    /// area-of-effect resolution, not a second grid. `results` is cleared
+    /// and filled; matches every other QueryRadius call in this file in
+    /// returning a bounding-square superset, not an exact circle -- the
+    /// caller still does its own exact-distance filter on the results.</summary>
+    public void QueryCombatantsInRadius(Vector3 center, float radius, List<UnitCombat> results)
+    {
+        RebuildCombatantGridIfNeeded();
+        results.Clear();
+        _combatantGrid.QueryRadius(center, radius, results);
+    }
+
     /// <summary>Hard positional correction -- unchanged since before docs/25
     /// (now delegating its per-pair math to
     /// MonsterSteeringController.SeparationForce, a pure extract, same

@@ -763,6 +763,17 @@ public class MonsterAgent : MonoBehaviour
             var dir = dist > 0.01f ? to / dist : transform.forward;
             transform.rotation = Quaternion.Slerp(transform.rotation,
                 Quaternion.LookRotation(dir, Vector3.up), dt * 6f);
+            // docs/26 Phase 4: cast the actual ability -- cooldown starts
+            // at DEPLOYMENT (this moment), not at impact, matching
+            // UnitCombat.TryFire only reloading _cooldown once a shot
+            // actually goes out. Which resolver runs is keyed on
+            // Definition.EffectType; only PullAndConsume (Web Attack) has
+            // a resolver so far -- an unrecognised EffectType still
+            // consumes the cooldown (the cast attempt happened) but has
+            // no effect, rather than silently doing nothing forever.
+            if (_activeSpecialAttack.Definition.EffectType == SpecialAttackEffectType.PullAndConsume)
+                WebAttackAbility.Launch(_builder, _fighter, _activeSpecialAttack.Definition,
+                    _targetSpecialAttackUnit.transform.position, Muzzle());
             _activeSpecialAttack.TriggerCooldown();
             _activeSpecialAttack = null;
             _targetSpecialAttackUnit = null;
