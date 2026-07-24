@@ -152,7 +152,10 @@ per-type flags.
   the `_order` switch while true; Phase 8 adds `EvaluateBestAbility(...)`
   and wires it into `AcquireTarget` ahead of retaliation/engage, and
   narrows `AcquireTarget`'s old all-or-nothing weapon guard so a
-  weaponless special-attack-only creature could still use one.
+  weaponless special-attack-only creature could still use one. Follow-up:
+  extracts `CreditHarvestForEatenCitizen()` out of `TickEat` and adds
+  public `NotifyCapturedCitizenEaten()` so a web-captured citizen credits
+  the harvest tank too.
 - `Tank.cs` — explicit `mass: 10f` on its `Configure(...)` call, the
   concrete heavy-target example; Phase 5 multiplies
   `_combat.SpeedMultiplier` into the hull-movement line; Phase 6 adds the
@@ -162,7 +165,8 @@ per-type flags.
   (a `Citizen` has no `UnitCombat`, so it can't share one), checked at
   the top of `Update()` ahead of even the flee logic; Phase 7: calls
   `_builder.OnCitizenEaten(this)` the instant its capture-tick reports
-  arrival.
+  arrival. Follow-up: also looks up the capturing `MonsterAgent` via
+  `GetComponent` and calls `NotifyCapturedCitizenEaten()` on it first.
 - `Projectile.cs` — one additive `OnArrive` hook (Phase 4), existing
   callers unaffected.
 - `RuntimeCityBuilder.cs` — `QueryCombatantsInRadius` (Phase 4), a thin
@@ -369,17 +373,43 @@ session), not just `Blocked()`.
   despawn are identical either way; no new consumption path needed for
   citizens, just wiring the existing one to a new trigger.
 
-  **Known, flagged (not hidden) gap**: a web-captured citizen does NOT
+  **Harvest-tank credit gap — closed (follow-up, 2026-07).** Originally
+  flagged here as a known, not-hidden gap: a web-captured citizen didn't
   fill the eating monster's harvest tank the way a direct chase-and-eat
-  order does (docs/22's `_carriedLoad`/`HarvestProfile.GatherBlood`
-  credit lives inside `MonsterAgent.TickEat` specifically, which this
-  path never runs). Citizen has no reference back to the capturing
-  MonsterAgent to credit it — only to the `UnitCombat` it's being pulled
-  toward — so wiring this would need a new UnitCombat→MonsterAgent
-  back-reference or an owner-lookup on `RuntimeCityBuilder`. Not
-  attempted here; a real follow-up, matching this project's convention
-  of flagging known gaps rather than papering over them (see e.g.
-  `Tank.SpawnWreck`'s "visual breakdown only" note).
+  order does, because docs/22's `_carriedLoad`/`HarvestProfile.
+  GatherBlood` credit lived inside `MonsterAgent.TickEat` specifically,
+  which the capture-arrival path never ran. Fixed by extracting that
+  credit into a new private `MonsterAgent.CreditHarvestForEatenCitizen()`
+  (identical formula, `Mathf.Min(Capacity, _carriedLoad + 3 *
+  GatherBlood)`, now called from both `TickEat` and the new public
+  `NotifyCapturedCitizenEaten()`) and having `Citizen.Update()` look up
+  the capturing `MonsterAgent` via `_capture.Captor.GetComponent<
+  MonsterAgent>()` — the back-reference this doc originally said would be
+  needed — the moment it's eaten on arrival. `MonsterAgent.Init` adds
+  `_fighter` to `gameObject` itself, so the `UnitCombat` a `Citizen` was
+  dragged toward and the `MonsterAgent` that owns it are always on the
+  SAME GameObject, making `GetComponent` the correct (and only) lookup —
+  no new field needed on either class. A web-captured citizen now counts
+  as the exact same kill as a directly chased-and-eaten one, in every
+  respect (wallet, gore FX, despawn, AND harvest credit).
+
+  Verified with a new dedicated harness, `harvestcreditverify` (compiling
+  the REAL `MonsterAgent.cs` plus its full real dependency chain, same
+  file list as flightcheck): 3 checks, using reflection to set/read
+  `MonsterAgent`'s private `_harvest`/`_carriedLoad` fields (same
+  discipline as `UnitCombat._slowRemaining`) since nothing outside
+  `MonsterAgent` should otherwise touch them — crediting matches
+  `TickEat`'s own `3 * GatherBlood` formula exactly; credit caps at the
+  vessel's `Capacity` rather than overflowing; a monster with no
+  `HarvestProfile` at all is a safe inert no-op, not a null-ref. All 3
+  pass. (Building this harness caught an unrelated pitfall worth
+  recording: its `UnityStub.cs` was seeded from flightcheck's own copy,
+  which stubs every `Mathf` float function as a hardcoded `return 0f` --
+  correct for a pure compile-check harness that never inspects a computed
+  value, but silently wrong for a harness that asserts on real numbers;
+  the first run of these checks all "failed" at `0` before this was
+  caught and `Mathf` was patched to real math, matching
+  `specialattackverify`/`webattackverify`'s stubs.)
 
   **Non-Citizen consume path (designed, not built)**: no light,
   non-heavy `UnitCombat` target exists anywhere in the project today to
@@ -476,14 +506,15 @@ retaliating/engaging normally) whenever a candidate target's AoE would
 catch enough valid targets to clear the ability's own usefulness bar; a
 Web Attack bolt travels to that snapshot position, and on arrival heavy
 targets are slowed (visibly, on any monster or Tank) while non-heavy
-targets are dragged toward the caster and eaten on arrival if they're a
-`Citizen`. Three follow-ups remain, all flagged above rather than
-hidden: (1) no creature is actually equipped with a
-`SpecialAttackDefinition` yet -- that's a creator/Editor drag-and-drop
+targets are dragged toward the caster and eaten (with full harvest-tank
+credit, same as a direct chase-and-eat kill) on arrival if they're a
+`Citizen`. Two follow-ups remain, both flagged above rather than hidden
+(the harvest-tank credit gap originally listed here was closed in a
+2026-07 follow-up, see above): (1) no creature is actually equipped with
+a `SpecialAttackDefinition` yet -- that's a creator/Editor drag-and-drop
 step outside any phase in this plan; (2) a non-Citizen consume path is
 designed but not built, since nothing testable exists to build it
-against; (3) web-captured citizens don't credit the eating monster's
-harvest tank the way a direct chase-and-eat order does.
+against.
 
 ## v0.1 tuning appendix
 

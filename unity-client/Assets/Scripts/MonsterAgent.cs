@@ -922,16 +922,7 @@ public class MonsterAgent : MonoBehaviour
         if (toTarget.magnitude < 3f)
         {
             _builder.OnCitizenEaten(_targetCitizen);
-            // harvest into the onboard tank (docs/22): a real harvest tool
-            // strips far more per body than teeth do -- the gathered load
-            // is the citizen's yield scaled by this creature's blood-gather
-            // rate, capped at what its vessel can hold. This is what makes a
-            // lamprey-and-tank build a hauler and slows it as it fills.
-            if (_harvest != null && _harvest.Capacity > 0.01f)
-            {
-                _carriedLoad = Mathf.Min((float)_harvest.Capacity,
-                    _carriedLoad + 3f * (float)_harvest.GatherBlood);
-            }
+            CreditHarvestForEatenCitizen();
             _targetCitizen = null;
             GoIdle();
             _path = null;
@@ -950,6 +941,38 @@ public class MonsterAgent : MonoBehaviour
         // always chase at a run -- but a laden harvester still pays the
         // weight tax (a full blood-tanker can't sprint down a fresh victim)
         return FollowPath(dt, (float)_profile.RunMetersPerSecond(_builder.speedDisplayMultiplier) * LoadFactor());
+    }
+
+    /// <summary>Harvest the onboard tank's share of an eaten citizen
+    /// (docs/22): a real harvest tool strips far more per body than teeth
+    /// do -- the gathered load is the citizen's yield scaled by this
+    /// creature's blood-gather rate, capped at what its vessel can hold.
+    /// This is what makes a lamprey-and-tank build a hauler and slows it
+    /// as it fills. Shared by TickEat (a direct chase-and-eat order) and
+    /// <see cref="NotifyCapturedCitizenEaten"/> (docs/26 follow-up: a web-
+    /// captured citizen eaten on arrival) so both count as the same real
+    /// kill instead of a web catch being a silently lesser one.</summary>
+    private void CreditHarvestForEatenCitizen()
+    {
+        if (_harvest != null && _harvest.Capacity > 0.01f)
+        {
+            _carriedLoad = Mathf.Min((float)_harvest.Capacity,
+                _carriedLoad + 3f * (float)_harvest.GatherBlood);
+        }
+    }
+
+    /// <summary>docs/26 follow-up: called by a Citizen this unit captured
+    /// (via a special attack, e.g. a Web Attack) once it's actually eaten
+    /// on arrival -- Citizen has no reference back to the MonsterAgent
+    /// that captured it, only to the UnitCombat it was dragged toward, so
+    /// it finds this via `GetComponent&lt;MonsterAgent&gt;()` on that same
+    /// GameObject (MonsterAgent.Init adds `_fighter` to `gameObject`
+    /// itself, so the two are always co-located). Mirrors TickEat's own
+    /// harvest credit exactly, so a web-captured citizen fills the
+    /// harvest tank the same as a directly chased-and-eaten one.</summary>
+    public void NotifyCapturedCitizenEaten()
+    {
+        CreditHarvestForEatenCitizen();
     }
 
     // ---- movement mechanics --------------------------------------------------

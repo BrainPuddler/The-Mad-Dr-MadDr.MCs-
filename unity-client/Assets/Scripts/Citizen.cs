@@ -72,12 +72,12 @@ public class Citizen : MonoBehaviour
         // is being dragged, not choosing to run (docs/26 Phase 6); once it
         // arrives at its captor, it's eaten (Phase 7) -- reusing the same
         // OnCitizenEaten a chased-and-caught citizen already goes through,
-        // so wallet credit/gore FX/despawn are identical either way. NOTE
-        // (docs/26, flagged not hidden): a web-captured citizen does NOT
-        // fill the eating monster's harvest tank the way a direct chase-
-        // and-eat order does (docs/22) -- that credit is wired on the
-        // MonsterAgent/HarvestProfile side of TickEat, which this path
-        // never touches; a real gap, follow-up not attempted here.
+        // so wallet credit/gore FX/despawn are identical either way. It
+        // also credits the capturing monster's harvest tank exactly like a
+        // direct chase-and-eat order does (docs/26 follow-up) -- found via
+        // GetComponent since a Citizen only has a reference to the
+        // UnitCombat it was dragged toward, not the MonsterAgent that
+        // captured it; the two are always on the same GameObject.
         if (_capture != null)
         {
             if (!_capture.Active)
@@ -89,7 +89,12 @@ public class Citizen : MonoBehaviour
                 var arrived = _capture.TickPull(transform, dt);
                 var cp = transform.position;
                 transform.position = new Vector3(cp.x, _builder.GroundHeightAt(cp) + 0.9f, cp.z);
-                if (arrived) _builder.OnCitizenEaten(this);
+                if (arrived)
+                {
+                    var captorAgent = _capture.Captor != null ? _capture.Captor.GetComponent<MonsterAgent>() : null;
+                    if (captorAgent != null) captorAgent.NotifyCapturedCitizenEaten();
+                    _builder.OnCitizenEaten(this);
+                }
                 return;
             }
         }

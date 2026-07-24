@@ -1190,3 +1190,55 @@ non-Citizen consume path is designed but not built (nothing testable
 exists to build it against); web-captured citizens don't credit the
 eating monster's harvest tank (Citizen has no back-reference to the
 capturing MonsterAgent).
+
+## Special Attacks System follow-up: harvest-tank credit for web-captured citizens (2026-07)
+
+Creator direction: "You should definitely do step 3. Unless it is
+covered in the consume phase." Checked: Phase 7's consume-on-arrival
+wiring only called `OnCitizenEaten` (wallet/gore FX/despawn) -- it
+explicitly did NOT credit the harvest tank, and the doc had flagged this
+as a known, not-hidden gap rather than silently covering it. Not covered
+by any phase, so implemented now as a standalone follow-up.
+
+Fix: extracted the harvest-credit lines already living inside
+`MonsterAgent.TickEat` into a new private `CreditHarvestForEatenCitizen()`
+(identical formula: `Mathf.Min(_harvest.Capacity, _carriedLoad + 3 *
+_harvest.GatherBlood)`), and added a new public
+`MonsterAgent.NotifyCapturedCitizenEaten()` that calls it. `Citizen.
+Update()`'s capture-arrival branch now looks up the capturing
+`MonsterAgent` via `_capture.Captor.GetComponent<MonsterAgent>()` and
+calls it before `OnCitizenEaten` -- this is the exact back-reference the
+docs/26 Phase 7 entry said would be needed, resolved via `GetComponent`
+rather than a new field, since `MonsterAgent.Init` adds `_fighter` to
+`gameObject` itself, so the `UnitCombat` a `Citizen` was dragged toward
+and the `MonsterAgent` that owns it are always co-located. A web-captured
+citizen now counts as the exact same kill as a directly chased-and-eaten
+one in every respect.
+
+Verified with a new dedicated harness, `harvestcreditverify` (compiles
+the REAL `MonsterAgent.cs` plus its full dependency chain -- same file
+list as `flightcheck`, since `MonsterAgent.cs` pulls in `MonsterBody`,
+`RuntimeCityBuilder`, and the whole gameplay layer regardless of which
+harness compiles it). Reads/writes `MonsterAgent`'s private `_harvest`/
+`_carriedLoad` fields via reflection (same discipline as `UnitCombat.
+_slowRemaining`), since nothing outside `MonsterAgent` should otherwise
+touch them. 3 checks: crediting matches `TickEat`'s own formula exactly;
+credit caps at the vessel's `Capacity` instead of overflowing; a monster
+with no `HarvestProfile` at all is a safe inert no-op. All 3 pass.
+
+Worth recording: the first run of these checks all "failed" at 0,
+because this new harness's `UnityStub.cs` was seeded from `flightcheck`'s
+own copy -- and `flightcheck` is a pure compile-check harness that never
+inspects a computed value, so its `Mathf` stub hardcodes every float
+function to `return 0f`. Silently correct for compile-checking, silently
+WRONG for a harness that asserts on real numbers. Caught immediately
+(the harvest math obviously couldn't produce 0 for both the plain-credit
+and the capacity-cap checks) and fixed by patching `Mathf` to real math,
+matching `specialattackverify`/`webattackverify`'s existing stubs. Flagged
+here in case a future harness copies `flightcheck`'s stub again.
+
+This closes the last of the three follow-ups noted when docs/26's 8-phase
+plan completed. Two remain, both genuinely out of scope for code alone:
+no creature is actually equipped with a special attack yet (an
+Editor-side task), and the non-Citizen consume path is designed but not
+built (nothing testable exists to build it against).
