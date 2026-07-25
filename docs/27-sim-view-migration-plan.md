@@ -1,6 +1,6 @@
 # 27 — MonsterAgent → Interpolated View: the Sim/View Migration Contract
 
-Status: **Approved architecture, Phase A implemented (2026-07)** · Realizes
+Status: **Approved architecture, Phases A–C implemented (2026-07)** · Realizes
 docs/23 §13 amendment A's Unity-side half ("MonsterAgent rewritten to render
 interpolated sim state only") · Extends
 [23-rts-master-build-plan.md](23-rts-master-build-plan.md)'s Phase 1.5 and
@@ -239,16 +239,19 @@ changes), `UnitCombat.cs`, the entire docs/26 Special Attacks System,
 ## 5. Risks & edge cases
 
 - **Two positions disagreeing.** While `_simDriven` is true, `match-core`'s
-  `SimUnit` is the ONLY writer of this unit's authoritative position — the
-  existing `ApplySeparation`/steering calls (docs/25) that currently nudge
-  `transform.position` directly must be SKIPPED for a sim-driven unit (they
-  have no sim-side equivalent yet and would fight the interpolated render
-  position every frame, a visible jitter). `TickMoveViaSim` must NOT call
-  `ApplySeparation`; this is an intentional, documented capability
-  regression for the sim-driven path specifically (no separation/flocking
-  yet), not an oversight — docs/23 §5 (flocking) is itself a `match-core`
-  port waiting to happen, and separation should arrive there, sim-side,
-  not be patched onto the interpolation layer.
+  `SimUnit` is the ONLY writer of this unit's authoritative position — any
+  legacy call that nudges `transform.position` directly must be SKIPPED for
+  a sim-driven unit, or it would fight the interpolated render position
+  every frame (a visible jitter). For Phase A/B this meant `TickMoveViaSim`
+  never called `ApplySeparation` itself, an intentional, documented
+  capability regression accepted until separation had a sim-side home to
+  arrive in. **Closed by Phase C (§7):** `MonsterAgent.Update()`'s own
+  unconditional `ApplySeparation` call now also skips a `SimDriven` unit
+  (match-core runs the equivalent pass itself, inside `MatchState.Tick`,
+  before `Update()` ever reads the position), and every non-sim-driven
+  unit's behavior is provably unchanged — see Phase C's own verification
+  notes. Alignment/cohesion (docs/23 §5's other two forces) remain an
+  accepted gap, same reasoning, waiting on an "order group" concept.
 - **Terrain-follow Y.** `SimUnit` is XZ-only (ground plane); Unity still
   owns and writes the Y coordinate every frame from `GroundHeightAt(pos)`,
   exactly as today, for every order kind including `Move` — this never
@@ -409,9 +412,84 @@ changes), `UnitCombat.cs`, the entire docs/26 Special Attacks System,
   (shift-click) moves have not yet been watched running in a live scene —
   `simDrivenDemo` doesn't currently have a queued-move smoke test wired
   up; whether to add one before or during Phase C is still open.
-- **Phase C — flocking (docs/23 §5) lands sim-side**, restoring
-  separation/alignment/cohesion for sim-driven units (closing §5's
-  documented regression).
+- **Phase C — flocking (docs/23 §5) lands sim-side, separation only.
+  Status: done (2026-07), scope narrowed.** docs/23 §5 specifies three
+  group forces (separation, alignment, cohesion). This phase closes only
+  the ACTUAL accepted gap docs/27 §5 flagged for Phase A ("`TickMoveViaSim`
+  must NOT call `ApplySeparation`... separation should arrive [in
+  match-core], sim-side, not be patched onto the interpolation layer") —
+  restoring the same hard "never actually overlap" guarantee legacy units
+  already have, sim-side. Alignment and cohesion are **not** implemented:
+  both need an "order group" concept (which units are moving together)
+  that match-core still doesn't have — the same concept Phase B already
+  deferred for queued group moves, for the identical reason. Flagged here
+  rather than guessed at; a real design pass for "order groups" would
+  unlock both this and Phase B's own deferred group-move half together.
+
+  **What shipped:** `match-core` gained `Flocking.cs` — pure static
+  `Separate(selfX, selfZ, selfRadius, neighbors, spacing)` math, identical
+  formula to Unity's `MonsterSteeringController.SeparationForce` (once two
+  bodies' combined radii + spacing overlap, push each one half the
+  overlap toward daylight, cumulative in caller-supplied order), weight
+  1.0 per docs/23 §5's table. `SimUnit` gained a `Radius` (fixed at spawn,
+  hashed like every other field). `MatchState.Tick` runs a new
+  `ApplySeparationPass` every tick, entity-ID order, across EVERY spawned
+  unit regardless of `Order` (Idle included — matching
+  `ApplySeparation`'s own unconditional behavior); a nudge that would land
+  a unit in a blocked or off-map hex is rejected outright (docs/23 §5's
+  "blocked-hex clamp never violated" bar) rather than partially applied.
+  `MatchState.SpawnUnit`/`SimBridge.SpawnUnit` both gained an optional
+  `radius` parameter, defaulting to `MatchState.DefaultUnitRadius` (1.5,
+  matching Unity's own `UnitCombat.Radius` default) so every existing call
+  site keeps compiling with no changes. `MonsterAgent.EnableSimDriven` now
+  sources the real radius from `_fighter.Radius` (set by `Init`'s own
+  `Configure` call, so it's the creature's actual body size, not a
+  generic placeholder) and passes it through.
+
+  **The one Unity-side behavior change:** the existing unconditional
+  `_builder.ApplySeparation(_fighter)` call in `MonsterAgent.Update()`
+  gained one more condition, `&& !SimDriven` — closing the "two positions
+  disagreeing" risk docs/27 §5 originally flagged (that hard correction
+  writes `transform.position` directly, which would otherwise fight
+  `SimUnitView`'s interpolated render every frame for a sim-driven unit,
+  now that match-core owns its position AND its own separation). Since
+  `SimDriven` is false for every unit in every real scene today (the
+  toggle stays opt-in, off by default), this condition is currently a
+  no-op for all actual gameplay — it only ever changes behavior for a
+  unit that's already sim-driven. **Nothing else changed**:
+  `MonsterSteeringController.cs` (`SeparationForce`, `PredictiveAvoidance`,
+  `Combine`), `RuntimeCityBuilder.ApplySeparation`'s own body, `Tank.cs`,
+  `HexPathfinder`, and `BattlefieldState` are byte-for-byte untouched —
+  confirmed via `git diff --stat`, not just asserted. The legacy
+  path-following steering blend (`Combine`, used by `TickMove`/
+  `FollowPath`) and the hard `ApplySeparation` correction keep running
+  exactly as before for every non-sim-driven unit.
+
+  **Verification:** `match-core` gained a new `FlockingTests.cs` (7 tests,
+  30/30 match-core total via `dotnet test Tests~/MatchCore.Tests.csproj`)
+  covering: `Flocking.Separate`'s pure math (single-neighbour push,
+  no-op once clear, cumulative multi-neighbour order); a `MatchState`
+  integration test proving two overlapping units converge toward (and
+  never overshoot) their combined radius+spacing; a 10,000-check stress
+  test (20 units × 500 ticks) proving separation never pushes a unit into
+  a blocked or off-map hex; a sanity check that widely-spaced units are
+  undisturbed; and a hash-determinism re-proof with separation actively
+  engaged. `harvestcreditverify` (compiling the real `SimBridge.cs`)
+  gained an integration check exercising `SimBridge.SpawnUnit`'s new
+  `radius` parameter directly, confirming two overlapping sim-driven
+  units separate through `SimUnitView`'s own tick snapshots (17/17 pass).
+  `flightcheck` (whole gameplay layer, real `MonsterAgent.cs`/
+  `SimBridge.cs`) still compiles clean. As with Phases A/B,
+  `MonsterAgent.EnableSimDriven`/`OrderMove` itself can't be exercised in
+  either stub harness (`Component.gameObject` reads `null` there), so
+  only `SimBridge`'s own API surface is exercised directly.
+
+  **Editor check: not yet run.** No live scene spawns more than one
+  sim-driven unit today (`simDrivenDemo` opts in only the first spawned
+  monster), so there's nothing yet to visually confirm two sim-driven
+  units actually separating on screen. Exercising that needs either
+  widening the demo toggle to opt in more than one unit, or waiting for a
+  later phase's own multi-unit scene.
 - **Phase D+ — every remaining order kind**, each following docs/23 §13-A's
   own rule: design the system, port it into the tick sim, THEN wire the
   Unity view — never the other order.

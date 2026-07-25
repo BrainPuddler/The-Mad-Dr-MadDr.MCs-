@@ -56,10 +56,14 @@ public class SimBridge : MonoBehaviour
     }
 
     /// <summary>Spawn a sim-side unit and register the view that will
-    /// receive its tick snapshots. Returns the new entity ID.</summary>
-    public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, SimUnitView view)
+    /// receive its tick snapshots. Returns the new entity ID.
+    /// <paramref name="radius"/> (docs/27 Phase C) feeds match-core's own
+    /// sim-side separation (<see cref="MatchState.SpawnUnit"/>) -- defaults
+    /// to <see cref="MatchState.DefaultUnitRadius"/> so existing call
+    /// sites keep compiling unchanged.</summary>
+    public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, SimUnitView view, double radius = MatchState.DefaultUnitRadius)
     {
-        var id = _match.SpawnUnit(playerIndex, atHex, speed);
+        var id = _match.SpawnUnit(playerIndex, atHex, speed, radius);
         _views[id] = view;
         var u = _match.FindUnit(id);
         if (u != null) view.Prime(u.X, u.Z);   // no interpolation FROM nowhere on the very first frame

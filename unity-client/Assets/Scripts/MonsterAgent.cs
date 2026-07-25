@@ -291,18 +291,24 @@ public class MonsterAgent : MonoBehaviour
     }
 
     /// <summary>docs/27 Phase A: opt a spawned unit into sim-driven
-    /// movement. Not called anywhere yet -- a future dev/test scene wires
-    /// this up after Init(); every current scene never calls it, so
-    /// <see cref="SimDriven"/> stays false and every order kind (Move
-    /// included) keeps running its legacy TickX method exactly as
-    /// before.</summary>
+    /// movement. Not called anywhere yet except the `simDrivenDemo` dev
+    /// toggle; every other scene never calls it, so <see cref="SimDriven"/>
+    /// stays false and every order kind (Move included) keeps running its
+    /// legacy TickX method exactly as before. Called AFTER Init(), so
+    /// `_fighter.Radius` (set by Init's own `Configure` call, from this
+    /// creature's actual body size) is already meaningful -- docs/27 Phase
+    /// C feeds it straight into match-core's own separation instead of
+    /// falling back to a generic default, so a sim-driven unit's spacing
+    /// matches its real body the same way the legacy path already
+    /// does.</summary>
     public void EnableSimDriven(SimBridge bridge, int playerIndex, HexCoord atHex, double speed)
     {
         if (bridge == null || _simEntityId.HasValue) return;
         _simBridge = bridge;
         _simPlayerIndex = playerIndex;
         _simView = gameObject.AddComponent<SimUnitView>();
-        _simEntityId = bridge.SpawnUnit(playerIndex, atHex, speed, _simView);
+        var radius = _fighter != null ? (double)_fighter.Radius : MatchState.DefaultUnitRadius;
+        _simEntityId = bridge.SpawnUnit(playerIndex, atHex, speed, _simView, radius);
     }
 
     /// <summary>Move order that also remembers a shared cluster point to
@@ -566,7 +572,19 @@ public class MonsterAgent : MonoBehaviour
         // path-following units lets two units driving straight at a shared
         // destination interpenetrate, since a heading blend alone has no
         // floor on how much overlap it will tolerate.
-        if (_fighter != null && _builder != null && !_flying && !Perched)
+        //
+        // docs/27 Phase C: also exempt a sim-driven unit -- match-core is
+        // now the sole authoritative writer of its position (its own
+        // per-tick separation pass, Flocking.Separate, already ran inside
+        // SimBridge.Pump before this Update() call). This hard correction
+        // writing transform.position directly would otherwise fight
+        // SimUnitView's interpolated render every frame -- exactly the
+        // "two positions disagreeing" risk docs/27 §5 flagged and
+        // deliberately accepted until this phase closed it. Every
+        // non-sim-driven unit (still every unit in every real scene) is
+        // completely unaffected: SimDriven is false for them, so this
+        // condition reduces to exactly what it was before.
+        if (_fighter != null && _builder != null && !_flying && !Perched && !SimDriven)
             _builder.ApplySeparation(_fighter);
     }
 

@@ -30,6 +30,21 @@ namespace MadDr.MatchCore
         public const int DefaultSupplyCap = 60;   // docs/23 §13-E
         private const double DtSeconds = 1.0 / TicksPerSecond;
 
+        /// <summary>docs/27 Phase C: fallback body radius for a spawn call
+        /// that doesn't supply one -- matches Unity's own
+        /// <c>UnitCombat.Radius</c> default (1.5f) so a caller that never
+        /// widens its own call site (every existing test, `Ping`-only
+        /// callers) gets the same separation behavior it would have gotten
+        /// with an explicit "generic monster" radius.</summary>
+        public const double DefaultUnitRadius = 1.5;
+
+        /// <summary>docs/27 Phase C: extra clearance (meters) separation
+        /// keeps on top of two units' own combined radii -- matches
+        /// Unity's `RuntimeCityBuilder.groupSpacing` Inspector default
+        /// (1f), a v0.1 placeholder like every other tuning number in this
+        /// project (docs/11).</summary>
+        private const double SeparationSpacing = 1.0;
+
         private readonly PlayerState[] _players;
         private readonly SimRng _rng;
 
@@ -107,17 +122,23 @@ namespace MadDr.MatchCore
         /// production (Factories, docs/23 §2/§6) becomes its own command
         /// kind when that phase lands; spawning at match start is not a
         /// player order to replay. Requires a city (see
-        /// <see cref="Create"/>). Returns the new unit's entity ID.</summary>
-        public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed)
+        /// <see cref="Create"/>). <paramref name="radius"/> defaults to
+        /// <see cref="DefaultUnitRadius"/> (docs/27 Phase C) -- every call
+        /// site that predates separation keeps compiling and gets a
+        /// reasonable generic body size rather than being forced to widen
+        /// itself just to keep building. Returns the new unit's entity
+        /// ID.</summary>
+        public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, double radius = DefaultUnitRadius)
         {
             if (_city == null) throw new InvalidOperationException("MatchState has no city -- cannot spawn units");
             if (playerIndex < 0 || playerIndex >= _players.Length)
                 throw new ArgumentOutOfRangeException(nameof(playerIndex));
             if (speed <= 0.0) throw new ArgumentOutOfRangeException(nameof(speed));
+            if (radius <= 0.0) throw new ArgumentOutOfRangeException(nameof(radius));
 
             var id = AllocateEntityId();
             var (x, z) = atHex.ToWorld();
-            var unit = new SimUnit(id, playerIndex, x, z, speed);
+            var unit = new SimUnit(id, playerIndex, x, z, speed, radius);
             _unitsInOrder.Add(unit);
             _unitsById[id] = unit;
             return id;
@@ -164,6 +185,13 @@ namespace MadDr.MatchCore
                 // walk never idles for even one tick between legs.
                 if (u.Order == UnitOrderKind.Idle && u.HasQueuedWaypoints) AdvanceToNextWaypoint(u);
             }
+
+            // docs/23 §5 / docs/27 Phase C: separation, restoring the same
+            // "never actually overlap" guarantee legacy (non-sim-driven)
+            // units already have via RuntimeCityBuilder.ApplySeparation.
+            // Runs on every unit regardless of Order (Idle included),
+            // matching that existing call's own unconditional behavior.
+            ApplySeparationPass();
 
             // Economy income, combat resolution, and everything else
             // arrive with their own phases (docs/23 §13-A porting
@@ -261,6 +289,49 @@ namespace MadDr.MatchCore
             var start = HexAt(unit.X, unit.Z);
             var path = HexPathfinder.FindPath(start, next, _city, _blockedToGround);
             unit.SetPath(path);
+        }
+
+        /// <summary>docs/23 §5 / docs/27 Phase C: one tick's separation
+        /// correction across every spawned unit, entity-ID order (the ONLY
+        /// order this class ever iterates in -- see
+        /// <see cref="_unitsInOrder"/>'s own doc comment). For each unit,
+        /// <see cref="Flocking.Separate"/> computes the net push against
+        /// every OTHER unit's CURRENT position (already-nudged, for units
+        /// earlier in this same pass -- the identical cumulative-per-call
+        /// idiom <c>MonsterSteeringController.SeparationForce</c> uses
+        /// within a single unit's own neighbour loop, extended here across
+        /// units within one tick). A nudge that would land the unit in an
+        /// off-map or blocked hex is rejected outright rather than
+        /// clamped to the boundary (docs/23 §5's acceptance bar: "blocked-
+        /// hex clamp never violated across 10k random steps") -- simpler
+        /// and just as correct as a partial slide, since separation gets
+        /// another full attempt next tick regardless.</summary>
+        private void ApplySeparationPass()
+        {
+            if (_city == null || _blockedToGround == null || _unitsInOrder.Count < 2) return;
+
+            var neighbors = new List<Flocking.Neighbor>(_unitsInOrder.Count - 1);
+            for (var i = 0; i < _unitsInOrder.Count; i++)
+            {
+                var self = _unitsInOrder[i];
+                neighbors.Clear();
+                for (var j = 0; j < _unitsInOrder.Count; j++)
+                {
+                    if (j == i) continue;
+                    var other = _unitsInOrder[j];
+                    neighbors.Add(new Flocking.Neighbor(other.X, other.Z, other.Radius));
+                }
+
+                var (dx, dz) = Flocking.Separate(self.X, self.Z, self.Radius, neighbors, SeparationSpacing);
+                if (dx == 0.0 && dz == 0.0) continue;
+
+                var nx = self.X + dx;
+                var nz = self.Z + dz;
+                var hex = HexAt(nx, nz);
+                if (!_city.Contains(hex) || _blockedToGround.Contains(hex)) continue;   // reject: would clip a building/off-map
+
+                self.ApplySeparationOffset(dx, dz);
+            }
         }
 
         /// <summary>Nearest hex to a world position -- inverse of

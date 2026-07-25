@@ -47,6 +47,13 @@ namespace MadDr.MatchCore
         public int PlayerIndex { get; }
         public double Speed { get; }   // m/s, IEEE-exact ops only
 
+        /// <summary>docs/27 Phase C: body half-width for
+        /// <see cref="Flocking.Separate"/> -- the sim-side twin of
+        /// Unity's <c>UnitCombat.Radius</c>. Fixed for the unit's whole
+        /// lifetime (no genome/growth system sim-side yet), so it's set
+        /// once at spawn, not mutated by Tick.</summary>
+        public double Radius { get; }
+
         public double X { get; private set; }
         public double Z { get; private set; }
         public UnitOrderKind Order { get; private set; } = UnitOrderKind.Idle;
@@ -65,13 +72,14 @@ namespace MadDr.MatchCore
         /// pathfound for `SetPath` either.</summary>
         private readonly Queue<HexCoord> _waypointQueue = new Queue<HexCoord>();
 
-        internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed)
+        internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed, double radius)
         {
             EntityId = entityId;
             PlayerIndex = playerIndex;
             X = x;
             Z = z;
             Speed = speed;
+            Radius = radius;
         }
 
         /// <summary>Begin walking a precomputed path (HexPathfinder output,
@@ -153,6 +161,20 @@ namespace MadDr.MatchCore
 
         internal HexCoord DequeueWaypoint() => _waypointQueue.Dequeue();
 
+        /// <summary>docs/27 Phase C: apply one tick's worth of separation
+        /// nudge, computed by <see cref="MatchState"/> (which owns the
+        /// blocked-hex clamp and the other units' current positions) via
+        /// <see cref="Flocking.Separate"/>. A plain position add -- this
+        /// class stays unaware of neighbours, radii of OTHER units, or the
+        /// blocked-hex set, matching how it's never known about
+        /// pathfinding either (`MatchState` computes, `SimUnit`
+        /// applies).</summary>
+        internal void ApplySeparationOffset(double dx, double dz)
+        {
+            X += dx;
+            Z += dz;
+        }
+
         /// <summary>Append this unit's canonical bytes, FIXED field order
         /// (docs/23 §13-J), floats bitwise. The waypoint queue is part of
         /// this unit's real state -- two clients that disagree on what's
@@ -166,6 +188,7 @@ namespace MadDr.MatchCore
             h.AddBits(X);
             h.AddBits(Z);
             h.AddBits(Speed);
+            h.AddBits(Radius);
             h.Add((int)Order);
             h.Add(_pathIndex);
             h.Add(_waypointQueue.Count);

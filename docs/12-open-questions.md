@@ -1686,3 +1686,68 @@ Not yet done: an Editor smoke test for queued (shift-click) moves
 specifically. The creator's existing Phase A confirmation only exercised
 a plain single-destination move; whether to add a queued-move check to
 `simDrivenDemo` now or defer it to Phase C is still open.
+
+## docs/27 Phase C: sim-side separation, scoped to close the accepted gap (2026-07)
+
+Following "Looks good continue, make sure the in place navigation rules,
+avoidance systems, are not changed" -- implemented docs/27 §7 Phase C,
+narrowed to separation only (docs/23 §5 also specifies alignment and
+cohesion; both need an "order group" concept match-core still doesn't
+have, the same reason Phase B deferred group tokens -- flagged, not
+guessed at).
+
+This closes a real, previously-accepted gap: docs/27 §5 documented that
+`ApplySeparation` (Unity's hard per-frame position correction) had no
+sim-side equivalent and had to be skipped for sim-driven units -- but the
+actual code never implemented that skip. `MonsterAgent.Update()`'s
+`ApplySeparation` call ran unconditionally regardless of `SimDriven`,
+meaning a sim-driven unit's `transform.position` was being overwritten by
+two disagreeing writers every frame (the hard correction, then
+`SimUnitView.Advance`'s interpolated render clobbering it again next
+frame) -- a discrepancy the docs claimed was handled but wasn't. Found by
+re-reading docs/27 §5 against the actual `Update()` call site before
+starting this phase.
+
+What shipped: `match-core` gained `Flocking.cs` (`Flocking.Separate`,
+pure static math, identical formula to
+`MonsterSteeringController.SeparationForce` -- same cumulative-push
+idiom, same "half the overlap" push, weight 1.0 per docs/23 §5's table).
+`SimUnit` gained a `Radius` (fixed at spawn). `MatchState.Tick` runs a
+new `ApplySeparationPass` every tick across every unit regardless of
+Order, entity-ID order, rejecting any nudge that would land a unit in a
+blocked/off-map hex (docs/23 §5's "blocked-hex clamp never violated"
+bar). `MatchState.SpawnUnit`/`SimBridge.SpawnUnit` both gained an
+optional `radius` param defaulting to 1.5 (matching Unity's own
+`UnitCombat.Radius` default) so every existing call site keeps compiling
+unchanged. `MonsterAgent.EnableSimDriven` now sources the real radius
+from `_fighter.Radius` (already meaningful by the time it's called, set
+by `Init`'s own `Configure`).
+
+The one Unity-side behavior change: `MonsterAgent.Update()`'s existing
+unconditional `_builder.ApplySeparation(_fighter)` call gained one more
+condition, `&& !SimDriven`. Verified this is the ONLY change to any
+existing navigation/avoidance code: `git diff --stat` after this phase
+shows only `packages/match-core/src/{MatchState,SimUnit}.cs` (both
+additive) and `unity-client/Assets/Scripts/{MonsterAgent,SimBridge}.cs`
+touched; `MonsterSteeringController.cs`, `RuntimeCityBuilder.
+ApplySeparation`'s own body, `Tank.cs`, `HexPathfinder`, and
+`BattlefieldState` are byte-for-byte untouched. Since `SimDriven` is
+false for every unit in every real scene today (the toggle stays
+opt-in, off by default), the new condition is currently a no-op for all
+actual gameplay -- legacy (non-sim-driven) separation/steering behaves
+exactly as before.
+
+Verification: match-core gained `FlockingTests.cs` (7 tests, 30/30
+total) covering the pure math, a convergence proof (two overlapping
+units approach but never overshoot their combined radius+spacing), a
+10,000-check stress test (20 units x 500 ticks) proving the blocked-hex
+clamp holds, a widely-spaced-units-undisturbed sanity check, and a
+hash-determinism re-proof with separation engaged. `harvestcreditverify`
+gained an integration check through the real `SimBridge.SpawnUnit`
+radius parameter (17/17 pass). `flightcheck` still compiles clean.
+
+Not yet done: no live scene spawns more than one sim-driven unit, so
+there's nothing to visually confirm yet for multi-unit separation (or
+Phase B's queued moves, still outstanding from before). Alignment and
+cohesion remain unimplemented, waiting on the same "order group" design
+pass Phase B's own deferred group-move half also needs.
