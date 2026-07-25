@@ -54,10 +54,19 @@ namespace MadDr.MatchCore
         /// (docs/18); this class only consumes it for pathfinding.</summary>
         private readonly CityModel? _city;
 
-        /// <summary>Ground-blocked hexes, computed once at Create from a
-        /// freshly-intact <see cref="BattlefieldState"/> (docs/23 Phase 2
-        /// will need this to change as buildings are built/destroyed --
-        /// out of scope for the movement-only Phase 1.5 slice).</summary>
+        /// <summary>Ground-blocked hexes, seeded once at Create from a
+        /// freshly-intact <see cref="BattlefieldState"/> (the generated
+        /// city's own buildings/water) and MUTATED from Phase 2 onward as
+        /// player-built structures go up (<see cref="ApplyBuildStructure"/>)
+        /// or come down (<see cref="ApplyBuildingDamage"/>) -- the field
+        /// itself stays `readonly` (never reassigned), only its CONTENTS
+        /// change. Known gap, flagged rather than silently ignored: a
+        /// unit's already-computed path is not currently invalidated when
+        /// a building newly blocks a hex mid-path (match-core has no
+        /// reactive "city changed, recompute" pass yet at all -- Unity's
+        /// own `RecomputeIfCityChanged` hasn't been ported here either;
+        /// this extends an existing Phase 1.5 limitation, not a new
+        /// one).</summary>
         private readonly HashSet<HexCoord>? _blockedToGround;
 
         /// <summary>Units in entity-ID allocation order -- the ONLY order
@@ -67,6 +76,14 @@ namespace MadDr.MatchCore
         /// affecting iteration order.</summary>
         private readonly List<SimUnit> _unitsInOrder = new List<SimUnit>();
         private readonly Dictionary<uint, SimUnit> _unitsById = new Dictionary<uint, SimUnit>();
+
+        /// <summary>Buildings in entity-ID allocation order -- same
+        /// iteration-order law as <see cref="_unitsInOrder"/>, and the
+        /// SAME entity-ID counter (<see cref="AllocateEntityId"/>): one
+        /// unified ID space across every entity kind, not a separate
+        /// counter per kind.</summary>
+        private readonly List<SimBuilding> _buildingsInOrder = new List<SimBuilding>();
+        private readonly Dictionary<uint, SimBuilding> _buildingsById = new Dictionary<uint, SimBuilding>();
 
         /// <summary>The tick this state is AT -- 0 before the first Tick.</summary>
         public int Frame { get; private set; }
@@ -154,6 +171,52 @@ namespace MadDr.MatchCore
 
         public SimUnit? FindUnit(uint entityId) => _unitsById.TryGetValue(entityId, out var u) ? u : null;
 
+        /// <summary>docs/23 §2: place a player's HQ, Complete immediately
+        /// (no build time, no cost) -- "every player starts with a themed
+        /// HQ placed by the generator," not something a player commands
+        /// mid-match. Setup-time API, same direct-call precedent as
+        /// <see cref="SpawnUnit"/>; the caller (Unity/CityGen) picks the
+        /// actual faction-appropriate landmark hex -- match-core only
+        /// needs to be handed one, it doesn't do landmark selection
+        /// itself. Blocks the hex like any other building.</summary>
+        public uint SpawnHqForPlayer(int playerIndex, HexCoord atHex)
+        {
+            if (_city == null) throw new InvalidOperationException("MatchState has no city -- cannot spawn buildings");
+            if (playerIndex < 0 || playerIndex >= _players.Length)
+                throw new ArgumentOutOfRangeException(nameof(playerIndex));
+
+            var def = BuildingDef.Get(BuildingKind.Hq);
+            var id = AllocateEntityId();
+            var building = new SimBuilding(id, playerIndex, BuildingKind.Hq, atHex, def.MaxHp, def.BuildTimeTicks, completeImmediately: true);
+            _buildingsInOrder.Add(building);
+            _buildingsById[id] = building;
+            _blockedToGround?.Add(atHex);
+            return id;
+        }
+
+        public int BuildingCount => _buildingsInOrder.Count;
+
+        /// <summary>Read-only building access in canonical (entity-ID)
+        /// order -- same contract as <see cref="UnitAt"/>.</summary>
+        public SimBuilding BuildingAt(int index) => _buildingsInOrder[index];
+
+        public SimBuilding? FindBuilding(uint entityId) => _buildingsById.TryGetValue(entityId, out var b) ? b : null;
+
+        /// <summary>Apply damage to a building (docs/23 §2's "Damaged →
+        /// Destroyed (rubble hexes reopen)" staging) -- a forward-looking
+        /// entry point for the combat phase that hasn't landed sim-side
+        /// yet (see <see cref="SimBuilding.ApplyDamage"/>'s own doc
+        /// comment). Reopens the hex the instant the building is
+        /// Destroyed. Silent no-op for an unknown entity, matching every
+        /// other bad-input contract in this class.</summary>
+        public void ApplyBuildingDamage(uint entityId, int amount)
+        {
+            var building = FindBuilding(entityId);
+            if (building == null) return;
+            building.ApplyDamage(amount);
+            if (building.State == BuildingState.Destroyed) _blockedToGround?.Remove(building.Hex);
+        }
+
         /// <summary>Advance the simulation by exactly one tick, applying
         /// this tick's commands. Pure function of (current state,
         /// commands): no wall-clock, no ambient randomness -- every draw
@@ -193,6 +256,10 @@ namespace MadDr.MatchCore
             // matching that existing call's own unconditional behavior.
             ApplySeparationPass();
 
+            // docs/23 §2 Phase 2: construction progress. Entity-ID order,
+            // same law as the unit loop above.
+            for (var i = 0; i < _buildingsInOrder.Count; i++) _buildingsInOrder[i].Tick();
+
             // Economy income, combat resolution, and everything else
             // arrive with their own phases (docs/23 §13-A porting
             // workstream). The frame advance itself is the deterministic
@@ -214,6 +281,9 @@ namespace MadDr.MatchCore
                     break;
                 case CommandKind.MoveQueue:
                     ApplyMoveQueue(cmd);
+                    break;
+                case CommandKind.BuildStructure:
+                    ApplyBuildStructure(cmd);
                     break;
                 case CommandKind.None:
                 default:
@@ -289,6 +359,42 @@ namespace MadDr.MatchCore
             var start = HexAt(unit.X, unit.Z);
             var path = HexPathfinder.FindPath(start, next, _city, _blockedToGround);
             unit.SetPath(path);
+        }
+
+        /// <summary>docs/23 §2 Phase 2: place a new building at hex
+        /// (ArgA, ArgB), building kind decoded from TargetEntity (see
+        /// <see cref="CommandKind.BuildStructure"/>'s own doc comment for
+        /// why that slot is repurposed here). Validates, in order: a real
+        /// buildable kind (never <see cref="BuildingKind.Hq"/>), an
+        /// on-map and currently-unblocked hex, and full affordability of
+        /// EVERY resource line in the building's cost -- checked BEFORE
+        /// debiting any of them, so a multi-resource cost is all-or-
+        /// nothing (never a partial spend on an unaffordable build).
+        /// Silent no-op on any failure, matching every other command's
+        /// bad-input contract.</summary>
+        private void ApplyBuildStructure(Command cmd)
+        {
+            if (_city == null || _blockedToGround == null) return;
+
+            var kind = (BuildingKind)cmd.TargetEntity;
+            if (kind == BuildingKind.Hq || (int)kind < 0 || (int)kind >= BuildingDef.AllDefs.Count) return;
+            if (cmd.PlayerIndex < 0 || cmd.PlayerIndex >= _players.Length) return;
+
+            var hex = new HexCoord(cmd.ArgA, cmd.ArgB);
+            if (!_city.Contains(hex) || _blockedToGround.Contains(hex)) return;
+
+            var def = BuildingDef.Get(kind);
+            var player = _players[cmd.PlayerIndex];
+            foreach (var (resource, amount) in def.Cost)
+                if (player.Wallet(resource) < amount) return;   // unaffordable -- reject before spending anything
+
+            foreach (var (resource, amount) in def.Cost) player.TrySpend(resource, amount);
+
+            var id = AllocateEntityId();
+            var building = new SimBuilding(id, cmd.PlayerIndex, kind, hex, def.MaxHp, def.BuildTimeTicks, completeImmediately: false);
+            _buildingsInOrder.Add(building);
+            _buildingsById[id] = building;
+            _blockedToGround.Add(hex);
         }
 
         /// <summary>docs/23 §5 / docs/27 Phase C: one tick's separation
@@ -384,6 +490,8 @@ namespace MadDr.MatchCore
             foreach (var p in _players) p.WriteTo(h);
             h.Add(_unitsInOrder.Count);
             for (var i = 0; i < _unitsInOrder.Count; i++) _unitsInOrder[i].WriteTo(h);
+            h.Add(_buildingsInOrder.Count);
+            for (var i = 0; i < _buildingsInOrder.Count; i++) _buildingsInOrder[i].WriteTo(h);
             return h.Value;
         }
     }

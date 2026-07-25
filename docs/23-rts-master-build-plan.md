@@ -174,6 +174,29 @@ faction-appropriate landmark site, plus a builder mechanism in faction flavor
 | Defense | Tesla Fence | Pillbox | Spine Turret | Static defense (docs/04 stats) |
 
 ### Phase 2 tasks
+
+> **Status (2026-07): match-core (sim-side) done, Unity half not started.**
+> Following the same split as Phase 1.5/docs/27 -- port the deterministic
+> core first, design+implement the Unity view as a separate follow-up.
+> `BuildingDef`/`BuildingKind`/`SimBuilding` (8-slot generic roster,
+> `CommandKind.BuildStructure`), placement validation via the existing
+> `_blockedToGround` set (buildings ARE solid/destructible through
+> `BattlefieldState`, automatically, exactly as specified), full
+> construction lifecycle, and the headless-harness "full tech tree,
+> deterministic, twice, identical hashes" acceptance bar are all
+> implemented and tested (`packages/match-core/Tests~/BuildingTests.cs`,
+> 12 tests). **Explicitly deferred, not overlooked:** `BaseDresser.cs`/
+> build-menu IMGUI/ghost-placement cursor (Unity-side, no design pass
+> written yet); wallet-CAP *enforcement* (`StorageCapBonus` is stored as
+> data only -- this section's own task list puts "storage caps from
+> buildings" under **Phase 3**, not here, so that's not a gap, it's the
+> plan working as written); multi-hex building footprints (single-hex
+> placeholder for this slice, docs/18's real generated-building footprints
+> are real added scope); a real balance-tuned cost table (every cost
+> number besides `BloodStorage`'s, which reuses docs/22's actual Blood
+> Bank numbers, is a flagged v0.1 placeholder -- see `BuildingDef.cs`'s
+> own header for exactly which and why).
+
 - `match-core`: `BuildingDef` data table (costs in Blood/Fuel/Ichor/Bones,
   build time in ticks, HP/armor reusing docs/18 tier table, storage/production
   effects), placement validation (must be on open hexes, becomes blocked —

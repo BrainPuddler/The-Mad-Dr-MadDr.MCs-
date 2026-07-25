@@ -26,6 +26,18 @@ namespace MadDr.MatchCore
         /// waypoint immediately, matching Unity's own
         /// `OrderMove(hex, queue: true)` semantics on an idle unit.</summary>
         MoveQueue = 3,
+        /// <summary>docs/23 §2 Phase 2: place a new building. No existing
+        /// entity to target, so TargetEntity is repurposed to carry the
+        /// <see cref="BuildingKind"/> (cast to uint) instead -- exactly
+        /// the "generic arg slots are interpreted per Kind" contract this
+        /// struct's own header already establishes, not a new liberty.
+        /// ArgA=Q, ArgB=R (the hex to build on). Silently a no-op for
+        /// <see cref="BuildingKind.Hq"/> (generator-placed only, never
+        /// player-built -- see <see cref="MatchState.SpawnHqForPlayer"/>),
+        /// an occupied/off-map hex, or an unaffordable cost, matching
+        /// every other command kind's "bad input is a no-op, never an
+        /// exception" contract.</summary>
+        BuildStructure = 4,
     }
 
     /// <summary>

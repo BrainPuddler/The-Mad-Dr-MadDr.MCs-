@@ -1751,3 +1751,88 @@ there's nothing to visually confirm yet for multi-unit separation (or
 Phase B's queued moves, still outstanding from before). Alignment and
 cohesion remain unimplemented, waiting on the same "order group" design
 pass Phase B's own deferred group-move half also needs.
+
+## docs/23 Phase 2: bases & building roster, match-core sim-side slice (2026-07)
+
+Following "on to the next phase" after docs/27 Phase C -- the master
+build plan's own dependency spine (§13 amendment C: 1 -> 1.5 -> 2 -> ...)
+makes Phase 2 (bases & the building roster) the unambiguous next step,
+distinct from docs/27's own remaining Phase D (which is gated on combat/
+citizen/ability systems that haven't landed sim-side yet, so isn't
+actually startable right now).
+
+Scoped the same way Phase 1.5 was: match-core (sim-side) first, Unity
+(`BaseDresser`, build-menu IMGUI, ghost-placement cursor) deferred as a
+separate follow-up design pass, not attempted blind.
+
+Two real open questions surfaced and are recorded here rather than
+resolved unilaterally:
+
+1. **docs/22 vs docs/23 §2 reconciliation.** docs/22 §6 defines a
+   specific storage set (Blood Bank/Bone Pile/Brain Trust, real costs)
+   from an earlier design pass; docs/23 §2's later, per-faction-skinned
+   roster table (Blood storage/Fuel pump/Fuel storage/Parts storage/
+   Harvest post/Factory/Defense) doesn't map 1:1 onto it and gives no
+   cost numbers of its own for most rows. Implemented docs/23 §2's fuller
+   roster (it's the newer, more complete spec, explicitly says "reuses
+   docs/22 storage"), reusing docs/22's real Blood Bank numbers (20
+   Bones + 10 Blood, +100 cap) verbatim for `BloodStorage` -- the one
+   clean 1:1 mapping -- and clearly-flagged v0.1 placeholder numbers for
+   every other buildable kind (`FuelPump`/`FuelStorage`/`PartsStorage`/
+   `HarvestPost`/`Factory`/`Defense`), matching this project's own
+   standing policy (CLAUDE.md: "v0.1 economy/upkeep numbers everywhere
+   are placeholders; real balance is a Phase-2 sandbox pass"). HP/Armor
+   for every kind reuse docs/18 §3's real structure tiers (Small 300/2,
+   Medium 600/4, Large 1500/6, Landmark 3000/8) rather than invented
+   numbers.
+
+2. **Which resource does `BloodStorage`'s cap bonus target per faction?**
+   docs/23 §2's table function column reads "Raises Blood/Ichor cap" for
+   the Blood-storage roster slot, while a *separate* Fuel-storage slot
+   exists for Fuel specifically -- ambiguous whether a Human Army
+   player's "Plasma Reserve" skin should raise Blood (literally, as
+   named) or generalize to that faction's own energy resource. NOT
+   resolved here: `StorageCapBonus` is stored as inert DATA
+   (`(ResourceKind.Blood, 100)` literally) and nothing in Phase 2 reads
+   or enforces it -- docs/23 §3's own task list puts "storage caps from
+   buildings" under Phase 3, not Phase 2, so this is correctly Phase 3's
+   call to make when it actually wires cap enforcement, not a gap in
+   this phase.
+
+What shipped: `BuildingKind` (8-slot roster) + `BuildingDef` (static
+per-kind cost/build-time/HP/armor/cap-bonus data) + `SimBuilding`
+(entity-ID-order lifecycle: UnderConstruction -> Complete, `IsDamaged`
+as a pure HP-threshold function per docs/18 §3 rather than its own
+state, `ApplyDamage` -> Destroyed reopens the hex). `CommandKind.
+BuildStructure` repurposes the `TargetEntity` slot to carry the
+building kind (no existing entity to target) -- explicitly the
+documented "generic arg slots are interpreted per Kind" contract
+`Command.cs`'s own header already established, not a new liberty.
+`MatchState.SpawnHqForPlayer` is a setup-time API (mirrors `SpawnUnit`):
+the HQ is generator-placed, Complete immediately, never a
+`BuildStructure` target. `ApplyBuildStructure` validates an on-map,
+unblocked hex and full multi-resource affordability BEFORE debiting
+anything (all-or-nothing, never a partial spend on failure). A known,
+flagged (not silent) gap: a unit's already-computed path isn't
+invalidated when a building newly blocks a hex mid-path -- match-core
+has no reactive "city changed, recompute" pass at all yet, extending an
+existing Phase 1.5 limitation rather than introducing a new one.
+
+Verified: `packages/match-core/Tests~/BuildingTests.cs`, 12 new tests
+(42 match-core total) covering placement legality (occupied/off-map
+hexes rejected), exact cost debit, unaffordable builds as a true no-op
+(wallet untouched), construction completing at the exact tick boundary,
+destruction reopening the hex for rebuilding, `IsDamaged`'s threshold,
+hash-determinism with buildings+units mixed, and the literal docs/23 §2
+acceptance bar itself (every buildable kind built from one scripted
+command list, deterministic across two runs). citygen-core's 145 tests
+and the 30 pre-existing match-core tests remain untouched.
+`harvestcreditverify` (17 checks) and `flightcheck` still compile/pass
+against the refreshed DLL -- no Unity-side files changed this phase at
+all, by design.
+
+Not yet done: `BaseDresser.cs`, build-menu IMGUI panel, ghost-placement
+cursor (Unity-side, no design doc written yet -- deferred the same way
+docs/27 was split out from Phase 1.5's Unity half); real balance-tuned
+costs for 6 of 7 buildable kinds; multi-hex building footprints; wallet-
+cap enforcement (Phase 3's own stated job).
