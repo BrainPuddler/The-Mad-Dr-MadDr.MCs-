@@ -1890,3 +1890,70 @@ purely visual/gameplay-feel (does a flyer's landing spot look right on
 screen), the real confirmation is the creator's own Editor check, same
 discipline as every other Unity-side change this session -- not yet
 run.
+
+## Follow-up: roof "parking" / distribution rules (2026-07)
+
+Creator follow-up to the roof-landing height fix above: "Same parking,
+distributions rules should apply to roof features. If there is not
+enough space for the monster(s) it should pick a different roof nearby
+before landing."
+
+Before this, ordering multiple selected flyers onto the same building
+(already possible -- `WaypointCommander.HandleOrders`' roof-click branch
+looped every selected flyer onto `OrderPerch(building)` independently)
+had ZERO distribution logic: each unit computed its own "nearest
+footprint hex to wherever I currently am" and, since a selected group
+usually starts clustered together, most/all of them converged on
+approximately the same point and stacked/overlapped. Ground orders
+already solve exactly this (`RuntimeCityBuilder.FormationHexes` --
+literally commented "one parking slot per unit" -- + `WaypointCommander.
+AssignFormation`/`RingTarget` for the settle-phase ring spread), but
+nothing analogous existed for rooftops.
+
+What shipped: `RuntimeCityBuilder.RoofCapacity(building)` (one perch
+slot per footprint hex -- a roof has no open neighbourhood to spread
+into the way `FormationHexes` searches outward from a ground point; it
+IS the footprint). `AvailableRoofSlots(building)` reads live occupancy
+off every spawned monster's new public `MonsterAgent.PerchedOn`
+property (`_targetBuilding`, which survives `GoIdle()` -- only a NEW
+order clears it) rather than a separate counter that could drift.
+`FindNearbyPerchableBuilding(preferred, neededSlots, exclude)` scans
+`_battlefield.Buildings` for the nearest OTHER standing building with
+enough free room, skipping any already tried -- same reject-then-rank
+shape `DeadlockManager.PickSidestepHex` uses for ground traffic
+unblocking, applied here to whole buildings instead of single hex
+neighbours.
+
+`WaypointCommander.AssignPerch` ties it together: nearest-unit-to-
+nearest-free-slot greedy assignment on the clicked building (same
+algorithm shape as `AssignFormation`), and whatever doesn't fit rolls
+over to the nearest nearby building with room, repeating outward until
+every unit has a spot or nothing nearby has space -- at which point the
+leftover units perch on the originally-clicked roof anyway rather than
+being left with no order (the same "pad rather than fail" call
+`FormationHexes` already makes). `MonsterAgent.OrderPerch` gained an
+optional `targetHex` parameter and a new `_perchTargetHex` field so
+`TickPerch` lands each unit on its SPECIFIC assigned hex instead of
+independently recomputing "nearest" and converging with its neighbors.
+
+Deliberately NOT built (flagged, not silently skipped): a golden-angle
+ring micro-spacing WITHIN a single footprint hex (ground's
+`RingTarget`/`groupSpacing` equivalent) -- footprint hexes are already
+~20m apart, which reads as reasonably distributed at RTS camera height
+without needing sub-hex ring placement; multi-hop alternate-building
+search (only one "look elsewhere" hop is attempted, not a chain of
+several); and a live Editor demo -- same as every other change this
+session, the actual "does a flock spread out and overflow correctly on
+screen" confirmation is the creator's own Editor check, not yet run.
+
+Verified: flightcheck (all three changed files: RuntimeCityBuilder.cs,
+MonsterAgent.cs, WaypointCommander.cs) compiles clean.
+`harvestcreditverify` gained 2 new isolated checks (21/21 total):
+`RoofCapacity` matches footprint hex count; `AvailableRoofSlots` returns
+every footprint hex when nobody's perched yet. Honestly flagged limit:
+the actual OCCUPANCY-EXCLUSION path (a monster genuinely perched on one
+of the hexes) depends on `MonsterAgent.Perched`'s own
+`SurfaceHeightAt`/`_battlefield` dependency, which this stub harness has
+no way to stand up without a live city -- that half is verified by
+compilation and code review only, not exercised by a runnable check,
+same boundary the roof-height fix's own harness check already hit.

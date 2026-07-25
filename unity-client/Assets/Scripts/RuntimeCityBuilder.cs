@@ -556,6 +556,77 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             : landableHeight;
     }
 
+    // ---- roof "parking": same distribution discipline as ground formations
+    // (FormationHexes/AssignFormation), extended to rooftops (creator
+    // direction, 2026-07: "Same parking, distributions rules should apply
+    // to roof features. If there is not enough space... it should pick a
+    // different roof nearby before landing.") ------------------------------
+
+    /// <summary>How many flyers this building's roof can hold at once --
+    /// one perch slot per footprint hex, the same "one parking slot per
+    /// unit" idea `FormationHexes` uses for ground destinations, just
+    /// keyed to the roof's own area instead of an open hex neighbourhood
+    /// (a roof has no neighbourhood to search outward into -- it IS the
+    /// footprint).</summary>
+    public int RoofCapacity(Building building)
+    {
+        return building.Footprint.Count;
+    }
+
+    /// <summary>This building's footprint hexes that are NOT currently
+    /// occupied by an already-perched flyer, nearest-to-the-building-
+    /// origin-hex first (a stable, deterministic order -- callers assign
+    /// nearest-unit-to-nearest-slot on top of this). Occupancy is read
+    /// live off <see cref="Monsters"/> (`MonsterAgent.PerchedOn`), not a
+    /// separate counter, so it can never drift from what's actually
+    /// standing up there.</summary>
+    public List<HexCoord> AvailableRoofSlots(Building building)
+    {
+        var occupied = new HashSet<HexCoord>();
+        foreach (var m in _monsters)
+        {
+            if (m == null) continue;
+            var on = m.PerchedOn;
+            if (on == null || !ReferenceEquals(on, building)) continue;
+            occupied.Add(HexAt(m.transform.position));
+        }
+        var free = new List<HexCoord>();
+        foreach (var hex in building.Footprint)
+            if (!occupied.Contains(hex)) free.Add(hex);
+        return free;
+    }
+
+    /// <summary>The nearest OTHER standing building (to `preferred`'s own
+    /// footprint) with at least `neededSlots` free roof slots right now --
+    /// "pick a different roof nearby" when the clicked one is full.
+    /// `exclude` skips buildings already tried this order (so a caller
+    /// walking overflow through several candidates in one click never
+    /// loops back to one it already rejected). Returns null if nothing
+    /// standing nearby has room -- the caller decides what "give up"
+    /// means (docs precedent: `FormationHexes` pads onto the original
+    /// spot rather than leaving a unit with no order at all).</summary>
+    public Building FindNearbyPerchableBuilding(Building preferred, int neededSlots, HashSet<Building> exclude)
+    {
+        if (preferred == null || preferred.Footprint.Count == 0) return null;
+        var origin = preferred.Footprint[0];
+
+        Building best = null;
+        var bestDist = int.MaxValue;
+        foreach (var state in _battlefield.Buildings)
+        {
+            if (!state.BlocksMovement) continue;   // destroyed/rubble -- no roof to land on
+            var candidate = state.Building;
+            if (ReferenceEquals(candidate, preferred)) continue;
+            if (exclude != null && exclude.Contains(candidate)) continue;
+            if (candidate.Footprint.Count == 0) continue;
+            if (AvailableRoofSlots(candidate).Count < neededSlots) continue;
+
+            var dist = origin.DistanceTo(candidate.Footprint[0]);
+            if (dist < bestDist) { bestDist = dist; best = candidate; }
+        }
+        return best;
+    }
+
     /// <summary>Rebuilds `_roofCache` (standing-building footprint hex ->
     /// roof height) if the city has changed since the last build. Shared by
     /// `SurfaceHeightAt` and `InsideBuildingFootprint` -- both need exactly

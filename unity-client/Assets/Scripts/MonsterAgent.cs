@@ -70,6 +70,14 @@ public class MonsterAgent : MonoBehaviour
     private Vector3? _settleTarget;   // shared cluster point to creep toward once idle (group moves only)
     private GroupFacing _groupFacing; // shared arrival-facing token for a group move (see GroupFacing)
 
+    // 2026-07: roof "parking" -- the SPECIFIC footprint hex this perch
+    // order was assigned to land on (WaypointCommander's AssignPerch),
+    // distinct per unit so a group ordered onto one roof spreads across
+    // its footprint instead of converging on one point. Null means "pick
+    // your own nearest footprint hex" -- the original, single-unit
+    // behavior, still used when nothing assigns one explicitly.
+    private HexCoord? _perchTargetHex;
+
     // docs/27 Phase A: opt-in sim-driven movement. Null/false by default
     // for every existing scene (nothing calls EnableSimDriven today), so
     // this is fully inert until a dev/test scene explicitly wires it up
@@ -141,6 +149,15 @@ public class MonsterAgent : MonoBehaviour
                 && _builder.SurfaceHeightAt(transform.position) > 0.1f;
         }
     }
+
+    /// <summary>The building this unit is currently perched on, or null if
+    /// it isn't perched right now (2026-07: roof "parking"/distribution --
+    /// `RuntimeCityBuilder.AvailableRoofSlots` reads this off every
+    /// monster live, rather than keeping a separate occupancy counter that
+    /// could drift). `_targetBuilding` survives `GoIdle()` (only a NEW
+    /// order clears it via `ClearTargets`), so it still correctly names
+    /// the roof a unit landed on for as long as it holds that perch.</summary>
+    public Building PerchedOn { get { return Perched ? _targetBuilding : null; } }
 
     public string OrderDescription
     {
@@ -393,8 +410,15 @@ public class MonsterAgent : MonoBehaviour
     /// direction, 2026-07: "they should be able to land on the
     /// building"). Winged only -- the commander routes a roof-click here
     /// for flyers and to OrderAttack for everyone else, but guard anyway
-    /// so a stray call can't strand a ground creature mid-wall.</summary>
-    public void OrderPerch(Building building)
+    /// so a stray call can't strand a ground creature mid-wall.
+    /// <paramref name="targetHex"/> (2026-07 roof "parking"): a SPECIFIC
+    /// footprint hex to land on, assigned by
+    /// `WaypointCommander.AssignPerch` when ordering a group so each unit
+    /// gets its own spot instead of all converging on the same one hex.
+    /// Null (the single-unit default) keeps the original behavior:
+    /// `TickPerch` picks whichever footprint hex is nearest wherever this
+    /// unit happens to be.</summary>
+    public void OrderPerch(Building building, HexCoord? targetHex = null)
     {
         if (building == null) return;
         if (!_canFly) { OrderAttack(building); return; }
@@ -402,6 +426,7 @@ public class MonsterAgent : MonoBehaviour
         _waypoints.Clear();
         _path = null;
         _targetBuilding = building;
+        _perchTargetHex = targetHex;
         _order = OrderKind.Perch;
     }
 
@@ -413,6 +438,7 @@ public class MonsterAgent : MonoBehaviour
         _settleTarget = null;   // any fresh order cancels a pending group-settle creep
         _groupFacing = null;    // and any pending group-arrival facing agreement
         _perchApproach = false;
+        _perchTargetHex = null;
         _activeSpecialAttack = null;
         _targetSpecialAttackUnit = null;
     }
@@ -738,7 +764,11 @@ public class MonsterAgent : MonoBehaviour
         if (!_perchApproach && (_path == null || _pathCityVersion != _builder.CityVersion))
         {
             var start = _builder.HexAt(transform.position);
-            var goal = _builder.HexAt(NearestFootprintPoint(_targetBuilding));
+            // 2026-07 roof "parking": land on the SPECIFIC hex this order
+            // was assigned (AssignPerch), if any -- otherwise fall back to
+            // the original single-unit behavior of picking whichever
+            // footprint hex is nearest right now.
+            var goal = _perchTargetHex ?? _builder.HexAt(NearestFootprintPoint(_targetBuilding));
             _flying = true;
             _flyingHigh = _builder.BuildingHeight(_targetBuilding) + 2f > _flightLowAlt;
             if (_body != null) _body.SetFlying(true, _flyingHigh);

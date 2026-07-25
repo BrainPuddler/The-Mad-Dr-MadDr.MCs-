@@ -169,11 +169,13 @@ public class WaypointCommander : MonoBehaviour
             // modifier key. Ground units can't perch, so a roof-click is
             // still just an attack for them.
             var roofClick = hit.Value.normal.y > 0.5f;
+            List<MonsterAgent> flyers = roofClick ? new List<MonsterAgent>() : null;
             foreach (var a in _selected)
             {
-                if (roofClick && a.IsFlyer) a.OrderPerch(building);
+                if (roofClick && a.IsFlyer) flyers.Add(a);
                 else a.OrderAttack(building);
             }
+            if (flyers != null && flyers.Count > 0) AssignPerch(flyers, building);
             return;
         }
 
@@ -249,6 +251,61 @@ public class WaypointCommander : MonoBehaviour
             var settle = RingTarget(clusterPoint, ringIndex++, _builder.groupSpacing);
             unit.OrderMove(slot, queue, settle, facing);
         }
+    }
+
+    /// <summary>Roof "parking" for a group of flyers ordered onto one
+    /// building (creator direction, 2026-07: "Same parking, distributions
+    /// rules should apply to roof features. If there is not enough
+    /// space... it should pick a different roof nearby before landing.").
+    /// Same nearest-slot-to-nearest-unit greedy assignment
+    /// `AssignFormation` uses for ground formations, but the "slots" are
+    /// the target building's own free footprint hexes
+    /// (`RuntimeCityBuilder.AvailableRoofSlots`) rather than an open hex
+    /// neighbourhood -- a roof has no neighbourhood to spread into, it IS
+    /// the footprint. Whatever doesn't fit (the roof's own capacity is
+    /// already spoken for, by earlier perchers or by more units than it
+    /// holds) rolls over to the nearest OTHER standing building with free
+    /// room (`FindNearbyPerchableBuilding`), repeating outward until every
+    /// unit has a spot or genuinely nothing nearby has room -- at which
+    /// point the leftover units perch on the ORIGINAL roof anyway rather
+    /// than being left with no order at all (the same "pad rather than
+    /// fail" call `FormationHexes` already makes for ground destinations
+    /// that are too hemmed in).</summary>
+    private void AssignPerch(List<MonsterAgent> flyers, Building building)
+    {
+        var remaining = new List<MonsterAgent>(flyers);
+        var tried = new HashSet<Building>();
+        var target = building;
+
+        while (remaining.Count > 0 && target != null)
+        {
+            tried.Add(target);
+            var slots = _builder.AvailableRoofSlots(target);
+            foreach (var slot in slots)
+            {
+                if (remaining.Count == 0) break;
+                var slotW = _builder.WorldOf(slot);
+                var best = -1;
+                var bestSq = float.MaxValue;
+                for (var i = 0; i < remaining.Count; i++)
+                {
+                    if (remaining[i] == null) continue;
+                    var d = remaining[i].transform.position - slotW;
+                    d.y = 0f;
+                    if (d.sqrMagnitude < bestSq) { bestSq = d.sqrMagnitude; best = i; }
+                }
+                if (best < 0) break;
+                var unit = remaining[best];
+                remaining.RemoveAt(best);
+                unit.OrderPerch(target, slot);
+            }
+            if (remaining.Count == 0) break;
+            target = _builder.FindNearbyPerchableBuilding(building, remaining.Count, tried);
+        }
+
+        // nothing nearby had room for the rest -- land them on the
+        // clicked roof anyway (graceful degradation, not a stall).
+        foreach (var a in remaining) a.OrderPerch(building);
     }
 
     /// <summary>The `index`-th distinct settle point on a ring around
