@@ -276,6 +276,41 @@ Docs/05 + docs/22 are the spec; this phase makes them real in `match-core`.
 
 ## 4. RPG layer: XP, levels, gear, and Fusion
 
+> **Status (2026-07): the combat core amendment C moved here (damage
+> formula + arcs + death/salvage window) is done, sim-side. None of
+> this section's own RPG tasks (XP/Level/Traits/Gear/Fusion) are started
+> yet** — correctly sequenced after combat core, since XP is earned from
+> kills that couldn't be resolved before now.
+>
+> `CombatStats` (Vitality/Power/Armor/Reach/Ferocity/Cunning/Affinity)
+> is an optional `SpawnUnit` parameter — the same "accept the
+> genome-derived NUMBER, never touch the genome itself" pattern already
+> used for Speed/Radius (docs/27 Phase C), so match-core stayed
+> genome-agnostic instead of reopening the "genome data has no path into
+> SimUnit" gap docs/12's Phase 3 entry flagged. `CommandKind.AttackUnit`
+> resolves docs/04's real formula exactly — `Facing.ArcOf` (already
+> existing in `packages/citygen-core`, untouched) supplies posMod for
+> melee/adjacent attacks, the existing docs/03 aura infrastructure
+> (Phase 3.5) supplies emitterMod via a new per-unit Affinity, and the
+> existing seeded `SimRng` supplies `luckRoll`/crit — every multiplier
+> kept as an integer PERCENT per docs/04's own "determinism requirements"
+> (no floating point in the actual damage math, stricter than the IEEE
+> double position math elsewhere). Death sets `DeathTick` and opens a
+> 150-tick (15s) `IsSalvageable` window.
+>
+> **Explicitly deferred, not faked:** ranged (Reach≥2) posMod (`Facing.
+> ArcOf` requires exact hex adjacency; a ranged attacker gets a flat
+> front-equivalent posMod today, not the real arc-at-a-distance geometry);
+> the real turn-time-gated facing (`turnTime = 0.15s × sizeClass` per
+> edge — needs a sizeClass stat no unit carries yet; facing here snaps
+> instantly to whatever a unit last attacked instead); chase-to-attack-
+> range movement (`AttackUnit` is a no-op if attacker and target aren't
+> already within Reach — no auto-approach yet); the actual salvage
+> resource payout and harvest/looting command (`IsSalvageable` is sim
+> state only — needs genome-linked construction-bill data, the same
+> category of gap as Phase 3's upkeep entry); and every task below this
+> note (XP/Level/Traits/Gear/Fusion).
+
 **Every unit is a character.** This is the "meets RPG" half of the pitch.
 
 - **XP** for kills/assists/structures. **v0.1 numbers corrected per panel

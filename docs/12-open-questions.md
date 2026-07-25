@@ -2111,3 +2111,86 @@ play. citygen-core's other 145 pre-existing tests and match-core's other
 51 remain untouched. `harvestcreditverify` (21 checks) and `flightcheck`
 still pass/compile against the refreshed DLL -- no Unity-side files
 touched this phase, same as Phase 3.
+
+## docs/23 Phase 4 (combat core slice): damage formula, arcs, death/salvage (2026-07)
+
+Following "continue" after Phase 3.5 -- docs/23 §13 amendment C moves
+the core combat loop (damage formula + arcs + death/salvage event) out
+of Phase 6 into Phase 4, since Phase 4's own XP-on-kill needs combat to
+exist first, and Phase 6 consumes it either way. Like docs/03, docs/04
+is a fully v0.1-spec'd document with a real formula and real worked
+examples -- ported directly.
+
+The recurring "genome data has no path into match-core" gap (hit for
+Phase 3's upkeep, and again for Phase 3.5's affinity) didn't block this
+phase: `CombatStats` (Vitality/Power/Armor/Reach/Ferocity/Cunning/
+Affinity) is an optional `SpawnUnit` parameter, the exact same "accept
+the genome-derived NUMBER as a spawn parameter, match-core never touches
+the genome itself" pattern already proven for Speed/Radius (docs/27
+Phase C). This sidesteps the gap entirely rather than needing to solve
+it -- the caller (Unity's `packages/roster-client` `Combat.Profile`,
+already computing these from a genome) supplies the whole stat block.
+
+What shipped: `CombatMath` (pure, integer-percent damage formula --
+docs/04's own "determinism requirements" section explicitly calls for
+integer/fixed-point math here, stricter than the IEEE-double position
+math used elsewhere in match-core, since multipliers are "exact
+hundredths by design"). `CommandKind.AttackUnit` + `UnitOrderKind.
+AttackUnit`. posMod reuses `Facing.ArcOf` -- ALREADY EXISTING in
+`packages/citygen-core`, untouched by this phase, confirming the arc
+math was ready and waiting. emitterMod reuses Phase 3.5's aura
+infrastructure (`Landmark.EmitterAuraRadiusHexes`, `_emitters`) plus a
+new per-unit `UnitAffinity` (Solar/Lunar/Neutral), implementing docs/03's
+full affinity/phase/aura table exactly (auras don't stack, so "is this
+position within ANY aura" is the whole boolean needed -- the modifier
+never depends on WHICH aura, unlike mana income which does). luckRoll/
+crit reuse the existing seeded `SimRng`. Death sets `DeathTick` and
+exposes a 150-tick (15s) `IsSalvageable` window as sim state.
+
+A bug caught while writing the first integration test, not shipped:
+`ApplyAttackUnit` originally didn't check the DEFENDER also has
+`CombatStats` -- attacking a pure-movement unit (Combat == null) would
+have thrown reaching for `defender.Combat!.Value.Armor` in `TickCombat`.
+Fixed by requiring both attacker AND defender to have combat stats
+before an attack order is even accepted, matching the "a unit with no
+combat stats isn't a combatant at all" framing already used for
+`IsAlive`.
+
+Explicitly deferred, not faked (see `SimUnit.cs`/`CombatStats.cs`'s own
+header comments): **ranged (Reach>=2) posMod** -- `Facing.ArcOf` requires
+exact hex adjacency and throws otherwise, so a Reach>=2 attacker gets a
+flat front-equivalent 100 today rather than the real "still have arcs,
+just not gated by adjacency" geometry docs/04 describes; widening
+`ArcOf` (or adding a distance-tolerant sibling) is the real fix. **Real
+turn-time-gated facing** -- docs/04's `turnTime = 0.15s x sizeClass` per
+hex-edge ("this is what makes flanking real") needs a sizeClass stat no
+unit carries yet; facing here snaps instantly to whatever a unit last
+attacked instead of turning over time, a documented simplification that
+still preserves the core "flanking a distracted defender" mechanic even
+without the time cost. **Chase-to-attack-range movement** -- `AttackUnit`
+is a silent no-op if attacker and target aren't already within Reach; no
+auto-approach exists yet (a real, separate feature: combine the existing
+MoveTo pathing with re-checking range each tick). **Actual salvage
+resource payout and the harvest/looting command itself** -- `IsSalvageable`
+is sim state only; docs/04's "harvesting a corpse is a 3-second channel"
+action and the 40-60% component drop need genome-linked construction-bill
+data with no path into match-core yet, the same category of gap as
+docs/12's Phase 3 upkeep entry. **All of Phase 4's own remaining tasks**
+(XP/Level/Traits/Gear/Fusion) -- correctly sequenced after combat core,
+since XP is earned from kills that couldn't be resolved before now.
+
+Verified: `packages/match-core/Tests~/CombatTests.cs`, 24 new tests (108
+match-core total) covering: `CombatMath.ResolveDamage` matching docs/04's
+own worked examples EXACTLY (Power22/Armor3 vs Power20/Armor3 front-on ->
+19/17; the aura-boosted retreat example -> 22); the full posMod and
+emitterMod tables; luckRoll's uniform band and crit edge cases (0%/100%
+cunning); out-of-range and non-combatant `AttackUnit` orders as silent
+no-ops; an adjacent fight resolving to death and the salvage window
+opening/closing at the exact tick boundaries; Ferocity gating attack rate
+to the exact tick (a 0.5/s attacker's second hit lands on exactly the
+20th tick, not the 19th or 21st); a ranged (Reach 3) non-adjacent attack
+resolving without `Facing.ArcOf` throwing; and hash-determinism with
+combat in play. citygen-core's 152 tests and match-core's other 84
+pre-existing tests remain untouched. `harvestcreditverify` (21 checks)
+and `flightcheck` still pass/compile against the refreshed DLL -- no
+Unity-side files touched this phase, same as Phase 3/3.5.

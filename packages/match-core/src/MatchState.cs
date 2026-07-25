@@ -159,9 +159,13 @@ namespace MadDr.MatchCore
         /// <see cref="DefaultUnitRadius"/> (docs/27 Phase C) -- every call
         /// site that predates separation keeps compiling and gets a
         /// reasonable generic body size rather than being forced to widen
-        /// itself just to keep building. Returns the new unit's entity
+        /// itself just to keep building. <paramref name="combat"/> (docs/23
+        /// Phase 4) defaults to null -- a pure-movement unit, exactly like
+        /// every unit before this phase; the caller supplies the
+        /// genome-derived stat block whole (same pattern as speed/radius),
+        /// match-core never derives it. Returns the new unit's entity
         /// ID.</summary>
-        public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, double radius = DefaultUnitRadius)
+        public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, double radius = DefaultUnitRadius, CombatStats? combat = null)
         {
             if (_city == null) throw new InvalidOperationException("MatchState has no city -- cannot spawn units");
             if (playerIndex < 0 || playerIndex >= _players.Length)
@@ -171,7 +175,7 @@ namespace MadDr.MatchCore
 
             var id = AllocateEntityId();
             var (x, z) = atHex.ToWorld();
-            var unit = new SimUnit(id, playerIndex, x, z, speed, radius);
+            var unit = new SimUnit(id, playerIndex, x, z, speed, radius, combat);
             _unitsInOrder.Add(unit);
             _unitsById[id] = unit;
             return id;
@@ -340,6 +344,81 @@ namespace MadDr.MatchCore
             }
         }
 
+        /// <summary>docs/23 Phase 4 (combat core): resolve one tick's
+        /// worth of attacks, entity-ID order. A unit whose target died,
+        /// wandered out of range, or isn't ready yet (cooldown) simply
+        /// waits -- no chase-to-range movement this pass (see
+        /// <see cref="ApplyAttackUnit"/>'s own doc comment), and a target
+        /// that's out of range is NOT an error, just nothing to resolve
+        /// this tick.</summary>
+        private void TickCombat()
+        {
+            for (var i = 0; i < _unitsInOrder.Count; i++)
+            {
+                var attacker = _unitsInOrder[i];
+                if (attacker.Order != UnitOrderKind.AttackUnit || !attacker.IsAlive) continue;
+                if (!attacker.AttackTargetId.HasValue || attacker.Combat == null) continue;
+
+                var defender = FindUnit(attacker.AttackTargetId.Value);
+                if (defender == null || !defender.IsAlive) continue;   // target gone -- unit just waits, doesn't auto-idle
+                if (!attacker.CanAttackNow) continue;
+
+                var attackerHex = HexAt(attacker.X, attacker.Z);
+                var defenderHex = HexAt(defender.X, defender.Z);
+                var combat = attacker.Combat.Value;
+                if (attackerHex.DistanceTo(defenderHex) > combat.Reach) continue;
+
+                // posMod: melee/adjacent attacks get the real docs/04 arc
+                // classification (Facing.ArcOf requires exact adjacency);
+                // a Reach>=2 attacker gets a flat front-equivalent 100 --
+                // docs/04 says reach>=2 attackers ignore THEIR OWN arc
+                // constraint when choosing a target, but the full "still
+                // classify by the target's facing at range" geometry
+                // needs widening ArcOf beyond adjacency, a documented,
+                // deferred gap (see SimUnit.cs's header).
+                var posMod = attackerHex.DistanceTo(defenderHex) == 1
+                    ? CombatMath.PosModForArc(Facing.ArcOf(attackerHex, defenderHex, defender.FacingEdge))
+                    : 100;
+
+                var inAura = IsWithinAnyEmitterAura(attackerHex);
+                var emitterMod = CombatMath.EmitterModPercent(combat.Affinity, CurrentLumenPhase, inAura);
+
+                var isCrit = CombatMath.RollCrit(_rng, combat.CunningPercent);
+                var luckOrCrit = isCrit ? 150 : CombatMath.RollLuckPercent(_rng);
+
+                var damage = CombatMath.ResolveDamage(combat.Power, posMod, emitterMod, luckOrCrit, defender.Combat!.Value.Armor);
+                defender.ApplyDamage(damage, Frame);
+                if (attackerHex.DistanceTo(defenderHex) == 1) attacker.FaceToward(ApproachEdgeFromTo(attackerHex, defenderHex));
+                attacker.ResetAttackCooldown();
+            }
+        }
+
+        /// <summary>Which of `from`'s 6 edges `to` lies beyond -- `to` must
+        /// be exactly adjacent (same precondition as
+        /// <see cref="Facing.ArcOf"/>, which this mirrors for the
+        /// attacker's OWN post-attack facing update rather than the
+        /// defender's arc classification).</summary>
+        private static HexEdge ApproachEdgeFromTo(HexCoord from, HexCoord to)
+        {
+            for (var e = 0; e < 6; e++)
+                if (from.Neighbor((HexEdge)e).Equals(to)) return (HexEdge)e;
+            return HexEdge.E;   // unreachable given the adjacency check above
+        }
+
+        /// <summary>True if `hex` is within ANY emitter's aura radius,
+        /// regardless of that emitter's owner (docs/03: "auras affect all
+        /// monsters by phase/affinity regardless of owner"). Auras don't
+        /// stack (docs/03), and since <see cref="CombatMath.
+        /// EmitterModPercent"/>'s output only depends on (affinity, phase,
+        /// in-any-aura) -- never on WHICH aura -- a plain boolean is the
+        /// whole answer; there's nothing to pick the "strongest" among.</summary>
+        private bool IsWithinAnyEmitterAura(HexCoord hex)
+        {
+            for (var e = 0; e < _emitters.Count; e++)
+                if (hex.DistanceTo(_emitters[e].Hex) <= Landmark.EmitterAuraRadiusHexes) return true;
+            return false;
+        }
+
         /// <summary>Advance the simulation by exactly one tick, applying
         /// this tick's commands. Pure function of (current state,
         /// commands): no wall-clock, no ambient randomness -- every draw
@@ -371,6 +450,10 @@ namespace MadDr.MatchCore
                 // walk never idles for even one tick between legs.
                 if (u.Order == UnitOrderKind.Idle && u.HasQueuedWaypoints) AdvanceToNextWaypoint(u);
             }
+
+            // docs/23 Phase 4 (combat core, docs/04): attack resolution,
+            // entity-ID order, same law as movement above.
+            TickCombat();
 
             // docs/23 §5 / docs/27 Phase C: separation, restoring the same
             // "never actually overlap" guarantee legacy (non-sim-driven)
@@ -436,10 +519,37 @@ namespace MadDr.MatchCore
                 case CommandKind.BuildStructure:
                     ApplyBuildStructure(cmd);
                     break;
+                case CommandKind.AttackUnit:
+                    ApplyAttackUnit(cmd);
+                    break;
                 case CommandKind.None:
                 default:
                     break;
             }
+        }
+
+        /// <summary>docs/23 Phase 4: TargetEntity begins attacking ArgA.
+        /// No chase-to-range movement (docs/12's Phase 4 entry) -- both
+        /// units must already exist, be alive, and be within the
+        /// attacker's Reach hexes of each other, or this is a silent
+        /// no-op, matching every other command's bad-input contract.</summary>
+        private void ApplyAttackUnit(Command cmd)
+        {
+            var attacker = FindUnit(cmd.TargetEntity);
+            var defender = FindUnit(unchecked((uint)cmd.ArgA));
+            if (attacker == null || defender == null) return;
+            // a unit with no Combat stats at all isn't a combatant --
+            // can't attack, and can't BE attacked either (there's no
+            // Armor/Vitality to resolve damage against).
+            if (attacker.Combat == null || defender.Combat == null) return;
+            if (!attacker.IsAlive || !defender.IsAlive) return;
+            if (ReferenceEquals(attacker, defender)) return;
+
+            var fromHex = HexAt(attacker.X, attacker.Z);
+            var toHex = HexAt(defender.X, defender.Z);
+            if (fromHex.DistanceTo(toHex) > attacker.Combat.Value.Reach) return;
+
+            attacker.BeginAttacking(defender.EntityId);
         }
 
         /// <summary>docs/23 §13-A: order TargetEntity to walk to hex

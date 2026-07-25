@@ -38,6 +38,17 @@ namespace MadDr.MatchCore
         /// every other command kind's "bad input is a no-op, never an
         /// exception" contract.</summary>
         BuildStructure = 4,
+        /// <summary>docs/23 Phase 4 (combat core, docs/04): TargetEntity
+        /// (the attacker) begins channeling an attack against ArgA (the
+        /// defender's entity ID, cast to int -- entity IDs never
+        /// realistically exceed int range in a single match, same
+        /// "reinterpret the generic slots" contract `BuildStructure`
+        /// already uses). Silently a no-op unless BOTH units exist, are
+        /// alive, the attacker has combat stats at all, and the two are
+        /// already within the attacker's Reach -- there is no
+        /// chase-to-range movement yet (docs/12's Phase 4 entry), so an
+        /// out-of-range order is rejected rather than queued.</summary>
+        AttackUnit = 5,
     }
 
     /// <summary>

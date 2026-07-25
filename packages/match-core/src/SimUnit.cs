@@ -15,6 +15,15 @@ namespace MadDr.MatchCore
     {
         Idle = 0,
         MoveTo = 1,
+
+        /// <summary>docs/23 Phase 4 (combat core, docs/04): channeling an
+        /// attack against another unit (<see cref="SimUnit.AttackTargetId"/>).
+        /// Set by <see cref="CommandKind.AttackUnit"/>; the attacker and
+        /// target must already be within <see cref="CombatStats.Reach"/>
+        /// hexes at the moment the command is applied -- there is no
+        /// chase-to-range movement yet (a documented, deferred gap; see
+        /// this enum's own file header for the others).</summary>
+        AttackUnit = 2,
     }
 
     /// <summary>
@@ -58,6 +67,69 @@ namespace MadDr.MatchCore
         public double Z { get; private set; }
         public UnitOrderKind Order { get; private set; } = UnitOrderKind.Idle;
 
+        /// <summary>docs/23 Phase 4 (combat core): this unit's genome-derived
+        /// combat stat block, or null for a pure-movement unit (every
+        /// existing `SpawnUnit` call site, unaffected -- same
+        /// backward-compatible-default pattern <see cref="Radius"/> used).</summary>
+        public CombatStats? Combat { get; }
+
+        /// <summary>Current hit points -- only meaningful when
+        /// <see cref="Combat"/> is set. Starts at
+        /// <see cref="CombatStats.MaxVitality"/>.</summary>
+        public int Vitality { get; private set; }
+
+        /// <summary>A unit with no <see cref="Combat"/> stats can never
+        /// die (it isn't a combatant at all) -- vacuously true, matching
+        /// how a pure-movement unit has no HP to track in the first
+        /// place.</summary>
+        public bool IsAlive => Combat == null || Vitality > 0;
+
+        /// <summary>The frame this unit died, or null if still alive.
+        /// Drives <see cref="IsSalvageable"/>'s 15s window (docs/04:
+        /// "lootable by either side for 15 seconds, then the remains sink
+        /// into the ground"). Actual resource payout on salvage and the
+        /// harvest/looting command itself are NOT implemented yet (need
+        /// genome-linked construction-bill data with no path into
+        /// match-core today, the same category of gap as docs/12's Phase
+        /// 3 upkeep entry) -- this is sim STATE for a later phase to
+        /// build the harvest action on top of, not the whole
+        /// mechanic.</summary>
+        public int? DeathTick { get; private set; }
+
+        /// <summary>docs/04: a corpse is lootable for 15s (150 ticks)
+        /// after death, then it "sinks into the ground." False for a
+        /// living unit.</summary>
+        public bool IsSalvageable(int currentFrame) => DeathTick.HasValue && currentFrame - DeathTick.Value < SalvageWindowTicks;
+
+        public const int SalvageWindowTicks = 15 * MatchState.TicksPerSecond;
+
+        /// <summary>Which of this unit's 6 hex edges it currently faces --
+        /// feeds <see cref="MadDr.CityGen.Facing.ArcOf"/> when someone
+        /// attacks it. Deliberately simplified for this pass: docs/04's
+        /// real turn-time cost (`turnTime = 0.15s x sizeClass` per edge,
+        /// "this is what makes flanking real") needs a sizeClass stat
+        /// this unit doesn't carry yet, so facing here snaps INSTANTLY to
+        /// face whatever this unit last attacked (see
+        /// <see cref="FaceToward"/>) rather than turning over time or
+        /// tracking movement direction. A unit that's busy fighting one
+        /// attacker still reads as vulnerable to a flanker who didn't
+        /// just get attacked back, which preserves the mechanic's main
+        /// point (flanking a distracted defender) even with the time-cost
+        /// simplified away. Flagged, not silently dropped.</summary>
+        public HexEdge FacingEdge { get; private set; } = HexEdge.E;
+
+        internal void FaceToward(HexEdge edge) => FacingEdge = edge;
+
+        /// <summary>Who this unit is channeling an attack against, while
+        /// <see cref="Order"/> is <see cref="UnitOrderKind.AttackUnit"/>.</summary>
+        public uint? AttackTargetId { get; private set; }
+
+        /// <summary>Seconds until this unit's next attack may resolve
+        /// (docs/04: Ferocity is attacks/second). Counts down every tick
+        /// regardless of order, so switching targets doesn't grant a free
+        /// instant attack.</summary>
+        private double _attackCooldownSeconds;
+
         private List<HexCoord>? _path;
         private int _pathIndex;
 
@@ -72,7 +144,7 @@ namespace MadDr.MatchCore
         /// pathfound for `SetPath` either.</summary>
         private readonly Queue<HexCoord> _waypointQueue = new Queue<HexCoord>();
 
-        internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed, double radius)
+        internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed, double radius, CombatStats? combat)
         {
             EntityId = entityId;
             PlayerIndex = playerIndex;
@@ -80,6 +152,8 @@ namespace MadDr.MatchCore
             Z = z;
             Speed = speed;
             Radius = radius;
+            Combat = combat;
+            Vitality = combat?.MaxVitality ?? 0;
         }
 
         /// <summary>Begin walking a precomputed path (HexPathfinder output,
@@ -100,6 +174,11 @@ namespace MadDr.MatchCore
         /// FollowPath, ported to fixed dt instead of Time.deltaTime.</summary>
         internal void Tick(double dt)
         {
+            // docs/23 Phase 4: cooldown counts down regardless of order,
+            // so switching targets (or briefly moving) never grants a
+            // free instant attack the moment AttackUnit resumes.
+            if (_attackCooldownSeconds > 0.0) _attackCooldownSeconds -= dt;
+
             if (Order != UnitOrderKind.MoveTo || _path == null) return;
 
             var budget = Speed * dt;
@@ -175,6 +254,50 @@ namespace MadDr.MatchCore
             Z += dz;
         }
 
+        /// <summary>docs/23 Phase 4: start (or retarget) an attack channel.
+        /// Does NOT reset the cooldown -- an attack already close to
+        /// ready keeps its progress even when retargeting, matching
+        /// docs/04's model where Ferocity gates attack RATE, not
+        /// per-target state.</summary>
+        internal void BeginAttacking(uint targetId)
+        {
+            AttackTargetId = targetId;
+            Order = UnitOrderKind.AttackUnit;
+        }
+
+        internal bool CanAttackNow => _attackCooldownSeconds <= 0.0;
+
+        /// <summary>Start the cooldown for this unit's NEXT attack --
+        /// called by `MatchState` immediately after resolving one
+        /// (docs/04: Ferocity is attacks/second, so the cooldown is
+        /// exactly its reciprocal).</summary>
+        internal void ResetAttackCooldown()
+        {
+            if (Combat != null) _attackCooldownSeconds = 1.0 / Combat.Value.Ferocity;
+        }
+
+        /// <summary>Apply combat damage. A no-op if already dead or if
+        /// this unit has no combat stats at all (shouldn't happen --
+        /// `MatchState` only ever calls this on a unit it already
+        /// confirmed has `Combat` -- but a defensive no-op costs nothing
+        /// and matches every other "bad input never crashes the sim"
+        /// contract in this class). Clamped at exactly 0, never negative;
+        /// reaching 0 is death: records `DeathTick`, drops whatever this
+        /// unit was doing (a corpse channels nothing).</summary>
+        internal void ApplyDamage(int amount, int currentFrame)
+        {
+            if (Combat == null || !IsAlive || amount <= 0) return;
+            Vitality -= amount;
+            if (Vitality <= 0)
+            {
+                Vitality = 0;
+                DeathTick = currentFrame;
+                Order = UnitOrderKind.Idle;
+                AttackTargetId = null;
+                _path = null;
+            }
+        }
+
         /// <summary>Append this unit's canonical bytes, FIXED field order
         /// (docs/23 §13-J), floats bitwise. The waypoint queue is part of
         /// this unit's real state -- two clients that disagree on what's
@@ -193,6 +316,28 @@ namespace MadDr.MatchCore
             h.Add(_pathIndex);
             h.Add(_waypointQueue.Count);
             foreach (var w in _waypointQueue) { h.Add(w.Q); h.Add(w.R); }
+
+            // docs/23 Phase 4 (combat core): fixed identity stats (never
+            // mutated post-spawn, hashed anyway for the same "everything
+            // gets hashed" consistency Speed/Radius already follow) plus
+            // the actual mutable combat state.
+            h.Add(Combat.HasValue ? 1 : 0);
+            if (Combat.HasValue)
+            {
+                var c = Combat.Value;
+                h.Add(c.MaxVitality);
+                h.Add(c.Power);
+                h.Add(c.Armor);
+                h.Add(c.Reach);
+                h.AddBits(c.Ferocity);
+                h.Add(c.CunningPercent);
+                h.Add((int)c.Affinity);
+            }
+            h.Add(Vitality);
+            h.Add(DeathTick ?? -1);
+            h.Add((int)FacingEdge);
+            h.Add(AttackTargetId.HasValue ? (long)AttackTargetId.Value : -1L);
+            h.AddBits(_attackCooldownSeconds);
         }
     }
 }
