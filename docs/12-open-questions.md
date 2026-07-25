@@ -1607,3 +1607,38 @@ false everywhere until a dev/test scene explicitly calls
 `EnableSimDriven`, which none does yet. The creator's own Editor check is
 the real, still-outstanding gate before docs/27's Phase B (queued/
 grouped moves) is attempted.
+
+## docs/27 follow-up: the actual Editor smoke-test toggle (2026-07)
+
+Creator direction: "what am I lookig for?" -- a fair question, since
+Phase A shipped fully opt-in with nothing in any scene actually calling
+`EnableSimDriven`. There was genuinely nothing to look at yet.
+
+Added `RuntimeCityBuilder.simDrivenDemo` (default off, so every existing
+scene is byte-for-byte unaffected) and a `SimBridge` field. When on,
+`HandleRosterReady`'s existing spawn loop additionally calls
+`EnableSimDriven` on the FIRST monster the roster spawns, right after
+its normal `Init(...)` -- nothing else about it changes, every other
+monster is untouched. This reuses the exact existing dev workflow this
+class's own header comment already documents ("Hit Play: left-click
+your monster, right-click the world") rather than inventing a separate
+demo scene: check the box, hit Play, click that one monster, right-click
+to move it.
+
+What to actually watch for, spelled out since this is a genuine first
+live run of code that's only been numerically verified so far: the unit
+should walk SMOOTHLY (interpolation working) rather than jitter/stutter
+(would indicate something else is still writing its position); a small
+(~100ms, one tick) delay before it starts moving after the click is
+CORRECT lockstep input latency per docs/27 SS5, not a bug; footstep
+animation should look completely normal throughout (proves MonsterBody
+genuinely doesn't care where its velocity came from -- the whole point
+of the interpolation boundary docs/25 established and this plan reuses);
+and every OTHER monster in the scene should behave completely normally
+(proves the opt-in boundary actually holds in practice, not just in the
+numeric harness).
+
+Verified: flightcheck stub-compile clean across the whole gameplay layer
+including the modified RuntimeCityBuilder.cs. This is still code-only --
+the actual "does it look right" answer is the creator's own Editor
+session, which is what this toggle exists to make possible at all.

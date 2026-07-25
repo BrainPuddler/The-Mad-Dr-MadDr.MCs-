@@ -224,6 +224,12 @@ guessed):**
 changes), `UnitCombat.cs`, the entire docs/26 Special Attacks System,
 `WaypointCommander.cs` (see above).
 
+- `RuntimeCityBuilder.cs` — a new `simDrivenDemo` Inspector toggle
+  (default off) and a `SimBridge` field, wired into `HandleRosterReady`'s
+  existing spawn loop: when on, the first spawned monster additionally
+  gets `EnableSimDriven` called on it. This is the actual Editor smoke
+  test (see below) — everything else in this file is unchanged.
+
 ## 5. Risks & edge cases
 
 - **Two positions disagreeing.** While `_simDriven` is true, `match-core`'s
@@ -317,6 +323,24 @@ changes), `UnitCombat.cs`, the entire docs/26 Special Attacks System,
   **Explicitly NOT claimed:** that a unit visibly moves smoothly on
   screen — that is the creator's own Editor check, still outstanding, and
   the actual gate before Phase B is attempted.
+
+  **The actual Editor check, made concrete.** `RuntimeCityBuilder` gained
+  a single Inspector toggle, `simDrivenDemo` (default off — every
+  existing scene is unaffected), plus a `SimBridge` field. When on, the
+  FIRST monster the roster spawns is additionally routed through
+  `EnableSimDriven` right after its normal `Init(...)` — nothing else
+  about it changes, and every other monster is completely untouched. This
+  reuses the EXACT existing workflow this class's own header comment
+  already documents ("Hit Play: left-click your monster, right-click the
+  world"): check the box, hit Play, click that one monster, right-click
+  to move it. What to watch for: the unit walks smoothly (interpolation
+  working) vs. jittering/stuttering (a real bug, since nothing else
+  should be writing its position while sim-driven); a roughly one-tick
+  (~100ms) delay before it starts moving after the click (correct
+  lockstep input latency, not a bug, per §5); normal footstep
+  animation throughout (proves `MonsterBody` genuinely doesn't care where
+  its velocity came from); and every OTHER monster in the scene behaving
+  completely normally (proves the opt-in boundary actually holds).
 - **Phase B — queued/grouped moves.** Widen `CommandKind.MoveTo` (or add a
   `CommandKind.MoveQueue`) to carry a waypoint list + group token;
   `match-core` gains queued-order support on `SimUnit`; `WaypointCommander`'s

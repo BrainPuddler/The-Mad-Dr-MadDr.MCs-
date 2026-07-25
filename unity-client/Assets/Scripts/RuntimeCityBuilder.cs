@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using MadDr.CityGen;
+using MadDr.MatchCore;
 using MadDr.RosterClient;
 using UnityEngine;
 
@@ -43,6 +44,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
     [Tooltip("How many cars drive the road network (docs/19 traffic) -- they flee monsters like Citizens do.")]
     public int trafficCarCount = 10;
+
+    [Header("docs/27 Phase A dev check (off by default)")]
+    [Tooltip("Wires the FIRST spawned monster to docs/27's SimBridge/interpolated-view pipeline instead of its normal Time.deltaTime movement, so a Move order on it is decided by match-core and rendered by interpolation -- the actual Editor smoke test docs/27 Phase A has been waiting on (nothing else in this environment can check it). Left-click that monster, right-click to move it, same as always. Every other monster (and every other order kind on this one) is completely unaffected.")]
+    public bool simDrivenDemo = false;
+
+    private SimBridge _simBridge;
 
     [Tooltip("Traffic field: the target fraction of the fleet actively driving at any moment. The rest sit parked at the curb between bounded trips (drive N hops, park a while, repeat). 1 = every car always driving, never parks. Long-run average, not a per-frame guarantee -- see HudStatus for the live measured percentage.")]
     [Range(0.05f, 1f)]
@@ -1540,6 +1547,23 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             agent.Init(this, creature, home);
             _monsters.Add(agent);
             if (agent.Fighter != null) _combatants.Add(agent.Fighter);
+
+            // docs/27 Phase A dev check: opt the FIRST spawned monster
+            // into sim-driven movement, and nothing else -- left-click it,
+            // right-click to move it, exactly the existing workflow this
+            // class's own header comment describes. Everything else about
+            // it (combat, special attacks, eating, flying) is untouched;
+            // only its Move order routes through match-core now.
+            if (simDrivenDemo && i == 0)
+            {
+                if (_simBridge == null)
+                {
+                    _simBridge = gameObject.AddComponent<SimBridge>();
+                    _simBridge.StartMatch(unchecked((uint)seed), new List<FactionId> { FactionId.MadDoctor, FactionId.HumanArmy }, _city);
+                    Debug.Log("docs/27: sim-driven demo active on " + root.name + " -- left-click it, right-click to move it.");
+                }
+                agent.EnableSimDriven(_simBridge, playerIndex: 0, atHex: home, speed: 6.0);
+            }
         }
     }
 
