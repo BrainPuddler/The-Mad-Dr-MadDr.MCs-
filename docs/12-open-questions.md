@@ -1407,3 +1407,47 @@ This closes the last of the two Phase-9-era follow-ups that were code-
 buildable. One remains, genuinely out of scope for code alone: the
 non-Citizen consume path (designed, not built -- nothing testable exists
 to build it against).
+
+## docs/23 RTS Phase 1 review (2026-07)
+
+Creator direction: "Review document created by fable relating to
+finishing a full StarCraft like game. Phase 1 and execute phase 1."
+Read docs/23 in full (including the §13 panel-review amendments) and
+checked its Phase 1 acceptance criteria plus every amendment that binds
+Phase 1 specifically (E: supply cap, F: Chimera three-origins predicate,
+J-i: entity-ID allocation + canonical serialization, K-iv: golden-fixture
+note) against the actual `packages/match-core` code, rather than assuming
+the prior session's "completed" task label was still accurate.
+
+Result: Phase 1 was already fully executed (commit 863530e, after the
+panel review landed) and every amendment above was already implemented
+in the original pass -- `MatchState.DefaultSupplyCap = 60`,
+`PlayerState.ChimeraTrackOpen` (all three origin bits, not "two enemy
+factions"), `MatchState.AllocateEntityId()` + `Command.TargetEntity`
+(entity IDs, never object references), `FnvHash`'s fixed-field-order
+bitwise hashing (never ToString/JSON). Re-ran both acceptance checks
+live rather than trusting the commit message: `dotnet test` — 13/13
+green; `Tools~/DetHarness` — 10,000-tick 8-player match, hash
+`94F13654C8B8941B` printed twice, identical, matching the value already
+recorded in the original Phase 1 docs/12 entry (confirms nothing has
+silently drifted since).
+
+One genuine gap found and closed: amendment K(iv)'s specific
+documentation requirement ("Phase 1 must add a note that its golden
+fixtures now gate sim determinism, not just display") had never actually
+been written anywhere -- not in `match-core`'s README, not in
+`roster-client`'s. Added a new section to `packages/roster-client/
+README.md` explaining that `Locomotion.cs`/`Weapon.cs`/`Harvest.cs`'s
+golden tests, originally written to keep the Lab-preview/battlefield
+display in sync, now also gate `match-core` lockstep determinism once
+Phase 1.5 promotes this code to the sim's source of truth -- a
+regression there stops being cosmetic and starts being a desync bug.
+
+docs/00's docs/23 row updated to reflect Phase 1 as implemented (it
+previously just said "Execution plan (panel-reviewed)," with no signal
+that Phase 1 had actually shipped).
+
+No code changes to `match-core` itself -- Phase 1 needed a review and a
+missing note, not new implementation. Next: Phase 1.5 ("Port the live
+sim into match-core," §13 amendment A) — the plan's stated true critical
+path, and NOT yet started.

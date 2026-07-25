@@ -47,6 +47,23 @@ clients. There's no verification key for this package (or the Unity
 client that uses it) to hold, dev-mode or otherwise; the signature is
 carried for whenever a real match server exists to check it.
 
+## Golden fixtures now gate sim determinism, not just display (docs/23 §13-K-iv)
+
+`Locomotion.cs`/`Weapon.cs`/`Harvest.cs`'s golden tests (`LocomotionTests.cs`,
+`WeaponTests.cs`, `HarvestTests.cs`) were written to keep this package honest
+as genome-core's **display-side twin** — proving the Lab and the Unity
+battlefield agree on what a genome expresses. docs/23 (the RTS master build
+plan) promotes this same code to be **`match-core`'s source of truth** for
+genome-derived stats once units are ported into the deterministic tick sim
+(§13-A, Phases 1.5+): a monster's locomotion/weapon/harvest profile, computed
+here, becomes part of what the sim hashes and lockstep depends on being
+bit-identical across every client. That means these golden fixtures no longer
+guard a cosmetic mismatch if they regress — they guard **desync**. Treat any
+change to `Locomotion.cs`/`Weapon.cs`/`Harvest.cs` (or their golden values)
+with the same care as a change to `match-core` itself, and remember these
+tests are load-bearing for §11's lockstep the moment Phase 1.5 lands, not
+just for the Lab preview matching the battlefield.
+
 ## What this package is not
 
 - Not the HTTP client: no `UnityWebRequest`, no retry/timeout logic, no
