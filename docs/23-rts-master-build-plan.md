@@ -232,6 +232,34 @@ Docs/05 + docs/22 are the spec; this phase makes them real in `match-core`.
   §4, §6.3). Unchanged sources, new sinks.
 
 ### Phase 3 tasks
+
+> **Status (2026-07): wallet-cap enforcement done, sim-side; everything
+> else in this section is a real, separate next slice, not started.**
+> Of this section's task list, only "storage caps from buildings" was
+> actually ready to build without inventing something: `BuildingDef.
+> StorageCapBonus` (Phase 2 data) now applies for real the tick a
+> storage building completes (`PlayerState.RaiseWalletCap`, raise-only --
+> whether destruction should lower it back is docs/22 §6's own
+> unresolved **Q28**, left open rather than guessed at). The base cap
+> itself (before any storage) is `int.MaxValue` -- effectively uncapped
+> -- because docs/22 §6 never gives "the Vat's base cap" a number either
+> (also Q28); this is the honest non-guess, not an oversight.
+>
+> Every other task here is gated on a real prerequisite that hasn't
+> landed: **income ticks from Collection Stations** need Citizens as sim
+> entities (docs/20's yield is citizen-death-driven, not a flat
+> per-tick number -- the same "Citizens aren't sim entities yet" gap
+> docs/27 flagged for the `EatCitizen` order kind); **income from Fuel
+> Depots** needs the `FuelNodes` generator below (a Fuel Depot's whole
+> role is "MUST sit on a fuel-node hex," so there's nothing to gate the
+> income on without it); **upkeep drains** need genome-linked per-unit
+> cost data that has no path into `match-core`'s `SimUnit` yet (docs/05's
+> real upkeep table is per-ARCHETYPE, computed in `packages/roster-client`,
+> never wired into `SpawnUnit`); **onboard per-unit pools** need
+> `Harvest.cs` promoted to sim-side, a separate port in its own right.
+> None of these were faked or approximated with invented numbers --
+> flagged here and in docs/12 instead.
+
 - Port the docs/22 economy contract into `match-core`: wallets per player,
   storage caps from buildings, onboard per-unit pools (capacity/spill already
   prototyped in `Harvest.cs` — promote to sim-side), income ticks from

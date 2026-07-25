@@ -217,6 +217,21 @@ namespace MadDr.MatchCore
             if (building.State == BuildingState.Destroyed) _blockedToGround?.Remove(building.Hex);
         }
 
+        /// <summary>docs/23 §3 Phase 3: a storage building just completed
+        /// -- raise its owner's wallet cap for whatever resource
+        /// `BuildingDef.StorageCapBonus` names (a no-op for every OTHER
+        /// building kind, which have no bonus). Raise-only; whether
+        /// destroying this building later should lower the cap back down
+        /// is docs/22 §6's own unresolved Q28, not decided here (see
+        /// `PlayerState.RaiseWalletCap`'s own doc comment).</summary>
+        private void ApplyStorageCapBonus(SimBuilding building)
+        {
+            var def = BuildingDef.Get(building.Kind);
+            if (def.StorageCapBonus == null) return;
+            var bonus = def.StorageCapBonus.Value;
+            _players[building.PlayerIndex].RaiseWalletCap(bonus.Resource, bonus.Amount);
+        }
+
         /// <summary>Advance the simulation by exactly one tick, applying
         /// this tick's commands. Pure function of (current state,
         /// commands): no wall-clock, no ambient randomness -- every draw
@@ -257,13 +272,27 @@ namespace MadDr.MatchCore
             ApplySeparationPass();
 
             // docs/23 §2 Phase 2: construction progress. Entity-ID order,
-            // same law as the unit loop above.
-            for (var i = 0; i < _buildingsInOrder.Count; i++) _buildingsInOrder[i].Tick();
+            // same law as the unit loop above. docs/23 §3 Phase 3: the
+            // instant a building finishes (UnderConstruction -> Complete,
+            // detected here rather than inside SimBuilding itself, which
+            // stays unaware of economy concerns the same way SimUnit stays
+            // unaware of pathfinding), its wallet-cap bonus (if any)
+            // applies -- once, not every tick it stays Complete.
+            for (var i = 0; i < _buildingsInOrder.Count; i++)
+            {
+                var b = _buildingsInOrder[i];
+                var wasComplete = b.State == BuildingState.Complete;
+                b.Tick();
+                if (!wasComplete && b.State == BuildingState.Complete) ApplyStorageCapBonus(b);
+            }
 
-            // Economy income, combat resolution, and everything else
-            // arrive with their own phases (docs/23 §13-A porting
-            // workstream). The frame advance itself is the deterministic
-            // heartbeat every system hangs off.
+            // Economy income and upkeep drains, combat resolution, and
+            // everything else arrive with their own phases (docs/23
+            // §13-A porting workstream) -- gated on prerequisites that
+            // haven't landed yet (Citizens as sim entities, genome-linked
+            // per-unit cost data, the FuelNodes generator; see docs/12's
+            // Phase 3 entry). The frame advance itself is the
+            // deterministic heartbeat every system hangs off.
             Frame++;
         }
 

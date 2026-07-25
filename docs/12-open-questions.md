@@ -1957,3 +1957,80 @@ of the hexes) depends on `MonsterAgent.Perched`'s own
 no way to stand up without a live city -- that half is verified by
 compilation and code review only, not exercised by a runnable check,
 same boundary the roof-height fix's own harness check already hit.
+
+## docs/23 Phase 3: wallet caps from storage buildings (2026-07)
+
+Following "continue to next phase of the full game" after Phase 2 --
+the master build plan's dependency spine (§13 amendment C: 1 -> 1.5 ->
+2 -> 3 -> ...) makes Phase 3 (the economy) the next step. Read the
+full Phase 3 task list before starting and found every item except
+wallet-cap enforcement is genuinely gated on a prerequisite that
+doesn't exist yet, not just unstarted busywork:
+
+- **Income ticks from Collection Stations** need Citizens as sim
+  entities -- docs/20's own yield model is citizen-death-driven ("the
+  Collection Station is what citizen deaths nearby, this match,
+  produce"), not a flat per-tick number, and Citizens aren't sim
+  entities in match-core (the identical gap docs/27 already flagged
+  for the `EatCitizen` order kind).
+- **Income from Fuel Depots** needs the `CityModel.FuelNodes` generator
+  task from this same section -- a Fuel Depot's whole defined role is
+  "MUST sit on a fuel-node hex," so there's no honest way to gate its
+  income without that generator work landing first.
+- **Upkeep drains** need genome-linked per-unit cost data that has no
+  path into `match-core.SimUnit` at all today -- docs/05's real upkeep
+  table (Blood upkeep 10/25/18 per minute for the three sample
+  archetypes) is computed per-creature in `packages/roster-client`,
+  never wired into `SpawnUnit`. Inventing a parallel, ungrounded number
+  here would create exactly the "two sources of truth that drift"
+  problem this project avoids elsewhere.
+- **Onboard per-unit pools** need `Harvest.cs`'s capacity/spill logic
+  promoted to sim-side -- a separate, real port in its own right.
+
+Only "storage caps from buildings" was actually ready: `BuildingDef.
+StorageCapBonus` (stored as inert data since Phase 2) now applies for
+real. `PlayerState` gained a per-resource `_walletCap` array (defaults
+to `int.MaxValue` -- uncapped -- for every resource) and
+`RaiseWalletCap` (raise-only, matching `RaiseSupplyCap`'s own existing
+raise-only shape; no `LowerSupplyCap` exists either). `MatchState.Tick`
+detects the UnderConstruction -> Complete transition (not "every tick
+it's Complete") and applies the building's `StorageCapBonus` exactly
+once. `Grant` clamps at the cap via a "room to the cap" calculation
+(`wallet += Min(amount, Max(0, cap - wallet))`), NOT
+`Min(wallet+amount, cap)` -- the latter would actively DECREASE an
+already-over-cap wallet the next time anything is granted, silently
+confiscating resources nobody spent. Caught and fixed while writing
+the first test for it, before it shipped.
+
+The base cap itself (before any storage exists) is left at
+`int.MaxValue` -- an honest non-guess, not an oversight: docs/22 §6
+says "base caps come from the Vat" but never gives that base a real
+number, flagging it as its own open question (**Q28**, still
+unresolved), so match-core doesn't invent one either. Docs/22 §6's Q28
+also explicitly leaves open "whether caps apply retroactively when
+storage dies" -- so destroying a cap-raising building does NOT lower
+the cap back down in this pass; that's a real, separate design
+decision for whoever resolves Q28, not decided here.
+
+Verified: `packages/match-core/Tests~/EconomyTests.cs`, 9 new tests
+(51 match-core total) covering: cap defaults to uncapped; the first
+raise sets the cap exactly (not `int.MaxValue + amount`, which would
+overflow and wrap negative) while later raises accumulate normally;
+`Grant` clamps at the cap; `Grant` never retroactively confiscates an
+existing over-cap balance (the bug caught above); `Clone()` copies the
+cap array; a `BloodStorage` completing raises exactly docs/22's real
+100 (not before, not re-applied on later ticks); a `FuelStorage`
+completing raises Fuel only, never Blood; a `Factory` (no
+`StorageCapBonus`) completing raises nothing at all; and hash-
+determinism with a cap-raising build plus an over-cap `Grant` in the
+same run. citygen-core's 145 tests and every one of the 42
+pre-existing match-core tests remain untouched -- the 9 new
+`EconomyTests.cs` cases are the only additions (42 + 9 = 51).
+`harvestcreditverify` (21 checks) and `flightcheck` still pass/compile
+against the refreshed DLL -- no Unity-side files touched this phase,
+same as Phase 2.
+
+Not yet done, explicitly deferred (see docs/23 §3's own updated status
+note): income ticks (both sources), upkeep drains, onboard per-unit
+pools, the `FuelNodes` generator, and the whole Unity half (gas-station
+dressing, wallet/cap HUD line).
