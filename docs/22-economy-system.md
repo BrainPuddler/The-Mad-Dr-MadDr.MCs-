@@ -204,6 +204,8 @@ All of it is ordinary genetics end to end: these families mutate, splice, canali
 
 Still design-only (the larger docs/22 build-out): dedicated storage structures, medics, factories, and the full onboard blood/bone/brain pools of §2 — the harvester's single pooled `_carriedLoad` here is the first working slice of that system.
 
+**Special-attack cast costs (docs/26 Phase 10, IMPLEMENTED, wallet-level):** every equipped secondary attack (Flamethrower/Psionic Tractor Beam/Ground Stomp) draws Blood + Bones from the session wallet on cast (`RuntimeCityBuilder.SpendWalletForCast`), clamped at 0 and never blocking the cast itself — this SS1 contract test ("Floors, not stalls... a player who ignores this entire system must still have a functional army") is exactly why the deduction is soft rather than a hard ammo gate. This is a wallet-level sink, simpler than and not yet integrated with the onboard Brain-pool "ability casts (1–3 each)" drain this section's §2 table already anticipates; when the onboard-pool system above is actually built, cast costs may move there or coexist with the wallet draw — an open question, not resolved here.
+
 ## 12. Open questions
 
 Logged in [12-open-questions.md](12-open-questions.md): **Q25** (wallet-zero decay rule superseded — full reconciliation with [05](05-component-economy.md)), **Q26** (Stitchworks destruction: refund queued bills?), **Q27** (medic auto-triage AI tuning vs. deathball risk), **Q28** (wallet-cap values and whether caps apply retroactively when storage dies), **Q29** (brain-charge interplay with Megabrain Augmentation and commander capacity — does the +7.2 Capacity monster also need a bigger grey-matter tank?).

@@ -1460,6 +1460,23 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         Debug.Log("Harvester banked " + banked + " blood. Wallet: " + WalletBlood + " blood.");
     }
 
+    /// <summary>docs/26 Phase 10 (Special Attacks System): draws down the
+    /// wallet for a special-attack cast. Clamped at 0, NEVER goes
+    /// negative and NEVER blocks the cast that called it -- this is a
+    /// pure economy sink, not a gate. Matches docs/22 §1's "Floors, not
+    /// stalls" design contract to the letter: "A depleted resource
+    /// degrades a unit; it never disables, strands, or kills it... a
+    /// player who ignores this entire system must still have a
+    /// functional army." An empty wallet reads as "no more free lunch,"
+    /// never "out of bullets, can't fire" -- so casters can't be
+    /// deliberately economy-starved into uselessness the way a hard
+    /// ammo gate would allow.</summary>
+    public void SpendWalletForCast(int blood, int bones)
+    {
+        WalletBlood = Mathf.Max(0, WalletBlood - blood);
+        WalletBones = Mathf.Max(0, WalletBones - bones);
+    }
+
     public void OnCitizenEaten(Citizen citizen)
     {
         // docs/20 per-citizen yield: Blood 2 / Bones 1 / Brains 1

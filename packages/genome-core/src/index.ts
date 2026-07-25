@@ -15,6 +15,7 @@ export * from "./validate.js";
 export * from "./behavior.js";
 export * from "./energy.js";
 export * from "./harvest.js";
+export * from "./attacks.js";
 export * from "./surgery.js";
 export * from "./serialize.js";
 export * from "./cost.js";

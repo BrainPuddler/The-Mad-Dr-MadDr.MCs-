@@ -1335,3 +1335,75 @@ in-range opposing targets; and `SecondaryAttackCatalog.ForMonster`
 routes all three alien-tech hand families to Psionic and everything else
 (including unarmed) to Ground Stomp, with Flamethrower confirmed
 Damage-only. All 33 checks (25 from Phases 4-8, 8 new) pass.
+
+## Special Attacks System Phase 10: Blood/Bones cast cost + Lab display (2026-07)
+
+Creator direction: "Yes let's get that info into the lab, keep It
+compatible with the chop shop but weapons must have a blood and bones
+cost. Keep it reasonable as in follow the guidelines to challenging, but
+not annoying in terms of the actual cost per unit so the user never
+completely runs out of bullets or fuel as should be outlined in the
+game development document." Closes the "into the Lab" item Phase 9 had
+explicitly left undone, plus a new cast-cost requirement.
+
+**Cast cost.** `SpecialAttackDefinition` gained `BloodCost`/`BonesCost`
+(v0.1 ints: Flamethrower 4/2, Psionic Tractor Beam 3/1, Ground Stomp
+2/4). New `RuntimeCityBuilder.SpendWalletForCast(blood, bones)` draws
+down the existing session wallet on every cast, clamped at
+`Mathf.Max(0, wallet - cost)` and NEVER blocking the cast itself. The
+"never completely runs out" requirement turned out to already be
+written down, word for word in spirit, in docs/22 SS1's "Floors, not
+stalls" design contract: "A depleted resource degrades a unit; it never
+disables, strands, or kills it... a player who ignores this entire
+system must still have a functional army." A hard ammo gate was
+considered and rejected specifically because it would let an opponent
+economy-starve a caster into uselessness -- the exact death-spiral
+pattern that contract forbids. Cross-referenced into docs/22 itself
+(after SS11's "still design-only" closing note) so the economy doc and
+the special-attacks doc don't drift out of sync on this point; also
+noted there that this is a WALLET-level sink, simpler than and not yet
+integrated with the (still unbuilt) onboard Brain-pool "ability casts
+(1-3 each)" drain SS2's table already anticipates -- an open question
+for whenever that system gets built, not resolved now.
+
+**Into the Lab.** New `packages/genome-core/src/attacks.ts`
+(`secondaryAttackFor`/`secondaryAttackForGenome`) is the TypeScript twin
+of `SecondaryAttackCatalog.ForMonster` -- same two monster-side outcomes
+(alien-tech hands -> Psionic Tractor Beam, everything else -> Ground
+Stomp), same v0.1 cost numbers, hand-kept in sync (flagged in the
+file's own header -- no automated golden test backs this particular
+pairing, unlike Locomotion/Weapon/Harvest, since it's a lookup table
+rather than a numeric formula). Humans/Tanks aren't genome creatures
+(Flamethrower is fixed Tank.cs archetype data), so the Lab twin only
+covers the two monster outcomes. Exported from the package index,
+built, and copied into `site/lib/` per the project's existing vendoring
+step.
+
+Surfaced in `site/main.js` in two places, both chop-shop-safe (a
+disassembled/stump hand or a freshly grafted alien hand reads correctly
+with zero special-casing, since the classifier already treats anything
+outside its 3-family alien set as the default): the Lab's per-creature
+"vital signs" panel gained a new "Secondary Attack" section right after
+the existing Parts table; the Chop Shop's own slab label gained a
+compact one-line summary, so the info stays visible and correct while a
+creature is mid-surgery -- literally the "keep it compatible with the
+chop shop" ask. New `--bones`/`.bones` CSS convention alongside the
+pre-existing `--blood`/`--fuel`/`--ichor` one, added to all three
+faction skins.
+
+Verified: `packages/genome-core`'s test suite gained
+`tests/attacks.test.ts` (5 checks) -- full suite (56 tests) passes,
+including the golden lineage digest (unaffected: pure additive
+derived-stat module, no RNG stream or catalog change). A manual Node
+smoke test confirmed the vendored `site/lib/index.js` build actually
+exports and runs the new functions end-to-end, and `node --check
+site/main.js` confirmed the edited Lab script parses clean.
+`unity-client` side: flightcheck stub-compile clean across every
+touched file; `harvestcreditverify` gained 2 new checks against the
+real `RuntimeCityBuilder.cs` (deducts exactly the requested blood/bones;
+an overdraw clamps at exactly 0, never negative) -- both pass.
+
+This closes the last of the two Phase-9-era follow-ups that were code-
+buildable. One remains, genuinely out of scope for code alone: the
+non-Citizen consume path (designed, not built -- nothing testable exists
+to build it against).

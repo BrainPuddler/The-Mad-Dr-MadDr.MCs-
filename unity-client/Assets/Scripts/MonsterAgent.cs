@@ -899,6 +899,9 @@ public class MonsterAgent : MonoBehaviour
                 SpecialAttackResolver.ResolveInstant(_builder, _fighter, def, _targetSpecialAttackUnit.transform.position);
             else if (def.EffectType == SpecialAttackEffectType.Stun)
                 SpecialAttackResolver.ResolveInstant(_builder, _fighter, def, transform.position);
+            // docs/26 Phase 10: every cast draws down the wallet -- soft,
+            // never blocks the cast itself (see SpendWalletForCast).
+            if (_builder != null) _builder.SpendWalletForCast(def.BloodCost, def.BonesCost);
             _activeSpecialAttack.TriggerCooldown();
             _activeSpecialAttack = null;
             _targetSpecialAttackUnit = null;

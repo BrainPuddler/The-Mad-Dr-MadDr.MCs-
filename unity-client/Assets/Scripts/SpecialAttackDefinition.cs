@@ -41,6 +41,12 @@ public class SpecialAttackDefinition : ScriptableObject
     [Tooltip("Stun effect type only -- seconds a caught target is frozen (can't move or fire).")]
     public float StunDuration = 2f;
 
+    [Header("Cast cost (docs/26 Phase 10, docs/22 economy)")]
+    [Tooltip("Drawn from the session wallet on cast via RuntimeCityBuilder.SpendWalletForCast -- soft, never blocks the cast (docs/22 'Floors, not stalls': an empty wallet just means no more free lunch, never an out-of-ammo lockout). v0.1 placeholder, per this repo's general numbers policy.")]
+    public int BloodCost = 3;
+    [Tooltip("See BloodCost.")]
+    public int BonesCost = 2;
+
     [Header("AI use requirements")]
     [Tooltip("The AI won't use this ability unless at least this many valid, weighted targets are within the area of effect at the chosen impact point.")]
     public int MinTargetsInArea = 1;

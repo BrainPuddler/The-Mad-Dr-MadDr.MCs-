@@ -8,6 +8,7 @@
   --blood: #ff5a6a;
   --fuel: #ffc14d;
   --ichor: #b07aff;
+  --bones: #e8e4d0;
   --dead: #6b7a72;
   --line: #243430;
 }
@@ -109,7 +110,7 @@ td, th { padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line); }
 .bar { display: inline-block; width: 90px; height: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; vertical-align: middle; margin-right: 6px; }
 .bar i { display: block; height: 100%; background: var(--acid); border-radius: 4px; }
 .num { color: var(--ink); }
-.blood { color: var(--blood); } .fuel { color: var(--fuel); } .ichor { color: var(--ichor); }
+.blood { color: var(--blood); } .fuel { color: var(--fuel); } .ichor { color: var(--ichor); } .bones { color: var(--bones); }
 .ok { color: var(--acid); } .warn { color: var(--fuel); } .bad { color: var(--blood); }
 .empty { color: var(--dim); padding: 16px; text-align: center; }
 
@@ -128,7 +129,7 @@ code { color: var(--acid); }
 body[data-faction="human"] {
   --bg: #0e1114; --panel: #151a20; --panel2: #1c232c;
   --ink: #e8dcae; --dim: #93998a; --acid: #ffb52e;
-  --blood: #ff6a5a; --fuel: #ffc14d; --ichor: #b07aff;
+  --blood: #ff6a5a; --fuel: #ffc14d; --ichor: #b07aff; --bones: #f0ead8;
   --dead: #6b7268; --line: #2b333e;
 }
 body[data-faction="human"] header {
@@ -140,7 +141,7 @@ body[data-faction="human"] h1 { letter-spacing: 5px; }
 body[data-faction="alien"] {
   --bg: #0f0918; --panel: #170e26; --panel2: #211534;
   --ink: #ddccf4; --dim: #9c87c0; --acid: #c08bff;
-  --blood: #ff5a9e; --fuel: #ffc14d; --ichor: #b07aff;
+  --blood: #ff5a9e; --fuel: #ffc14d; --ichor: #b07aff; --bones: #e6def4;
   --dead: #6f6486; --line: #35244f;
 }
 body[data-faction="alien"] header {
@@ -194,6 +195,7 @@ body[data-faction="alien"] button { border-radius: 12px; }
 .chop-slab-label .pl-name { font-size: 15px; color: var(--ink); font-weight: bold; letter-spacing: 1px; }
 .chop-slab-label .pl-plan { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
 .chop-slab-label .pl-stat { font-size: 12px; margin-top: 4px; }
+.chop-slab-label .pl-atk { font-size: 11px; color: var(--dim); margin-top: 4px; }
 .chop-slab-actions { display: flex; flex-direction: column; gap: 6px; width: 100%; margin-top: 6px; }
 .chop-slab-actions button { width: 100%; }
 

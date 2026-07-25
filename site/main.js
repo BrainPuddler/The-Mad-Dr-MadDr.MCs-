@@ -14,6 +14,7 @@ import {
   viability, upkeep, heartCapacity, circulatoryLoad, partUpkeep,
   originOf, isVestigial, homologOf, brainSize, bodyAxis, brainAxis, heartVigor,
   capacity as controlCapacity, controlCost, controlRadius, berserkThreshold,
+  secondaryAttackForGenome,
 } from "./lib/index.js";
 import { initRenderer, updateGenome, destroyRenderer, locomotionProfile, setLabFaction, renderThumbnail, renderPartThumbnail } from "./creature-renderer.js";
 
@@ -857,6 +858,14 @@ function _renderScreenInner(el) {
   const bt = berserkThreshold(g.brain);
   const parents = (g.parentIds ?? []).map(p => esc(nameOf(p))).join(" × ") || "primordial (no parents)";
 
+  // docs/26 Phase 9/10: read straight off the hand slot, same as the
+  // Parts table above -- so a chop-shop stump (or a graft that swaps in
+  // an alien hand) is reflected here with no special-casing, exactly
+  // like every other hand-derived stat on this screen.
+  const atk = secondaryAttackForGenome(g);
+  const atkDelivery = atk.range > 0 ? `range ${atk.range}m` : "self-centered";
+  const atkEffect = atk.effect === "stun" ? "stun" : "pull & consume";
+
   el.innerHTML = `
     <h3>${c.alive ? "" : "💀 "}${esc(c.name)} — vital signs</h3>
     <div class="kv">
@@ -871,6 +880,12 @@ function _renderScreenInner(el) {
     <div class="kv">${bodyRows}</div>
     <h3>Parts</h3>
     <table><tr><th>slot</th><th>family</th><th>origin</th><th>energy</th></tr>${partRows}</table>
+    <h3>Secondary Attack</h3>
+    <div class="kv">
+      <div class="k">${esc(atk.name)}</div><div>${esc(atk.description)}</div>
+      <div class="k">delivery</div><div>${atkEffect} · ${atkDelivery} · AoE ${atk.areaOfEffect}m</div>
+      <div class="k">cast cost</div><div><span class="blood">${atk.bloodCost} blood</span> · <span class="bones">${atk.bonesCost} bones</span></div>
+    </div>
     <h3>Brain — ${esc(g.brain.tier)} (size ${brainSize(g.brain)})</h3>
     <div class="kv">${brainRows}</div>
     <h3>Behavior (expressed)</h3>
@@ -974,12 +989,19 @@ function renderChopSlab() {
     : "One or more of its original parts have already been grafted onto something else";
   const sendTitle = canSendBack ? "" : !c.alive ? "Dead specimens can't go back to the lab"
     : "Must be whole -- no stumps, working heart -- first";
+  // docs/26 Phase 10: recomputed live off whatever's CURRENTLY on the
+  // slab -- a hand mid-harvest reads as a stump (Ground Stomp, same as
+  // any unarmed creature) with no special-casing needed, and a hand
+  // freshly grafted from another specimen is reflected the instant the
+  // graft lands, same as every other part-derived stat in this room.
+  const atk = secondaryAttackForGenome(g);
   wrap.innerHTML = `
     <canvas id="chop-canvas"></canvas>
     <div class="chop-slab-label">
       <div class="pl-name">${c.alive ? "" : "💀 "}${esc(c.name)}</div>
       <div class="pl-plan">${esc(g.body.plan)} · ${esc(g.brain.tier)} brain · ${esc(g.heart.tier)} heart</div>
       <div class="pl-stat ${vClass}">${c.alive ? v.state.toUpperCase() : "DEAD ON THE TABLE"}</div>
+      <div class="pl-atk">⚡ ${esc(atk.name)} — <span class="blood">${atk.bloodCost}🩸</span> <span class="bones">${atk.bonesCost}🦴</span></div>
     </div>
     <div class="chop-slab-actions">
       <button id="btn-restore" title="${restoreTitle}" ${check.ok ? "" : "disabled"}>🩹 Restore original parts</button>

@@ -1,7 +1,8 @@
 # 26 — Special Attacks System (enemy AI)
 
 Status: **Approved architecture, Phases 1–8 implemented + Phase 9
-(secondary attacks for all races)** (design produced
+(secondary attacks for all races) + Phase 10 (Blood/Bones cast cost +
+Lab display)** (design produced
 2026-07 via a research-then-design pass over the existing combat/AI
 architecture before any code was written; creator approved "pure Unity"
 + ScriptableObject-based definitions before implementation began) ·
@@ -138,6 +139,7 @@ per-type flags.
 **Modified:**
 - `SpecialAttackDefinition.cs` — Phase 9: new `Stun` enum value on
   `SpecialAttackEffectType`; new `DamageAmount`/`StunDuration` fields.
+  Phase 10: new `BloodCost`/`BonesCost` fields.
 - `UnitCombat.cs` — `Mass` field, `Abilities` list, ability cooldown
   ticking in `Update()`, `Configure(...)` gains an optional `mass = 1f`
   trailing parameter (every existing call site unaffected); Phase 5 adds
@@ -163,7 +165,8 @@ per-type flags.
   the harvest tank too. Phase 9: `EvaluateBestAbility` gains a self-anchor
   case for `Stun`-type abilities; `TickSpecialAttack` dispatches
   `Damage`/`Stun` to the new `SpecialAttackResolver`; `Init` equips every
-  monster with `SecondaryAttackCatalog.ForMonster(handFamily)`.
+  monster with `SecondaryAttackCatalog.ForMonster(handFamily)`. Phase 10:
+  `TickSpecialAttack` calls `_builder.SpendWalletForCast(...)` at cast time.
 - `Tank.cs` — explicit `mass: 10f` on its `Configure(...)` call, the
   concrete heavy-target example; Phase 5 multiplies
   `_combat.SpeedMultiplier` into the hull-movement line; Phase 6 adds the
@@ -179,7 +182,8 @@ per-type flags.
 - `Projectile.cs` — one additive `OnArrive` hook (Phase 4), existing
   callers unaffected.
 - `RuntimeCityBuilder.cs` — `QueryCombatantsInRadius` (Phase 4), a thin
-  public wrapper over the existing docs/25 neighbour grid.
+  public wrapper over the existing docs/25 neighbour grid. Phase 10:
+  `SpendWalletForCast(blood, bones)`, a soft/clamped wallet deduction.
 - `WebAttackAbility.cs` — Phase 5: `HeavySlowMultiplier`/
   `HeavySlowDuration` constants; the heavy branch now calls
   `c.ApplySlow(...)` instead of only logging; `ShouldCatchCombatant`'s
@@ -196,9 +200,23 @@ per-type flags.
 `SecondaryAttackCatalog.cs` (Phase 9).
 
 **Explicitly untouched:** `WeaponProfile`/`WeaponFx` (additive parallel
-system, not a modification of the existing weapon path),
-`packages/genome-core` (abilities are equipped data, not bred genome
-traits, for this first version), `packages/match-core` (per §1).
+system, not a modification of the existing weapon path), `packages/
+match-core` (per §1). `packages/genome-core` was touched by Phase 10,
+but narrowly: a new DISPLAY-only derived-stat module
+(`attacks.ts`, mirroring `harvest.ts`'s pattern), not a new gene --
+abilities are still equipped data assigned at spawn time
+(`SecondaryAttackCatalog`), never bred/mutated/spliced. The original
+"for this first version" caveat here has now been narrowed rather than
+reversed.
+
+**Phase 10 also touched (outside unity-client):**
+`packages/genome-core/src/attacks.ts` (new), `packages/genome-core/src/
+index.ts` (export), `packages/genome-core/tests/attacks.test.ts` (new),
+`site/lib/attacks.js` (vendored build output), `site/main.js`
+(`_renderScreenInner`'s new Secondary Attack section,
+`renderChopSlab`'s new one-line summary), `site/style.css` (new
+`--bones`/`.bones` convention, all three faction skins + the shared
+`.chop-slab-label .pl-atk` rule).
 
 ## 5. Risks & edge cases (full list; see design-doc discussion for detail)
 
@@ -629,22 +647,91 @@ direct chase-and-eat kill) on arrival if they're a `Citizen`.
   Flamethrower confirmed `Damage`-only. All 33 checks (25 from Phases
   4-8, 8 new) pass.
 
-  **Explicitly NOT done: "into the Lab."** Read narrowly (literally
-  adding to `site/`, the browser test bench) rather than as a colloquial
-  "roll out broadly": the Lab has zero combat-simulation or attack-
-  display code today (confirmed by research before starting this work --
-  it's purely a creature-appearance/roster gallery), and genome-core has
-  no weapon/attack twin at all (`Combat.WeaponFor`'s hand-family switch
-  exists only in `roster-client` C#, never duplicated into TypeScript,
-  unlike Locomotion/Harvest which DO have genome-core twins). Adding a
-  Lab-side "this creature's secondary attack" display would mean
-  inventing a first-of-its-kind combat-stat twin in genome-core purely
-  for display purposes -- a real, separable follow-up, not attempted
-  here without further direction on what the Lab should actually show.
-  The classification rule itself (`SecondaryAttackCatalog.ForMonster`'s
-  hand-family switch) is trivial to mirror into TypeScript whenever that
-  direction is given, since it keys off data the Lab already has
-  (`Slots.Hand.Family`).
+  **"Into the Lab" was deliberately left undone here** -- see Phase 10
+  below, done as a direct follow-up once the creator asked for it.
+
+- **Phase 10 — Blood/Bones cast cost + Lab display.** Creator direction,
+  2026-07: "let's get that info into the lab, keep it compatible with
+  the chop shop but weapons must have a blood and bones cost. Keep it
+  reasonable as in follow the guidelines to challenging, but not
+  annoying in terms of the actual cost per unit so the user never
+  completely runs out of bullets or fuel as should be outlined in the
+  game development document." **Status: done (2026-07).**
+
+  **Cast cost.** `SpecialAttackDefinition` gained `BloodCost`/`BonesCost`
+  (v0.1 ints, per-definition -- Flamethrower 4/2, Psionic Tractor Beam
+  3/1, Ground Stomp 2/4, roughly flavor-weighted: a fuel-burning burst
+  costs more Blood, a joint-jarring stomp costs more Bones). New
+  `RuntimeCityBuilder.SpendWalletForCast(blood, bones)` draws down the
+  EXISTING session wallet (`WalletBlood`/`WalletBones`, the same pool
+  citizen-eating and harvester-banking already feed) on every cast,
+  wired into `MonsterAgent.TickSpecialAttack` at the same "cast attempt
+  happened" moment the cooldown itself starts. Deliberately clamped at
+  `Mathf.Max(0, wallet - cost)` and NEVER blocks the cast that called it
+  -- this follows docs/22 SS1's explicit "Floors, not stalls" design
+  contract to the letter ("A depleted resource degrades a unit; it
+  never disables, strands, or kills it... a player who ignores this
+  entire system must still have a functional army"), which is exactly
+  the creator's own "never completely runs out of bullets or fuel"
+  requirement, already written down in this project's economy doc
+  before this feature existed. An empty wallet just means "no more free
+  lunch," never an out-of-ammo lockout -- a hard ammo gate was
+  considered and rejected specifically because it would let an
+  opponent economy-starve a caster into uselessness, the exact
+  death-spiral pattern docs/22 forbids.
+
+  This is a WALLET-level sink, not the (still design-only, per docs/22
+  SS11) per-unit ONBOARD resource pools SS2 describes -- docs/22's own
+  Brain-pool row already anticipated "ability casts (1-3 each)" draining
+  onboard Brain specifically; this Phase 10 cost is a simpler, already-
+  implementable layer on the currently-real economy (the wallet), not a
+  conflicting mechanic. If/when the onboard-pool system is built, cast
+  costs may move there or coexist -- noted, not resolved, here.
+
+  **Into the Lab.** New `packages/genome-core/src/attacks.ts`
+  (`secondaryAttackFor(handFamily)` / `secondaryAttackForGenome(genome)`)
+  is the TypeScript twin of `SecondaryAttackCatalog.ForMonster` -- same
+  two outcomes, same alien-hand-family set, same v0.1 cost numbers,
+  hand-kept in sync (flagged in the file's own header: no automated
+  golden test backs this pairing yet, unlike Locomotion/Weapon/Harvest,
+  since this is a lookup table rather than numeric-formula output).
+  Exported from the package index, built, and copied into `site/lib/`
+  per the project's standard vendoring step. Humans/Tanks are NOT
+  genome creatures (Flamethrower is fixed Tank.cs archetype data, never
+  bred), so the Lab twin only covers the two monster-side outcomes.
+
+  Surfaced in TWO places in `site/main.js`, both **chop-shop-safe** (a
+  disassembled/stump hand or a freshly grafted alien hand is reflected
+  correctly with zero special-casing, since `secondaryAttackFor` already
+  treats anything outside its 3-family alien set as the default --
+  identical to how an unarmed creature already read before this
+  feature): the Lab's existing per-creature "vital signs" panel
+  (`_renderScreenInner`) gained a new "Secondary Attack" section right
+  after the Parts table (name/description, delivery mechanism + AoE,
+  cast cost) recomputed live off the genome on every render, same as
+  every other part-derived stat already there; and the Chop Shop's own
+  slab label (`renderChopSlab`) gained a compact one-line summary, so
+  the info stays visible and correct while a creature is mid-surgery --
+  the actual ask this doc's Phase 9 entry flagged as untested when it
+  said "into the Lab" was left undone. New `--bones`/`.bones` CSS
+  variable (all three faction skins) alongside the pre-existing
+  `--blood`/`--fuel`/`--ichor` convention.
+
+  Verified: `packages/genome-core`'s test suite gained
+  `tests/attacks.test.ts` (5 checks: all three alien hand families route
+  to Psionic; every other family including `hand_stump` routes to
+  Ground Stomp; Ground Stomp is self-centered; both kinds carry a
+  nonzero cost; the genome-reading convenience function matches the
+  family-reading one) -- full suite (56 tests total) passes, including
+  the golden lineage digest (unaffected -- this is a pure additive
+  derived-stat module, no RNG stream or catalog change). A manual Node
+  smoke test confirmed the vendored `site/lib/index.js` build actually
+  exports and runs the new functions end-to-end.
+  `unity-client` side: flightcheck stub-compile clean;
+  `harvestcreditverify` gained 2 new checks against the real
+  `RuntimeCityBuilder.cs` (`SpendWalletForCast` deducts exactly the
+  requested blood/bones; an overdraw clamps at exactly 0, never
+  negative) -- both pass.
 
 ## v0.1 tuning appendix
 
@@ -655,6 +742,9 @@ Mass threshold separating "non-heavy" from "heavy-class"),
 heavy target moves at 35% speed for 3s while caught), `CapturePullSpeed
 = 6f` m/s (Phase 6 — how fast a non-heavy target is dragged toward its
 captor), `CaptureState.ArriveRadius = 1.5f` (how close counts as
-"arrived" — now eaten-on-arrival for citizens, Phase 7). All
+"arrived" — now eaten-on-arrival for citizens, Phase 7). Phase 10 cast
+costs (`SpecialAttackDefinition.BloodCost`/`BonesCost`, drawn from the
+wallet, soft/never-blocking): Flamethrower 4 blood / 2 bones, Psionic
+Tractor Beam 3 blood / 1 bones, Ground Stomp 2 blood / 4 bones. All
 placeholders until playtested, per this repo's general v0.1 numbers
 policy.

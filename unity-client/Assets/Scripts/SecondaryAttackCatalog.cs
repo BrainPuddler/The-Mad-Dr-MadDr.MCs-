@@ -41,6 +41,11 @@ public static class SecondaryAttackCatalog
             _flamethrower.EffectType = SpecialAttackEffectType.Damage;
             _flamethrower.DamageAmount = 30f;
             _flamethrower.MinTargetsInArea = 1;
+            // docs/22 "fun first, never annoying": a soft wallet draw,
+            // not an ammo gate -- see SpecialAttackDefinition.BloodCost.
+            // A wide fuel-burning burst costs more Blood than Bones.
+            _flamethrower.BloodCost = 4;
+            _flamethrower.BonesCost = 2;
         }
         return _flamethrower;
     }
@@ -63,6 +68,10 @@ public static class SecondaryAttackCatalog
             _psionicTractorBeam.AreaOfEffect = 2f;
             _psionicTractorBeam.ValidTargets = TargetFilter.All;
             _psionicTractorBeam.EffectType = SpecialAttackEffectType.PullAndConsume;
+            // psionic energy over physical material -- lighter Bones draw
+            // than the other two.
+            _psionicTractorBeam.BloodCost = 3;
+            _psionicTractorBeam.BonesCost = 1;
         }
         return _psionicTractorBeam;
     }
@@ -85,6 +94,10 @@ public static class SecondaryAttackCatalog
             _groundStomp.ValidTargets = TargetFilter.All;
             _groundStomp.EffectType = SpecialAttackEffectType.Stun;
             _groundStomp.StunDuration = 2f;
+            // joint/frame strain over blood loss -- heavier Bones draw
+            // than the other two.
+            _groundStomp.BloodCost = 2;
+            _groundStomp.BonesCost = 4;
         }
         return _groundStomp;
     }
