@@ -2034,3 +2034,80 @@ Not yet done, explicitly deferred (see docs/23 §3's own updated status
 note): income ticks (both sources), upkeep drains, onboard per-unit
 pools, the `FuelNodes` generator, and the whole Unity half (gas-station
 dressing, wallet/cap HUD line).
+
+## docs/23 Phase 3.5: emitters + the Lumen mana currency (2026-07)
+
+Following "continue" after Phase 3 -- docs/23 §13 amendment C's corrected
+dependency spine explicitly inserts Phase 3.5 (amendment B) here, before
+Phase 4/6, because Phase 6's damage formula depends on `emitterMod` and
+the anti-turtle Dominion victory condition needs live emitter ownership.
+
+Unlike Phase 3's economy tasks (mostly gated on missing prerequisites),
+docs/03-mana-system.md is a fully v0.1-spec'd document with real numbers
+already: Lumen Cycle durations (90/30/90/30s), the polarity/phase output
+table, an 8s capture channel with contested-pause, a 100 mana cap. Ported
+these directly rather than inventing anything.
+
+What shipped: citygen-core gained `EmitterPolarity` (Solar/Lunar/
+Twilight) and `Landmark.Polarity`, assigned round-robin at generation
+time using the existing per-emitter `emitterIndex` counter -- "roughly
+balanced mix" (docs/03) satisfied trivially since round-robin can never
+differ by more than 1 between any two polarities. match-core gained
+`LumenPhase`/`LumenClock` (deliberately NOT stateful -- the current
+phase is a pure function of `MatchState.Frame`, nothing to keep in sync
+or drift), `SimEmitter` (capture is automatic, reading live unit
+positions every tick -- there is no capture Command, matching docs/03's
+own "captured by a monster standing on the hex" framing), and
+`PlayerState.Mana` (a currency deliberately DISJOINT from the
+`ResourceKind` wallet array, per docs/03's own "Mana is energy...
+Components are material" framing -- never a seventh `ResourceKind`).
+Mana income grants once per simulated second (docs/03's table is already
+whole mana/second, so this is exact, not a fractional approximation).
+
+**A real gap discovered while writing the capture tests, not introduced
+by this phase:** a `Landmark`'s own `Site` hex is part of its
+Landmark-tier building's footprint, which `BattlefieldState` blocks to
+ground movement -- confirmed by direct inspection (every generated
+emitter's site hex reads `blocked=True`). This means a GROUND unit can
+never actually walk onto the exact hex docs/03's capture rule names, for
+ANY landmark, today -- this predates Phase 3.5 entirely (it's a Phase 1
+city-generation decision from the original "landmark = a Landmark-tier
+building occupying the site + its footprint" design) and was only
+surfaced now because emitter capture is the first mechanic that actually
+needs a unit standing on that specific hex. Flying units aren't excluded
+by the ground-blocked set, so the mechanic isn't fully inert, but a real
+design decision is needed (open the site hex itself back up, capture
+from an adjacent hex instead, or something else) before ground armies
+can capture emitters in a real match. NOT resolved here -- flagged for
+whoever picks it up, the same discipline as every other open question in
+this log. (Practical effect on this phase's own tests: two capture tests
+that needed to move a unit AWAY from an emitter hex found that
+`HexPathfinder.FindPath` returns null starting from that blocked hex, so
+they reposition the test unit directly via reflection instead of issuing
+a real `MoveTo` -- a test-only workaround for this same gap, documented
+inline in `EmitterTests.cs`.)
+
+Explicitly deferred, not faked: unit affinity (solar/lunar/neutral) and
+the `emitterMod` attack/speed modifiers docs/03 defines for it -- needs
+genome-linked per-unit data in `SimUnit` AND a combat formula, neither
+exists yet (Phase 4's job per the corrected dependency spine); the
+Dominion victory timer -- needs a match end-condition system that
+doesn't exist at all; the Unity-side moon-dial HUD, capture progress
+bar, and mana display (today's only emitter visualization is the
+existing `BuildLandmarkAuras` aura rings, from an earlier batch).
+
+Verified: `packages/citygen-core/Tests~/CityGeneratorTests.cs` gained 7
+new tests (152 total) for polarity assignment (emitter-only, roughly
+balanced, deterministic). `packages/match-core/Tests~/EmitterTests.cs`
+gained 33 new tests (84 match-core total) covering: exact Lumen phase
+boundaries at every tick threshold including the cycle wraparound;
+emitter seeding count; capture progressing while uncontested, staying
+frozen (not reset) while contested, resetting when abandoned, flipping
+ownership at exactly the 80th tick, and recapture by a different player;
+mana income matching docs/03's table exactly for every polarity/phase
+combination, the 100-cap overflow-loss rule, and unowned emitters
+granting nothing; and hash-determinism with emitters/capture/mana all in
+play. citygen-core's other 145 pre-existing tests and match-core's other
+51 remain untouched. `harvestcreditverify` (21 checks) and `flightcheck`
+still pass/compile against the refreshed DLL -- no Unity-side files
+touched this phase, same as Phase 3.

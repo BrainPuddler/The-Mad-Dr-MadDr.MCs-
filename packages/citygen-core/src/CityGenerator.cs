@@ -480,10 +480,16 @@ namespace MadDr.CityGen
 
                 string archetype;
                 LandmarkKind kind;
+                EmitterPolarity? polarity = null;
                 if (isEmitter)
                 {
                     kind = LandmarkKind.Emitter;
                     archetype = preset.EmitterArchetypes[emitterIndex % preset.EmitterArchetypes.Length];
+                    // docs/03: "roughly balanced polarity mix" -- round-robin
+                    // over EMITTER generation order (not the shared i/hub
+                    // counter) guarantees any two polarities differ by at
+                    // most 1 across the whole map, deterministically.
+                    polarity = (EmitterPolarity)(emitterIndex % 3);
                     emitterIndex++;
                     emittersLeft--;
                 }
@@ -506,7 +512,7 @@ namespace MadDr.CityGen
                 }
                 foreach (var h in footprint) occupied.Add(h);
 
-                landmarks.Add(new Landmark(kind, archetype, site));
+                landmarks.Add(new Landmark(kind, archetype, site, polarity));
                 buildings.Add(new Building(footprint, BuildingTier.Landmark, archetype));
             }
         }

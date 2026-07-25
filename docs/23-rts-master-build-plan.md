@@ -671,6 +671,41 @@ of Phase 6's docs/04 golden examples (`emitterMod 1.25`) depend on them. Build
 emitter runtime + mana as its own economy sibling in `match-core` before Phase
 6 needs it. Without this the anti-turtle victory path ships as dead code.
 
+> **Status (2026-07): sim-side core done (Lumen Cycle, capture,
+> ownership, mana income) — unlike Phase 3's economy tasks, docs/03
+> is a fully v0.1-spec'd doc with real numbers already, so nothing here
+> was a flagged placeholder.** `LumenPhase`/`LumenClock` (a pure function
+> of `MatchState.Frame`, no separate clock state to drift), `SimEmitter`
+> (automatic capture from live unit positions — no capture Command
+> exists, matching docs/03's own "captured by a monster standing on the
+> hex" framing), and `PlayerState.Mana` (a currency deliberately DISJOINT
+> from the `ResourceKind` wallet, capped at 100 per docs/03) are all
+> implemented and tested. citygen-core also gained `EmitterPolarity`
+> (Solar/Lunar/Twilight), assigned round-robin at generation time — a
+> "roughly balanced mix" per docs/03, satisfied trivially by construction.
+>
+> **A real gap discovered while testing, not a Phase 3.5 regression:**
+> an emitter's own `Landmark.Site` hex is part of its Landmark-tier
+> building's footprint, which `BattlefieldState` blocks-to-ground —
+> meaning a GROUND unit can never actually stand on the exact hex docs/03's
+> capture rule names, today, for ANY landmark (this predates this phase;
+> discovered here because emitter capture is the first mechanic that
+> actually needed to test standing on that specific hex). Flying units
+> aren't excluded by the ground-blocked set, so the mechanic isn't fully
+> dead, but this needs an actual design decision (open the site hex
+> itself, capture from an adjacent hex instead, or something else) before
+> ground-army emitter captures work in a real match. Logged in docs/12,
+> not resolved here.
+>
+> **Explicitly deferred, not faked:** unit affinity (solar/lunar/neutral)
+> and the `emitterMod` attack/speed modifiers it feeds — needs
+> genome-linked per-unit data in `SimUnit` AND a combat formula, neither
+> exists yet (Phase 4's job); the Dominion victory timer — needs a match
+> end-condition system that doesn't exist at all; Unity-side moon-dial
+> HUD, capture progress bar, and mana display (the existing
+> `BuildLandmarkAuras` aura rings are the only emitter visualization
+> today).
+
 **C. Phase reorder — combat resolution moves EARLY.** The docs/04 damage
 formula, target acquisition, and the death→salvage event are prerequisites of
 XP (§4), attack-move (§5), and everything in §6. Move the **core combat loop**

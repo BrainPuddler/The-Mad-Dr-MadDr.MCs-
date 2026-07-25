@@ -52,6 +52,18 @@ namespace MadDr.MatchCore
         /// 1v1 via off-origin neutral drops.</summary>
         public int SalvagedOrigins { get; private set; }
 
+        /// <summary>docs/03 / docs/23 Phase 3.5: mana, a currency DISJOINT
+        /// from the <see cref="ResourceKind"/> wallet above -- "Mana is
+        /// energy... Components are material," never interchangeable
+        /// (docs/03's own load-bearing framing) -- so it's its own field,
+        /// not a seventh `ResourceKind`. Fixed cap (docs/03: "cap 100;
+        /// overflow is lost"), unlike the wallet's per-resource caps,
+        /// which start uncapped and only rise when a building completes --
+        /// mana's cap is a real, given number from day one, nothing to
+        /// leave open.</summary>
+        public const int ManaCap = 100;
+        public int Mana { get; private set; }
+
         public PlayerState(int playerIndex, FactionId faction, int supplyCap)
         {
             PlayerIndex = playerIndex;
@@ -120,6 +132,29 @@ namespace MadDr.MatchCore
             _walletCap[i] = _walletCap[i] == int.MaxValue ? by : _walletCap[i] + by;
         }
 
+        /// <summary>Bank mana income, clamped at <see cref="ManaCap"/>
+        /// (docs/03: "overflow is lost"). Unlike the wallet's
+        /// <see cref="Grant"/>, a straight clamp is correct here with no
+        /// "room" trick needed -- mana's cap is fixed at 100 from the
+        /// start of the match, never raised later, so there's no
+        /// "already-over-a-since-lowered-cap" edge case to protect
+        /// against.</summary>
+        public void GrantMana(int amount)
+        {
+            if (amount < 0) throw new ArgumentOutOfRangeException(nameof(amount));
+            Mana = Math.Min(Mana + amount, ManaCap);
+        }
+
+        /// <summary>Spend mana if affordable; same validation-not-clamping
+        /// contract as <see cref="TrySpend"/>.</summary>
+        public bool TrySpendMana(int amount)
+        {
+            if (amount < 0) throw new ArgumentOutOfRangeException(nameof(amount));
+            if (Mana < amount) return false;
+            Mana -= amount;
+            return true;
+        }
+
         /// <summary>Record salvaging a part of the given origin -- sets its
         /// bit toward the Chimera unlock.</summary>
         public void RecordSalvage(Origin origin) => SalvagedOrigins |= 1 << (int)origin;
@@ -135,6 +170,7 @@ namespace MadDr.MatchCore
             {
                 SupplyUsed = SupplyUsed,
                 SalvagedOrigins = SalvagedOrigins,
+                Mana = Mana,
             };
             Array.Copy(_wallet, c._wallet, _wallet.Length);
             Array.Copy(_walletCap, c._walletCap, _walletCap.Length);
@@ -153,6 +189,7 @@ namespace MadDr.MatchCore
             h.Add(SupplyUsed);
             h.Add(SupplyCap);
             h.Add(SalvagedOrigins);
+            h.Add(Mana);
         }
     }
 }

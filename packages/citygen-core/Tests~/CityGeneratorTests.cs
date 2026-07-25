@@ -183,6 +183,50 @@ public class CityGeneratorTests
 
     [Theory]
     [MemberData(nameof(PresetNames))]
+    public void Emitter_polarity_is_assigned_only_to_emitters_never_hubs(string presetName)
+    {
+        var m = CityGenerator.Generate(5u, PresetByName(presetName));
+        foreach (var l in m.Landmarks)
+        {
+            if (l.Kind == LandmarkKind.Emitter) Assert.NotNull(l.Polarity);
+            else Assert.Null(l.Polarity);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(PresetNames))]
+    public void Emitter_polarity_mix_is_roughly_balanced_docs03(string presetName)
+    {
+        // docs/03: "Maps carry 6-10 emitters in a roughly balanced
+        // polarity mix" -- round-robin assignment guarantees any two
+        // polarities' counts differ by at most 1, for any emitter total.
+        var m = CityGenerator.Generate(5u, PresetByName(presetName));
+        var counts = new Dictionary<EmitterPolarity, int>
+        {
+            [EmitterPolarity.Solar] = 0,
+            [EmitterPolarity.Lunar] = 0,
+            [EmitterPolarity.Twilight] = 0,
+        };
+        foreach (var l in m.Landmarks)
+            if (l.Kind == LandmarkKind.Emitter) counts[l.Polarity.Value]++;
+
+        var min = counts.Values.Min();
+        var max = counts.Values.Max();
+        Assert.True(max - min <= 1, $"polarity counts should differ by at most 1 (got Solar={counts[EmitterPolarity.Solar]}, Lunar={counts[EmitterPolarity.Lunar]}, Twilight={counts[EmitterPolarity.Twilight]})");
+    }
+
+    [Fact]
+    public void Emitter_polarity_assignment_is_deterministic_across_two_runs()
+    {
+        var a = CityGenerator.Generate(77u, CityPreset.SmallTown());
+        var b = CityGenerator.Generate(77u, CityPreset.SmallTown());
+        var emittersA = a.Landmarks.Where(l => l.Kind == LandmarkKind.Emitter).Select(l => l.Polarity).ToList();
+        var emittersB = b.Landmarks.Where(l => l.Kind == LandmarkKind.Emitter).Select(l => l.Polarity).ToList();
+        Assert.Equal(emittersA, emittersB);
+    }
+
+    [Theory]
+    [MemberData(nameof(PresetNames))]
     public void Landmark_archetypes_come_from_the_preset_lists(string presetName)
     {
         var preset = PresetByName(presetName);

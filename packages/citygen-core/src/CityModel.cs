@@ -32,6 +32,17 @@ namespace MadDr.CityGen
         CommunityHub,
     }
 
+    /// <summary>An emitter's output polarity (docs/03) -- which half of
+    /// the Lumen Cycle it favors. Only meaningful on a
+    /// <see cref="LandmarkKind.Emitter"/> landmark; null on a
+    /// CommunityHub (see <see cref="Landmark.Polarity"/>).</summary>
+    public enum EmitterPolarity
+    {
+        Solar,
+        Lunar,
+        Twilight,
+    }
+
     /// <summary>A landmark node from the generator's allocation pass
     /// (docs/18 SS2): each node is EITHER an emitter host OR a Community
     /// Hub, never both.</summary>
@@ -50,11 +61,21 @@ namespace MadDr.CityGen
         public string Archetype { get; }
         public HexCoord Site { get; }
 
-        public Landmark(LandmarkKind kind, string archetype, HexCoord site)
+        /// <summary>docs/03: this emitter's output polarity, deterministically
+        /// assigned by the generator (round-robin across generation order --
+        /// a "roughly balanced polarity mix" per docs/03 SS"Emitter polarities
+        /// &amp; output", satisfied trivially since round-robin can never be
+        /// more than 1 apart between any two polarities). Null on a
+        /// <see cref="LandmarkKind.CommunityHub"/> -- polarity is an
+        /// emitter-only concept.</summary>
+        public EmitterPolarity? Polarity { get; }
+
+        public Landmark(LandmarkKind kind, string archetype, HexCoord site, EmitterPolarity? polarity = null)
         {
             Kind = kind;
             Archetype = archetype;
             Site = site;
+            Polarity = polarity;
         }
 
         /// <summary>The radius this landmark's mechanic covers: emitter

@@ -85,6 +85,17 @@ namespace MadDr.MatchCore
         private readonly List<SimBuilding> _buildingsInOrder = new List<SimBuilding>();
         private readonly Dictionary<uint, SimBuilding> _buildingsById = new Dictionary<uint, SimBuilding>();
 
+        /// <summary>docs/23 Phase 3.5: one runtime entry per
+        /// <see cref="LandmarkKind.Emitter"/> in the generated city,
+        /// seeded once at <see cref="Create"/> and in a FIXED order
+        /// (generation order -- <see cref="CityModel.Landmarks"/>'s own
+        /// list order, which is itself deterministic) for the same
+        /// never-hash-order reason every other collection in this class
+        /// follows it. Emitters are pre-existing map features, not
+        /// player-built, so unlike units/buildings they get no entity ID
+        /// and are never looked up by one.</summary>
+        private readonly List<SimEmitter> _emitters = new List<SimEmitter>();
+
         /// <summary>The tick this state is AT -- 0 before the first Tick.</summary>
         public int Frame { get; private set; }
 
@@ -105,6 +116,11 @@ namespace MadDr.MatchCore
             _rng = rng;
             _city = city;
             _blockedToGround = city != null ? BattlefieldState.FreshFrom(city).BlockedToGround() : null;
+
+            if (city != null)
+                foreach (var landmark in city.Landmarks)
+                    if (landmark.Kind == LandmarkKind.Emitter)
+                        _emitters.Add(new SimEmitter(landmark.Site, landmark.Polarity!.Value));
         }
 
         /// <summary>Start a fresh match. <paramref name="factions"/> is one
@@ -202,6 +218,18 @@ namespace MadDr.MatchCore
 
         public SimBuilding? FindBuilding(uint entityId) => _buildingsById.TryGetValue(entityId, out var b) ? b : null;
 
+        /// <summary>docs/03: the current Lumen Cycle phase -- a pure
+        /// function of <see cref="Frame"/>, nothing to seed or drift out
+        /// of sync (see <see cref="LumenClock"/>'s own doc comment).</summary>
+        public LumenPhase CurrentLumenPhase => LumenClock.PhaseAt(Frame);
+
+        public int EmitterCount => _emitters.Count;
+
+        /// <summary>Read-only emitter access in generation order -- same
+        /// "fixed, never hash-order" law as <see cref="UnitAt"/>/
+        /// <see cref="BuildingAt"/>.</summary>
+        public SimEmitter EmitterAt(int index) => _emitters[index];
+
         /// <summary>Apply damage to a building (docs/23 §2's "Damaged →
         /// Destroyed (rubble hexes reopen)" staging) -- a forward-looking
         /// entry point for the combat phase that hasn't landed sim-side
@@ -230,6 +258,86 @@ namespace MadDr.MatchCore
             if (def.StorageCapBonus == null) return;
             var bonus = def.StorageCapBonus.Value;
             _players[building.PlayerIndex].RaiseWalletCap(bonus.Resource, bonus.Amount);
+        }
+
+        /// <summary>docs/03 / Phase 3.5: one tick of capture logic for
+        /// every emitter, reading live unit positions fresh (no cached
+        /// occupancy state -- a unit that moved off the hex this very
+        /// tick is already gone). For each emitter: `soleOccupant` is the
+        /// one player with a unit standing on its EXACT hex, or null if
+        /// the hex is empty OR units from 2+ different players are on it
+        /// simultaneously (no valid single claimant either way);
+        /// `contested` is true if any unit belonging to a DIFFERENT
+        /// player than `soleOccupant` is anywhere within the 3-hex aura
+        /// (docs/03's own radius, reused from <see cref="Landmark.
+        /// EmitterAuraRadiusHexes"/> rather than a second hardcoded
+        /// constant).</summary>
+        private void TickEmitters()
+        {
+            for (var e = 0; e < _emitters.Count; e++)
+            {
+                var emitter = _emitters[e];
+                int? soleOccupant = null;
+                var multipleClaimants = false;
+
+                for (var i = 0; i < _unitsInOrder.Count; i++)
+                {
+                    var u = _unitsInOrder[i];
+                    var hex = HexAt(u.X, u.Z);
+                    if (hex.Q != emitter.Hex.Q || hex.R != emitter.Hex.R) continue;
+                    if (soleOccupant == null) soleOccupant = u.PlayerIndex;
+                    else if (soleOccupant.Value != u.PlayerIndex) multipleClaimants = true;
+                }
+                if (multipleClaimants) soleOccupant = null;
+
+                var contested = false;
+                if (soleOccupant != null)
+                {
+                    for (var i = 0; i < _unitsInOrder.Count; i++)
+                    {
+                        var u = _unitsInOrder[i];
+                        if (u.PlayerIndex == soleOccupant.Value) continue;
+                        var hex = HexAt(u.X, u.Z);
+                        if (hex.DistanceTo(emitter.Hex) <= Landmark.EmitterAuraRadiusHexes) { contested = true; break; }
+                    }
+                }
+
+                emitter.Tick(soleOccupant, contested);
+            }
+        }
+
+        /// <summary>docs/03's polarity/phase output table, granted once
+        /// per simulated second to each owned emitter's controller.
+        /// Un-owned emitters (docs/03: emitters start uncaptured) produce
+        /// nothing until someone actually holds them.</summary>
+        private void GrantEmitterManaIncome()
+        {
+            var phase = CurrentLumenPhase;
+            for (var e = 0; e < _emitters.Count; e++)
+            {
+                var emitter = _emitters[e];
+                if (emitter.Owner == null) continue;
+                _players[emitter.Owner.Value].GrantMana(EmitterOutput(emitter.Polarity, phase));
+            }
+        }
+
+        /// <summary>docs/03's "Emitter polarities &amp; output" table,
+        /// verbatim: Solar peaks Day (5), Lunar peaks Night (5), Twilight
+        /// peaks the transitions (6) and is otherwise flat (3) -- Solar/
+        /// Lunar are flat 3 during the transition they don't favor.</summary>
+        private static int EmitterOutput(EmitterPolarity polarity, LumenPhase phase)
+        {
+            switch (polarity)
+            {
+                case EmitterPolarity.Solar:
+                    return phase == LumenPhase.Day ? 5 : phase == LumenPhase.Night ? 1 : 3;
+                case EmitterPolarity.Lunar:
+                    return phase == LumenPhase.Night ? 5 : phase == LumenPhase.Day ? 1 : 3;
+                case EmitterPolarity.Twilight:
+                    return phase == LumenPhase.Dusk || phase == LumenPhase.Dawn ? 6 : 3;
+                default:
+                    return 0;
+            }
         }
 
         /// <summary>Advance the simulation by exactly one tick, applying
@@ -286,14 +394,28 @@ namespace MadDr.MatchCore
                 if (!wasComplete && b.State == BuildingState.Complete) ApplyStorageCapBonus(b);
             }
 
-            // Economy income and upkeep drains, combat resolution, and
-            // everything else arrive with their own phases (docs/23
-            // §13-A porting workstream) -- gated on prerequisites that
-            // haven't landed yet (Citizens as sim entities, genome-linked
-            // per-unit cost data, the FuelNodes generator; see docs/12's
-            // Phase 3 entry). The frame advance itself is the
-            // deterministic heartbeat every system hangs off.
+            // docs/23 §13 amendment B (Phase 3.5): emitter capture, entity
+            // order (generation order, fixed -- same law as everything
+            // else). Reads live unit positions fresh every tick; capture
+            // is automatic (docs/03), never a Command.
+            TickEmitters();
+
+            // Economy income (Blood/Fuel/Ichor/etc.) and upkeep drains,
+            // combat resolution, and everything else arrive with their
+            // own phases (docs/23 §13-A porting workstream) -- gated on
+            // prerequisites that haven't landed yet (Citizens as sim
+            // entities, genome-linked per-unit cost data, the FuelNodes
+            // generator; see docs/12's Phase 3 entry). The frame advance
+            // itself is the deterministic heartbeat every system hangs
+            // off.
             Frame++;
+
+            // docs/03 / Phase 3.5 mana income: once per simulated SECOND
+            // (docs/03's table is already whole mana/second, so granting
+            // it once every 10 completed ticks is exact, not a
+            // fractional approximation), checked on the POST-increment
+            // Frame so it fires on the 10th/20th/30th... tick.
+            if (Frame % TicksPerSecond == 0) GrantEmitterManaIncome();
         }
 
         private void ApplyCommand(Command cmd)
@@ -521,6 +643,8 @@ namespace MadDr.MatchCore
             for (var i = 0; i < _unitsInOrder.Count; i++) _unitsInOrder[i].WriteTo(h);
             h.Add(_buildingsInOrder.Count);
             for (var i = 0; i < _buildingsInOrder.Count; i++) _buildingsInOrder[i].WriteTo(h);
+            h.Add(_emitters.Count);
+            for (var i = 0; i < _emitters.Count; i++) _emitters[i].WriteTo(h);
             return h.Value;
         }
     }
