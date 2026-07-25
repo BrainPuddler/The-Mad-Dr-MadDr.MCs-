@@ -583,6 +583,24 @@ interpolation with no `Time.deltaTime`-driven gameplay left in `MonsterAgent`.
 This is the plan's true long pole — treat Phases 2–6 as "design system + port it
 into the tick sim," never "add to the Unity Update loop."
 
+> **Status (2026-07): match-core half done, Unity half not started.**
+> `packages/match-core` gained `SimUnit` (Idle/MoveTo order state, fixed-tick
+> movement) and `MatchState.SpawnUnit`/`CommandKind.MoveTo`, using the SAME
+> `HexPathfinder`/`BattlefieldState.BlockedToGround()` the live game paths
+> with, so sim pathing and Unity pathing agree by construction. The
+> acceptance bar's sim-side half is met: `Tools~/DetHarness` proves 100
+> units on scripted `MoveTo` orders hash identically across two runs (19
+> `dotnet test` cases green, `packages/citygen-core`'s 145 untouched). The
+> Unity-side half — `MonsterAgent` rewritten to render interpolated sim
+> state with zero `Time.deltaTime` gameplay decisions left — is explicitly
+> NOT attempted yet: no Unity Editor exists in this environment to visually
+> verify a rewrite of a ~950-line file ten already-shipped phases depend on,
+> and this project's own discipline forbids claiming visual verification
+> that didn't happen. See docs/12 (2026-07, "docs/23 Phase 1.5") for the
+> full account. Next: design the Unity-side interpolated-view contract
+> (probably a parallel/incremental cutover, not a single blind rewrite) and
+> get it in front of the creator's own Editor to actually check.
+
 **B. New Phase 3.5 (or fold into 3) — Emitters + the Lumen mana currency.**
 Nothing in the first draft implemented docs/03's emitter capture (8 s
 stand-and-hold, contested-pause), ownership, the Dominion timer, affinity

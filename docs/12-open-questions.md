@@ -1451,3 +1451,70 @@ No code changes to `match-core` itself -- Phase 1 needed a review and a
 missing note, not new implementation. Next: Phase 1.5 ("Port the live
 sim into match-core," §13 amendment A) — the plan's stated true critical
 path, and NOT yet started.
+
+## docs/23 Phase 1.5: port unit movement into match-core (2026-07)
+
+Creator direction: "Continue to the next step" (following the Phase 1
+review). Per docs/23's own corrected dependency spine (§13 amendment C:
+`1 -> 1.5 -> 2 -> 3 -> ...`), the next step is Phase 1.5 -- amendment
+A's "port the live sim into match-core," explicitly named the plan's
+true critical path, since none of `MonsterAgent`/`UnitCombat`/`Tank`/
+`Citizen`/`TrafficCar` is tick-driven or hashable today.
+
+Amendment A actually asks for two things: (1) port the *movement +
+order state machine* of one unit type into `match-core` as a
+deterministic fixed-tick entity, and (2) rewrite Unity's `MonsterAgent`
+to render that sim state via interpolation with ZERO
+`Time.deltaTime`-driven gameplay decisions left. Did (1) in full this
+pass; deliberately did NOT attempt (2).
+
+**What shipped (match-core side):** new `SimUnit` (`Idle`/`MoveTo`
+order state, double X/Z hashed bitwise, ticked by consuming a
+`Speed * dt` budget across as many path nodes as it covers per tick --
+never leaves fractional-tick motion on the table, matching what Unity's
+FollowPath already does per-frame). `MatchState.SpawnUnit` (a direct,
+setup-time call, same precedent as the existing `AllocateEntityId` --
+match-start placement isn't a replayable player order). New
+`CommandKind.MoveTo` -- the canonical, replayable way to ORDER a unit
+(targets an entity ID per §13-J, never an object reference), resolving
+a path via the SAME `HexPathfinder`/`BattlefieldState.
+BlockedToGround()` citygen-core already exposes and the live Unity game
+already uses, so sim pathing and Unity pathing agree by construction,
+not by coincidence, once the Unity side is ported. Units are iterated
+for `Tick`/`Hash` strictly in entity-ID allocation order (a parallel
+dictionary gives O(1) command dispatch without touching iteration
+order) -- the §0 "never object reference or hash-set order" rule is now
+structural, not just a comment.
+
+**What did NOT ship (Unity side), on purpose:** `MonsterAgent` rewritten
+to render interpolated sim state only. This is a ~950-line file that
+ten already-shipped phases of this session's own work (docs/26 Special
+Attacks System Phases 1-10, docs/22 harvest, docs/25 steering) all
+depend on, and there is no Unity Editor in this environment to visually
+verify a rewrite of that size actually still plays correctly --
+attempting it blind would directly violate this project's own "never
+claim visual verification" rule (ground rule #4 in docs/23 itself).
+Flagged in docs/23 (a new inline status note under amendment A) and
+here, not silently skipped or half-attempted.
+
+**Verified:** `dotnet test` -- 19 tests green (13 original Phase-1
+tests + 6 new: spawn-idle-at-hex, MoveTo-reaches-and-goes-idle,
+unreachable/unknown-entity is a silent no-op (never throws, never
+creates a phantom unit), mid-path redirect recomputes from the unit's
+actual current position, entity-ID-ordered iteration). `packages/
+citygen-core`'s 145 tests untouched (no citygen-core changes).
+`Tools~/DetHarness` now runs BOTH acceptance proofs: the original
+Phase-1 10k-tick empty-match check, and a new Phase-1.5 check (100
+units, scripted `MoveTo` orders over a real generated `CityPreset.
+Village()`, 3,000 ticks) -- both hash identically across two runs. Note:
+the Phase-1 empty-match hash value changed (was `94F13654C8B8941B`, now
+`EC265E3CF8E6B74B`) because `Hash()` now includes the unit list/count --
+expected and harmless (the hash only needs to be internally consistent
+between two runs of the SAME code, never stable across a code version
+that deliberately changed what it hashes); recorded here so nobody
+mistakes it for a regression later.
+
+Next: the Unity-side interpolated-view contract for `MonsterAgent` --
+probably an incremental/parallel cutover design (not a single blind
+rewrite) that the creator can actually check in their own Editor before
+it's trusted, rather than another environment-blind pass.

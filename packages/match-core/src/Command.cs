@@ -11,6 +11,12 @@ namespace MadDr.MatchCore
     {
         None = 0,
         Ping = 1,   // Phase 1 placeholder: carries data through the pipeline, affects only the ack counter
+        /// <summary>docs/23 Phase 1.5: order the unit at TargetEntity to
+        /// walk to the hex (ArgA=Q, ArgB=R). The canonical, replayable way
+        /// to move a unit -- never a direct method call from outside the
+        /// sim, so a real lockstep command log can reconstruct the exact
+        /// same order stream.</summary>
+        MoveTo = 2,
     }
 
     /// <summary>

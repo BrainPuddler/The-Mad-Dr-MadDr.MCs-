@@ -9,7 +9,7 @@ tested standalone via `dotnet`, imported into Unity as an asmdef reference.
 lockstep 4v4 is built on.** Everything here is integer/fixed-point and hashes
 byte-for-byte identically across machines (docs/23 §0 float discipline).
 
-## Phase 1 scope (this commit)
+## Phase 1 scope
 
 The **skeleton**, per docs/23 Phase 1 (as amended by §13):
 
@@ -27,19 +27,51 @@ The **skeleton**, per docs/23 Phase 1 (as amended by §13):
 - `Command` / `MatchState` — the fixed-tick (10 tps) advance function, a
   monotonic entity-ID allocator, and the canonical `Hash()`.
 
-**Not yet here** (arrive with their phases, docs/23 §13-A porting workstream):
-units, buildings, economy income/upkeep, combat, emitters/mana. Phase 1 proves
-the *shape* — one seeded stream, integer state, canonical hash, pure tick.
+## Phase 1.5 scope (docs/23 §13 amendment A — "port the live sim")
+
+The first slice of the sim-porting workstream: **deterministic unit
+movement**.
+
+- `SimUnit` — one entity's position (double X/Z, hashed bitwise) and order
+  state (`Idle` / `MoveTo`), ticked by consuming a `Speed * dt` budget across
+  as many path nodes as it covers per tick (never leaves fractional motion on
+  the table).
+- `MatchState.SpawnUnit` — setup-time spawn (direct call, like
+  `AllocateEntityId`, not a replayable command — matches how the live game
+  doesn't treat match-start placement as a player order either).
+- `CommandKind.MoveTo` — the canonical, replayable way to ORDER a unit:
+  targets an entity ID (never an object reference, §13-J), resolves a path
+  via the SAME `HexPathfinder`/`BattlefieldState.BlockedToGround()`
+  citygen-core already uses for the live game, so sim pathing and Unity
+  pathing behave identically by construction, not by coincidence.
+- Units are iterated for `Tick`/`Hash` in **entity-ID allocation order only**
+  (a parallel dictionary gives O(1) command dispatch without touching
+  iteration order) — the §0 "never object reference or hash-set order" rule,
+  enforced structurally, not by convention.
+
+**Deliberately NOT done in this pass:** the OTHER half of Phase 1.5's
+acceptance bar — rewriting Unity's `MonsterAgent` to render this sim state
+via interpolation with **zero** `Time.deltaTime`-driven gameplay decisions
+left in it. `MonsterAgent` is a ~950-line file ten already-shipped phases of
+combat/economy/special-attacks logic depend on, and this environment has no
+Unity Editor to visually verify a rewrite of that size actually still works.
+Doing it blind would violate this project's own "never claim visual
+verification" rule. Flagged as the next real step (docs/12), not silently
+skipped.
 
 ## Build & test
 
 ```
 cd packages/match-core
-dotnet test Tests~/MatchCore.Tests.csproj      # 13 tests
+dotnet test Tests~/MatchCore.Tests.csproj      # 19 tests
 ```
 
-Acceptance harness (docs/23 Phase 1): `Tools~/DetHarness` prints the hash of a
-10,000-tick 8-player empty match twice; the two lines must be identical.
+Acceptance harness: `Tools~/DetHarness` runs BOTH acceptance proofs and prints
+each hash twice; every pair of lines must be identical.
+
+- docs/23 Phase 1: a 10,000-tick 8-player empty match.
+- docs/23 §13-A Phase 1.5: 100 units, scripted `MoveTo` orders over a real
+  generated city, 3,000 ticks.
 
 ```
 dotnet run --project Tools~/DetHarness
