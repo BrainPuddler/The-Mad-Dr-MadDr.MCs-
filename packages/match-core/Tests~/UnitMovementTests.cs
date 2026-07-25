@@ -128,6 +128,120 @@ public class UnitMovementTests
     }
 
     [Fact]
+    public void MoveQueue_from_idle_starts_walking_immediately()
+    {
+        // docs/27 Phase B: nothing in flight -- a queued waypoint on an
+        // Idle unit starts it moving right away, same as MoveTo.
+        var city = SmallCity();
+        var m = MatchState.Create(7u, TwoPlayers(), city);
+        var start = city.CenterHex;
+        var goal = FindOpenNeighbor(city, start);
+        var id = m.SpawnUnit(0, start, speed: 5.0);
+
+        m.Tick(new List<Command> { new Command(0, CommandKind.MoveQueue, targetEntity: id, argA: goal.Q, argB: goal.R) });
+        Assert.Equal(UnitOrderKind.MoveTo, m.FindUnit(id)!.Order);
+    }
+
+    [Fact]
+    public void MoveQueue_walks_multiple_waypoints_in_order_with_no_idle_tick_between_legs()
+    {
+        var city = SmallCity();
+        var m = MatchState.Create(8u, TwoPlayers(), city);
+        var start = city.CenterHex;
+        var spots = OpenHexesNear(city, start, 4);   // spots[0] is `start` itself (ring 0)
+        var waypointA = spots[1];
+        var waypointB = spots[2];
+        var id = m.SpawnUnit(0, start, speed: 5.0);
+
+        // MoveTo starts the first leg; MoveQueue appends the second --
+        // exactly what a plain-click-then-shift-click sequence produces.
+        m.Tick(new List<Command>
+        {
+            new Command(0, CommandKind.MoveTo, targetEntity: id, argA: waypointA.Q, argB: waypointA.R),
+            new Command(0, CommandKind.MoveQueue, targetEntity: id, argA: waypointB.Q, argB: waypointB.R),
+        });
+
+        var (ax, az) = waypointA.ToWorld();
+        var sawWaypointA = false;
+        for (var i = 0; i < 400 && m.FindUnit(id)!.Order != UnitOrderKind.Idle; i++)
+        {
+            m.Tick(null);
+            var u = m.FindUnit(id)!;
+            if (Math.Abs(u.X - ax) < 0.01 && Math.Abs(u.Z - az) < 0.01) sawWaypointA = true;
+        }
+
+        Assert.True(sawWaypointA, "the unit actually passed through waypoint A on the way to B, not a straight line to B");
+        var final = m.FindUnit(id)!;
+        Assert.Equal(UnitOrderKind.Idle, final.Order);
+        var (bx, bz) = waypointB.ToWorld();
+        Assert.Equal(bx, final.X, 6);
+        Assert.Equal(bz, final.Z, 6);
+    }
+
+    [Fact]
+    public void MoveTo_after_MoveQueue_drops_the_previously_queued_waypoint()
+    {
+        // docs/27 Phase B: a plain (non-shift, REPLACE) move always wins
+        // over whatever was queued -- "forget what I was doing, go here
+        // instead," matching Unity's own !queue OrderMove semantics.
+        var city = SmallCity();
+        var m = MatchState.Create(9u, TwoPlayers(), city);
+        var start = city.CenterHex;
+        var spots = OpenHexesNear(city, start, 4);
+        var queuedButDropped = spots[1];
+        var replacementGoal = spots[2];
+        var id = m.SpawnUnit(0, start, speed: 5.0);
+
+        m.Tick(new List<Command>
+        {
+            new Command(0, CommandKind.MoveTo, targetEntity: id, argA: start.Q, argB: start.R), // no-op-ish: already there
+            new Command(0, CommandKind.MoveQueue, targetEntity: id, argA: queuedButDropped.Q, argB: queuedButDropped.R),
+        });
+        // now issue a REPLACE move before the queued waypoint is ever reached
+        m.Tick(new List<Command> { new Command(0, CommandKind.MoveTo, targetEntity: id, argA: replacementGoal.Q, argB: replacementGoal.R) });
+
+        for (var i = 0; i < 400 && m.FindUnit(id)!.Order != UnitOrderKind.Idle; i++) m.Tick(null);
+
+        var final = m.FindUnit(id)!;
+        Assert.Equal(UnitOrderKind.Idle, final.Order);
+        var (gx, gz) = replacementGoal.ToWorld();
+        Assert.Equal(gx, final.X, 6);
+        Assert.Equal(gz, final.Z, 6);
+        // and it must NOT have ended up walking on to the dropped waypoint afterward
+        for (var i = 0; i < 50; i++) m.Tick(null);
+        Assert.Equal(UnitOrderKind.Idle, m.FindUnit(id)!.Order);
+        Assert.Equal(gx, m.FindUnit(id)!.X, 6);
+    }
+
+    [Fact]
+    public void Same_seed_same_city_same_queued_orders_hashes_identically_across_two_runs()
+    {
+        ulong Run()
+        {
+            var city = SmallCity();
+            var m = MatchState.Create(0xFEEDu, TwoPlayers(), city);
+            var start = city.CenterHex;
+            var spots = OpenHexesNear(city, start, 50);
+            var ids = new List<uint>();
+            for (var i = 0; i < spots.Count; i++)
+                ids.Add(m.SpawnUnit(i % 2, spots[i], speed: 3.0 + (i % 4)));
+
+            var commands = new List<Command>();
+            for (var i = 0; i < ids.Count; i++)
+            {
+                var legA = spots[(i + 11) % spots.Count];
+                var legB = spots[(i + 23) % spots.Count];
+                commands.Add(new Command(i % 2, CommandKind.MoveTo, targetEntity: ids[i], argA: legA.Q, argB: legA.R));
+                commands.Add(new Command(i % 2, CommandKind.MoveQueue, targetEntity: ids[i], argA: legB.Q, argB: legB.R));
+            }
+            m.Tick(commands);
+            for (var i = 0; i < 3000; i++) m.Tick(null);
+            return m.Hash();
+        }
+        Assert.Equal(Run(), Run());
+    }
+
+    [Fact]
     public void Units_iterate_and_hash_in_entity_id_order_not_insertion_coincidence()
     {
         var city = SmallCity();

@@ -154,7 +154,16 @@ namespace MadDr.MatchCore
             // docs/23 §13-A: unit movement is the first per-tick system.
             // Iterated strictly in entity-ID order -- see _unitsInOrder's
             // own doc comment for why that's load-bearing, not cosmetic.
-            for (var i = 0; i < _unitsInOrder.Count; i++) _unitsInOrder[i].Tick(DtSeconds);
+            for (var i = 0; i < _unitsInOrder.Count; i++)
+            {
+                var u = _unitsInOrder[i];
+                u.Tick(DtSeconds);
+                // docs/27 Phase B: a leg just finished (Idle) with more
+                // waypoints queued behind it -- compute the next leg's
+                // path immediately, in the SAME tick, so a multi-waypoint
+                // walk never idles for even one tick between legs.
+                if (u.Order == UnitOrderKind.Idle && u.HasQueuedWaypoints) AdvanceToNextWaypoint(u);
+            }
 
             // Economy income, combat resolution, and everything else
             // arrive with their own phases (docs/23 §13-A porting
@@ -175,6 +184,9 @@ namespace MadDr.MatchCore
                 case CommandKind.MoveTo:
                     ApplyMoveTo(cmd);
                     break;
+                case CommandKind.MoveQueue:
+                    ApplyMoveQueue(cmd);
+                    break;
                 case CommandKind.None:
                 default:
                     break;
@@ -194,9 +206,60 @@ namespace MadDr.MatchCore
             var unit = FindUnit(cmd.TargetEntity);
             if (unit == null) return;
 
+            // docs/27 Phase B: a REPLACE-style move drops any waypoints
+            // already queued, matching Unity's own `!queue` OrderMove
+            // clearing `_waypoints` -- a plain (non-shift) click always
+            // means "forget what I was doing, go here instead."
+            unit.ClearWaypoints();
             var start = HexAt(unit.X, unit.Z);
             var goal = new HexCoord(cmd.ArgA, cmd.ArgB);
             var path = HexPathfinder.FindPath(start, goal, _city, _blockedToGround);
+            unit.SetPath(path);
+        }
+
+        /// <summary>docs/27 Phase B: append hex (ArgA, ArgB) to
+        /// TargetEntity's waypoint queue -- the sim-side twin of a SHIFT
+        /// ground-click. If the unit is currently Idle, starts walking
+        /// there immediately (nothing to queue BEHIND, since nothing's in
+        /// flight); otherwise the waypoint waits for
+        /// <see cref="AdvanceToNextWaypoint"/> to pick it up once the
+        /// current leg (and everything queued ahead of it) finishes.
+        /// Same silent-no-op-on-bad-input contract as
+        /// <see cref="ApplyMoveTo"/>.</summary>
+        private void ApplyMoveQueue(Command cmd)
+        {
+            if (_city == null || _blockedToGround == null) return;
+            var unit = FindUnit(cmd.TargetEntity);
+            if (unit == null) return;
+
+            var hex = new HexCoord(cmd.ArgA, cmd.ArgB);
+            if (unit.Order == UnitOrderKind.Idle)
+            {
+                var start = HexAt(unit.X, unit.Z);
+                var path = HexPathfinder.FindPath(start, hex, _city, _blockedToGround);
+                unit.SetPath(path);
+            }
+            else
+            {
+                unit.EnqueueWaypoint(hex);
+            }
+        }
+
+        /// <summary>docs/27 Phase B: a unit just went Idle with more
+        /// waypoints queued -- dequeue the next one and start walking to
+        /// it, in the SAME tick the previous leg finished (never an idle
+        /// tick between legs). If the computed path is null (unreachable/
+        /// off-map), the unit simply stays Idle and the NEXT queued
+        /// waypoint (if any) is tried on a LATER tick's own Idle+queued
+        /// check -- one bad waypoint in a queue doesn't stall the rest of
+        /// it forever, since this runs again every tick the unit is Idle
+        /// with a non-empty queue.</summary>
+        private void AdvanceToNextWaypoint(SimUnit unit)
+        {
+            if (_city == null || _blockedToGround == null) return;
+            var next = unit.DequeueWaypoint();
+            var start = HexAt(unit.X, unit.Z);
+            var path = HexPathfinder.FindPath(start, next, _city, _blockedToGround);
             unit.SetPath(path);
         }
 

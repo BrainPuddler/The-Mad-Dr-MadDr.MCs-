@@ -1642,3 +1642,47 @@ Verified: flightcheck stub-compile clean across the whole gameplay layer
 including the modified RuntimeCityBuilder.cs. This is still code-only --
 the actual "does it look right" answer is the creator's own Editor
 session, which is what this toggle exists to make possible at all.
+
+## docs/27 Phase B: single-unit waypoint queueing (2026-07)
+
+Following the creator's Editor confirmation that Phase A works ("looks
+like it works, go on to the next phase."), implemented docs/27 §7 Phase
+B — but narrowed its scope from the doc's original text ("waypoint list +
+group token") to single-unit waypoint queueing only. Group moves
+(multi-unit formations, settle points, the shared `GroupFacing` token
+`WaypointCommander.AssignFormation` uses) are explicitly deferred:
+`match-core` has no representation of a token shared across N units yet,
+and building that deserves its own design pass rather than being folded
+silently into this one. `AssignFormation`'s 4-arg `OrderMove` call site
+is not intercepted by `SimDriven` and keeps using the legacy path
+regardless of the toggle — the same documented boundary Phase A already
+drew for queued/grouped moves, just not yet moved for the group half.
+
+What shipped: `match-core` gained `CommandKind.MoveQueue` (APPEND —
+starts immediately if Idle, else enqueues behind what's in flight);
+`SimUnit` gained a `Queue<HexCoord>` waypoint queue, included in the
+canonical hash (`Queue<T>` enumerates in insertion order, a documented
+guarantee, so hashing it is safe); `MatchState.Tick` advances to the next
+queued waypoint in the SAME tick a leg completes, so a multi-waypoint
+walk never idles between legs; `SimBridge.QueueWaypointCommand` is the
+Unity-facing twin of `QueueMoveCommand`; `MonsterAgent.OrderMoveViaSim`
+widened to handle `queue == true`. `WaypointCommander` needed zero
+changes again — both single-unit call sites already funnel through the
+2-arg `OrderMove(hex, queue)` overload where all sim-driven interception
+lives.
+
+Verification: match-core gained 4 tests (23/23 total) including a
+same-seed/same-queued-orders hash-determinism check; `harvestcreditverify`
+(compiling the real `SimBridge.cs`) gained an integration check driving
+`QueueMoveCommand` + `QueueWaypointCommand` through a real generated city
+and confirming the view's tick snapshots pass through waypoint A en route
+to B (16/16 pass); `flightcheck` still compiles clean. As with Phase A,
+`MonsterAgent.EnableSimDriven`/`OrderMove` itself can't be exercised in
+either stub harness (`Component.gameObject` reads `null` there), so only
+`SimBridge`'s own API surface is exercised directly — verification of the
+real `MonsterAgent` path stops at compilation, same precedent as Phase A.
+
+Not yet done: an Editor smoke test for queued (shift-click) moves
+specifically. The creator's existing Phase A confirmation only exercised
+a plain single-destination move; whether to add a queued-move check to
+`simDrivenDemo` now or defer it to Phase C is still open.

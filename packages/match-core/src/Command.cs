@@ -15,8 +15,17 @@ namespace MadDr.MatchCore
         /// walk to the hex (ArgA=Q, ArgB=R). The canonical, replayable way
         /// to move a unit -- never a direct method call from outside the
         /// sim, so a real lockstep command log can reconstruct the exact
-        /// same order stream.</summary>
+        /// same order stream. REPLACES whatever the unit was doing,
+        /// including dropping any queued waypoints (<see cref="MoveQueue"/>
+        /// below) -- the sim-side twin of a non-shift ground-click.</summary>
         MoveTo = 2,
+        /// <summary>docs/27 Phase B: append hex (ArgA=Q, ArgB=R) to
+        /// TargetEntity's waypoint queue instead of replacing its current
+        /// path -- the sim-side twin of a SHIFT ground-click. If the unit
+        /// is currently Idle (nothing in flight), starts walking to this
+        /// waypoint immediately, matching Unity's own
+        /// `OrderMove(hex, queue: true)` semantics on an idle unit.</summary>
+        MoveQueue = 3,
     }
 
     /// <summary>

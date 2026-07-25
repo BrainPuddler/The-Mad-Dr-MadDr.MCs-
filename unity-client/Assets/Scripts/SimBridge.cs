@@ -66,12 +66,22 @@ public class SimBridge : MonoBehaviour
         return id;
     }
 
-    /// <summary>Queue a move order for the NEXT tick boundary -- never
-    /// applied immediately (docs/27 §5: one-tick input latency is
-    /// correct lockstep behavior, not a bug).</summary>
+    /// <summary>Queue a REPLACE move order for the NEXT tick boundary --
+    /// never applied immediately (docs/27 §5: one-tick input latency is
+    /// correct lockstep behavior, not a bug). Drops any waypoints already
+    /// queued on this unit (match-core's `ApplyMoveTo`), same as a plain
+    /// (non-shift) ground-click.</summary>
     public void QueueMoveCommand(int playerIndex, uint entityId, HexCoord destination)
     {
         _pending.Add(new Command(playerIndex, CommandKind.MoveTo, targetEntity: entityId, argA: destination.Q, argB: destination.R));
+    }
+
+    /// <summary>docs/27 Phase B: queue an APPEND waypoint order -- the
+    /// sim-side twin of a SHIFT ground-click. Same one-tick latency as
+    /// <see cref="QueueMoveCommand"/>.</summary>
+    public void QueueWaypointCommand(int playerIndex, uint entityId, HexCoord destination)
+    {
+        _pending.Add(new Command(playerIndex, CommandKind.MoveQueue, targetEntity: entityId, argA: destination.Q, argB: destination.R));
     }
 
     /// <summary>Current sim-side order state for a unit, or Idle if this

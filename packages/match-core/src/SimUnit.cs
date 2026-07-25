@@ -54,6 +54,17 @@ namespace MadDr.MatchCore
         private List<HexCoord>? _path;
         private int _pathIndex;
 
+        /// <summary>docs/27 Phase B: waypoints queued behind the CURRENT
+        /// path, walked one at a time in FIFO order once each leg
+        /// completes -- the sim-side twin of Unity's `_waypoints` queue
+        /// on `MonsterAgent`. `Queue&lt;T&gt;` enumerates in insertion
+        /// order (a documented guarantee, unlike Dictionary/HashSet), so
+        /// hashing it is safe and deterministic. `MatchState` (not
+        /// `SimUnit`) computes the actual path for a dequeued waypoint --
+        /// this class stays pathfinding-agnostic, matching how it never
+        /// pathfound for `SetPath` either.</summary>
+        private readonly Queue<HexCoord> _waypointQueue = new Queue<HexCoord>();
+
         internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed)
         {
             EntityId = entityId;
@@ -122,8 +133,32 @@ namespace MadDr.MatchCore
             }
         }
 
+        /// <summary>Append a waypoint to walk once the current path (and
+        /// every waypoint already queued ahead of it) is finished --
+        /// never replaces anything already in flight. If this unit is
+        /// currently Idle, it does NOT start moving on its own: the
+        /// caller (`MatchState.ApplyMoveQueue`) is responsible for
+        /// dequeuing immediately in that case, since starting a path
+        /// requires pathfinding this class deliberately doesn't
+        /// do.</summary>
+        internal void EnqueueWaypoint(HexCoord hex) => _waypointQueue.Enqueue(hex);
+
+        /// <summary>Drop every not-yet-started queued waypoint -- called
+        /// when a REPLACE-style move (MoveTo) overrides whatever this
+        /// unit was doing, same as Unity's `_waypoints.Clear()` on a
+        /// non-queued OrderMove.</summary>
+        internal void ClearWaypoints() => _waypointQueue.Clear();
+
+        internal bool HasQueuedWaypoints => _waypointQueue.Count > 0;
+
+        internal HexCoord DequeueWaypoint() => _waypointQueue.Dequeue();
+
         /// <summary>Append this unit's canonical bytes, FIXED field order
-        /// (docs/23 §13-J), floats bitwise.</summary>
+        /// (docs/23 §13-J), floats bitwise. The waypoint queue is part of
+        /// this unit's real state -- two clients that disagree on what's
+        /// still queued (even before any of it has been walked) must
+        /// hash differently, or a desync there would go undetected until
+        /// it visibly manifested many ticks later.</summary>
         public void WriteTo(FnvHash h)
         {
             h.Add(EntityId);
@@ -133,6 +168,8 @@ namespace MadDr.MatchCore
             h.AddBits(Speed);
             h.Add((int)Order);
             h.Add(_pathIndex);
+            h.Add(_waypointQueue.Count);
+            foreach (var w in _waypointQueue) { h.Add(w.Q); h.Add(w.R); }
         }
     }
 }

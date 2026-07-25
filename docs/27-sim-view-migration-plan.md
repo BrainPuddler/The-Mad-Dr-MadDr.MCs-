@@ -169,15 +169,21 @@ guarantee from §0, made structural rather than aspirational.
 | `SpecialAttack` | No | Needs the whole docs/26 ability system (10 phases of it) ported — deliberately deferred; this is a LOT to re-verify blind. |
 | `Perch` | No | Flight/altitude has no sim-side representation at all yet (`SimUnit` is ground-plane XZ only). |
 
-**Known, accepted gap for this first cut:** `match-core`'s
+**Known, accepted gap for this first cut (Phase A):** `match-core`'s
 `CommandKind.MoveTo` is a single destination — no waypoint queueing, no
 group-settle creep point, no `GroupFacing` token (see §1). `TickMoveViaSim`
 therefore only handles the SAME single-destination case `WaypointCommander`
 already sends for `queue == false`; a queued/grouped move keeps using the
 legacy `TickMove` path (`_simDriven` stays false whenever `OrderMove` is
-called with `queue == true` or a non-null `groupFacing`). Widening
-`CommandKind.MoveTo` to carry a waypoint list and a group token is a real,
-separate follow-up (flagged here, not hidden), not attempted in this pass.
+called with `queue == true` or a non-null `groupFacing`).
+
+**Phase B closed the queueing half of this gap** (single-unit only —
+`CommandKind.MoveQueue`, §7). `OrderMoveViaSim` now handles `queue == true`
+for single-unit selections. The group half — a shared group-settle creep
+point and `GroupFacing` token spanning multiple sim units — is **still**
+not represented in `match-core` and remains deferred; `AssignFormation`'s
+4-arg `OrderMove` call keeps using the legacy path unconditionally,
+regardless of `SimDriven`.
 
 ## 4. Files touched (as implemented)
 
@@ -324,6 +330,10 @@ changes), `UnitCombat.cs`, the entire docs/26 Special Attacks System,
   screen — that is the creator's own Editor check, still outstanding, and
   the actual gate before Phase B is attempted.
 
+  **Editor check: CONFIRMED (2026-07).** The creator ran the
+  `simDrivenDemo` toggle in a real Editor session and reported it works.
+  Phase B is unblocked.
+
   **The actual Editor check, made concrete.** `RuntimeCityBuilder` gained
   a single Inspector toggle, `simDrivenDemo` (default off — every
   existing scene is unaffected), plus a `SimBridge` field. When on, the
@@ -341,12 +351,64 @@ changes), `UnitCombat.cs`, the entire docs/26 Special Attacks System,
   animation throughout (proves `MonsterBody` genuinely doesn't care where
   its velocity came from); and every OTHER monster in the scene behaving
   completely normally (proves the opt-in boundary actually holds).
-- **Phase B — queued/grouped moves.** Widen `CommandKind.MoveTo` (or add a
-  `CommandKind.MoveQueue`) to carry a waypoint list + group token;
-  `match-core` gains queued-order support on `SimUnit`; `WaypointCommander`'s
-  remaining branches cut over. Only attempted after Phase A is confirmed
-  working in a real Editor session — no point widening a foundation nobody
-  has checked yet.
+- **Phase B — queued moves (single-unit). Status: done (2026-07),
+  scope narrowed.** The original text above described one increment
+  ("waypoint list + group token"). In practice this split into two: this
+  phase covers single-unit waypoint queueing only. Group moves (multi-unit
+  formations, settle points, the shared `GroupFacing` token used by
+  `WaypointCommander.AssignFormation`) are **explicitly deferred** —
+  `match-core` has no representation of "a token shared across N units"
+  yet, and building that deserves its own design pass rather than being
+  folded silently into this one. `AssignFormation`'s group-move call site
+  (the 4-arg `OrderMove(hex, queue, settle, facing)` overload) is
+  therefore **not** intercepted by `SimDriven` and keeps running the
+  legacy per-unit steering path regardless of the toggle — the same
+  documented boundary Phase A already drew, just not yet moved.
+
+  **What shipped:** `match-core` gained `CommandKind.MoveQueue` (APPEND
+  semantics — starts immediately if the unit is Idle, else enqueues
+  behind whatever's in flight) alongside the existing `CommandKind.MoveTo`
+  (REPLACE semantics, now explicitly clears any queued waypoints).
+  `SimUnit` gained a `Queue<HexCoord> _waypointQueue`
+  (`EnqueueWaypoint`/`ClearWaypoints`/`HasQueuedWaypoints`/
+  `DequeueWaypoint`), included in `WriteTo`'s hash — `Queue<T>` enumerates
+  in insertion order, a documented guarantee, so hashing it is safe and
+  deterministic. `MatchState.Tick` computes the next leg's path in the
+  SAME tick a unit goes Idle with waypoints still queued, so a
+  multi-waypoint walk never idles for even one tick between legs.
+  `SimBridge` gained `QueueWaypointCommand(playerIndex, entityId,
+  destination)`, the Unity-facing twin of `QueueMoveCommand`.
+  `MonsterAgent.OrderMoveViaSim` widened to take the `queue` bool: `false`
+  clears local waypoint/path state and issues a REPLACE; `true` issues an
+  APPEND without touching what's already in flight. `WaypointCommander`
+  again needed zero changes — both single-unit call sites already funnel
+  through the 2-arg `OrderMove(hex, queue)` overload where this
+  interception lives.
+
+  **Verification:** `match-core` gained 4 new tests (23/23 total,
+  `dotnet test Tests~/MatchCore.Tests.csproj`) covering: a queued
+  waypoint on an Idle unit starts immediately; two legs walk in order
+  with the unit actually observed passing through waypoint A en route to
+  B (not a straight line); a REPLACE move after a queued waypoint drops
+  the queue; and same-seed/same-orders hashes identically across two runs
+  with queued commands in the stream. `harvestcreditverify` (compiling
+  the real `SimBridge.cs`) gained an integration check exercising the
+  Unity-facing API directly — `QueueMoveCommand` for leg A then
+  `QueueWaypointCommand` for leg B, pumped over a fixed frame budget,
+  confirming the view's tick snapshots pass through A and land exactly on
+  B (16/16 pass). `flightcheck` (whole gameplay layer, real
+  `MonsterAgent.cs`/`SimBridge.cs`) still compiles clean. As with Phase A,
+  `MonsterAgent.EnableSimDriven`/`OrderMove` itself can't be exercised in
+  either stub harness — `Component.gameObject` always reads `null` there
+  — so verification of the real `MonsterAgent` path stops at compilation;
+  only `SimBridge`'s own API surface is exercised directly, same
+  precedent Phase A already established.
+
+  **Editor check: not yet run.** The creator's confirmed Phase A check
+  only exercised a plain (non-shift) single-destination move. Queued
+  (shift-click) moves have not yet been watched running in a live scene —
+  `simDrivenDemo` doesn't currently have a queued-move smoke test wired
+  up; whether to add one before or during Phase C is still open.
 - **Phase C — flocking (docs/23 §5) lands sim-side**, restoring
   separation/alignment/cohesion for sim-driven units (closing §5's
   documented regression).

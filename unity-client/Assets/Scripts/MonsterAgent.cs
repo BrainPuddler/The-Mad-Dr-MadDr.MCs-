@@ -252,29 +252,41 @@ public class MonsterAgent : MonoBehaviour
 
     public void OrderMove(HexCoord hex, bool queue)
     {
-        // docs/27 Phase A: single-unit, non-queued moves are the only
-        // case the sim side implements yet (CommandKind.MoveTo has no
-        // waypoint-queue/group-settle/GroupFacing concept, docs/27 SS3) --
-        // a queued move on a sim-driven unit deliberately falls through to
-        // the legacy path below, unchanged.
-        if (SimDriven && !queue) { OrderMoveViaSim(hex); return; }
+        // docs/27 Phase A/B: single-unit moves (queued or not) are the
+        // sim side's scope -- GROUP moves (settle target + GroupFacing)
+        // never reach this overload at all (WaypointCommander's
+        // AssignFormation calls the 4-arg OrderMove directly, below), so
+        // they always stay on the legacy path regardless of SimDriven.
+        // That's a deliberate, documented scope boundary (docs/27 SS3),
+        // not an oversight.
+        if (SimDriven) { OrderMoveViaSim(hex, queue); return; }
         OrderMove(hex, queue, null, null);
     }
 
-    /// <summary>docs/27 Phase A: the sim-driven twin of the legacy
-    /// OrderMove above -- queues a MoveTo command for the NEXT tick
-    /// boundary (docs/27 SS5: one tick of input latency is correct
-    /// lockstep behavior) instead of computing a path locally. `_order`
-    /// still becomes Move so the existing Update() dispatch switch and
-    /// OrderDescription/ClearTargets machinery all keep working
-    /// unmodified; only WHICH TickX method runs changes (see
-    /// TickMoveViaSim).</summary>
-    private void OrderMoveViaSim(HexCoord hex)
+    /// <summary>docs/27 Phase A/B: the sim-driven twin of the legacy
+    /// OrderMove above -- queues a MoveTo (REPLACE) or MoveQueue (APPEND)
+    /// command for the NEXT tick boundary (docs/27 SS5: one tick of input
+    /// latency is correct lockstep behavior) instead of computing a path
+    /// locally. `_order` still becomes Move so the existing Update()
+    /// dispatch switch and OrderDescription/ClearTargets machinery all
+    /// keep working unmodified; only WHICH TickX method runs changes (see
+    /// TickMoveViaSim). A queued command on an already-Move unit does NOT
+    /// re-clear `_order` or touch it further -- match-core owns whether
+    /// this is "start now" or "wait behind what's in flight" (§27 Phase
+    /// B), Unity just forwards the command.</summary>
+    private void OrderMoveViaSim(HexCoord hex, bool queue)
     {
-        ClearTargets();
-        _waypoints.Clear();
-        _path = null;
-        _simBridge.QueueMoveCommand(_simPlayerIndex, _simEntityId.Value, hex);
+        if (!queue)
+        {
+            ClearTargets();
+            _waypoints.Clear();
+            _path = null;
+            _simBridge.QueueMoveCommand(_simPlayerIndex, _simEntityId.Value, hex);
+        }
+        else
+        {
+            _simBridge.QueueWaypointCommand(_simPlayerIndex, _simEntityId.Value, hex);
+        }
         _order = OrderKind.Move;
     }
 
