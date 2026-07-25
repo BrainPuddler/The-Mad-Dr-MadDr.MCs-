@@ -1518,3 +1518,92 @@ Next: the Unity-side interpolated-view contract for `MonsterAgent` --
 probably an incremental/parallel cutover design (not a single blind
 rewrite) that the creator can actually check in their own Editor before
 it's trusted, rather than another environment-blind pass.
+
+## docs/27: sim/view migration contract, Phase A implemented (2026-07)
+
+Creator direction: "Ok do that" (in response to the proposed next step
+after docs/23 Phase 1.5's sim-side landing: "design the Unity-side
+interpolated-view contract... so it can actually be checked in a real
+Editor before being trusted"). Wrote docs/27-sim-view-migration-plan.md
+(mirroring docs/25's proven design-doc structure/rigor) and then
+implemented its first phase in the same pass.
+
+**The design (docs/27).** The classic lockstep-with-interpolation split:
+`match-core` is the sole source of truth for position/order, ticking at
+its fixed 10/s; Unity holds the last TWO tick snapshots per unit and
+renders `Lerp(prev, curr, alpha)` where `alpha` is "how far between the
+last completed tick and the next are we right now" -- ONE shared value
+per frame (not duplicated per unit, an explicit correction from an
+earlier draft of the doc that would have let two units' interpolation
+drift apart for no reason). Velocity is always the ACTUAL measured
+render-position delta divided by dt, never a separately-computed
+"intended" value -- the same trick docs/26 Phase 6's `TickCaptured`
+already established for a directly-position-writing order. The cutover
+is INCREMENTAL, one order kind at a time: `OrderKind.Move` first (the
+only one `match-core` implements), every other order kind (Attack/Eat/
+SpecialAttack/Perch) untouched, gated behind a per-unit `SimDriven` flag
+that's false everywhere until a scene explicitly opts a unit in -- so
+this is provably zero-risk to every currently-working scene.
+
+**Phase A, implemented in the same pass.** New `SimBridge.cs` (owns the
+`MatchState`, the fixed-timestep accumulator, the outgoing command
+queue) and `SimUnitView.cs` (the interpolated view, one component per
+sim-driven unit). `MonsterAgent` gained `EnableSimDriven(...)` (opt-in,
+called after `Init`, not a parameter threaded through it),
+`OrderMoveViaSim`, `TickMoveViaSim`, and a `SimDriven` property --
+`WaypointCommander` needed ZERO changes, since both its single-unit move
+call sites already funnel through `MonsterAgent`'s existing 2-arg
+`OrderMove(hex, queue)` overload, which is where the sim-driven
+interception was added instead -- a smaller, cleaner seam than the
+design doc originally guessed, corrected there once discovered.
+
+One real design refinement made during implementation, also corrected in
+the doc: `SimBridge.Update()` is now a one-line call to a new `public
+Pump(float dt)` method that takes `dt` as a parameter rather than reading
+`Time.deltaTime` internally -- the same convention every
+`MonsterAgent.TickX(dt)` method already follows. This wasn't just
+stylistic: `Time.deltaTime` cannot be faked outside a live Unity
+Editor/Player, so without this seam the fixed-timestep accumulator's own
+correctness (monotonic alpha, the catch-up cap, never going negative)
+would have been completely unverifiable in this environment.
+
+**Verified:** flightcheck stub-compile clean across the whole gameplay
+layer (needed one addition: a real `MadDr.MatchCore.dll`, built from the
+package and copied in like every other package reference flightcheck
+already uses). A standalone numeric harness (`harvestcreditverify`,
+extended -- compiles the REAL `SimBridge.cs`/`SimUnitView.cs`, not
+reimplementations) drove 6 new checks: the interpolation formula itself
+(exact halfway lerp, Y always untouched, velocity = measured delta/dt),
+zero velocity at rest across five alpha values, correct 20 m/s for a
+known 2m-in-one-tick motion, the accumulator's `Alpha` strictly
+increasing within a tick and always staying in [0,1], a monstrous
+single-frame `dt` never hanging/throwing with the catch-up cap correctly
+dropping the remainder, and a full integration check (spawn a unit over
+a real generated `CityPreset.Village()`, queue a `MoveTo`, pump 400
+frames, confirm the rendered snapshot lands exactly on the goal hex's
+world position). 15/15 total pass; `match-core`'s own 19 tests and
+citygen-core's 145 untouched.
+
+Two real bugs caught building this harness, both fixed, both worth
+recording so they don't recur: (1) the harness's own `Vector3` stub was
+seeded from `flightcheck`'s copy -- a pure compile-check harness whose
+`Vector3` operators all return `default(Vector3)`, correct there since
+nothing ever inspects the value, silently wrong here since this harness
+asserts on real interpolation math. Patched to real math, matching
+`webattackverify`'s already-correct copy -- the THIRD time this exact
+"flightcheck's dummy stub leaks into a harness that actually needs real
+math" class of bug has been caught this session (previously: `Mathf`,
+twice). (2) the first draft of the integration test looped "pump until
+the unit's order reads Idle" -- which exits on the very first check
+without pumping even once, because a freshly-spawned unit already reads
+Idle before its queued command has even been applied. Fixed to a
+fixed-budget pump instead (guaranteed to cover the scenario), with a
+comment recorded in the harness so nobody reintroduces that exact
+loop-condition bug.
+
+**Explicitly not claimed:** that a unit visibly moves smoothly on
+screen. Nothing in this pass touches a live scene -- `SimDriven` stays
+false everywhere until a dev/test scene explicitly calls
+`EnableSimDriven`, which none does yet. The creator's own Editor check is
+the real, still-outstanding gate before docs/27's Phase B (queued/
+grouped moves) is attempted.

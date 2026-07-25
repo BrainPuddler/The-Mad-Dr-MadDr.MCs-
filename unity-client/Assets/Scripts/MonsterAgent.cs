@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using MadDr.CityGen;
+using MadDr.MatchCore;
 using MadDr.RosterClient;
 using UnityEngine;
 
@@ -68,6 +69,16 @@ public class MonsterAgent : MonoBehaviour
     private UnitCombat _targetUnit;
     private Vector3? _settleTarget;   // shared cluster point to creep toward once idle (group moves only)
     private GroupFacing _groupFacing; // shared arrival-facing token for a group move (see GroupFacing)
+
+    // docs/27 Phase A: opt-in sim-driven movement. Null/false by default
+    // for every existing scene (nothing calls EnableSimDriven today), so
+    // this is fully inert until a dev/test scene explicitly wires it up
+    // -- see docs/27 SS3/SS6.
+    private SimBridge _simBridge;
+    private SimUnitView _simView;
+    private uint? _simEntityId;
+    private int _simPlayerIndex;
+    private bool SimDriven => _simEntityId.HasValue;
 
     // docs/26 (Special Attacks System) -- Phase 1-3: state-machine wiring
     // only, no ability effect resolution yet (that's WebAttackAbility,
@@ -241,7 +252,45 @@ public class MonsterAgent : MonoBehaviour
 
     public void OrderMove(HexCoord hex, bool queue)
     {
+        // docs/27 Phase A: single-unit, non-queued moves are the only
+        // case the sim side implements yet (CommandKind.MoveTo has no
+        // waypoint-queue/group-settle/GroupFacing concept, docs/27 SS3) --
+        // a queued move on a sim-driven unit deliberately falls through to
+        // the legacy path below, unchanged.
+        if (SimDriven && !queue) { OrderMoveViaSim(hex); return; }
         OrderMove(hex, queue, null, null);
+    }
+
+    /// <summary>docs/27 Phase A: the sim-driven twin of the legacy
+    /// OrderMove above -- queues a MoveTo command for the NEXT tick
+    /// boundary (docs/27 SS5: one tick of input latency is correct
+    /// lockstep behavior) instead of computing a path locally. `_order`
+    /// still becomes Move so the existing Update() dispatch switch and
+    /// OrderDescription/ClearTargets machinery all keep working
+    /// unmodified; only WHICH TickX method runs changes (see
+    /// TickMoveViaSim).</summary>
+    private void OrderMoveViaSim(HexCoord hex)
+    {
+        ClearTargets();
+        _waypoints.Clear();
+        _path = null;
+        _simBridge.QueueMoveCommand(_simPlayerIndex, _simEntityId.Value, hex);
+        _order = OrderKind.Move;
+    }
+
+    /// <summary>docs/27 Phase A: opt a spawned unit into sim-driven
+    /// movement. Not called anywhere yet -- a future dev/test scene wires
+    /// this up after Init(); every current scene never calls it, so
+    /// <see cref="SimDriven"/> stays false and every order kind (Move
+    /// included) keeps running its legacy TickX method exactly as
+    /// before.</summary>
+    public void EnableSimDriven(SimBridge bridge, int playerIndex, HexCoord atHex, double speed)
+    {
+        if (bridge == null || _simEntityId.HasValue) return;
+        _simBridge = bridge;
+        _simPlayerIndex = playerIndex;
+        _simView = gameObject.AddComponent<SimUnitView>();
+        _simEntityId = bridge.SpawnUnit(playerIndex, atHex, speed, _simView);
     }
 
     /// <summary>Move order that also remembers a shared cluster point to
@@ -454,7 +503,7 @@ public class MonsterAgent : MonoBehaviour
         var velocity = Vector3.zero;
         switch (_order)
         {
-            case OrderKind.Move: velocity = TickMove(dt); break;
+            case OrderKind.Move: velocity = SimDriven ? TickMoveViaSim(dt) : TickMove(dt); break;
             case OrderKind.AttackBuilding: velocity = TickAttack(dt); break;
             case OrderKind.AttackUnit: velocity = TickAttackUnit(dt); break;
             case OrderKind.EatCitizen: velocity = TickEat(dt); break;
@@ -616,6 +665,23 @@ public class MonsterAgent : MonoBehaviour
         }
         RecomputeIfCityChanged();
         return FollowPath(dt, RunOrWalkSpeed());
+    }
+
+    /// <summary>docs/27 Phase A: the sim-driven twin of TickMove above.
+    /// Renders this frame's interpolated position (SimUnitView.Advance
+    /// writes transform.position and returns the ACTUAL measured
+    /// velocity, same idiom as TickCaptured, docs/26 Phase 6) and asks
+    /// the sim -- not local state -- whether the order has completed.
+    /// Deliberately does NOT call ApplySeparation/steering (docs/27 SS5:
+    /// a known, documented capability gap for this first cutover --
+    /// separation has no sim-side equivalent yet, and patching it onto
+    /// the interpolation layer would just fight the sim's own authority
+    /// over position).</summary>
+    private Vector3 TickMoveViaSim(float dt)
+    {
+        var velocity = _simView.Advance(_simBridge.Alpha, dt, transform);
+        if (_simBridge.OrderOf(_simEntityId.Value) == UnitOrderKind.Idle) GoIdle();
+        return velocity;
     }
 
     /// <summary>Fly to the target building's nearest footprint hex, then

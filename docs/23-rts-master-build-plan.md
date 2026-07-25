@@ -597,9 +597,20 @@ into the tick sim," never "add to the Unity Update loop."
 > verify a rewrite of a ~950-line file ten already-shipped phases depend on,
 > and this project's own discipline forbids claiming visual verification
 > that didn't happen. See docs/12 (2026-07, "docs/23 Phase 1.5") for the
-> full account. Next: design the Unity-side interpolated-view contract
-> (probably a parallel/incremental cutover, not a single blind rewrite) and
-> get it in front of the creator's own Editor to actually check.
+> full account.
+>
+> **Update: the Unity-side contract is now designed AND its Phase A
+> (opt-in, single-unit) slice is implemented** —
+> [27-sim-view-migration-plan.md](27-sim-view-migration-plan.md). New
+> `SimBridge`/`SimUnitView` render interpolated sim position for a unit
+> explicitly opted in via `MonsterAgent.EnableSimDriven(...)`; no existing
+> scene calls this yet, so behavior is unchanged everywhere until one
+> does. Verified by a 15-check standalone numeric harness (interpolation
+> formula, fixed-timestep accumulator, a full spawn→MoveTo→arrival
+> integration check against a real generated city) plus flightcheck.
+> **Still not claimed:** that a unit visibly moves smoothly on screen —
+> that's the creator's own Editor check, the actual gate before docs/27's
+> Phase B (queued/grouped moves) is attempted.
 
 **B. New Phase 3.5 (or fold into 3) — Emitters + the Lumen mana currency.**
 Nothing in the first draft implemented docs/03's emitter capture (8 s
