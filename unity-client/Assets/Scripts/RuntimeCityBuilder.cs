@@ -501,20 +501,69 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     }
 
     /// <summary>Rendered height of this building right now -- the roof a
-    /// winged unit perches on. Same tier table the visuals use.</summary>
+    /// winged unit perches on. Tier table the visuals use, MAX'd against
+    /// any registered roof-landing override (2026-07 bug fix, see
+    /// `_roofHeightOverrides`'s doc comment) so a gable/setback building's
+    /// approach-altitude decision (`TickPerch`'s low/high cruise-tier
+    /// pick) sees the same real roof height `SurfaceHeightAt` will
+    /// eventually land the creature on, not the flatter tier number.</summary>
     public float BuildingHeight(Building building)
     {
-        return HeightForTier(building.Tier);
+        var height = HeightForTier(building.Tier);
+        foreach (var hex in building.Footprint)
+        {
+            float overrideHeight;
+            if (_roofHeightOverrides.TryGetValue(hex, out overrideHeight) && overrideHeight > height)
+                height = overrideHeight;
+        }
+        return height;
     }
 
     private Dictionary<HexCoord, float> _roofCache;
     private int _roofCacheVersion = -1;
 
+    /// <summary>Bug fix (2026-07, creator report): a flyer couldn't land on
+    /// an A-frame/gable roof (`BuildingDresser.DressSmall`'s pitched-roof
+    /// pick, Small tier) or the stacked deco setback every Large-tier
+    /// "high-rise" gets (`DressOffice`) -- both are real, contiguous roof
+    /// MASSING drawn on top of `HeightForTier`'s flat per-tier cube, and
+    /// nothing fed their extra height back into the landing-height table,
+    /// so a perch settled the creature down at the flat tier height,
+    /// visually below/inside that geometry. `BuildingDresser` -- the only
+    /// code that knows which specific hex got which roof shape (a
+    /// per-hex hash, not stored anywhere else) -- registers the actual
+    /// solid-roof height here as it dresses each hex; deliberately NOT
+    /// used for the small decorative "rooftop kit" (water towers, vents,
+    /// antennas, chimneys, signage, landmark set pieces) -- those stay
+    /// colliderless clutter, exactly as the creator asked.</summary>
+    private readonly Dictionary<HexCoord, float> _roofHeightOverrides = new Dictionary<HexCoord, float>();
+
+    /// <summary>Register hex's actual landable roof height, if it's taller
+    /// than the flat per-tier massing height -- called once per hex by
+    /// `BuildingDresser` while dressing (never overwritten downward: a
+    /// multi-hex building's hex is only ever registered once, but `Max`
+    /// keeps this safe regardless of call order). Reset naturally on the
+    /// next `BuildBuildings()` full rebuild along with everything else
+    /// this class owns; a since-destroyed building's hex is excluded by
+    /// `EnsureRoofCache`'s own `BlocksMovement` check below, same as the
+    /// flat-tier case, so a rubble pancake correctly ignores whatever was
+    /// registered for the roof that no longer exists.</summary>
+    public void RegisterRoofLandingHeight(HexCoord hex, float landableHeight)
+    {
+        float existing;
+        _roofHeightOverrides[hex] = _roofHeightOverrides.TryGetValue(hex, out existing)
+            ? Mathf.Max(existing, landableHeight)
+            : landableHeight;
+    }
+
     /// <summary>Rebuilds `_roofCache` (standing-building footprint hex ->
     /// roof height) if the city has changed since the last build. Shared by
     /// `SurfaceHeightAt` and `InsideBuildingFootprint` -- both need exactly
     /// "which hexes currently have a standing building on them," just for
-    /// different questions (how tall / does this point land inside).</summary>
+    /// different questions (how tall / does this point land inside).
+    /// Folds in `_roofHeightOverrides` (see its own doc comment) so a
+    /// flyer's landing height matches whatever solid roof massing is
+    /// actually on screen, not just the flat per-tier number.</summary>
     private void EnsureRoofCache()
     {
         if (_roofCacheVersion == _cityVersion && _roofCache != null) return;
@@ -523,7 +572,13 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         {
             if (!b.BlocksMovement) continue;
             var h = HeightForTier(b.Building.Tier);
-            foreach (var hex in b.Building.Footprint) _roofCache[hex] = h;
+            foreach (var hex in b.Building.Footprint)
+            {
+                float overrideHeight;
+                _roofCache[hex] = _roofHeightOverrides.TryGetValue(hex, out overrideHeight)
+                    ? Mathf.Max(h, overrideHeight)
+                    : h;
+            }
         }
         _roofCacheVersion = _cityVersion;
     }

@@ -104,7 +104,7 @@ public static class BuildingDresser
                     DressLandmark(builder, building.Archetype, holder.transform, height, h, primary);
                     break;
                 case BuildingTier.Large:
-                    DressOffice(builder, holder.transform, height, h, primary);
+                    DressOffice(builder, hex, holder.transform, height, h, primary);
                     break;
                 case BuildingTier.Medium:
                     if (industrial) DressIndustrial(builder, holder.transform, height, h, primary);
@@ -112,7 +112,7 @@ public static class BuildingDresser
                     break;
                 default:
                     if (industrial) DressIndustrial(builder, holder.transform, height, h, primary);
-                    else DressSmall(builder, holder.transform, height, h, primary, suburb);
+                    else DressSmall(builder, hex, holder.transform, height, h, primary, suburb);
                     break;
             }
         }
@@ -123,7 +123,15 @@ public static class BuildingDresser
 
     // ---- small tier: suburbia / roadside America ------------------------------
 
-    private static void DressSmall(RuntimeCityBuilder b, Transform t, float height, int h, bool primary, bool suburb = false)
+    // 2026-07 bug fix: the pitched-roof pick's actual landable apex height
+    // above `height` -- half-extents (5.5, 5.5) of the gable's 11x11
+    // cross-section, rotated 45 degrees about Z, plus the 0.6 base lift
+    // the gable prim itself is spawned at (see case 0 below). Derived from
+    // the SAME numbers the mesh uses, not a separate guess, so a flyer
+    // lands exactly where the roof ridge visually is.
+    private const float GableApexOffset = 0.6f + 5.5f * 1.41421356f;   // 0.6 + 5.5*sqrt(2) ~= 8.38
+
+    private static void DressSmall(RuntimeCityBuilder b, HexCoord hex, Transform t, float height, int h, bool primary, bool suburb = false)
     {
         var basePos = t.position;
         // suburb: house-heavy (60/20/20 house/gas/diner); downtown:
@@ -145,6 +153,10 @@ public static class BuildingDresser
                 gable.transform.rotation = Quaternion.Euler(0f, 0f, 45f);
                 b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(4f, height + 4.6f, 3f),
                     new Vector3(1.4f, 2.6f, 1.4f), Brick(), t);   // chimney, poking through the roof plane
+                // 2026-07 bug fix: this IS solid, walkable roof massing
+                // (not rooftop-kit clutter) -- a flyer should be able to
+                // land on the ridge, not sink to the flat tier height.
+                b.RegisterRoofLandingHeight(hex, height + GableApexOffset);
                 break;
             }
             case 1:   // gas station: forecourt canopy on poles + pylon sign
@@ -249,16 +261,25 @@ public static class BuildingDresser
 
     // ---- large tier: stepped deco office ---------------------------------------
 
-    private static void DressOffice(RuntimeCityBuilder b, Transform t, float height, int h, bool primary)
+    // 2026-07 bug fix: top of the upper setback tier above `height` --
+    // 6.5 (its center lift) + half its own 3f depth. Every Large-tier
+    // footprint hex gets this unconditionally (see below), matching how
+    // the setback itself is drawn on every hex, not just the primary one.
+    private const float SetbackTopOffset = 6.5f + 1.5f;   // = 8f
+
+    private static void DressOffice(RuntimeCityBuilder b, HexCoord hex, Transform t, float height, int h, bool primary)
     {
         var basePos = t.position;
         var trim = (h / 5) % 2 == 0 ? Cream() : Mustard();
 
-        // deco setbacks: two shrinking tiers on the roof
+        // deco setbacks: two shrinking tiers on the roof -- real, solid,
+        // walkable massing on every high-rise, not decoration; register
+        // its actual top as landable (2026-07 bug fix).
         b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 2.5f),
             new Vector3(13f, 5f, 13f), Concrete(), t);
         b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 6.5f),
             new Vector3(8f, 3f, 8f), Concrete(), t);
+        b.RegisterRoofLandingHeight(hex, height + SetbackTopOffset);
         // vertical pilaster strips -- the deco silhouette from a distance
         for (var i = -1; i <= 1; i++)
         {

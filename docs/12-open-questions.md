@@ -1836,3 +1836,57 @@ cursor (Unity-side, no design doc written yet -- deferred the same way
 docs/27 was split out from Phase 1.5's Unity half); real balance-tuned
 costs for 6 of 7 buildable kinds; multi-hex building footprints; wallet-
 cap enforcement (Phase 3's own stated job).
+
+## Bug fix: flying monsters couldn't land on A-frame/stacked high-rise roofs (2026-07)
+
+Creator report: "Flying monster should be able to land on any surface,
+including building features like A-frame roofs and stacked roofs on
+high-rises. You'll probably have to reclassify those features as solid.
+Do not alter the smaller features."
+
+Root cause: `RuntimeCityBuilder.SurfaceHeightAt`/`BuildingHeight`/
+`EnsureRoofCache` (the flyer landing-height pipeline `MonsterAgent.
+GoIdle`/`TickPerch` reads) keyed purely off `HeightForTier`, a flat
+4-value table (Small/Medium/Large/Landmark = 6/12/30/40m) matching only
+the tier-colored massing cube. `BuildingDresser` (added later, docs/21
+Phase 3) draws real, contiguous, colliderless roof geometry ON TOP of
+that cube -- the suburban house's A-frame/gable roof (`DressSmall` case
+0, Small tier, picked per-hex by a private hash) and the unconditional
+stacked deco setback every Large-tier "high-rise" gets (`DressOffice`)
+-- but nothing fed either shape's real height back into the landing
+pipeline. A perch settled the creature at the flat tier height, below/
+inside that geometry.
+
+Fix: `RuntimeCityBuilder` gained `_roofHeightOverrides` (a per-hex
+Dictionary<HexCoord,float>) and `RegisterRoofLandingHeight(hex, height)`
+(keeps the max ever registered for a hex). `EnsureRoofCache` and
+`BuildingHeight` both now take `Max(flatTierHeight, override)`.
+`BuildingDresser.DressSmall`'s gable case calls
+`RegisterRoofLandingHeight(hex, height + GableApexOffset)` (0.6 base
+lift + 5.5*sqrt(2) for the 45-degree-rotated 11x11 square's half-
+diagonal -- derived from the actual mesh numbers, not guessed);
+`DressOffice` calls it unconditionally for every footprint hex with
+`height + SetbackTopOffset` (6.5+1.5 = 8, the real top-tier box's
+height). A since-destroyed building's hex is naturally excluded by
+`EnsureRoofCache`'s existing `BlocksMovement` check, same as the flat-
+tier case, so registered overrides for a rubbled building are correctly
+ignored.
+
+Explicitly NOT touched, per the creator's own instruction: the "rooftop
+kit" (water towers, vents, antenna masts, chimneys, signage --
+`BuildingDresser.Rooftop()` and the other small per-archetype props) and
+the Landmark archetype's own similarly-shaped tapering stacked boxes
+(church spire etc.) -- the creator named only A-frame roofs and
+stacked/high-rise roofs, and Landmark set pieces weren't mentioned, so
+they're out of scope here (flagged for a future ask, not silently
+extended to).
+
+Verified: flightcheck (whole gameplay layer, both changed files compiled
+directly) still compiles clean. `harvestcreditverify` gained 2 new
+checks (19/19 total) -- `RegisterRoofLandingHeight` correctly keeps the
+taller of any two registrations for a hex, and `BuildingHeight` reports
+the override across a multi-hex footprint. Since the actual bug is
+purely visual/gameplay-feel (does a flyer's landing spot look right on
+screen), the real confirmation is the creator's own Editor check, same
+discipline as every other Unity-side change this session -- not yet
+run.
