@@ -2720,3 +2720,108 @@ the `Tools~/DetHarness` acceptance harness still prints identical hashes
 twice (the hash values themselves changed from prior phases, as expected
 -- `SimUnit.WriteTo` now hashes two new fields, so it hasn't drifted, it's
 covering more state).
+
+## docs/23 Phase 8: New York/Paris/Montreal region presets (2026-07)
+
+Shipped Phase 8's citygen-core half: three flagship-region presets as
+docs/18's own "one generator, a small authored kit of style presets"
+economy — no bespoke per-region generator, just new DATA (`CityPreset.
+NewYork()`/`Paris()`/`Montreal()`) plus one genuinely new piece of
+GEOMETRY (`RoadPattern.Boulevard`).
+
+**`CityRegion`** (`Generic`/`NewYork`/`Paris`/`Montreal`) is a new field
+on both `CityPreset` and `CityModel`, copied straight through generation
+— lets Unity's future dressing branch switch on one field instead of
+string-matching `PresetName`. Every pre-Phase-8 preset is `Generic`.
+
+**New York** reuses `BigCity`'s own scale/pattern/density knobs VERBATIM
+— docs/23 §8's own words are "the Big City preset, personified," so
+there was a real, sourced number to reuse rather than invent, exactly the
+way `BuildingDef`'s `BloodStorage` reused docs/22's real Blood Bank
+figures back in Phase 2. Re-skinned only with its own real named
+emitter-archetype strings ("liberty_statuette_plaza," "grand_terminal").
+
+**Paris and Montreal's SIZES are invented v0.1 placeholders** — a
+genuinely different situation from New York's: docs/23 §8 gives no
+explicit km² figure for either (unlike Village/SmallTown/BigCity/New
+York, which all have one), so Paris reuses SmallTown's own scale and
+Montreal a modestly larger one (for "the big ridge cluster" Mount Royal
+needs), both flagged in `CityPreset.cs`'s own doc comments. Their
+landmark archetype strings ("iron_tower," "sacré-cœur," "marche_tower,"
+"forum_arena") ARE the real names docs/23 §8 gives, used verbatim.
+
+**`RoadPattern.Boulevard`** (Paris's own pattern) is the real new
+geometry this phase adds: the cardinal grid (read as Grid's own dense
+net — docs/23 §8's prose says "the cardinal grid" without specifying
+which existing pattern that means; Grid's is the documented reading,
+since MainStreet's is a single-arterial-plus-sparse-residential net, not
+a grid) plus two diagonal avenues. Each avenue is traced as a walk in ONE
+FIXED hex direction, radiating from the map center in both directions
+until it exits the map — deliberately not a generic point-to-point
+Bresenham hex-line algorithm, since the avenues always pass through the
+center by construction and a fixed-direction walk makes "straight in
+world space" true BY CONSTRUCTION (`HexCoord.ToWorld` is a linear map, so
+a constant per-step axial delta is provably a constant per-step
+world-space delta) rather than something to approximate afterward. The
+two directions used — `NW`/`SE` and `NE`/`SW` — are specifically the only
+two (of the six primitive hex directions) whose world-space step has a
+NONZERO component on both axes; `E`/`W` is the one direction that's
+PURELY horizontal, already the "row" direction MainStreet's own arterial
+and Grid's own row-streets use, so using anything else here is what makes
+these read as genuinely diagonal against the cardinal grid rather than a
+third cardinal axis. The two avenues are unioned into both the road set
+and the (Boulevard-only) arterial set BEFORE `ChooseBridges` runs, so a
+river crossing gets a bridge automatically, exactly like any other road
+— no special-case bridge logic needed for Boulevard at all.
+
+**l'Étoile sits deliberately ON the crossing** — the literal opposite of
+MainStreet's own "a roundabout must never sit in the middle of the
+through-arterial" rule two paragraphs earlier in the same file. This is
+a documented EXCEPTION, not a violation: Boulevard is not MainStreet, and
+a grand traffic circle at the meeting of grand avenues is the entire
+point of the real Place Charles-de-Gaulle this preset models. The
+existing MainStreet rule itself is completely untouched (`isMainStreet`
+stays false for Boulevard, so none of that code path is even reached)
+and is re-verified as this phase's own explicit regression test, on top
+of the whole pre-existing `CityGeneratorTests.cs` suite continuing to
+pass unmodified — the literal "off the arterial rule preserved" acceptance
+line docs/23 §8 itself asks for.
+
+**A test-design lesson, not a production bug:** the first draft of the
+diagonal-avenue test asserted every intermediate hex along a walked
+avenue must itself be in `ArterialRoads` — an "unbroken line" assumption
+that isn't actually guaranteed: the river can drown an avenue hex that
+isn't one of the few `ChooseBridges` happened to pick, the SAME "drowned
+road segments vanish" rule every other road in this generator already
+follows (MainStreet's own single arterial row is subject to the identical
+rule and always has been). Fixed by dropping the unbroken-line assertion
+and keeping only what's actually guaranteed: every arterial hex that DOES
+survive is exactly `center + k * direction` for some integer k, and lies
+exactly on its avenue's own straight world-space line (a cross-product
+check). A second, related miscount in the same test: two BIDIRECTIONAL
+avenues show up as four distinct direction vectors (each avenue radiates
+both ways from center), not two — fixed by asserting four vectors forming
+exactly two opposite pairs, not two vectors outright.
+
+**Explicitly deferred, not faked:** every Unity task docs/23 §8 names —
+region-keyed `BuildingDresser`/`RoadDresser` style branches, the three
+signature props (fire escape / Métro entrance / spiral staircase),
+palettes, and the `RuntimeCityBuilder`/CityGizmo region picker. citygen-
+core's own "skin pass is renderer-side data, not logic" principle
+(already stated in `CityPreset.cs`'s own header) keeps this whole layer
+out of scope for this slice; no Unity design pass was attempted.
+`flightcheck` was not re-run since no Unity source references any of this
+phase's new API surface yet (every change here is additive — new enum
+values, a new optional constructor parameter defaulting to the old
+behavior) and its own DLL copy is therefore unaffected.
+
+**Verification:** 168 citygen-core tests (16 new: deterministic
+generation for all three region presets, `Region` correctly threaded
+through for both new and every pre-Phase-8 preset, l'Étoile sitting
+exactly at the map center and nowhere else, the diagonal avenues'
+provable world-space collinearity, the MainStreet off-arterial regression
+proof, and a non-Boulevard preset's center NOT auto-becoming a
+roundabout), 217 match-core tests (untouched, confirming citygen-core's
+API stayed backward compatible), plus a deterministic ASCII-dump text-art
+rendering of all three regions committed to `docs/23-balance/` (a real,
+non-fabricated textual rendering, not a claim of an actual screenshot).

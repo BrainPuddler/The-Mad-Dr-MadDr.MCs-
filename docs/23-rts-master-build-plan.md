@@ -749,6 +749,56 @@ generators). Each keys off systems that already exist:
   variant palette optional. Landmarks: Marché tower with clock, Forum arena.
 
 ### Phase 8 tasks
+
+> **Status (2026-07): citygen-core done, Unity not started.** 168
+> citygen-core tests total (16 new). `CityPreset.NewYork()`/`Paris()`/
+> `Montreal()` (`CityRegion` enum + a `Region` field on both `CityPreset`
+> and `CityModel`, copied straight through generation — `Generic` for
+> every pre-Phase-8 preset). New York reuses `BigCity`'s own scale/
+> pattern/density knobs VERBATIM ("the Big City preset, personified,"
+> docs/23 §8's own words), re-skinned with its real named landmark
+> archetypes ("liberty_statuette_plaza," "grand_terminal"). Paris and
+> Montreal's SIZES are invented v0.1 placeholders (docs/23 §8 gives no
+> explicit km² figure for either, unlike New York/Village/SmallTown/
+> BigCity) — Paris reuses SmallTown's scale, Montreal a modestly larger
+> one for "the big ridge cluster"; both use their own real named
+> landmark archetypes ("iron_tower," "marche_tower," "forum_arena").
+> **New `RoadPattern.Boulevard`** (Paris's pattern): the cardinal grid
+> (read as Grid's own dense net — a documented interpretation of docs/23
+> §8's "the cardinal grid" phrase) plus two diagonal avenues traced as
+> single-fixed-hex-direction walks radiating from the map center
+> (`NW`/`SE` and `NE`/`SW` — the two hex directions with a nonzero world-
+> space step on BOTH axes, genuinely diagonal against the cardinal grid's
+> own `E`/`W`-aligned streets) until they exit the map, unioned into both
+> the road set and the (Boulevard-only) arterial set BEFORE bridges are
+> chosen, so a river crossing gets a bridge automatically like any other
+> road. l'Étoile (the grand roundabout) sits deliberately ON their
+> crossing — the opposite of MainStreet's own "never on the arterial"
+> rule two paragraphs earlier in `CityGenerator.cs`, a documented
+> exception (Boulevard isn't MainStreet) rather than a violation; the
+> existing MainStreet rule itself is untouched and re-verified as this
+> phase's own explicit regression test. **Explicitly deferred, not
+> faked:** every Unity task this section names (BuildingDresser/
+> RoadDresser per-region style branches, the three signature props, the
+> region picker) — citygen-core's own "one generator, style presets"
+> principle keeps the skin pass renderer-side data, not logic, and no
+> Unity design pass was attempted this slice.
+> **Both acceptance bars met:** all three presets generate
+> deterministically (a canonical-string equality test, the same idiom
+> `CityGeneratorTests.cs` already uses); the diagonal avenues' straight-
+> line-in-world-space claim is proven by exact collinearity (a cross-
+> product check against each avenue's own world-space direction vector,
+> not an approximation) rather than merely asserted; an ASCII-dump text-
+> art rendering of all three regions is committed to `docs/23-balance/`
+> (ROUNDABOUT/ARTERIAL/ROAD/LANDMARK/BUILDING/WATER/RIDGE legend) for
+> visual sanity review — this is a real, non-fabricated textual rendering
+> (never a claim of an actual screenshot, honoring this project's "never
+> claim visual verification" discipline); existing Village/SmallTown/
+> BigCity presets are untouched (all their own pre-existing tests still
+> pass unmodified). flightcheck was not re-run: no Unity source references
+> any of this phase's new API surface (only additive optional-parameter/
+> new-enum-value changes), so its existing DLL copy is unaffected.
+
 - citygen-core: `CityPreset.NewYork()/Paris()/Montreal()` (sizes, patterns,
   Boulevard pattern + tests proving the diagonal avenues are straight lines in
   world space and the étoile roundabout sits at their crossing, off the

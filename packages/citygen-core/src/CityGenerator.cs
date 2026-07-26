@@ -60,6 +60,7 @@ namespace MadDr.CityGen
             var roadGeom = new HashSet<HexCoord>();
             var arterialGeom = new HashSet<HexCoord>();
             var isMainStreet = preset.Pattern == RoadPattern.MainStreet;
+            var isBoulevard = preset.Pattern == RoadPattern.Boulevard;
             for (var row = 0; row < height; row++)
             {
                 for (var col = 0; col < width; col++)
@@ -72,6 +73,20 @@ namespace MadDr.CityGen
                     // street -- see IsRoad's MainStreet case
                     if (isMainStreet && row == height / 2) arterialGeom.Add(hex);
                 }
+            }
+
+            // docs/23 §8: Boulevard's own two diagonal avenues -- traced
+            // SEPARATELY from the per-hex IsRoad scan above (they don't
+            // follow a row/col rule at all), unioned into both the
+            // ordinary road set and the arterial set (the wide-lane
+            // treatment, same as MainStreet's single arterial row) BEFORE
+            // bridges are chosen, so a diagonal avenue crossing the river
+            // gets a bridge automatically, exactly like any other road.
+            if (isBoulevard)
+            {
+                var avenues = TraceDiagonalAvenues(center, width, height);
+                roadGeom.UnionWith(avenues);
+                arterialGeom.UnionWith(avenues);
             }
 
             // -- 3. bridges: where roads meet the river ------------------
@@ -134,6 +149,19 @@ namespace MadDr.CityGen
                 for (var i = 0; i < want; i++) roundaboutSet.Add(candidates[i]);
             }
 
+            // docs/23 §8: l'Étoile -- Boulevard's single grand roundabout,
+            // deliberately placed ON the crossing of its two arterial
+            // diagonal avenues. This is the OPPOSITE of MainStreet's own
+            // rule two paragraphs up (roundabouts there are explicitly
+            // banned from the arterial) -- a documented exception, not a
+            // violation: Boulevard isn't MainStreet, and a grand traffic
+            // circle at the meeting of grand avenues is the whole point
+            // of the real Place Charles-de-Gaulle this preset is modeling.
+            // Guarded on roadSet membership defensively (river carving
+            // already keeps the map center dry via its own centerMargin,
+            // so this should always hold) rather than assumed.
+            if (isBoulevard && roadSet.Contains(center)) roundaboutSet.Add(center);
+
             // Ridges never coincide with roads or water.
             var ridgeSet = new HashSet<HexCoord>();
             foreach (var h in ridgeCandidates)
@@ -170,7 +198,8 @@ namespace MadDr.CityGen
             ridgeList.Sort(CompareRQ);
 
             return new CityModel(seed, preset.Name, width, height,
-                roadList, arterialList, roundaboutList, waterList, ridgeList, buildings, landmarks, bridges);
+                roadList, arterialList, roundaboutList, waterList, ridgeList, buildings, landmarks, bridges,
+                preset.Region);
         }
 
         // ---- terrain ----------------------------------------------------
@@ -382,9 +411,64 @@ namespace MadDr.CityGen
                         || col % pitch == 0
                         || row % (pitch * 2) == 0;
 
+                case RoadPattern.Boulevard:
+                    // docs/23 §8's own words, "the cardinal grid" -- read
+                    // here as Grid's dense net (see RoadPattern.Boulevard's
+                    // own doc comment for why). The two diagonal avenues
+                    // are traced separately (TraceDiagonalAvenues), not
+                    // part of this per-hex row/col scan at all.
+                    return row % pitch == 0 || col % pitch == 0;
+
                 default:
                     throw new ArgumentOutOfRangeException(nameof(preset));
             }
+        }
+
+        /// <summary>docs/23 §8: the two diagonal avenues radiating from
+        /// the map center, meeting at l'Étoile. Each is a straight walk
+        /// in ONE fixed hex direction (never a generic point-to-point hex
+        /// line -- not needed here, since the avenues always pass through
+        /// the center by construction), which makes "straight in world
+        /// space" true by construction rather than something to
+        /// approximate: <see cref="HexCoord.ToWorld"/> is a linear map, so
+        /// a fixed-direction axial walk is provably a fixed-(dx,dz)-per-
+        /// step world-space line. <see cref="HexEdge.NW"/>/<see cref="
+        /// HexEdge.SE"/> and <see cref="HexEdge.NE"/>/<see cref="
+        /// HexEdge.SW"/> are used rather than <see cref="HexEdge.E"/>/
+        /// <see cref="HexEdge.W"/> specifically because those two pairs
+        /// are the only ones with a NONZERO world-space x AND z step each
+        /// (E/W is pure horizontal, already the "row" direction every
+        /// other pattern's arterial/street geometry uses) -- so these read
+        /// as genuinely diagonal against the cardinal grid, at roughly
+        /// +-60 degrees from horizontal, radiating from center like a
+        /// real étoile.</summary>
+        private static HashSet<HexCoord> TraceDiagonalAvenues(HexCoord center, int width, int height)
+        {
+            var avenues = new HashSet<HexCoord>();
+            TraceAxis(center, HexEdge.NW, width, height, avenues);
+            TraceAxis(center, HexEdge.NE, width, height, avenues);
+            return avenues;
+        }
+
+        private static void TraceAxis(HexCoord center, HexEdge direction, int width, int height, HashSet<HexCoord> into)
+        {
+            var opposite = (HexEdge)(((int)direction + 3) % 6);
+            var forward = center;
+            while (InOffsetBounds(forward, width, height)) { into.Add(forward); forward = forward.Neighbor(direction); }
+            var backward = center.Neighbor(opposite);
+            while (InOffsetBounds(backward, width, height)) { into.Add(backward); backward = backward.Neighbor(opposite); }
+        }
+
+        /// <summary>Same odd-r offset-rectangle containment
+        /// <see cref="CityModel.Contains"/> implements, duplicated here
+        /// since the generator doesn't have a <see cref="CityModel"/>
+        /// instance to call yet at this point in <see cref="Generate"/>.</summary>
+        private static bool InOffsetBounds(HexCoord hex, int width, int height)
+        {
+            var row = hex.R;
+            if (row < 0 || row >= height) return false;
+            var col = hex.Q + (row - (row & 1)) / 2;
+            return col >= 0 && col < width;
         }
 
         // ---- blocks -----------------------------------------------------

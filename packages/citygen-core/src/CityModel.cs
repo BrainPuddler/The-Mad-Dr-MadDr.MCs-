@@ -124,6 +124,15 @@ namespace MadDr.CityGen
     {
         public uint Seed { get; }
         public string PresetName { get; }
+
+        /// <summary>docs/23 §8 Phase 8: which real-world 1950s flagship
+        /// city this model represents, copied straight from the preset it
+        /// was generated from -- lets Unity's dressing branch switch on
+        /// ONE field instead of string-matching <see cref="PresetName"/>.
+        /// <see cref="CityRegion.Generic"/> for every pre-Phase-8
+        /// preset.</summary>
+        public CityRegion Region { get; }
+
         public int WidthHexes { get; }
         public int HeightHexes { get; }
 
@@ -179,10 +188,12 @@ namespace MadDr.CityGen
             IReadOnlyList<HexCoord> ridges,
             IReadOnlyList<Building> buildings,
             IReadOnlyList<Landmark> landmarks,
-            IReadOnlyList<Bridge> bridges)
+            IReadOnlyList<Bridge> bridges,
+            CityRegion region = CityRegion.Generic)
         {
             Seed = seed;
             PresetName = presetName;
+            Region = region;
             WidthHexes = widthHexes;
             HeightHexes = heightHexes;
             Roads = roads;
