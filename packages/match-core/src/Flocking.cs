@@ -24,19 +24,34 @@ namespace MadDr.MatchCore
     /// that are now sim-driven, since match-core is the sole authoritative
     /// writer of their position once they are.
     ///
-    /// Alignment and cohesion (docs/23 §5's other two flocking forces) are
-    /// NOT implemented here. Both need an "order group" concept -- which
-    /// units are moving together -- that match-core still doesn't have
-    /// (docs/27 Phase B explicitly deferred the same concept for queued
-    /// group moves, for the identical reason). Scoped to separation only,
-    /// flagged here rather than guessed at.
+    /// docs/23 Phase 5 adds the other two forces, <see cref="Alignment"/>
+    /// and <see cref="Cohesion"/>, as PURE math only -- exactly what
+    /// docs/23 §5's own match-core task line asks for ("Flocking.cs (pure
+    /// math, unit positions in, steering out)"), no more. Neither is
+    /// wired into <see cref="MatchState"/>'s own tick loop the way
+    /// <see cref="Separate"/> is: docs/23 §5 frames alignment/cohesion as
+    /// forces "for units sharing an order group," a concept match-core
+    /// still doesn't have (docs/27 Phase B deferred it for queued group
+    /// moves, for the identical reason) -- and unlike separation's hard
+    /// "never overlap" correction (a real, already-accepted gap this
+    /// class closed for sim-driven units in Phase C), docs/23 itself puts
+    /// the actual STEERING integration under the Unity task line ("wire
+    /// into MonsterAgent.FollowPath"), not match-core's. So this phase's
+    /// match-core deliverable is the pure math plus the numeric harness
+    /// docs/23 §5 explicitly asks for; the live integration lives in
+    /// Unity's `MonsterSteeringController.Alignment`/`Cohesion`, wired
+    /// additively into `Combine`.
     /// </summary>
     public static class Flocking
     {
-        /// <summary>docs/23 §5 v0.1 weight table: separation is 1.0
-        /// (full-strength; the other two weights, 0.35/0.15, belong to
-        /// alignment/cohesion, not yet implemented).</summary>
+        /// <summary>docs/23 §5 v0.1 weight table.</summary>
         public const double SeparationWeight = 1.0;
+
+        /// <summary>docs/23 §5 v0.1 weight table: "align 0.35."</summary>
+        public const double AlignmentWeight = 0.35;
+
+        /// <summary>docs/23 §5 v0.1 weight table: "coh 0.15."</summary>
+        public const double CohesionWeight = 0.15;
 
         /// <summary>One neighbour's position + body radius, as seen by
         /// <see cref="Separate"/> -- a plain snapshot rather than a
@@ -89,6 +104,66 @@ namespace MadDr.MatchCore
                 }
             }
             return (px - selfX, pz - selfZ);
+        }
+
+        /// <summary>docs/23 §5: "match average heading of groupmates
+        /// within 12 m." Each entry in `neighborHeadings` is a groupmate's
+        /// current movement-direction vector (not necessarily normalized,
+        /// and not necessarily even nonzero -- a stationary groupmate has
+        /// no heading to align to and is skipped, matching how a unit
+        /// with zero velocity contributes nothing to
+        /// <c>MonsterSteeringController.PredictiveAvoidance</c> either).
+        /// The 12m proximity filter itself is the CALLER's job (match-core
+        /// entity-ID order, Unity's spatial grid query) -- this function
+        /// only ever sees whatever list it's handed, matching
+        /// <see cref="Separate"/>'s own "caller supplies neighbours"
+        /// contract. Returns a normalized direction, or (0,0) if there are
+        /// no headings to align to, or they cancel out to (near) zero
+        /// (e.g. two groupmates moving directly apart).</summary>
+        public static (double dx, double dz) Alignment(IReadOnlyList<(double Hx, double Hz)> neighborHeadings)
+        {
+            double sumX = 0, sumZ = 0;
+            var counted = 0;
+            for (var i = 0; i < neighborHeadings.Count; i++)
+            {
+                var h = neighborHeadings[i];
+                var mag = Math.Sqrt(h.Hx * h.Hx + h.Hz * h.Hz);
+                if (mag < 1e-9) continue;
+                sumX += h.Hx / mag;
+                sumZ += h.Hz / mag;
+                counted++;
+            }
+            if (counted == 0) return (0.0, 0.0);
+            var avgX = sumX / counted;
+            var avgZ = sumZ / counted;
+            var avgMag = Math.Sqrt(avgX * avgX + avgZ * avgZ);
+            return avgMag < 1e-9 ? (0.0, 0.0) : (avgX / avgMag, avgZ / avgMag);
+        }
+
+        /// <summary>docs/23 §5: "gentle pull toward group centroid, capped
+        /// so it never fights the path." Returns a normalized direction
+        /// toward the centroid of `neighborPositions` (the CAP is the
+        /// caller's blend weight, <see cref="CohesionWeight"/>, not a
+        /// magnitude limit here -- the same "return a unit vector, let the
+        /// weighted blend bound it" shape <see cref="Alignment"/> and
+        /// Unity's `Combine` both already use for their bias terms).
+        /// Returns (0,0) if there are no groupmates, or self is already
+        /// exactly at the centroid.</summary>
+        public static (double dx, double dz) Cohesion(double selfX, double selfZ, IReadOnlyList<(double X, double Z)> neighborPositions)
+        {
+            if (neighborPositions.Count == 0) return (0.0, 0.0);
+            double sumX = 0, sumZ = 0;
+            for (var i = 0; i < neighborPositions.Count; i++)
+            {
+                sumX += neighborPositions[i].X;
+                sumZ += neighborPositions[i].Z;
+            }
+            var centroidX = sumX / neighborPositions.Count;
+            var centroidZ = sumZ / neighborPositions.Count;
+            var dx = centroidX - selfX;
+            var dz = centroidZ - selfZ;
+            var mag = Math.Sqrt(dx * dx + dz * dz);
+            return mag < 1e-9 ? (0.0, 0.0) : (dx / mag, dz / mag);
         }
     }
 }

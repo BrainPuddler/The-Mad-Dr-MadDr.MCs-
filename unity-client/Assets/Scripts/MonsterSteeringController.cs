@@ -55,6 +55,23 @@ public static class MonsterSteeringController
     /// layer).</summary>
     public const float MinSpeedScale = 0.35f;
 
+    /// <summary>docs/23 §5 v0.1 weights for the two NEW group forces this
+    /// phase adds. Separation's own weight isn't listed here -- it keeps
+    /// its existing, already-tuned Combine contribution (`sepBias * 0.8f`
+    /// below, unchanged) rather than being re-weighted to docs/23's literal
+    /// "sep 1.0," since that number describes match-core's own PARALLEL
+    /// pure-math port (`Flocking.cs`), not a mandate to retune Unity's
+    /// already-proven blend (see this class's own header: `ApplySeparation`
+    /// and this whole file are explicitly NOT to be altered in their
+    /// existing behaviour for units that aren't opted into something
+    /// new).</summary>
+    public const float AlignmentWeight = 0.35f;
+    public const float CohesionWeight = 0.15f;
+
+    /// <summary>docs/23 §5: "match average heading of groupmates within
+    /// 12 m."</summary>
+    public const float GroupmateRadius = 12f;
+
     /// <summary>Combine's output: a steering direction plus how much of the
     /// caller's intended speed to actually use this frame.</summary>
     public struct SteeringResult
@@ -161,15 +178,90 @@ public static class MonsterSteeringController
         return avoid;
     }
 
+    /// <summary>docs/23 §5: "match average heading of groupmates within
+    /// 12 m" -- a groupmate is a same-`Faction` (docs/23's own words are
+    /// "units sharing an order group," but this codebase has no formal
+    /// order-group concept yet, the same thing docs/27 Phase B already
+    /// deferred for queued group moves; same-Faction is the existing,
+    /// already-used stand-in -- `UnitCombat.Faction` is how the codebase
+    /// already tells "monster" from "human" everywhere else, e.g.
+    /// `NearestEnemyOf`) neighbour within <see cref="GroupmateRadius"/>.
+    /// Each groupmate's heading is its own published `LastVelocity`
+    /// (the same field <see cref="PredictiveAvoidance"/> already reads,
+    /// no new per-frame publish needed) -- a stationary groupmate
+    /// contributes nothing (no heading to align to), matching
+    /// `PredictiveAvoidance`'s own "not closing -- nothing to predict"
+    /// idiom. Returns a normalized direction, or zero if there's nobody to
+    /// align with or their headings cancel out.</summary>
+    public static Vector3 Alignment(UnitCombat self, List<UnitCombat> neighbours)
+    {
+        var sum = Vector3.zero;
+        var counted = 0;
+        var radiusSq = GroupmateRadius * GroupmateRadius;
+        foreach (var c in neighbours)
+        {
+            if (c == null || c == self || !c.Alive) continue;
+            if (c.Faction != self.Faction) continue;
+            var d = c.transform.position - self.transform.position;
+            d.y = 0f;
+            if (d.sqrMagnitude > radiusSq) continue;
+            var v = c.LastVelocity;
+            v.y = 0f;
+            if (v.sqrMagnitude < 1e-6f) continue;
+            sum += v.normalized;
+            counted++;
+        }
+        if (counted == 0) return Vector3.zero;
+        var avg = sum / counted;
+        return avg.sqrMagnitude < 1e-9f ? Vector3.zero : avg.normalized;
+    }
+
+    /// <summary>docs/23 §5: "gentle pull toward group centroid, capped so
+    /// it never fights the path." Same groupmate definition as
+    /// <see cref="Alignment"/> (same-Faction, within
+    /// <see cref="GroupmateRadius"/>). Always returns a UNIT-length
+    /// direction (or zero) regardless of how far away the centroid
+    /// actually is -- the cap docs/23 asks for is
+    /// <see cref="CohesionWeight"/>'s small blend weight in
+    /// <see cref="Combine"/>, not a distance-dependent magnitude here (the
+    /// same "return a bounded unit vector, let the weighted blend limit
+    /// it" shape <see cref="PredictiveAvoidance"/>'s own `avoid` term and
+    /// `Combine`'s `sepBias` already use).</summary>
+    public static Vector3 Cohesion(UnitCombat self, List<UnitCombat> neighbours)
+    {
+        var centroidSum = Vector3.zero;
+        var counted = 0;
+        var radiusSq = GroupmateRadius * GroupmateRadius;
+        foreach (var c in neighbours)
+        {
+            if (c == null || c == self || !c.Alive) continue;
+            if (c.Faction != self.Faction) continue;
+            var d = c.transform.position - self.transform.position;
+            d.y = 0f;
+            if (d.sqrMagnitude > radiusSq) continue;
+            centroidSum += c.transform.position;
+            counted++;
+        }
+        if (counted == 0) return Vector3.zero;
+        var centroid = centroidSum / counted;
+        var toCentroid = centroid - self.transform.position;
+        toCentroid.y = 0f;
+        return toCentroid.sqrMagnitude < 1e-6f ? Vector3.zero : toCentroid.normalized;
+    }
+
     /// <summary>The FollowPath entry point (docs/25 Phase B, extended by
-    /// Phase C): blends seek, separation-as-a-force, and predictive
-    /// avoidance into one steering direction, plus a speed scale. A unit
-    /// with a clear predicted path and no neighbour inside its separation
-    /// envelope steers at full speed straight toward `desiredDir`;
-    /// separation/avoidance only join the blend once they actually have
-    /// something to say, and even then at softened weights -- see
-    /// `PredictiveAvoidance` and `SeparationForce`'s own headers for why
-    /// neither replaces `RuntimeCityBuilder.ApplySeparation`'s hard
+    /// Phase C, and docs/23 §5 Phase 5): blends seek, separation-as-a-force,
+    /// predictive avoidance, and (new) alignment/cohesion into one steering
+    /// direction, plus a speed scale. A unit with a clear predicted path,
+    /// no neighbour inside its separation envelope, and no same-Faction
+    /// groupmates nearby steers at full speed straight toward `desiredDir`
+    /// -- BYTE-FOR-BYTE the same as before this phase, since `Alignment`/
+    /// `Cohesion` both return exactly `Vector3.zero` in that case; the new
+    /// terms only ever contribute once a unit actually has groupmates
+    /// within `GroupmateRadius`, and even then at docs/23 §5's own soft
+    /// weights. `PredictiveAvoidance`/`SeparationForce`'s own headers still
+    /// explain why NEITHER of the two ORIGINAL terms (nor these two new
+    /// ones) replaces `RuntimeCityBuilder.ApplySeparation`'s hard
     /// positional correction, which keeps running unconditionally
     /// regardless of this call.</summary>
     public static SteeringResult Combine(UnitCombat self, Vector3 desiredDir, float selfSpeed, List<UnitCombat> neighbours, float groupSpacing)
@@ -184,10 +276,13 @@ public static class MonsterSteeringController
         var sepBias = sepPush.sqrMagnitude > 1e-6f
             ? sepPush.normalized * Mathf.Min(1f, sepPush.magnitude / Mathf.Max(0.01f, self.Radius))
             : Vector3.zero;
+        var alignBias = Alignment(self, neighbours);
+        var cohesionBias = Cohesion(self, neighbours);
 
         var dir = avoid.sqrMagnitude < 1e-6f && sepBias.sqrMagnitude < 1e-6f
+            && alignBias.sqrMagnitude < 1e-6f && cohesionBias.sqrMagnitude < 1e-6f
             ? fwd
-            : (fwd + avoid * 1.2f + sepBias * 0.8f).normalized;
+            : (fwd + avoid * 1.2f + sepBias * 0.8f + alignBias * AlignmentWeight + cohesionBias * CohesionWeight).normalized;
 
         // speed modulation (docs/25 Phase C): alignment between the chosen
         // heading and the original seek direction is a cheap, principled

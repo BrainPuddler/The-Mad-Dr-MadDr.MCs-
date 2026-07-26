@@ -2260,3 +2260,64 @@ hitting harder; and hash-determinism with leveling in play. citygen-core's
 152 tests and match-core's other 108 pre-existing tests remain untouched.
 `harvestcreditverify` (21 checks) and `flightcheck` still pass/compile
 against the refreshed DLL -- no Unity-side files touched this phase.
+
+## docs/23 Phase 5: flocking alignment + cohesion (2026-07)
+
+Shipped the two remaining boid forces docs/23 §5 names — **alignment**
+(match average heading of nearby groupmates) and **cohesion** (gentle pull
+toward group centroid) — alongside separation, which docs/27 Phase C
+already ported to `match-core`.
+
+**match-core** (`Flocking.cs`): `Alignment`/`Cohesion` as pure math only —
+normalized average of moving neighbours' headings, and a normalized pull
+toward neighbour centroid, respectively. Deliberately **not** wired into
+`MatchState`'s tick loop: docs/23 §5's own task list puts the live steering
+integration under the *Unity* line ("wire into `MonsterAgent.FollowPath`"),
+not match-core's, and match-core still has no "order group" concept to
+scope neighbours by — the same gap docs/27 Phase B flagged and deferred
+for queued group moves. `FlockingTests.cs` gained 6 tests (heading
+convergence, zero-with-no-moving-neighbours-or-cancelling-headings,
+bounded centroid pull, zero-at-centroid); full match-core suite: 133 tests
+green.
+
+**Unity** (`MonsterSteeringController.cs`): matching `Alignment`/`Cohesion`
+static methods, scoped to same-`Faction` neighbours within 12m using each
+neighbour's own published `LastVelocity` as its heading — `Faction` is the
+existing two-value stand-in for docs/23's undefined "order group," already
+used elsewhere in this file (`NearestEnemyOf`). Wired into `Combine`
+**additively**: the existing `avoid*1.2f + sepBias*0.8f` terms and their
+weights are byte-for-byte unchanged; the new `alignBias*0.35 +
+cohesionBias*0.15` terms are zero whenever a unit has no same-faction
+groupmates in range, so a solo unit — or one surrounded only by enemies —
+sees zero behavior change from before this phase. This directly honors
+this session's standing instruction not to alter existing
+navigation/avoidance behavior.
+
+**Explicitly deferred, not faked:** attack-move (`A`+click) and patrol
+orders in `WaypointCommander` + the HUD hint line docs/23 §5 also asks
+for — a separate, real player-facing command feature, not core to the
+flocking math itself.
+
+**Aside — harness staleness bug found and fixed:** `steercheck` (the
+standalone harness compiling the real `MonsterSteeringController.cs`/
+`DeadlockManager.cs`/`UnitCombat.cs` for numeric verification, previously
+used for docs/25) had gone stale: its csproj never picked up
+`SpecialAttackInstance`/`CaptureState`, two types the real `UnitCombat.cs`
+gained in later docs/26 work, so it failed to compile (`CS0246`). First
+fix attempt (compiling in the real `SpecialAttackDefinition.cs`/
+`WebAttackAbility.cs`/`CaptureState.cs`/etc. files) cascaded into needing
+`ScriptableObject`/`RuntimeCityBuilder` — far outside this harness's
+scope. Fixed correctly by giving the harness its own minimal stub
+definitions for just `SpecialAttackInstance` (bare, only needs to exist as
+a type) and `CaptureState` (`Active`/`Captor` properties, `Begin`/
+`TickPull` methods) matching only the exact surface `UnitCombat.cs` itself
+calls (grep-confirmed), leaving the real csproj file list otherwise
+unchanged. Re-verified all 11 pre-existing `steercheck` checks still pass
+against the now-compiling real `UnitCombat.cs`, then added 3 new checks
+for `Alignment`/`Cohesion` plus 3 regression checks proving `Combine`'s
+additive wiring (solo unit unchanged, enemy-only neighbours unchanged,
+same-faction groupmate actually bends the direction) — 18 checks total,
+all passing.
+
+**Verification:** 133 match-core tests, 152 citygen-core tests (untouched),
+18 `steercheck` checks, `flightcheck` clean.

@@ -6,10 +6,14 @@ using Xunit;
 
 namespace MadDr.MatchCore.Tests;
 
-/// <summary>docs/23 §5 / docs/27 Phase C acceptance bar: separation
-/// min-distance holds, and the blocked-hex clamp is never violated.
-/// Alignment/cohesion have no tests here because they aren't implemented
-/// yet (see Flocking.cs's own header) -- nothing to verify.</summary>
+/// <summary>docs/23 §5's own four-property acceptance bar: "alignment
+/// converges heading variance, cohesion bounded, separation min-distance
+/// holds, blocked-hex clamp never violated." Separation/blocked-hex-clamp
+/// were already covered from docs/27 Phase C; this file adds
+/// alignment/cohesion. Both are pure math only here -- see Flocking.cs's
+/// own header for why the live steering INTEGRATION is Unity's job
+/// (`MonsterSteeringController.Alignment`/`Cohesion`, wired into
+/// `Combine`), not match-core's, for this phase.</summary>
 public class FlockingTests
 {
     private static List<FactionId> TwoPlayers() => new() { FactionId.MadDoctor, FactionId.HumanArmy };
@@ -63,6 +67,117 @@ public class FlockingTests
         var pushSecond = (4.0 - distToSecond) * 0.5;         // (4.0-0.5)*0.5 = 1.75, direction -X again (away from -1,0)
         var expectedDx = afterFirst - pushSecond;
         Assert.Equal(expectedDx, dx, 9);
+        Assert.Equal(0.0, dz, 9);
+    }
+
+    // ---- Alignment/Cohesion: docs/23 §5's other two flocking properties ----
+
+    private static double CircularVariance(IReadOnlyList<(double Hx, double Hz)> headings)
+    {
+        // 0 = every heading identical; up to 1 = maximally scattered
+        // (mean resultant vector length collapses to zero).
+        double sumX = 0, sumZ = 0;
+        foreach (var h in headings) { sumX += h.Hx; sumZ += h.Hz; }
+        var meanLen = Math.Sqrt(sumX * sumX + sumZ * sumZ) / headings.Count;
+        return 1.0 - meanLen;
+    }
+
+    [Fact]
+    public void Alignment_converges_a_scattered_groups_heading_variance_over_repeated_application()
+    {
+        // 6 headings spread evenly around a full circle -- maximum
+        // possible initial scatter. Each iteration, every agent blends
+        // its own heading toward Flocking.Alignment's answer (computed
+        // from every OTHER agent's CURRENT heading, docs/23 §5's own
+        // weight of 0.35) -- repeated application should pull the whole
+        // group toward a single shared heading, shrinking variance.
+        const int n = 6;
+        var headings = new (double Hx, double Hz)[n];
+        for (var i = 0; i < n; i++)
+        {
+            var angle = 2 * Math.PI * i / n;
+            headings[i] = (Math.Cos(angle), Math.Sin(angle));
+        }
+        var initialVariance = CircularVariance(headings);
+
+        for (var iter = 0; iter < 50; iter++)
+        {
+            var next = new (double Hx, double Hz)[n];
+            for (var i = 0; i < n; i++)
+            {
+                var others = new List<(double Hx, double Hz)>();
+                for (var j = 0; j < n; j++) if (j != i) others.Add(headings[j]);
+                var (ax, az) = Flocking.Alignment(others);
+                var bx = headings[i].Hx + Flocking.AlignmentWeight * ax;
+                var bz = headings[i].Hz + Flocking.AlignmentWeight * az;
+                var mag = Math.Sqrt(bx * bx + bz * bz);
+                next[i] = mag < 1e-9 ? headings[i] : (bx / mag, bz / mag);
+            }
+            headings = next;
+        }
+
+        var finalVariance = CircularVariance(headings);
+        Assert.True(finalVariance < initialVariance * 0.5,
+            $"heading variance should shrink substantially over repeated alignment (initial {initialVariance}, final {finalVariance})");
+    }
+
+    [Fact]
+    public void Alignment_returns_a_normalized_average_of_moving_neighbors_only()
+    {
+        // one moving neighbour heading +X, one stationary (zero heading,
+        // no direction to contribute) -- the average must be exactly the
+        // moving one's heading, not diluted by the stationary one.
+        var neighbors = new List<(double Hx, double Hz)> { (5.0, 0.0), (0.0, 0.0) };
+        var (dx, dz) = Flocking.Alignment(neighbors);
+        Assert.Equal(1.0, dx, 9);
+        Assert.Equal(0.0, dz, 9);
+    }
+
+    [Fact]
+    public void Alignment_is_zero_with_no_neighbors_all_stationary_or_headings_that_cancel_out()
+    {
+        Assert.Equal((0.0, 0.0), Flocking.Alignment(new List<(double, double)>()));
+        Assert.Equal((0.0, 0.0), Flocking.Alignment(new List<(double, double)> { (0.0, 0.0), (0.0, 0.0) }));
+        // directly opposing headings of equal weight cancel to (near) zero
+        var opposing = Flocking.Alignment(new List<(double, double)> { (1.0, 0.0), (-1.0, 0.0) });
+        Assert.Equal(0.0, opposing.Item1, 9);
+        Assert.Equal(0.0, opposing.Item2, 9);
+    }
+
+    [Fact]
+    public void Cohesion_points_toward_the_actual_centroid_as_a_unit_vector()
+    {
+        var neighbors = new List<(double X, double Z)> { (10.0, 0.0), (0.0, 10.0) };
+        // centroid (5,5); self at origin -> direction (5,5) normalized
+        var (dx, dz) = Flocking.Cohesion(0.0, 0.0, neighbors);
+        Assert.Equal(1.0 / Math.Sqrt(2), dx, 6);
+        Assert.Equal(1.0 / Math.Sqrt(2), dz, 6);
+    }
+
+    [Fact]
+    public void Cohesion_direction_is_always_bounded_to_unit_length_regardless_of_distance()
+    {
+        // docs/23 §5: "capped so it never fights the path" -- Cohesion
+        // itself always returns a unit vector (or zero); the actual cap
+        // on influence is the caller's CohesionWeight blend, not a
+        // distance-dependent magnitude here. A far-flung group and a
+        // nearby one produce the same-magnitude bias.
+        var near = new List<(double X, double Z)> { (1.0, 0.0) };
+        var far = new List<(double X, double Z)> { (100000.0, 0.0) };
+        var (nearDx, nearDz) = Flocking.Cohesion(0.0, 0.0, near);
+        var (farDx, farDz) = Flocking.Cohesion(0.0, 0.0, far);
+        Assert.Equal(1.0, Math.Sqrt(nearDx * nearDx + nearDz * nearDz), 9);
+        Assert.Equal(1.0, Math.Sqrt(farDx * farDx + farDz * farDz), 9);
+        Assert.Equal(nearDx, farDx, 9);   // same direction, same (unit) magnitude
+    }
+
+    [Fact]
+    public void Cohesion_is_zero_with_no_neighbors_or_when_self_is_already_at_the_centroid()
+    {
+        Assert.Equal((0.0, 0.0), Flocking.Cohesion(5.0, 5.0, new List<(double, double)>()));
+        var atCentroid = new List<(double X, double Z)> { (10.0, 10.0), (0.0, 0.0) };   // centroid (5,5)
+        var (dx, dz) = Flocking.Cohesion(5.0, 5.0, atCentroid);
+        Assert.Equal(0.0, dx, 9);
         Assert.Equal(0.0, dz, 9);
     }
 

@@ -422,6 +422,44 @@ formations, group arrival facing, minimap orders). This phase adds the feel.
 - Attack-move (`A` + click) and patrol added to close the SC2 verb set.
 
 ### Phase 5 tasks
+
+> **Status (2026-07): alignment + cohesion shipped, attack-move/patrol
+> deferred.** `match-core/src/Flocking.cs` (already holding `Separate` from
+> docs/27 Phase C) gained `Alignment`/`Cohesion` as pure math — normalized
+> average heading of moving neighbours, and a normalized pull toward
+> neighbour centroid, respectively (`FlockingTests.cs`, 6 new tests: heading
+> convergence, zero-with-no-moving-neighbours, bounded centroid pull,
+> zero-at-centroid). Deliberately NOT wired into `MatchState`'s own tick
+> loop — docs/23 §5 itself puts the live steering integration under the
+> Unity task line ("wire into `MonsterAgent.FollowPath`"), not match-core's,
+> and match-core still has no "order group" concept to scope neighbours by
+> (docs/27 Phase B deferred that too, for queued group moves — same reason).
+> On the Unity side, `MonsterSteeringController.cs` gained matching
+> `Alignment`/`Cohesion` static methods, scoped to same-`Faction` neighbours
+> within 12 m using each neighbour's own published `LastVelocity` as its
+> heading (`Faction` is the existing two-value stand-in for docs/23's
+> undefined "order group," already used elsewhere in this file for
+> `NearestEnemyOf`). Wired ADDITIVELY into `Combine`: the existing
+> `avoid*1.2f + sepBias*0.8f` terms and their weights are byte-for-byte
+> unchanged; the new `alignBias*0.35 + cohesionBias*0.15` terms are zero for
+> any unit with no same-faction groupmates in range, so a solo unit or one
+> surrounded only by enemies sees zero behavior change (per this session's
+> standing "don't alter existing navigation/avoidance" instruction) —
+> verified directly (not just asserted) by three new `steercheck` checks:
+> solo unit unchanged, enemy-only neighbours unchanged, same-faction
+> groupmate actually bends the direction. **Explicitly deferred, not
+> faked:** attack-move (`A` + click) and patrol orders in
+> `WaypointCommander` + the HUD hint line — a separate, real player-facing
+> command feature, not core to the flocking math itself. **Aside:** fixing
+> this required first repairing `steercheck`, a standalone verification
+> harness left stale since docs/26 added `SpecialAttackInstance`/
+> `CaptureState` fields to the real `UnitCombat.cs` — its csproj had never
+> picked those up. Fixed by giving the harness its own minimal stub
+> definitions for those two types (matching only the exact surface
+> `UnitCombat.cs` itself calls, grep-confirmed) rather than pulling in the
+> real files, which cascade into `ScriptableObject`/`RuntimeCityBuilder`
+> dependencies far outside this harness's scope.
+
 - `match-core`: `Flocking.cs` (pure math, unit positions in, steering out —
   testable numerically: alignment converges heading variance, cohesion bounded,
   separation min-distance holds, blocked-hex clamp never violated across 10k
