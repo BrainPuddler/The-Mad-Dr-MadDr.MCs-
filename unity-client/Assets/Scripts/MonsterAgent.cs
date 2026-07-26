@@ -32,7 +32,7 @@ using UnityEngine;
 /// </summary>
 public class MonsterAgent : MonoBehaviour
 {
-    private enum OrderKind { Idle, Move, AttackBuilding, AttackUnit, EatCitizen, Perch, SpecialAttack }
+    private enum OrderKind { Idle, Move, AttackBuilding, AttackUnit, EatCitizen, Perch, SpecialAttack, AttackMove }
 
     /// <summary>Shared "which way does the group face" token for a squad
     /// move order (see OrderMove's groupFacing overload). Stays unlocked
@@ -77,6 +77,20 @@ public class MonsterAgent : MonoBehaviour
     // your own nearest footprint hex" -- the original, single-unit
     // behavior, still used when nothing assigns one explicitly.
     private HexCoord? _perchTargetHex;
+
+    // docs/23 Phase 5 follow-up: attack-move (walk toward `_attackMoveDestination`,
+    // auto-detouring into a full AttackUnit fight on any spotted enemy) and
+    // patrol (the same thing, but flipping between two ends forever). Both
+    // ride the SAME OrderKind.AttackMove; `_isPatrolling` distinguishes a
+    // one-shot arrival from "turn around and walk back." These deliberately
+    // sit OUTSIDE ClearTargets()'s combat-detour set (TickAttackMove sets
+    // _targetUnit/_order directly, not via OrderAttackUnit) so a fight
+    // picked up mid-attack-move doesn't erase where the unit was headed --
+    // but ClearTargets() itself still resets them, so any genuinely NEW
+    // player order correctly cancels a pending attack-move/patrol.
+    private HexCoord? _attackMoveDestination;
+    private bool _isPatrolling;
+    private HexCoord _patrolOtherEnd;
 
     // docs/27 Phase A: opt-in sim-driven movement. Null/false by default
     // for every existing scene (nothing calls EnableSimDriven today), so
@@ -172,6 +186,7 @@ public class MonsterAgent : MonoBehaviour
                 case OrderKind.EatCitizen: return "hunting a citizen";
                 case OrderKind.Perch: return "flying to a rooftop perch";
                 case OrderKind.SpecialAttack: return "using " + (_activeSpecialAttack?.Definition != null ? _activeSpecialAttack.Definition.AbilityName : "a special attack");
+                case OrderKind.AttackMove: return (_isPatrolling ? "patrolling" : "attack-moving") + air;
                 default: return Perched ? "perched on a rooftop" : "idle";
             }
         }
@@ -385,6 +400,37 @@ public class MonsterAgent : MonoBehaviour
         _order = OrderKind.AttackUnit;
     }
 
+    /// <summary>docs/23 Phase 5 follow-up: walk to `hex`, auto-engaging any
+    /// enemy spotted within aggro range along the way (see TickAttackMove)
+    /// instead of walking past it like a plain Move. Queueing works the
+    /// same as OrderMove.</summary>
+    public void OrderAttackMove(HexCoord hex, bool queue)
+    {
+        ClearTargets();
+        if (!queue) { _waypoints.Clear(); _path = null; }
+        _waypoints.Enqueue(hex);
+        _attackMoveDestination = hex;
+        _isPatrolling = false;
+        _order = OrderKind.AttackMove;
+    }
+
+    /// <summary>docs/23 Phase 5 follow-up: attack-move back and forth
+    /// forever between wherever this unit is standing right now and
+    /// `destination`, auto-engaging along the way -- SC2-style patrol.
+    /// Never queues (a patrol IS the whole order).</summary>
+    public void OrderPatrol(HexCoord destination)
+    {
+        ClearTargets();
+        _waypoints.Clear();
+        _path = null;
+        var here = _builder != null ? _builder.HexAt(transform.position) : destination;
+        _waypoints.Enqueue(destination);
+        _attackMoveDestination = destination;
+        _patrolOtherEnd = here;
+        _isPatrolling = true;
+        _order = OrderKind.AttackMove;
+    }
+
     /// <summary>docs/26 (Special Attacks System): use `ability` on `unit`
     /// once in range. `ability` must be one of THIS unit's own
     /// `_fighter.Abilities` entries (same object, not a copy) so its
@@ -441,6 +487,8 @@ public class MonsterAgent : MonoBehaviour
         _perchTargetHex = null;
         _activeSpecialAttack = null;
         _targetSpecialAttackUnit = null;
+        _attackMoveDestination = null;  // any fresh order cancels a pending attack-move/patrol
+        _isPatrolling = false;
     }
 
     /// <summary>The single place _order becomes Idle. Flight is only ever
@@ -474,6 +522,58 @@ public class MonsterAgent : MonoBehaviour
                 _body.SetFlying(false, false);
             }
         }
+    }
+
+    private enum AttackMoveLegOutcome { Arrived, DetourEnded, Unreachable }
+
+    /// <summary>docs/23 Phase 5 follow-up: stands in for a plain GoIdle()
+    /// at the three points where a leg of movement completes -- arrival,
+    /// an unreachable path, or a combat detour's target dying/vanishing.
+    /// When there's no pending attack-move (`_attackMoveDestination` is
+    /// null -- true for every ordinary Move/AttackUnit/etc. order), this
+    /// IS exactly GoIdle(); every other order kind is completely
+    /// unaffected. Otherwise: an unreachable leg gives up entirely; a
+    /// one-shot arrival lands (GoIdle); a patrol arrival flips to the
+    /// other end and keeps walking; and a detour ending (the enemy this
+    /// unit chased down mid-attack-move died) resumes toward the original
+    /// destination.</summary>
+    private void GoIdleOrContinueAttackMove(AttackMoveLegOutcome outcome)
+    {
+        if (!_attackMoveDestination.HasValue) { GoIdle(); return; }
+
+        if (outcome == AttackMoveLegOutcome.Unreachable)
+        {
+            _attackMoveDestination = null;
+            _isPatrolling = false;
+            GoIdle();
+            return;
+        }
+
+        if (outcome == AttackMoveLegOutcome.Arrived && _isPatrolling)
+        {
+            var next = _patrolOtherEnd;
+            _patrolOtherEnd = _attackMoveDestination.Value;
+            _attackMoveDestination = next;
+            _waypoints.Clear();
+            _waypoints.Enqueue(next);
+            _path = null;
+            _order = OrderKind.AttackMove;
+            return;
+        }
+
+        if (outcome == AttackMoveLegOutcome.Arrived)
+        {
+            _attackMoveDestination = null;
+            GoIdle();
+            return;
+        }
+
+        // DetourEnded: the enemy this unit turned aside to fight is gone --
+        // resume toward the original attack-move/patrol destination.
+        _waypoints.Clear();
+        _waypoints.Enqueue(_attackMoveDestination.Value);
+        _path = null;
+        _order = OrderKind.AttackMove;
     }
 
     // ---- per-frame ----------------------------------------------------------
@@ -548,6 +648,7 @@ public class MonsterAgent : MonoBehaviour
         switch (_order)
         {
             case OrderKind.Move: velocity = SimDriven ? TickMoveViaSim(dt) : TickMove(dt); break;
+            case OrderKind.AttackMove: velocity = TickAttackMove(dt); break;
             case OrderKind.AttackBuilding: velocity = TickAttack(dt); break;
             case OrderKind.AttackUnit: velocity = TickAttackUnit(dt); break;
             case OrderKind.EatCitizen: velocity = TickEat(dt); break;
@@ -614,6 +715,10 @@ public class MonsterAgent : MonoBehaviour
             _builder.ApplySeparation(_fighter);
     }
 
+    // shared with TickAttackMove -- how far an idle/attack-moving unit
+    // looks for something to engage
+    private const float AggroRangeMeters = 130f;
+
     private void AcquireTarget()
     {
         if (_fighter == null) return;
@@ -634,7 +739,7 @@ public class MonsterAgent : MonoBehaviour
         if (_fighter.Weapon == null || !_fighter.Weapon.CanAttack) return;
         var attacker = _fighter.LastAttacker;
         if (attacker != null && attacker.Alive) { OrderAttackUnit(attacker); return; }
-        var enemy = _builder.NearestEnemyOf(_fighter, 130f);
+        var enemy = _builder.NearestEnemyOf(_fighter, AggroRangeMeters);
         if (enemy != null) OrderAttackUnit(enemy);
     }
 
@@ -710,14 +815,37 @@ public class MonsterAgent : MonoBehaviour
         return ability != null;
     }
 
+    /// <summary>docs/23 Phase 5 follow-up: like TickMove, but scans for an
+    /// enemy in aggro range every tick first. Finding one detours straight
+    /// into a real AttackUnit fight -- `_targetUnit`/`_order` are set
+    /// DIRECTLY here, bypassing OrderAttackUnit's ClearTargets() call, so
+    /// `_attackMoveDestination`/`_isPatrolling` survive the detour and
+    /// TickAttackUnit's own dead-target branch (via
+    /// GoIdleOrContinueAttackMove) knows to resume this order once the
+    /// fight ends. No SimDriven equivalent yet (docs/23 §5: match-core has
+    /// no sim-side attack-move concept) -- a sim-driven unit never reaches
+    /// this method (Update()'s Move case still goes through
+    /// TickMoveViaSim), so attack-move is legacy-path only for now.</summary>
+    private Vector3 TickAttackMove(float dt)
+    {
+        var enemy = _builder != null ? _builder.NearestEnemyOf(_fighter, AggroRangeMeters) : null;
+        if (enemy != null)
+        {
+            _targetUnit = enemy;
+            _order = OrderKind.AttackUnit;
+            return TickAttackUnit(dt);
+        }
+        return TickMove(dt);
+    }
+
     private Vector3 TickMove(float dt)
     {
         if (_path == null)
         {
-            if (_waypoints.Count == 0) { GoIdle(); return Vector3.zero; }
+            if (_waypoints.Count == 0) { GoIdleOrContinueAttackMove(AttackMoveLegOutcome.Arrived); return Vector3.zero; }
             var goal = _waypoints.Dequeue();
             _path = ComputePath(goal);
-            if (_path == null) { GoIdle(); return Vector3.zero; } // unreachable: stop rather than pretend
+            if (_path == null) { GoIdleOrContinueAttackMove(AttackMoveLegOutcome.Unreachable); return Vector3.zero; } // unreachable: stop rather than pretend
         }
         RecomputeIfCityChanged();
         return FollowPath(dt, RunOrWalkSpeed());
@@ -946,7 +1074,12 @@ public class MonsterAgent : MonoBehaviour
 
     private Vector3 TickAttackUnit(float dt)
     {
-        if (_targetUnit == null || !_targetUnit.Alive) { _targetUnit = null; GoIdle(); return Vector3.zero; }
+        if (_targetUnit == null || !_targetUnit.Alive)
+        {
+            _targetUnit = null;
+            GoIdleOrContinueAttackMove(AttackMoveLegOutcome.DetourEnded);
+            return Vector3.zero;
+        }
         var w = _fighter.Weapon;
         var to = _targetUnit.AimPoint - transform.position;
         to.y = 0f;

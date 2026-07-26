@@ -20,6 +20,11 @@ using UnityEngine.InputSystem;
 ///                            on a building ROOF -> winged units fly to it
 ///                              and land (perch); everyone else attacks
 ///                            on the ground -> waypoint (Shift queues)
+///   A + left click       : attack-move -- walk to the ground point,
+///                            auto-engaging any enemy spotted en route
+///                            instead of walking past it (Shift queues)
+///   P + left click       : patrol -- attack-move back and forth forever
+///                            between here and the clicked ground point
 ///   G                    : glide the camera to the unit nearest the cursor
 /// </summary>
 public class WaypointCommander : MonoBehaviour
@@ -73,17 +78,25 @@ public class WaypointCommander : MonoBehaviour
         // real right button).
         var ctrlHeld = keyboard != null && (keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed);
 
-        HandleSelection(cam, mouse, keyboard, ctrlHeld);
-        HandleOrders(cam, mouse, keyboard, ctrlHeld);
+        // docs/23 Phase 5 follow-up: A/P held turns the next left click into
+        // an order (attack-move / patrol) instead of a selection click --
+        // same idea as the Ctrl-left-click-for-right-click stand-in above.
+        var attackMoveHeld = keyboard != null && keyboard.aKey.isPressed;
+        var patrolHeld = keyboard != null && keyboard.pKey.isPressed;
+
+        HandleSelection(cam, mouse, keyboard, ctrlHeld, attackMoveHeld, patrolHeld);
+        HandleOrders(cam, mouse, keyboard, ctrlHeld, attackMoveHeld, patrolHeld);
     }
 
     // ---- selection (left button) --------------------------------------------
 
-    private void HandleSelection(Camera cam, Mouse mouse, Keyboard keyboard, bool ctrlHeld)
+    private void HandleSelection(Camera cam, Mouse mouse, Keyboard keyboard, bool ctrlHeld,
+        bool attackMoveHeld, bool patrolHeld)
     {
-        // Ctrl+left is claimed by the right-click stand-in above -- never
-        // let it start a selection click/drag too.
-        if (mouse.leftButton.wasPressedThisFrame && !ctrlHeld)
+        // Ctrl+left is claimed by the right-click stand-in above, and
+        // A/P-left by the attack-move/patrol order below -- never let any
+        // of them start a selection click/drag too.
+        if (mouse.leftButton.wasPressedThisFrame && !ctrlHeld && !attackMoveHeld && !patrolHeld)
         {
             _leftDown = true;
             _dragStart = mouse.position.ReadValue();
@@ -134,10 +147,14 @@ public class WaypointCommander : MonoBehaviour
 
     // ---- orders (right button, or Ctrl+left for trackpads) ------------------
 
-    private void HandleOrders(Camera cam, Mouse mouse, Keyboard keyboard, bool ctrlHeld)
+    private void HandleOrders(Camera cam, Mouse mouse, Keyboard keyboard, bool ctrlHeld,
+        bool attackMoveHeld, bool patrolHeld)
     {
+        var leftPressed = mouse.leftButton.wasPressedThisFrame;
+        var attackMoveClick = attackMoveHeld && leftPressed;
+        var patrolClick = patrolHeld && leftPressed;
         var ordered = mouse.rightButton.wasPressedThisFrame
-            || (ctrlHeld && mouse.leftButton.wasPressedThisFrame);
+            || (ctrlHeld && leftPressed) || attackMoveClick || patrolClick;
         if (!ordered) return;
         PruneSelection();
         if (_selected.Count == 0) return;
@@ -187,7 +204,11 @@ public class WaypointCommander : MonoBehaviour
         if (_builder.City.Contains(hex))
         {
             var shift = keyboard != null && keyboard.leftShiftKey.isPressed;
-            if (_selected.Count == 1)
+            if (patrolClick)
+                foreach (var a in _selected) a.OrderPatrol(hex);
+            else if (attackMoveClick)
+                foreach (var a in _selected) a.OrderAttackMove(hex, shift);
+            else if (_selected.Count == 1)
                 _selected[0].OrderMove(hex, shift);
             else
                 AssignFormation(_builder.FormationHexes(hex, _selected.Count), shift, hit.Value.point);

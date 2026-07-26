@@ -3011,3 +3011,64 @@ same real assets + Editor-side iteration every Phase 10 sub-phase already
 requires (no Editor exists in this environment); nothing here was
 visually verified, consistent with this whole project's standing
 discipline against claiming verification it can't back up.
+
+## docs/23 Phase 5 follow-up: attack-move + patrol orders shipped (2026-07)
+
+Implemented the piece of Phase 5 explicitly deferred when the flocking
+slice landed: attack-move (`A` + click) and patrol (`P` + click) orders,
+plus the HUD hint line.
+
+`MonsterAgent.cs` gained `OrderKind.AttackMove` (patrol reuses it via an
+`_isPatrolling` flag rather than a separate order kind) and a
+`TickAttackMove` that scans `NearestEnemyOf` every tick — the same
+aggro-range check `AcquireTarget` already made, now pulled into a shared
+`AggroRangeMeters` constant instead of two copies of the same inline
+`130f`. Finding an enemy detours straight into a real `AttackUnit` fight:
+`_targetUnit`/`_order` are set directly rather than through the public
+`OrderAttackUnit`, specifically so the pending attack-move/patrol
+destination (`_attackMoveDestination`/`_isPatrolling`/`_patrolOtherEnd`)
+survives the detour instead of being wiped by `ClearTargets()` — but
+`ClearTargets()` itself still resets those three fields, so any
+genuinely new player order correctly cancels a pending attack-move or
+patrol.
+
+A new `GoIdleOrContinueAttackMove` helper stands in for a plain
+`GoIdle()` at exactly the three call sites where the distinction
+matters: `TickMove`'s arrival and unreachable-path branches, and
+`TickAttackUnit`'s target-gone branch. With no pending attack-move
+(`_attackMoveDestination` null — true for every ordinary Move/AttackUnit/
+etc. order) it is byte-for-byte `GoIdle()`, so none of the other ~13
+existing `GoIdle()` call sites or order kinds changed behavior at all.
+Otherwise: an unreachable leg gives up and lands; a one-shot arrival
+lands; a patrol arrival flips to the other end and keeps walking; and a
+detour ending (the enemy chased down mid-attack-move died) resumes
+toward the original destination.
+
+`WaypointCommander.cs` binds `A`/`P` + left-click the same way
+`Ctrl+left` already stands in for right-click (both gate the plain
+selection-click handler so the same press doesn't also start a
+marquee-drag). Grep-confirmed both keys were free before this change —
+`SimpleCameraRig.cs`'s own WASD camera pan also reads `aKey`, but that's
+a different input context, not a real keybinding collision; it does mean
+holding `A` to click an attack-move order also pans the camera left for
+that instant, a known, minor, accepted UX overlap, not a bug. The HUD
+hint line was added to `HudStatus.cs` alongside the existing
+control-reference lines (that file, not `WaypointCommander.cs`, is where
+every other hint line already lives).
+
+**Known, accepted gap:** no `SimDriven` (docs/27 opt-in sim-driven
+movement) equivalent — match-core has no sim-side attack-move concept
+yet, so a sim-driven unit's attack-move would need to fall back to
+`TickMoveViaSim`'s plain move with no auto-engage; in practice this never
+triggers today since `OrderAttackMove`/`OrderPatrol` don't check
+`SimDriven` at all (only `OrderMove` has a `SimDriven` branch) — a
+sim-driven unit issued an attack-move gets the plain legacy `TickMove`/
+`TickAttackMove` path, same as every other order kind except Move.
+
+Verified via the `flightcheck` scratchpad harness only (compiles the
+real `MonsterAgent.cs`/`WaypointCommander.cs`/`HudStatus.cs` against a
+Unity API stub — the stub's `Keyboard` needed a `pKey` field added,
+harness-only, the real Input System package already has one). No Unity
+Editor exists in this environment, so this is NOT visually or
+runtime-verified — consistent with this whole project's standing
+discipline against claiming verification it can't back up.

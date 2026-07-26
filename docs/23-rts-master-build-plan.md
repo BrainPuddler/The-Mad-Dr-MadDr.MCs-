@@ -447,25 +447,52 @@ formations, group arrival facing, minimap orders). This phase adds the feel.
 > standing "don't alter existing navigation/avoidance" instruction) —
 > verified directly (not just asserted) by three new `steercheck` checks:
 > solo unit unchanged, enemy-only neighbours unchanged, same-faction
-> groupmate actually bends the direction. **Explicitly deferred, not
-> faked:** attack-move (`A` + click) and patrol orders in
-> `WaypointCommander` + the HUD hint line — a separate, real player-facing
-> command feature, not core to the flocking math itself. **Aside:** fixing
-> this required first repairing `steercheck`, a standalone verification
-> harness left stale since docs/26 added `SpecialAttackInstance`/
-> `CaptureState` fields to the real `UnitCombat.cs` — its csproj had never
-> picked those up. Fixed by giving the harness its own minimal stub
-> definitions for those two types (matching only the exact surface
-> `UnitCombat.cs` itself calls, grep-confirmed) rather than pulling in the
-> real files, which cascade into `ScriptableObject`/`RuntimeCityBuilder`
-> dependencies far outside this harness's scope.
+> groupmate actually bends the direction. **Aside:** fixing this required
+> first repairing `steercheck`, a standalone verification harness left
+> stale since docs/26 added `SpecialAttackInstance`/`CaptureState` fields
+> to the real `UnitCombat.cs` — its csproj had never picked those up.
+> Fixed by giving the harness its own minimal stub definitions for those
+> two types (matching only the exact surface `UnitCombat.cs` itself
+> calls, grep-confirmed) rather than pulling in the real files, which
+> cascade into `ScriptableObject`/`RuntimeCityBuilder` dependencies far
+> outside this harness's scope.
+>
+> **Follow-up (2026-07): attack-move + patrol shipped.** `MonsterAgent.cs`
+> gained `OrderKind.AttackMove` (patrol reuses it via an `_isPatrolling`
+> flag rather than a separate order kind) plus `OrderAttackMove`/
+> `OrderPatrol` and a `TickAttackMove` that scans `NearestEnemyOf` (the
+> same aggro-range check `AcquireTarget` already made, now a shared
+> `AggroRangeMeters` constant instead of a duplicated inline `130f`) every
+> tick and detours straight into a real `AttackUnit` fight on a hit —
+> setting `_targetUnit`/`_order` directly rather than through
+> `OrderAttackUnit`, specifically so the pending attack-move/patrol
+> destination survives the detour instead of being wiped by
+> `ClearTargets()`. A new `GoIdleOrContinueAttackMove` helper stands in
+> for `GoIdle()` at exactly the three call sites where that matters
+> (`TickMove`'s arrival/unreachable branches, `TickAttackUnit`'s
+> target-gone branch): with no pending attack-move it's byte-for-byte
+> `GoIdle()`, so every other order kind is unaffected; otherwise it lands
+> a one-shot arrival, flips a patrol to its other end and keeps walking,
+> or resumes toward the original destination once a combat detour ends.
+> `WaypointCommander` binds `A`/`P` + left-click (both free — grep-
+> confirmed no prior binding except `SimpleCameraRig`'s own WASD camera
+> pan, a different input context) the same way `Ctrl+left` already stands
+> in for right-click; the HUD hint line lives in `HudStatus.cs` alongside
+> the existing control-reference lines. **Known, accepted gap:** no
+> `SimDriven` (docs/27 opt-in sim-driven movement) equivalent yet —
+> match-core has no sim-side attack-move concept, so a sim-driven unit
+> falls back to `TickMoveViaSim`'s plain move with no auto-engage, same
+> as before this follow-up. Verified via the `flightcheck` scratchpad
+> harness (compiles the real `MonsterAgent.cs`/`WaypointCommander.cs`/
+> `HudStatus.cs` against a Unity API stub) only — no Editor available in
+> this environment, so this is NOT visually/runtime verified.
 
 - `match-core`: `Flocking.cs` (pure math, unit positions in, steering out —
   testable numerically: alignment converges heading variance, cohesion bounded,
   separation min-distance holds, blocked-hex clamp never violated across 10k
   random steps).
 - Unity: wire into `MonsterAgent.FollowPath`; attack-move + patrol orders in
-  `WaypointCommander` (+ HUD hint line).
+  `WaypointCommander` (+ HUD hint line). **Shipped** (see status note above).
 - **Acceptance:** numeric harness proves the four flocking properties; existing
   84+ creature-mesh / 56 roster-client / 145 citygen tests untouched.
 
