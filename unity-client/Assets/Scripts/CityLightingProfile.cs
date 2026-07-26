@@ -103,12 +103,29 @@ public class CityLightingProfile : ScriptableObject
         }
     }
 
+    private static CityLightingProfile _active;
+
     /// <summary>The profile RuntimeCityBuilder is currently using, set
     /// once at city-build time -- the loose static-holder idiom this
     /// project already uses (NeonRegistry, StreetLampRegistry) so static
     /// generator classes (BuildingDresser/RoadDresser mint their cached
     /// materials once, not per-frame) can read tunable values without
     /// threading a profile reference through every dresser method
-    /// signature.</summary>
-    public static CityLightingProfile Active = Default;
+    /// signature.
+    ///
+    /// Deliberately NOT `= Default` as a field initializer -- Unity
+    /// forbids calling ScriptableObject.CreateInstance from a
+    /// ScriptableObject's own static field initializer/constructor
+    /// ("CreateScriptableObjectInstanceFromType is not allowed to be
+    /// called from a ScriptableObject constructor... call it in OnEnable
+    /// instead"), since the type's static constructor can run during
+    /// Unity's own serialization/domain-reload window, before it's safe
+    /// to construct instances. The getter below only ever calls
+    /// `Default` lazily, from ordinary runtime code (Start()/Update()),
+    /// which is exactly what Unity expects.</summary>
+    public static CityLightingProfile Active
+    {
+        get { return _active != null ? _active : Default; }
+        set { _active = value; }
+    }
 }

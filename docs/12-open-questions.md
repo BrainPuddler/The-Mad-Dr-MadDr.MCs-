@@ -3372,3 +3372,43 @@ separate follow-ups, not silently skipped.
 **Not visually verified** -- still no Unity Editor in this environment.
 The whole point of shipping the ScriptableObject first is that the next
 round of "still not right" tuning is a slider drag, not another commit.
+
+## docs/28 fix: CityLightingProfile crashed on load (2026-07)
+
+Real runtime crash from the creator's own Editor session (the first
+Play-mode run of any of this lighting work): `UnityException:
+CreateScriptableObjectInstanceFromType is not allowed to be called from
+a ScriptableObject constructor (or instance field initializer), call it
+in OnEnable instead`, thrown from `CityLightingProfile`'s own static
+constructor.
+
+Cause: `public static CityLightingProfile Active = Default;` is a static
+FIELD INITIALIZER, which runs as part of the type's `.cctor` the moment
+anything touches the class -- and that eagerly called `Default`'s
+getter (`CreateInstance<CityLightingProfile>()`) from within static
+type-construction, exactly the context Unity's error names. The
+existing `Default` lazy-getter pattern was fine in isolation (matches
+`SecondaryAttackCatalog`'s own working lazy-CreateInstance idiom); the
+bug was specifically triggering it eagerly via a field initializer
+instead of from ordinary runtime code.
+
+Fixed by making `Active` a property backed by a plain (uninitialized,
+defaults to null) static field, resolving to `Default` lazily in the
+getter instead of eagerly in a field initializer:
+```
+private static CityLightingProfile _active;
+public static CityLightingProfile Active
+{
+    get { return _active != null ? _active : Default; }
+    set { _active = value; }
+}
+```
+Grepped every other `CreateInstance` call in the codebase
+(`LumenCycleController`'s Volume profile, `SecondaryAttackCatalog`'s
+three definitions) -- all already called from safe runtime contexts
+(`Start()`/lazy getters invoked at gameplay time), not static
+initializers; no other instance of this bug exists.
+
+Not yet re-confirmed against a live Play session from this side (no
+Editor access), but this is a real, understood, mechanical fix for a
+real reported crash, not a guess.
