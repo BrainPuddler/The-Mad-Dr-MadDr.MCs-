@@ -574,8 +574,11 @@ namespace MadDr.MatchCore
         /// number; this reuses melee <see cref="CombatStats.Reach"/>'s own
         /// convention (1 = adjacent) as the v0.1 placeholder, same
         /// "flagged, not invented in secret" discipline as every other
-        /// unspecified tuning constant this project ships with.</summary>
-        private const int SalvageRangeHexes = 1;
+        /// unspecified tuning constant this project ships with. Public so
+        /// a command SOURCE (<see cref="SkirmishCommander"/>) can check
+        /// range before issuing an order that would just be rejected,
+        /// rather than duplicating the number.</summary>
+        public const int SalvageRangeHexes = 1;
 
         /// <summary>docs/23 Phase 6a (docs/04): TargetEntity (the
         /// harvester) begins looting ArgA (the corpse). Both units must
@@ -1009,6 +1012,15 @@ namespace MadDr.MatchCore
         /// around the flat-index guess); Phase 1.5 doesn't need this to be
         /// more than correct, since it only runs once per MoveTo command,
         /// never per tick.</summary>
+        /// <summary>Public face of <see cref="HexAt"/> -- which hex a world
+        /// position sits in. Exposed for command SOURCES outside the sim
+        /// (<see cref="SkirmishCommander"/>, and eventually the Unity
+        /// input layer) that need to reason in the same hex space the sim
+        /// validates orders in, so they can avoid issuing orders that
+        /// would be silently rejected. Read-only: converting a coordinate
+        /// mutates nothing.</summary>
+        public static HexCoord HexOfWorld(double x, double z) => HexAt(x, z);
+
         private static HexCoord HexAt(double x, double z)
         {
             var size = HexCoord.HexMeters / Math.Sqrt(3);

@@ -2509,3 +2509,123 @@ positive stat floor, `SpawnRosterUnit` copies the def's exact stat block
 onto the spawned `SimUnit`, a faction/kind mismatch throws, a real mixed
 4-unit Army-vs-Hive skirmish fields and ticks deterministically), 152
 citygen-core tests (untouched).
+
+## docs/23 Phase 6c: utility-driven skirmish commander AI (2026-07)
+
+Shipped the last piece of §13 amendment D's Phase 6 split — "AI opponents
+for skirmish use a utility-driven commander in match-core... so 1-player
+matches work before netcode."
+
+**Architecture decision, and it's the load-bearing one: the commander is a
+command SOURCE, not part of the simulation.** `SkirmishCommander` reads a
+`MatchState` and RETURNS `Command`s; the caller feeds them to the next
+tick. Nothing in it runs inside `MatchState.Tick`. Three things fall out
+of that, all of which would have been problems the other way:
+
+- lockstep (docs/23 §11) already replicates a command stream, so an AI
+  that emits commands needs no new netcode — one peer runs the commander
+  and its orders replicate like any human's;
+- a replay is exact without re-running the AI at all, since its commands
+  are already in the log;
+- its `double` utility math can never threaten cross-platform determinism,
+  because docs/23 §0's float discipline governs the TICK path, and a
+  command source sits outside it exactly the way Unity's mouse handler
+  does.
+
+Decisions themselves are RNG-free and evaluated in entity-ID order, so an
+AI-vs-AI match is hash-identical run to run (pinned by a test).
+
+**`ThreatMap`** is docs/23's other named ingredient, implemented as an
+on-demand falloff FUNCTION rather than a materialized grid: a `BigCity`
+preset is ~20k hexes and a match fields tens of units (§13-E targets
+20-40/player), so scanning the small list per query is both cheaper and
+exact, with no cell-resolution artifacts.
+
+**Personality, and the two ways to author it (the creator's explicit
+ask).** `CommanderPersonality` is six axes in three designed tension
+pairs — Aggression↔Caution, Greed↔Territoriality, Opportunism↔Discipline.
+Deliberately not a fresh vocabulary: it's docs/16's brain-gene idea
+(`command`/`will`/`temperament`/`guile`/`fury`) lifted one level, from
+"how does this ONE creature behave under stress" to "how does a commander
+spend its turn" — the same "a faction is an expression profile, not a new
+system" principle docs/17 applies to factions, applied to AI. Every
+commander runs the SAME scoring code over the SAME action set; only the
+weights differ.
+
+1. **Dial it in.** Six named archetypes (`Berserker`, `Turtle`, `Hoarder`,
+   `Warlord`, `Opportunist`, `Balanced`) plus a chainable
+   `.With(trait, value)` for single-axis tuning:
+   `CommanderPersonality.Turtle().With(CommanderTrait.Greed, 0.9)`.
+2. **Generate it procedurally.** `Generate(seed)` / `Generate(SimRng)`
+   rolls one off the project's canonical seeded RNG (never `Math.Random`
+   — CLAUDE.md's determinism invariant), advancing the stream by a FIXED
+   9 draws so pulling N commanders off one stream is reproducible
+   position-for-position.
+
+Generation is explicitly **not** six independent uniform rolls. That
+reliably produces a field of indistinguishable ~0.5 commanders — every
+axis regressing to the mean is exactly what makes procedural personality
+feel same-y. Instead each rolled commander gets a **signature**: one
+tension pair is driven apart (one side into [0.7,1], its opposite into
+[0,0.3]), while the other two pairs roll freely for texture but
+anti-correlated. Decision CADENCE is derived from Discipline rather than
+configured separately, because "how long do you commit to a plan" is what
+that trait means — a scattered opportunist re-reads the field every 2
+ticks and abandons approaches halfway; a methodical commander locks in for
+20 and is slow to react. Both are legible weaknesses rather than one
+being strictly better.
+
+**Four real defects, three of them found by printing a seed gallery and
+actually looking at it** rather than by a failing test (all fixed, all now
+regression-tested):
+
+1. Generation only decorrelated the SIGNATURE pair and left the other two
+   independent — so seed 7 rolled maximum Aggression *and* maximum
+   Caution. That commander isn't interestingly conflicted, it's noisy: its
+   charge and retreat utilities cancel and it dithers. Fixed by
+   anti-correlating every pair; the guarantee is now exposed as
+   `IsCoherent`/`CoherenceLimit`.
+2. Damping was always applied to each pair's SECOND member, which quietly
+   biased every generated commander away from Caution/Territoriality/
+   Discipline (they are the `B` of their pair) — the gallery came out
+   overwhelmingly "Grasping." Fixed by drawing which side gets damped.
+3. A flat 0.5-everywhere personality labelled itself "Reckless," purely
+   because Aggression sorts first among six identical values. Fixed with a
+   `Spread` check and a "Nondescript" label.
+4. Caught while wiring, not by gallery: a low-Discipline commander
+   re-decides every 2 ticks, and re-issuing `SalvageCorpse` RESTARTS
+   docs/04's 3-second all-or-nothing channel — so a greedy twitchy
+   commander would have collected nothing, all match. Guarded by never
+   interrupting a salvage channel in progress.
+
+**Explicitly deferred, not faked:** docs/23's other named 6c ingredient,
+*build order scripts*. `CommandKind.BuildStructure` exists (so structures
+COULD be scripted), but match-core has no unit-PRODUCTION command
+whatsoever — units are setup-time spawns, and "a Factory produces a unit
+over time" is not a mechanic any shipped phase has. A build order that
+can't produce units isn't a build order, so the whole scripted-opening
+layer waits on that prerequisite rather than being half-built here; this
+commander fights, loots, and takes ground with the army it is handed.
+
+**Discovered, NOT fixed (flagged for a real decision):** no command
+handler verifies that `Command.PlayerIndex` actually OWNS the unit in
+`TargetEntity` — `ApplyMoveTo`/`ApplyAttackUnit`/`ApplySalvageCorpse`/
+`ApplyAttackAnomaly` all look the entity up and act on it regardless. It
+is harmless today (every caller commands its own units, and the commander
+is asserted to do so), but it becomes a real exploit the moment commands
+arrive over a wire from an untrusted peer. Command AUTHORIZATION is its
+own concern that belongs with the netcode phase (§11), not a drive-by fix
+inside an AI phase — logged here so it is a decision rather than an
+oversight.
+
+**Verification:** 193 match-core tests (24 new: personality validation/
+`With`/default-safety/archetype distinctness, cadence bounds, seeded
+reproducibility, signature guarantee over 200 seeds, coherence over 500
+seeds, no-runaway-identity over 600 seeds, stream reproducibility, threat
+falloff and living-enemies-only, the headline "identical board, two
+personalities, two different orders" test, real-command acceptance, the
+salvage-channel guard driven end-to-end, ownership scoping, cadence
+throttling, a deterministic AI-vs-AI skirmish, and 12 generated
+commanders all actually acting), 152 citygen-core tests (untouched), and
+the `Tools~/DetHarness` acceptance harness still prints identical hashes
+twice.

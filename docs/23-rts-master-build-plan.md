@@ -581,8 +581,55 @@ formations, group arrival facing, minimap orders). This phase adds the feel.
 > describes** — that translation is a real, separate, not-yet-built
 > integration job, the same "genome data has no path into match-core"
 > category of gap logged repeatedly this session (Phase 3's upkeep, Phase
-> 3.5's affinity, now this). **6c** (utility-driven skirmish commander AI)
-> is unstarted, per amendment D's own split — "a full phase on its own."
+> 3.5's affinity, now this). **6c (utility-driven skirmish commander AI),
+> done** (193 match-core tests total): `SkirmishCommander` scores every
+> action one of its units could take this decision — attack, capture an
+> anomaly, strip a corpse, advance, retreat, seize an emitter — and issues
+> the winner, with `ThreatMap` (an on-demand falloff function, not a
+> materialized grid: a `BigCity` is ~20k hexes against tens of units)
+> supplying the "how exposed am I here" term. **It is a command SOURCE,
+> not part of the tick** — it reads a `MatchState` and returns
+> `Command`s exactly as a human player's input layer does, so lockstep
+> replicates its orders like anyone else's, replays need never re-run it,
+> and its `double` scoring math can't threaten §0's float discipline
+> (which governs the tick path). Decisions are RNG-free and
+> entity-ID-ordered, so an AI-vs-AI match is hash-identical run to run.
+>
+> **Personality is the design, and it is dial-able two ways.**
+> `CommanderPersonality` is six axes in three designed tension pairs
+> (Aggression↔Caution, Greed↔Territoriality, Opportunism↔Discipline) —
+> deliberately the docs/16 brain-gene idea lifted from "how does this ONE
+> creature behave under stress" to "how does a commander spend its turn,"
+> rather than a fresh parallel vocabulary. **(1) Dial it in:** six named
+> archetypes (`Berserker`/`Turtle`/`Hoarder`/`Warlord`/`Opportunist`/
+> `Balanced`) plus a chainable `.With(trait, value)` for single-axis
+> tuning. **(2) Generate it procedurally:** `Generate(seed)` rolls one off
+> the canonical seeded RNG, so "skirmish opponent #7" is the same opponent
+> forever. Generation is explicitly NOT six independent uniform rolls
+> (that yields a field of indistinguishable ~0.5 commanders): each rolled
+> commander gets a **signature** — one tension pair driven apart into
+> top/bottom bands — while the other two pairs roll freely but
+> anti-correlated. Decision CADENCE is derived from Discipline rather than
+> configured separately, since "how long do you commit to a plan" is what
+> that trait means: a scattered opportunist re-reads the field every 2
+> ticks and abandons approaches halfway, a methodical commander locks in
+> for 20 — both legible weaknesses. **Three real defects were found by
+> printing a seed gallery and looking at it** (all fixed, all now
+> regression-tested): generation left the two non-signature pairs
+> independent, so seed 7 rolled maximum Aggression *and* maximum Caution —
+> a commander whose own utilities cancel into dithering; damping was
+> always applied to each pair's second member, quietly biasing every
+> generated commander away from Caution/Territoriality/Discipline; and a
+> flat 0.5-everywhere personality mislabelled itself "Reckless" purely
+> because Aggression sorts first. **Explicitly deferred, not faked:**
+> docs/23's other named 6c ingredient, *build order scripts*.
+> `CommandKind.BuildStructure` exists, but there is no unit-PRODUCTION
+> command anywhere in match-core — units are setup-time spawns, and "a
+> Factory produces a unit over time" is not a mechanic any shipped phase
+> has. A build order that cannot produce units isn't a build order, so
+> that layer waits on the real prerequisite instead of being half-built
+> here; this commander fights, loots, and takes ground with the army it is
+> handed.
 
 - `match-core`: docs/04 damage formula implementation (finally — it has never
   been implemented), arcs from `Facing`, bounded-luck rolls from the match
