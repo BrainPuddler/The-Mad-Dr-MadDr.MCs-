@@ -556,11 +556,33 @@ formations, group arrival facing, minimap orders). This phase adds the feel.
 > timed capture point. A city preset that generates no `Roundabouts` at
 > all (not every `RoadPattern` does) has nowhere valid to respawn an
 > anomaly to — flagged, handled by respawning in place rather than a
-> silent failure or a crash, a real content-coverage gap. **6b** (enemy
-> faction rosters as genome data) and **6c** (utility-driven skirmish
-> commander AI) are unstarted, separate phases per amendment D's own
-> split — 6b needs real authored genome content, 6c is "a full phase on
-> its own."
+> silent failure or a crash, a real content-coverage gap. **6b (enemy
+> faction rosters), sim-side data table done** (169 match-core tests
+> total): `FactionRoster.cs`'s `UnitRosterDef` (mirroring `BuildingDef`'s
+> own established "static data table, one entry per kind" pattern) gives
+> the Human Army (Rifleman/Half-Track/Tank/Zeppelin Gunship) and Alien
+> Hive (Drone/Spitter/Floater Queen) rosters docs/23 §6 itself names a
+> real `CombatStats`/Speed/Radius/SalvageValue block each, plus
+> `MatchState.SpawnRosterUnit(playerIndex, hex, kind)` to field one
+> (throws on a faction/kind mismatch — a setup-time programming error, not
+> a replayable command). `FactionId.MadDoctor` gets no roster at all: the
+> Doctor's whole identity is custom-bred creatures via the Mutator, never
+> a fixed list. **Every stat number is an invented v0.1 placeholder** —
+> docs/17-factions.md gives each faction's real behavioral/economic
+> design (control-snap identity, origin-tag materials/energy, morale math)
+> in rich detail, but never a numeric combat-stat table for any individual
+> unit archetype, and more fundamentally: match-core has ZERO reference to
+> genome-core (a repo invariant), so there is no bridge from docs/17's own
+> "the bill of materials IS the genome" expression math (bulk, canalized
+> part bounds, brain tier — all TypeScript, `packages/genome-core`) to
+> this C# table at all. This data exists so 6c's skirmish AI and Phase 7's
+> balance smoke test have real units to field with, **not a claim that a
+> Human Rifleman fielded in a match is the same genome docs/17
+> describes** — that translation is a real, separate, not-yet-built
+> integration job, the same "genome data has no path into match-core"
+> category of gap logged repeatedly this session (Phase 3's upkeep, Phase
+> 3.5's affinity, now this). **6c** (utility-driven skirmish commander AI)
+> is unstarted, per amendment D's own split — "a full phase on its own."
 
 - `match-core`: docs/04 damage formula implementation (finally — it has never
   been implemented), arcs from `Facing`, bounded-luck rolls from the match

@@ -205,6 +205,31 @@ namespace MadDr.MatchCore
 
         public SimUnit? FindUnit(uint entityId) => _unitsById.TryGetValue(entityId, out var u) ? u : null;
 
+        /// <summary>docs/23 §13 amendment D Phase 6b: spawn a fixed
+        /// Human-Army/Alien-Hive roster unit by kind, resolving its stat
+        /// block from <see cref="UnitRosterDef"/> -- setup-time API, same
+        /// direct-call precedent as <see cref="SpawnUnit"/>/
+        /// <see cref="SpawnHqForPlayer"/> (a skirmish AI or a headless
+        /// harness calls this once per unit it fields, not a Command --
+        /// mid-match PRODUCTION of one of these from a Factory building is
+        /// a different, not-yet-built feature). Throws if
+        /// <paramref name="playerIndex"/>'s own faction doesn't match the
+        /// roster kind's faction (docs/23 §6: these are each faction's OWN
+        /// fixed roster, not a shared unit pool) -- a setup-time
+        /// programming error, not a replayable command's "bad input,
+        /// silent no-op" contract. Returns the new unit's entity
+        /// ID.</summary>
+        public uint SpawnRosterUnit(int playerIndex, HexCoord atHex, RosterUnitKind kind)
+        {
+            if (playerIndex < 0 || playerIndex >= _players.Length)
+                throw new ArgumentOutOfRangeException(nameof(playerIndex));
+            var def = UnitRosterDef.Get(kind);
+            if (_players[playerIndex].Faction != def.Faction)
+                throw new InvalidOperationException($"{kind} belongs to {def.Faction}'s roster, not player {playerIndex}'s {_players[playerIndex].Faction}");
+
+            return SpawnUnit(playerIndex, atHex, def.Speed, def.Radius, def.Combat, def.SalvageValue);
+        }
+
         /// <summary>docs/23 §2: place a player's HQ, Complete immediately
         /// (no build time, no cost) -- "every player starts with a themed
         /// HQ placed by the generator," not something a player commands

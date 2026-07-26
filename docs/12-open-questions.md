@@ -2457,3 +2457,55 @@ respawn + buff-cycle-restart, Damage buff raising EffectivePower, buff
 expiry at exactly 90s, Regen healing exactly once per simulated second,
 XpGain scaling kill XP, and a same-seed-same-hash determinism proof), 152
 citygen-core tests (untouched).
+
+## docs/23 Phase 6b: Army + Hive faction rosters as data (2026-07)
+
+Shipped Phase 6b per §13 amendment D's split: "the two enemy faction
+rosters as genome data" — Human Army and Alien Hive, the exact unit
+archetypes docs/23 §6 names (Army: Rifleman/Half-Track/Tank/Zeppelin
+Gunship; Hive: Drone/Spitter/Floater Queen), sim-side.
+
+**`FactionRoster.cs`'s `UnitRosterDef`:** a static per-`RosterUnitKind`
+data table, deliberately mirroring `BuildingDef.cs`'s own already-
+established pattern (a private array indexed by `(int)kind`, `Get(kind)`/
+`AllDefs` accessors, DATA not simulation state so it's outside the tick
+hash). Each entry carries a full `CombatStats`/Speed/Radius/SalvageValue
+block — everything `MatchState.SpawnUnit` needs. `FactionId.MadDoctor`
+gets no roster at all: the Doctor's whole identity is fielding CUSTOM bred
+creatures through the Mutator, never a fixed unit list, so there's
+nothing for a roster table to enumerate for that faction.
+`MatchState.SpawnRosterUnit(playerIndex, hex, kind)` is a new setup-time
+API (same direct-call precedent as `SpawnUnit`/`SpawnHqForPlayer`) that
+resolves a def and spawns it — throws (not a silent no-op) if the
+kind's own faction doesn't match the player's, since this is a
+setup-time programming error, not a replayable command.
+
+**Every stat number is an invented v0.1 placeholder, not a real figure —
+and this is a genuinely different flavor of "placeholder" than earlier
+ones.** docs/17-factions.md is rich, detailed, and REAL about each
+faction's behavioral/economic identity (control-snap morale math,
+origin-tag energy/material flavors, the Queen-as-Vat decapitation
+mechanic) — but it never gives a numeric combat-stat table for any
+individual unit archetype, the same way docs/04's damage formula or
+docs/22's Blood Bank numbers were real, reusable figures. More
+fundamentally: docs/17's own "the bill of materials IS the genome"
+section describes these units as PRODUCTS of genome-core's real
+expression math (bulk scaling, canalized part bounds, brain tier) —
+match-core has ZERO reference to genome-core at all (a repo invariant:
+genome-core has no engine/graphics deps, and match-core doesn't reach
+into TypeScript either). There is no bridge from a real genome's
+expression output to this C# table today. This table exists so Phase 6c's
+skirmish AI and Phase 7's balance smoke test have real units to field
+with AT ALL — it is explicitly NOT a claim that a Human Rifleman fielded
+in a match is the same genome docs/17 describes. That translation is a
+real, separate, not-yet-built integration job — the same "genome data has
+no path into match-core" category of gap logged for Phase 3's upkeep and
+Phase 3.5's affinity, now a third time here.
+
+**Verification:** 169 match-core tests (12 new: every roster kind
+resolves to its documented faction, `AllDefs` covers every enum value
+exactly once with no array/enum-index drift, every entry has a sane
+positive stat floor, `SpawnRosterUnit` copies the def's exact stat block
+onto the spawned `SimUnit`, a faction/kind mismatch throws, a real mixed
+4-unit Army-vs-Hive skirmish fields and ticks deterministically), 152
+citygen-core tests (untouched).
