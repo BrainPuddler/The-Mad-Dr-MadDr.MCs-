@@ -76,6 +76,16 @@ public static class BuildingDresser
     private static Material Concrete() { return MTextured("limestone", 0.62f, 0.6f, 0.55f, PbrTextureAtlas.Limestone); }
     private static Material Chrome() { return MTextured("chrome", 0.78f, 0.8f, 0.82f, PbrTextureAtlas.Chrome); }
     private static Material WindowBand() { return MTextured("glass", 0.16f, 0.2f, 0.28f, PbrTextureAtlas.Glass); }
+
+    // docs/28 (city lighting system): "house and apartment windows."
+    // ONE shared emissive material for every "this window is lit"
+    // instance (SRP-batcher friendly, same cache-and-reuse convention as
+    // every other material here) -- per-instance variation (which
+    // windows are lit, and their independent flicker) comes from
+    // EmissiveAnimator's MaterialPropertyBlock layer on top, not from
+    // minting a separate Material per window.
+    private static readonly Color WindowGlowColor = new Color(1f, 0.85f, 0.55f);
+    private static Material WindowGlow() { return M(1f, 0.85f, 0.55f, CityLightingProfile.Active.BulbEmissiveBase * 0.9f); }
     private static Material RoofTar() { return M(0.24f, 0.23f, 0.21f); }
     private static Material RustRed() { return M(0.5f, 0.24f, 0.16f); }
     private static Material NeonRed() { return M(0.95f, 0.25f, 0.3f, 1.6f); }
@@ -247,6 +257,33 @@ public static class BuildingDresser
         }
     }
 
+    /// <summary>docs/28: one window strip, deterministically "lit" or
+    /// dark based on (h, slot) -- roughly 2 in 5 lit, no actual
+    /// randomness (same seed always dresses the same city, same as every
+    /// other hash-keyed choice in this file). A lit strip gets the shared
+    /// WindowGlow() material plus its own independent EmissiveAnimator
+    /// Flicker registration and a GlowPointRegistry entry so it competes
+    /// fairly for DynamicLightBudget's shared real-light budget alongside
+    /// streetlamps/neon/marquee bulbs.</summary>
+    private static void SpawnWindowStrip(RuntimeCityBuilder b, Transform t, Vector3 pos, Vector3 scale, int h, int slot)
+    {
+        int floorSeed;
+        unchecked { floorSeed = (h * 397) ^ (slot * 8191 + 17); }
+        var lit = (floorSeed & 0x7fffffff) % 5 < 2;
+        if (!lit)
+        {
+            b.SpawnPrim(PrimitiveType.Cube, pos, scale, WindowBand(), t);
+            return;
+        }
+
+        var go = b.SpawnPrim(PrimitiveType.Cube, pos, scale, WindowGlow(), t);
+        var renderer = go.GetComponent<Renderer>();
+        var seed = ((floorSeed & 0x7fffffff) % 10007) / 10007f;
+        EmissiveAnimator.Register(renderer, WindowGlowColor * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
+            LightBehaviorKind.Flicker, seed);
+        GlowPointRegistry.Register(go.transform, WindowGlowColor);
+    }
+
     // ---- medium tier: brick walk-up apartments ---------------------------------
 
     private static void DressApartment(RuntimeCityBuilder b, Transform t, float height, int h, bool primary, bool suburb = false)
@@ -258,15 +295,18 @@ public static class BuildingDresser
             ? ((h / 7) % 4 < 2 ? Cream() : (h / 7) % 4 == 2 ? Brick() : Seafoam())
             : ((h / 7) % 4 < 2 ? Seafoam() : (h / 7) % 4 == 2 ? Cream() : Brick());
 
-        // window bands: dark strips proud of two opposite faces per floor
+        // window bands: dark strips proud of two opposite faces per floor.
+        // docs/28: roughly 2 in 5 floor/face strips are "lit" at night --
+        // a per-instance EmissiveAnimator Flicker registration, not a
+        // synchronized whole-building glow, so a building face reads as
+        // "some windows lit, some dark, occasionally changing" instead of
+        // one uniform glow block.
         var floors = Mathf.Max(2, Mathf.RoundToInt(height / 4f));
         for (var f = 0; f < floors; f++)
         {
             var y = (f + 0.55f) * (height / floors);
-            b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, y, Half * 1.01f),
-                new Vector3(15f, 1.5f, 0.35f), WindowBand(), t);
-            b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, y, -Half * 1.01f),
-                new Vector3(15f, 1.5f, 0.35f), WindowBand(), t);
+            SpawnWindowStrip(b, t, basePos + new Vector3(0f, y, Half * 1.01f), new Vector3(15f, 1.5f, 0.35f), h, f * 2);
+            SpawnWindowStrip(b, t, basePos + new Vector3(0f, y, -Half * 1.01f), new Vector3(15f, 1.5f, 0.35f), h, f * 2 + 1);
         }
         // repaint accent: thin corner pilasters in the era wall color
         b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(Half * 0.98f, height / 2f, Half * 0.98f),
@@ -511,12 +551,36 @@ public static class BuildingDresser
                 // every b-movie city needs one theater downtown
                 b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 6.5f, Half * 1.25f),
                     new Vector3(14f, 2.4f, 4.5f), SignWhite(), t);      // marquee
-                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 5.2f, Half * 1.25f),
+                var underglow = b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 5.2f, Half * 1.25f),
                     new Vector3(13f, 0.4f, 4.2f), NeonTeal(), t);       // marquee underglow
-                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, height + 5f, 0f),
+                var bladeSign = b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, height + 5f, 0f),
                     new Vector3(2f, 10f, 0.8f), SignWhite(), t);        // vertical blade sign
-                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, height + 5f, 0.7f),
+                var letters = b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, height + 5f, 0.7f),
                     new Vector3(1.2f, 8.6f, 0.4f), NeonRed(), t);       // neon letters strip
+
+                // docs/28: "neon that buzz and flicker" -- the palace's own
+                // signature neon, each independently buzzing (a different
+                // seed per strip so they don't stutter in lockstep). Base
+                // emission matches each material's own M(r,g,b,emissive)
+                // color * emissive -- NOT a Color(r,g,b,a) alpha (there's
+                // no transparency involved here).
+                EmissiveAnimator.Register(underglow.GetComponent<Renderer>(), new Color(0.3f, 0.9f, 0.85f) * 1.6f, LightBehaviorKind.Buzz, 0.2f);
+                EmissiveAnimator.Register(bladeSign.GetComponent<Renderer>(), new Color(0.92f, 0.9f, 0.82f) * 0.6f, LightBehaviorKind.Buzz, 0.55f);
+                EmissiveAnimator.Register(letters.GetComponent<Renderer>(), new Color(0.95f, 0.25f, 0.3f) * 1.6f, LightBehaviorKind.Buzz, 0.8f);
+
+                // docs/28: "clique light that flash on and off in sequence"
+                // -- a row of small chaser bulbs along the marquee's front
+                // edge, each one slot further along a shared sequence.
+                const int chaseBulbs = 10;
+                for (var i = 0; i < chaseBulbs; i++)
+                {
+                    var bx = Mathf.Lerp(-6f, 6f, i / (float)(chaseBulbs - 1));
+                    var bulb = b.SpawnPrim(PrimitiveType.Sphere, basePos + new Vector3(bx, 5.2f, Half * 1.45f),
+                        new Vector3(0.3f, 0.3f, 0.3f), M(1f, 0.9f, 0.6f, CityLightingProfile.Active.BulbEmissiveBase), t);
+                    EmissiveAnimator.Register(bulb.GetComponent<Renderer>(),
+                        new Color(1f, 0.9f, 0.6f) * CityLightingProfile.Active.BulbEmissiveBase,
+                        LightBehaviorKind.Chase, 0f, i, chaseBulbs);
+                }
                 break;
         }
         Rooftop(b, t, basePos, height, h + 3);

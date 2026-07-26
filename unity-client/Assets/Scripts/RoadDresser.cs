@@ -78,12 +78,13 @@ public static class RoadDresser
     private static Material PostGray() { return M(0.5f, 0.52f, 0.54f); }
     private static Material PoleWood() { return M(0.35f, 0.26f, 0.18f); }
     private static Material PoleMetal() { return MTextured("painted-metal", 0.45f, 0.48f, 0.5f, PbrTextureAtlas.PaintedMetal); }
-    // 2026-07 creator correction: was 1.4 -- stacked with NeonRegistry's
-    // own Night boost (2.2x) this pushed the bulb's emissive well past
-    // 3.0, blowing out into a harsh glare under Night's bloom instead of
-    // a warm glow. 0.7 keeps a real bright-bulb pop at night (0.7*2.2 ~=
-    // 1.5) without the blowout.
-    private static Material Bulb() { return M(1f, 0.9f, 0.6f, 0.7f); }
+    // docs/28: base emissive now lives on CityLightingProfile
+    // (BulbEmissiveBase) instead of a hardcoded constant -- the 2026-07
+    // creator correction (was a hardcoded 1.4, which stacked with
+    // NeonRegistry's own Night boost to blow well past 3.0) is now a
+    // tunable default (0.45) instead of another blind guess.
+    private static readonly Color LampColor = new Color(1f, 0.85f, 0.55f);   // warm sodium bulb
+    private static Material Bulb() { return M(1f, 0.9f, 0.6f, CityLightingProfile.Active.BulbEmissiveBase); }
     private static Material HydrantRed() { return M(0.75f, 0.15f, 0.12f); }
     private static Material CanGray() { return M(0.4f, 0.42f, 0.44f); }
     private static Material ChromeTrim() { return MTextured("chrome", 0.8f, 0.82f, 0.85f, PbrTextureAtlas.Chrome); }
@@ -363,7 +364,7 @@ public static class RoadDresser
                 arm.transform.rotation = Quaternion.LookRotation(-side * sideSign, Vector3.up);
                 var bulb = b.SpawnPrim(PrimitiveType.Sphere, propSpot + Vector3.up * 4.55f - side * (sideSign * 2.2f),
                     new Vector3(0.5f, 0.35f, 0.5f), Bulb(), holder);
-                StreetLampRegistry.Register(bulb.transform);
+                GlowPointRegistry.Register(bulb.transform, LampColor);
                 MakeKnockable(b, holder.gameObject, 1.6f);
                 break;
             }
@@ -421,7 +422,7 @@ public static class RoadDresser
                     var globeSpot = propSpot + Vector3.up * 5.9f
                         + new Vector3(Mathf.Sin(ga) * 0.5f, 0f, Mathf.Cos(ga) * 0.5f);
                     var globe = b.SpawnPrim(PrimitiveType.Sphere, globeSpot, new Vector3(0.4f, 0.4f, 0.4f), Bulb(), holder);
-                    StreetLampRegistry.Register(globe.transform);
+                    GlowPointRegistry.Register(globe.transform, LampColor);
                 }
                 MakeKnockable(b, holder.gameObject, 1.8f);
                 break;
@@ -531,7 +532,7 @@ public static class RoadDresser
             var p = c + new Vector3(Mathf.Sin(a), 0f, Mathf.Cos(a)) * (RndAsphalt + 1.2f);
             b.SpawnPrim(PrimitiveType.Cylinder, p + Vector3.up * 2.4f, new Vector3(0.16f, 2.4f, 0.16f), PoleMetal(), host);
             var roundaboutBulb = b.SpawnPrim(PrimitiveType.Sphere, p + Vector3.up * 4.7f, new Vector3(0.45f, 0.35f, 0.45f), Bulb(), host);
-            StreetLampRegistry.Register(roundaboutBulb.transform);
+            GlowPointRegistry.Register(roundaboutBulb.transform, LampColor);
         }
 
         // per-entry treatment: flared apron, give-way triangles, set-back

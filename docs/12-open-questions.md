@@ -3295,3 +3295,80 @@ grimdark/washed-out" target), not a guess; if the pools still don't read
 right once someone can actually look at it, the next lever to pull is
 `StreetLampLightBudget`'s `range` (currently unchanged at 9) before
 touching intensity again.
+
+## docs/28: city lighting system -- ScriptableObject profile + scalable architecture (2026-07)
+
+Follow-up to the previous street-lamp brightness correction: the creator
+reported the lights were STILL "big opaque balls of light on the screen
+that obscure the view... turning it completely white," and asked for
+(a) an Inspector setting or ScriptableObject to tune intensity directly,
+and (b) a real plan for scaling to "a bunch of different lights" (house/
+apartment windows, marquee "clique" chase lights, buzzing/flickering
+neon, streetlights) while staying performant with hundreds on screen at
+once, able to turn on/off and fade.
+
+Full architecture write-up: docs/28-city-lighting-system.md. Summary of
+what changed and why:
+
+**Root cause of the still-too-bright complaint**: the previous fix
+lowered numbers but they were still hardcoded, unverifiable guesses
+(no Editor access to confirm), and more importantly the ARCHITECTURE
+itself didn't scale -- `StreetLampLightBudget` was streetlamp-only, so
+adding windows/neon/marquee as their own separate real-light systems
+would have multiplied the total live-light count exactly the way this
+whole system needs to avoid.
+
+**`CityLightingProfile.cs`** (new): a ScriptableObject
+(`Assets > Create > MadDr > City Lighting Profile`) gathering every
+lighting-related number that used to be a hardcoded constant scattered
+across `LumenCycleController`/`RoadDresser`/`BuildingDresser`/the old
+`StreetLampLightBudget` -- real-light budget/peak intensity/range, base
+emissive brightness, the night boost ceiling, night ambient/bloom,
+flicker/buzz/chase timing. `RuntimeCityBuilder` gets a `lightingProfile`
+Inspector field; unassigned falls back to `CityLightingProfile.Default`.
+This is the direct, literal answer to "give me an inspector setting...
+or a scriptable object that I can change" -- the creator can now retune
+brightness themselves without another code round-trip.
+
+**Generalized the real-light budget**: `StreetLampLightBudget`/
+`StreetLampRegistry` are replaced by `GlowPointRegistry` (any glowing
+prop, any kind, registers here with its own tint color) +
+`DynamicLightBudget` (one shared pool of real `Light` components spent
+on whichever registered points are nearest the camera RIGHT NOW, across
+EVERY kind combined). This is the actual answer to "keeping them
+performant" at scale -- one budget of ~24 real lights total for the
+whole city, not 24-per-kind multiplying every time a new light type is
+added.
+
+**`EmissiveAnimator.cs`** (new): the answer to "turn on/off and fade
+with hundreds of them on screen at once." A single manager
+(`EmissiveAnimatorDriver`, one `Update()` per scene) drives per-instance
+emissive color via `MaterialPropertyBlock` -- no per-object Update(), no
+per-instance Material (which would break SRP batching). Four behavior
+kinds: Steady (no-op -- deliberately does NOT install a property-block
+override, since a frozen one-time snapshot would actually be WORSE than
+no registration, permanently ignoring the day/night cycle for that
+instance), Flicker (windows), Buzz (failing neon tube), Chase (marquee
+sequencer). A real correctness bug was caught and fixed while building
+this: a `MaterialPropertyBlock` override on a renderer takes priority
+over the shared Material's own color for that renderer, so an animated
+light would silently ignore `NeonRegistry`'s whole day/night boost cycle
+unless `EmissiveAnimator` ALSO folds in the same boost value -- fixed by
+publishing it as `DayNightState.NeonBoost` (the exact value
+`NeonRegistry.SetBoost` was just called with) and multiplying it into
+every animated instance's color each tick.
+
+**Wired end-to-end** (not just designed): `BuildingDresser.DressApartment`
+now spawns roughly 2-in-5 floor/face window strips as a new `WindowGlow`
+material with an independent per-instance Flicker registration ("house
+and apartment windows" -- some lit, some dark, occasionally changing,
+not one uniform building-wide glow); the movie-palace landmark's existing
+neon (underglow/blade sign/letters) now buzzes independently per strip;
+its marquee grew a 10-bulb chaser row using Chase. Office-tower windows
+(`DressOffice` uses one tall strip per face, not per-floor) and true
+individual window-PANE granularity are explicitly deferred -- real,
+separate follow-ups, not silently skipped.
+
+**Not visually verified** -- still no Unity Editor in this environment.
+The whole point of shipping the ScriptableObject first is that the next
+round of "still not right" tuning is a slider drag, not another commit.

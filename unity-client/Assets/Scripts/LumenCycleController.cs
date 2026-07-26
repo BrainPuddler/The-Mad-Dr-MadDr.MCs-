@@ -201,7 +201,9 @@ public class LumenCycleController : MonoBehaviour
         RenderSettings.fogColor = Color.Lerp(a.Fog, b.Fog, blend);
         RenderSettings.fogDensity = fogDensity;
 
-        NeonRegistry.SetBoost(Mathf.Lerp(a.NeonBoost, b.NeonBoost, blend));
+        var neonBoost = Mathf.Lerp(a.NeonBoost, b.NeonBoost, blend);
+        NeonRegistry.SetBoost(neonBoost);
+        DayNightState.NeonBoost = neonBoost;
         DayNightState.NightAmount = Mathf.Lerp(a.LampBoost, b.LampBoost, blend);
 
         _colorAdjustments.postExposure.value = Mathf.Lerp(a.PostExposure, b.PostExposure, blend);
@@ -263,6 +265,24 @@ public class LumenCycleController : MonoBehaviour
         };
 
         ApplyRegionTint(grades, region);
+
+        // docs/28: the specific fields that were causing "way too bright"
+        // now come from CityLightingProfile instead of another hardcoded
+        // guess -- the creator's actual tuning knob. Everything else (sun
+        // color/elevation, fog, color grading, vignette/grain) stays the
+        // authored mood-board keyframe; only Night's ambient/bloom/boost
+        // ceiling and Day's boost ceiling are profile-driven.
+        var profile = CityLightingProfile.Active;
+        var night = grades[(int)LumenPhase.Night];
+        night.Ambient = new Color(profile.NightAmbientBrightness, profile.NightAmbientBrightness, profile.NightAmbientBrightness * 2f);
+        night.BloomIntensity = profile.NightBloomIntensity;
+        night.NeonBoost = profile.MaxNightBoost;
+        grades[(int)LumenPhase.Night] = night;
+
+        var day = grades[(int)LumenPhase.Day];
+        day.NeonBoost = profile.DayNeonBoost;
+        grades[(int)LumenPhase.Day] = day;
+
         return grades;
     }
 

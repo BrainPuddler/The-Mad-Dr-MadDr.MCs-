@@ -45,6 +45,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     [Tooltip("How many cars drive the road network (docs/19 traffic) -- they flee monsters like Citizens do.")]
     public int trafficCarCount = 10;
 
+    [Header("Lighting (docs/28)")]
+    [Tooltip("Every tunable number for streetlamps/windows/neon/marquee lights -- brightness, real-light budget, flicker/buzz/chase timing. Create one via Assets > Create > MadDr > City Lighting Profile. Left unassigned, everything falls back to CityLightingProfile.Default's own safe values.")]
+    public CityLightingProfile lightingProfile;
+
     [Header("docs/27 Phase A dev check (off by default)")]
     [Tooltip("Wires the FIRST spawned monster to docs/27's SimBridge/interpolated-view pipeline instead of its normal Time.deltaTime movement, so a Move order on it is decided by match-core and rendered by interpolation -- the actual Editor smoke test docs/27 Phase A has been waiting on (nothing else in this environment can check it). Left-click that monster, right-click to move it, same as always. Every other monster (and every other order kind on this one) is completely unaffected.")]
     public bool simDrivenDemo = false;
@@ -139,6 +143,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         foreach (var lm in _city.Landmarks)
             if (lm.Archetype == "rail_depot") { _railyardCenter = lm.Site; break; }
 
+        // docs/28: set BEFORE any dresser runs -- BuildingDresser/RoadDresser
+        // are static generators that mint their cached emissive materials
+        // (Bulb(), window glow) ONCE at build time, reading whatever
+        // profile is active right now.
+        CityLightingProfile.Active = lightingProfile != null ? lightingProfile : CityLightingProfile.Default;
+
         BuildGround();
         BuildTableEdge();
         BuildTerrainAndRoads();
@@ -153,8 +163,14 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // toggle with a continuous Lumen-clock-driven cycle + post stack.
         if (GetComponent<LumenCycleController>() == null)
             gameObject.AddComponent<LumenCycleController>().Init(_city.Region);
-        if (GetComponent<StreetLampLightBudget>() == null)
-            gameObject.AddComponent<StreetLampLightBudget>();
+        // docs/28: generalized from the streetlamp-only budget -- now
+        // spends one shared real-light budget across every registered
+        // glow point (streetlamps, windows, neon, marquee), whichever kind
+        // they are.
+        if (GetComponent<DynamicLightBudget>() == null)
+            gameObject.AddComponent<DynamicLightBudget>();
+        if (GetComponent<EmissiveAnimatorDriver>() == null)
+            gameObject.AddComponent<EmissiveAnimatorDriver>();
 
         // camera: frame the spawn area so Play starts looking at the action
         var cam = Camera.main;
