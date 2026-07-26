@@ -386,10 +386,22 @@ namespace MadDr.MatchCore
                 var isCrit = CombatMath.RollCrit(_rng, combat.CunningPercent);
                 var luckOrCrit = isCrit ? 150 : CombatMath.RollLuckPercent(_rng);
 
-                var damage = CombatMath.ResolveDamage(combat.Power, posMod, emitterMod, luckOrCrit, defender.Combat!.Value.Armor);
+                // docs/23 §4: EffectivePower (base Power x the attacker's
+                // own level bonus), not the raw base -- a leveled-up
+                // attacker hits harder. Armor is never level-scaled
+                // (docs/23 §4 only lists MaxHP/damage/speed).
+                var victimLevelBeforeDeath = defender.Level;
+                var damage = CombatMath.ResolveDamage(attacker.EffectivePower, posMod, emitterMod, luckOrCrit, defender.Combat!.Value.Armor);
                 defender.ApplyDamage(damage, Frame);
                 if (attackerHex.DistanceTo(defenderHex) == 1) attacker.FaceToward(ApproachEdgeFromTo(attackerHex, defenderHex));
                 attacker.ResetAttackCooldown();
+
+                // docs/23 §4: "kill = 40 XP flat + 4xvictim level" -- credit
+                // the attacker the instant its blow finishes the target.
+                // Assist and building-destruction XP are NOT implemented
+                // (docs/12's Phase 4 RPG entry: no specified assist window,
+                // no AttackBuilding command to know who dealt the damage).
+                if (!defender.IsAlive) attacker.GrantXp(UnitLeveling.KillXp(victimLevelBeforeDeath));
             }
         }
 

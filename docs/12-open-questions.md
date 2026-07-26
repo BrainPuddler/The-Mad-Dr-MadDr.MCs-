@@ -2194,3 +2194,69 @@ combat in play. citygen-core's 152 tests and match-core's other 84
 pre-existing tests remain untouched. `harvestcreditverify` (21 checks)
 and `flightcheck` still pass/compile against the refreshed DLL -- no
 Unity-side files touched this phase, same as Phase 3/3.5.
+
+## docs/23 Phase 4 (RPG layer): XP, levels, per-level stat bonuses (2026-07)
+
+Following "execute the next phase" -- with Phase 4's combat-core prerequisite
+done, its own listed RPG tasks (XP/Level/Traits/Gear/Fusion) became
+buildable. Scoped this pass to XP/Level only, the one piece with a fully
+real, numeric v0.1 spec and no unresolved content gap.
+
+What shipped: `UnitLeveling` (kill XP = 40 + 4xvictim level; the 10-entry
+cumulative XP threshold table; a linear, not compounding, per-level stat
+multiplier -- read from docs/23's "+8% MaxHP... per level" phrasing as
+additive percentage points, a documented interpretation choice since the
+doc doesn't disambiguate linear vs. compounding). `SimUnit` gained
+`XP`/`Level` (Level is a pure function of XP, never stored independently)
+and `EffectiveMaxVitality`/`EffectivePower`/`EffectiveSpeed`, applying the
+bonus on top of the untouched genome-derived base stats -- `TickCombat`
+already uses `EffectivePower` for damage, `Tick`'s movement math already
+uses `EffectiveSpeed`. Kill XP credits the attacker's `GrantXp` the
+instant `TickCombat` detects a kill.
+
+Level-up preserves "missing HP" rather than granting a full heal
+(current Vitality rises by the exact same delta the effective max just
+did) -- a documented interpretation choice, since docs/23 doesn't specify
+either way.
+
+A bug caught while writing the golden multi-kill test, not shipped: the
+first draft used the `Fighter()` helper's default Ferocity (1.0 =
+1s/10-tick cooldown) for a unit meant to score six kills in six single-
+`Tick()` calls -- only the FIRST kill ever resolved, since the attacker
+was still on cooldown from it during every subsequent spot's single tick,
+silently failing to reproduce the intended scenario. Fixed by giving that
+specific test's attacker a much higher Ferocity (100/s) so each tick has
+time to both apply the command and resolve the attack.
+
+Explicitly deferred, not faked (see `UnitLeveling.cs`'s own header and
+docs/23 §4's updated status note for the full reasoning): **assist XP**
+-- docs/23 never specifies the assist-tracking window (how recent a hit
+counts, how many attackers can share credit), a real content/design gap;
+**building-destruction XP** -- match-core has no `AttackBuilding` command/
+order kind yet, so there's no attacker to credit when
+`SimBuilding.ApplyBuildingDamage` (a generic, not-attacker-tied hook)
+fires; **Trait choices at levels 3/6/9** -- docs/23 names only 3 of the
+9 required traits (Thick Hide/Adrenal Rush/Scavenger's Eye); inventing
+the other 6 would be fabricating game content, not translating given
+numbers -- a genuinely different kind of gap than every other deferral
+logged so far, flagged rather than guessed at; **Gear (grafted salvage)**
+-- needs the salvage/harvest system already deferred in the combat-core
+entry above; **Fusion** -- the stat-derivation math itself (HP=sum*0.85,
+level=max+1, Power/Ferocity=max*1.1, Speed=min, upkeep=sum) is pure and
+computable, but the render side (dominant-parent genome, four-hand-part
+creature-mesh rig) is Unity/genome-core territory, and Fusion also needs
+a per-unit Bones-cost stat match-core doesn't track anywhere -- a
+separate, bigger slice.
+
+Verified: `packages/match-core/Tests~/LevelingTests.cs`, 19 new tests
+(127 match-core total) covering: `KillXp`/`LevelForXp` matching docs/23's
+own numbers exactly (including the table's 10th entry never actually
+triggering a level-up past the level-10 cap); the linear stat multiplier;
+effective stats at level 1 matching base stats unscaled; level-up
+scaling MaxVitality/Power/Speed and preserving missing HP (not a full
+heal); a kill granting exactly `KillXp(victimLevel)`; a golden six-kill
+scenario leveling a unit up and measurably speeding up its movement and
+hitting harder; and hash-determinism with leveling in play. citygen-core's
+152 tests and match-core's other 108 pre-existing tests remain untouched.
+`harvestcreditverify` (21 checks) and `flightcheck` still pass/compile
+against the refreshed DLL -- no Unity-side files touched this phase.

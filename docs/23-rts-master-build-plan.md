@@ -298,18 +298,51 @@ Docs/05 + docs/22 are the spec; this phase makes them real in `match-core`.
 > double position math elsewhere). Death sets `DeathTick` and opens a
 > 150-tick (15s) `IsSalvageable` window.
 >
-> **Explicitly deferred, not faked:** ranged (Reach≥2) posMod (`Facing.
-> ArcOf` requires exact hex adjacency; a ranged attacker gets a flat
-> front-equivalent posMod today, not the real arc-at-a-distance geometry);
-> the real turn-time-gated facing (`turnTime = 0.15s × sizeClass` per
-> edge — needs a sizeClass stat no unit carries yet; facing here snaps
-> instantly to whatever a unit last attacked instead); chase-to-attack-
-> range movement (`AttackUnit` is a no-op if attacker and target aren't
-> already within Reach — no auto-approach yet); the actual salvage
-> resource payout and harvest/looting command (`IsSalvageable` is sim
-> state only — needs genome-linked construction-bill data, the same
-> category of gap as Phase 3's upkeep entry); and every task below this
-> note (XP/Level/Traits/Gear/Fusion).
+> **Explicitly deferred, not faked (combat core):** ranged (Reach≥2)
+> posMod (`Facing.ArcOf` requires exact hex adjacency; a ranged attacker
+> gets a flat front-equivalent posMod today, not the real arc-at-a-distance
+> geometry); the real turn-time-gated facing (`turnTime = 0.15s ×
+> sizeClass` per edge — needs a sizeClass stat no unit carries yet; facing
+> here snaps instantly to whatever a unit last attacked instead);
+> chase-to-attack-range movement (`AttackUnit` is a no-op if attacker and
+> target aren't already within Reach — no auto-approach yet); the actual
+> salvage resource payout and harvest/looting command (`IsSalvageable`
+> is sim state only — needs genome-linked construction-bill data, the
+> same category of gap as Phase 3's upkeep entry).
+>
+> **Update (2026-07): XP/Level done, sim-side — the rest of this
+> section's RPG tasks (Traits/Gear/Fusion) are not started.**
+> `UnitLeveling` ports docs/23 §4's real numbers exactly: kill XP
+> (`40 + 4×victim level`), the 10-entry cumulative level-threshold
+> table, and the linear per-level stat bonus (+8% MaxHP/+4% damage/+2%
+> speed — read as additive percentage points per level, not compounding;
+> a documented interpretation choice, since the doc doesn't spell out
+> which). `SimUnit.EffectiveMaxVitality`/`EffectivePower`/`EffectiveSpeed`
+> apply the bonus on top of the untouched genome-derived base stats
+> (never replacing them, per docs/23's own words); `TickCombat` already
+> uses `EffectivePower` for damage and `Tick`'s movement math already
+> uses `EffectiveSpeed`. Kill XP credits the attacker the instant its
+> blow finishes the target.
+>
+> **Explicitly deferred, not faked (RPG layer):** **assist XP** — docs/23
+> never specifies the assist-tracking window (how recent a hit counts,
+> how many attackers can share credit), a real content/design gap, not
+> just a missing prerequisite; **building-destruction XP** — match-core
+> has no `AttackBuilding` command/order kind yet, so there's no attacker
+> to credit when a building is destroyed (`SimBuilding.ApplyBuildingDamage`
+> is a generic hook, not tied to a unit); **Trait choices at levels
+> 3/6/9** — docs/23 names only 3 of the 9 required traits (Thick Hide /
+> Adrenal Rush / Scavenger's Eye), and inventing the other 6 would be
+> fabricating game content rather than mechanically translating given
+> numbers, a genuinely different kind of gap than every other deferral
+> this project has logged so far; **Gear (grafted salvage)** — needs the
+> salvage/harvest system already deferred above; **Fusion** — the stat
+> derivation itself (HP=sum×0.85, level=max+1, Power/Ferocity=max×1.1,
+> Speed=min, upkeep=sum) is pure, computable math, but the render
+> side (which parent's genome dominates, the four-hand-part creature-mesh
+> rig, `GenomeDto` hand-slot handling) is Unity/genome-core territory,
+> and Fusion also needs a per-unit Bones-cost stat match-core doesn't
+> track anywhere yet — a bigger, separate slice.
 
 **Every unit is a character.** This is the "meets RPG" half of the pitch.
 

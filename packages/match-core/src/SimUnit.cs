@@ -84,6 +84,39 @@ namespace MadDr.MatchCore
         /// place.</summary>
         public bool IsAlive => Combat == null || Vitality > 0;
 
+        /// <summary>docs/23 §4 "RPG layer": career-cumulative XP, never
+        /// decreasing. Only meaningful for a combat-capable unit -- "every
+        /// unit is a character," but only fighting units earn XP at all.
+        /// Carried here (`UnitRuntime`'s sim-side home, docs/23's own
+        /// words: "not the genome -- the genome is nature, the level is
+        /// nurture").</summary>
+        public int XP { get; private set; }
+
+        /// <summary>1-10 (docs/23 §4), derived from <see cref="XP"/> via
+        /// <see cref="UnitLeveling.LevelForXp"/> -- never stored/set
+        /// independently, so it can never drift from the XP total that
+        /// produced it.</summary>
+        public int Level => Combat == null ? 1 : UnitLeveling.LevelForXp(XP);
+
+        /// <summary>docs/23 §4: base <see cref="CombatStats.MaxVitality"/>
+        /// scaled by this unit's level bonus (+8%/level, linear -- see
+        /// <see cref="UnitLeveling.StatMultiplier"/>'s own doc comment).
+        /// The genome-derived base stat itself never changes; only the
+        /// EFFECTIVE number combat/movement math actually uses does.</summary>
+        public int EffectiveMaxVitality => Combat == null ? 0 :
+            (int)System.Math.Round(Combat.Value.MaxVitality * UnitLeveling.StatMultiplier(Level, UnitLeveling.MaxVitalityPerLevel));
+
+        /// <summary>docs/23 §4: base Power scaled by level (+4%/level).</summary>
+        public int EffectivePower => Combat == null ? 0 :
+            (int)System.Math.Round(Combat.Value.Power * UnitLeveling.StatMultiplier(Level, UnitLeveling.PowerPerLevel));
+
+        /// <summary>docs/23 §4: base movement Speed scaled by level
+        /// (+2%/level) -- this is what <see cref="Tick"/>'s movement math
+        /// actually consumes, not the raw <see cref="Speed"/> field
+        /// (kept as the genome-derived base, same "never mutate the
+        /// identity stat" convention as <see cref="Combat"/> itself).</summary>
+        public double EffectiveSpeed => Combat == null ? Speed : Speed * UnitLeveling.StatMultiplier(Level, UnitLeveling.SpeedPerLevel);
+
         /// <summary>The frame this unit died, or null if still alive.
         /// Drives <see cref="IsSalvageable"/>'s 15s window (docs/04:
         /// "lootable by either side for 15 seconds, then the remains sink
@@ -181,7 +214,10 @@ namespace MadDr.MatchCore
 
             if (Order != UnitOrderKind.MoveTo || _path == null) return;
 
-            var budget = Speed * dt;
+            // docs/23 §4: EffectiveSpeed (base Speed x the level bonus),
+            // not the raw base -- a leveled-up unit actually moves
+            // faster, not just hits harder.
+            var budget = EffectiveSpeed * dt;
             while (budget > 0.0 && Order == UnitOrderKind.MoveTo)
             {
                 if (_path == null || _pathIndex >= _path.Count)
@@ -252,6 +288,22 @@ namespace MadDr.MatchCore
         {
             X += dx;
             Z += dz;
+        }
+
+        /// <summary>docs/23 §4: award XP (a no-op for a non-combatant or a
+        /// non-positive amount). If this pushes <see cref="Level"/> up,
+        /// current <see cref="Vitality"/> rises by exactly the same
+        /// amount <see cref="EffectiveMaxVitality"/> just did -- preserving
+        /// how much damage this unit was already carrying rather than a
+        /// full heal on level-up (a documented interpretation choice;
+        /// docs/23 doesn't specify either way).</summary>
+        internal void GrantXp(int amount)
+        {
+            if (Combat == null || amount <= 0) return;
+            var oldEffectiveMax = EffectiveMaxVitality;
+            XP += amount;
+            var newEffectiveMax = EffectiveMaxVitality;
+            if (newEffectiveMax != oldEffectiveMax) Vitality += newEffectiveMax - oldEffectiveMax;
         }
 
         /// <summary>docs/23 Phase 4: start (or retarget) an attack channel.
@@ -338,6 +390,7 @@ namespace MadDr.MatchCore
             h.Add((int)FacingEdge);
             h.Add(AttackTargetId.HasValue ? (long)AttackTargetId.Value : -1L);
             h.AddBits(_attackCooldownSeconds);
+            h.Add(XP);   // Level is a pure function of XP -- hashing XP alone covers it
         }
     }
 }
