@@ -24,6 +24,14 @@ namespace MadDr.MatchCore
         /// chase-to-range movement yet (a documented, deferred gap; see
         /// this enum's own file header for the others).</summary>
         AttackUnit = 2,
+
+        /// <summary>docs/23 Phase 6a (docs/04): channeling a 3-second
+        /// harvest of a corpse (<see cref="SimUnit.SalvageTargetId"/>). Set
+        /// by <see cref="CommandKind.SalvageCorpse"/>; re-validated every
+        /// tick (corpse still salvageable, still in range) the same way
+        /// <see cref="AttackUnit"/>'s own Reach is -- an invalidated
+        /// channel simply cancels back to Idle rather than erroring.</summary>
+        Salvaging = 3,
     }
 
     /// <summary>
@@ -120,13 +128,10 @@ namespace MadDr.MatchCore
         /// <summary>The frame this unit died, or null if still alive.
         /// Drives <see cref="IsSalvageable"/>'s 15s window (docs/04:
         /// "lootable by either side for 15 seconds, then the remains sink
-        /// into the ground"). Actual resource payout on salvage and the
-        /// harvest/looting command itself are NOT implemented yet (need
-        /// genome-linked construction-bill data with no path into
-        /// match-core today, the same category of gap as docs/12's Phase
-        /// 3 upkeep entry) -- this is sim STATE for a later phase to
-        /// build the harvest action on top of, not the whole
-        /// mechanic.</summary>
+        /// into the ground"). docs/23 Phase 6a built the actual resource
+        /// payout and harvest command on top of this state -- see
+        /// <see cref="SalvageValue"/>/<see cref="SalvageRemaining"/>/
+        /// <see cref="SalvageTargetId"/>.</summary>
         public int? DeathTick { get; private set; }
 
         /// <summary>docs/04: a corpse is lootable for 15s (150 ticks)
@@ -135,6 +140,104 @@ namespace MadDr.MatchCore
         public bool IsSalvageable(int currentFrame) => DeathTick.HasValue && currentFrame - DeathTick.Value < SalvageWindowTicks;
 
         public const int SalvageWindowTicks = 15 * MatchState.TicksPerSecond;
+
+        /// <summary>docs/23 Phase 6a / docs/04: this unit's total
+        /// "construction components" value, supplied whole by the caller
+        /// at spawn time -- match-core never derives it (same "accept the
+        /// genome-derived NUMBER, stay genome-agnostic" pattern as
+        /// <see cref="Speed"/>/<see cref="Radius"/>/<see cref="Combat"/>).
+        /// 0 for every pre-Phase-6a spawn call (the existing default),
+        /// meaning nothing drops on death -- not an error, just an empty
+        /// corpse.</summary>
+        public int SalvageValue { get; }
+
+        /// <summary>How much of <see cref="SalvageValue"/> is still
+        /// waiting to be looted from this corpse -- 0 while alive, rolled
+        /// once at death (<see cref="SalvageMath.RollAmount"/>, 40-60%),
+        /// decremented to 0 the instant a harvest channel completes
+        /// (docs/04 pays out the whole remaining pile in one channel,
+        /// not a partial-harvest system).</summary>
+        public int SalvageRemaining { get; private set; }
+
+        /// <summary>docs/04: "occasionally (10%) yield a genome fragment."
+        /// Rolled once at death alongside <see cref="SalvageRemaining"/>
+        /// (see <see cref="SalvageMath.RollGenomeFragment"/>'s own doc
+        /// comment for why match-core stops at deciding THIS boolean and
+        /// goes no further).</summary>
+        public bool YieldsGenomeFragment { get; private set; }
+
+        private bool _salvageRolled;
+
+        /// <summary>Roll this corpse's loot, exactly once (idempotent
+        /// against an accidental second call -- there is only one death
+        /// per unit, but defensive no-op costs nothing, same style as
+        /// <see cref="ApplyDamage"/>'s own guards). Called by
+        /// <see cref="MatchState.TickCombat"/> the instant
+        /// <see cref="IsAlive"/> goes false.</summary>
+        internal void RollSalvage(SimRng rng)
+        {
+            if (_salvageRolled) return;
+            _salvageRolled = true;
+            SalvageRemaining = SalvageMath.RollAmount(SalvageValue, rng);
+            YieldsGenomeFragment = SalvageMath.RollGenomeFragment(rng);
+        }
+
+        /// <summary>docs/04: "harvesting a corpse is a 3-second channel."</summary>
+        public const double SalvageChannelSeconds = 3.0;
+
+        /// <summary>Who this unit is channeling a harvest against, while
+        /// <see cref="Order"/> is <see cref="UnitOrderKind.Salvaging"/>.</summary>
+        public uint? SalvageTargetId { get; private set; }
+
+        private double _salvageChannelRemainingSeconds;
+
+        /// <summary>Start (or restart) harvesting a corpse -- always resets
+        /// the channel to the full 3s, even if re-issued against the same
+        /// target (a v0.1 simplification: re-clicking harvest restarts
+        /// progress, matching how re-issuing most orders in this project
+        /// restarts rather than resumes).</summary>
+        internal void BeginSalvaging(uint corpseId)
+        {
+            SalvageTargetId = corpseId;
+            _salvageChannelRemainingSeconds = SalvageChannelSeconds;
+            Order = UnitOrderKind.Salvaging;
+        }
+
+        /// <summary>Abort an in-progress harvest (target died a second
+        /// time -- impossible --, decayed past its window, or walked out
+        /// of range). No-op if not currently salvaging.</summary>
+        internal void CancelSalvaging()
+        {
+            if (Order != UnitOrderKind.Salvaging) return;
+            Order = UnitOrderKind.Idle;
+            SalvageTargetId = null;
+            _salvageChannelRemainingSeconds = 0.0;
+        }
+
+        /// <summary>Advance this tick's worth of channel progress. Returns
+        /// true the instant the channel completes (caller pays out and
+        /// calls <see cref="CompleteSalvaging"/> that same tick) -- only
+        /// ever called by <see cref="MatchState.TickSalvage"/>, and only
+        /// while <see cref="Order"/> is already confirmed
+        /// <see cref="UnitOrderKind.Salvaging"/> and in-range, the same
+        /// division of labor <see cref="MatchState.TickCombat"/> uses for
+        /// <see cref="ApplyDamage"/>.</summary>
+        internal bool TickSalvageChannel(double dt)
+        {
+            _salvageChannelRemainingSeconds -= dt;
+            return _salvageChannelRemainingSeconds <= 0.0;
+        }
+
+        /// <summary>Called on the HARVESTER once payout completes.</summary>
+        internal void CompleteSalvaging()
+        {
+            Order = UnitOrderKind.Idle;
+            SalvageTargetId = null;
+            _salvageChannelRemainingSeconds = 0.0;
+        }
+
+        /// <summary>Called on the CORPSE once its pile has been paid out.</summary>
+        internal void ConsumeSalvage() => SalvageRemaining = 0;
 
         /// <summary>Which of this unit's 6 hex edges it currently faces --
         /// feeds <see cref="MadDr.CityGen.Facing.ArcOf"/> when someone
@@ -177,7 +280,7 @@ namespace MadDr.MatchCore
         /// pathfound for `SetPath` either.</summary>
         private readonly Queue<HexCoord> _waypointQueue = new Queue<HexCoord>();
 
-        internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed, double radius, CombatStats? combat)
+        internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed, double radius, CombatStats? combat, int salvageValue = 0)
         {
             EntityId = entityId;
             PlayerIndex = playerIndex;
@@ -187,6 +290,7 @@ namespace MadDr.MatchCore
             Radius = radius;
             Combat = combat;
             Vitality = combat?.MaxVitality ?? 0;
+            SalvageValue = salvageValue;
         }
 
         /// <summary>Begin walking a precomputed path (HexPathfinder output,
@@ -335,7 +439,10 @@ namespace MadDr.MatchCore
         /// and matches every other "bad input never crashes the sim"
         /// contract in this class). Clamped at exactly 0, never negative;
         /// reaching 0 is death: records `DeathTick`, drops whatever this
-        /// unit was doing (a corpse channels nothing).</summary>
+        /// unit was doing (a corpse channels nothing, attacks nothing, and
+        /// harvests nothing -- if it was mid-<see cref="UnitOrderKind.
+        /// Salvaging"/> itself when killed, that channel is abandoned
+        /// too).</summary>
         internal void ApplyDamage(int amount, int currentFrame)
         {
             if (Combat == null || !IsAlive || amount <= 0) return;
@@ -346,6 +453,8 @@ namespace MadDr.MatchCore
                 DeathTick = currentFrame;
                 Order = UnitOrderKind.Idle;
                 AttackTargetId = null;
+                SalvageTargetId = null;
+                _salvageChannelRemainingSeconds = 0.0;
                 _path = null;
             }
         }
@@ -391,6 +500,16 @@ namespace MadDr.MatchCore
             h.Add(AttackTargetId.HasValue ? (long)AttackTargetId.Value : -1L);
             h.AddBits(_attackCooldownSeconds);
             h.Add(XP);   // Level is a pure function of XP -- hashing XP alone covers it
+
+            // docs/23 Phase 6a (salvage): SalvageValue is a fixed identity
+            // stat (hashed for the same "everything gets hashed" reason as
+            // Speed/Radius); the rest is the corpse's own mutable loot
+            // state plus the harvester's channel progress.
+            h.Add(SalvageValue);
+            h.Add(SalvageRemaining);
+            h.Add(YieldsGenomeFragment ? 1 : 0);
+            h.Add(SalvageTargetId.HasValue ? (long)SalvageTargetId.Value : -1L);
+            h.AddBits(_salvageChannelRemainingSeconds);
         }
     }
 }

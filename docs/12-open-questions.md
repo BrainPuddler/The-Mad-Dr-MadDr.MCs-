@@ -2321,3 +2321,61 @@ all passing.
 
 **Verification:** 133 match-core tests, 152 citygen-core tests (untouched),
 18 `steercheck` checks, `flightcheck` clean.
+
+## docs/23 Phase 6a: salvage drops + harvest command (2026-07)
+
+Shipped the salvage-drop half of Phase 6a (per §13 amendment D's 6a/6b/6c
+split) — "every unit death drops 40-60% of its construction components,
+lootable by either side for 15 seconds" (docs/04), sim-side.
+
+**match-core:** `Salvage.cs`'s `SalvageMath` — a pure, all-integer 40-60%
+uniform roll (docs/23 §0 determinism discipline: no double in a resource
+payout, same bar `CombatMath` already holds itself to) plus a separate,
+independent 10% "genome fragment" roll. `SimUnit.SalvageValue` is an
+optional spawn parameter (default 0) — match-core never derives a unit's
+"construction components" total, same "accept the genome-derived NUMBER,
+stay genome-agnostic" pattern already used for Speed/Radius/`CombatStats`.
+On death, `RollSalvage` fills `SalvageRemaining` (the loot still waiting)
+and `YieldsGenomeFragment` (sim state only — see below). `CommandKind.
+SalvageCorpse` + a new `UnitOrderKind.Salvaging` order drive a 3-second
+harvest channel (`MatchState.TickSalvage`), re-validating range and
+corpse-still-lootable every tick — an interrupted channel (corpse decays,
+harvester or corpse moves out of range) cancels cleanly back to Idle
+rather than erroring, the same "an order can go stale mid-channel" idea
+`TickCombat` already applies to Reach. Completion pays the corpse's whole
+remaining pile into the harvester's owner's `ResourceKind.Parts` wallet
+(docs/04 describes one channel, not a partial-harvest system) via the
+existing `PlayerState.Grant`.
+
+**A real, pre-existing bug fixed along the way:** `ApplySeparationPass`
+never filtered out dead units — a corpse could get shoved by a living
+neighbour's separation nudge (or itself shove a living unit), drifting off
+the hex it died on. This bug predates this phase (it's been there since
+Phase 4 introduced death) but only started to matter now that a corpse's
+exact position is something a harvest command actually range-checks.
+Fixed by skipping `!self.IsAlive` units on both sides of the separation
+pass — corpses are now inert, matching "a stable loot location," not a
+moving body.
+
+**Explicitly deferred, not faked:** `SimUnit.YieldsGenomeFragment` decides
+only WHETHER a corpse yields a genome fragment, deterministically and
+replayably — match-core has zero reference to genome-core or the Mutator
+catalog (a repo invariant: genome-core has no engine/graphics deps, and
+match-core doesn't reach into it either), so it cannot say WHICH part
+family, whether the player already owns it, or apply the +5% stat
+affinity/permanent Lab-unlock docs/23 §6 also promises. That translation
+is a real, separate, not-yet-built job for whatever system reads the
+match transcript afterward (mutator-service or a future match-summary
+consumer) — this is sim STATE for that job to build on, the same
+"flag the state, defer the cross-system consumer" shape `DeathTick` itself
+used for salvage before this phase. Roaming Loose Experiment anomalies
+(their own spawn/movement/aura-cycling/capture-on-kill system, also part
+of 6a's own bundle) remain a separate, not-yet-started slice. Phase 6b
+(enemy faction rosters as genome data) and 6c (utility-driven skirmish
+commander AI) are unstarted, separate phases per amendment D.
+
+**Verification:** 147 match-core tests (14 new: pure salvage-math bounds,
+death-time roll, full harvest payout, empty-corpse/out-of-range/decayed-
+corpse rejection, mid-channel cancellation on the corpse moving away,
+corpse-stays-put-under-separation, and a same-seed-same-hash determinism
+proof), 152 citygen-core tests (untouched).

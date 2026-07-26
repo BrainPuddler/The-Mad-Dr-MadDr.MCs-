@@ -497,6 +497,41 @@ formations, group arrival facing, minimap orders). This phase adds the feel.
   timed — the SC2 xel'naga-tower/DotA-rune hybrid this game's streets deserve.
 
 ### Phase 6 tasks
+
+> **Status (2026-07): split per §13 amendment D into 6a/6b/6c — 6a's
+> salvage-drop half done, sim-side.** This section's own task list below
+> predates amendment C/D and still reads as one bundle ("docs/04 damage
+> formula implementation... finally") — the damage formula/arcs/luck rolls
+> it names already shipped with **Phase 4's combat-core amendment**, not
+> here; this status note covers only what's genuinely still Phase 6's job.
+> **6a (damage-model consumers + all-parts salvage + Discovery + roaming
+> anomalies), salvage-drop slice done** (147 match-core tests total):
+> `SalvageMath` (docs/04's 40-60% uniform roll, all-integer); `SimUnit.
+> SalvageValue` (an optional spawn parameter, same genome-agnostic pattern
+> as `CombatStats`/Speed/Radius) rolls into `SalvageRemaining` the instant
+> a unit dies; `CommandKind.SalvageCorpse` + a 3-second harvest channel
+> (`UnitOrderKind.Salvaging`) pays the whole pile into the harvester's
+> owner's `ResourceKind.Parts` wallet, re-validating range/corpse-still-
+> lootable every tick the same way `TickCombat` already re-validates
+> Reach. **A real pre-existing bug fixed along the way:** `ApplySeparationPass`
+> had never filtered out dead units, so a corpse could drift under a
+> living neighbour's separation nudge — corpses are now inert (neither
+> push nor are pushed), matching "a corpse is a stable loot location," not
+> a moving body. **Explicitly deferred, not faked:** the 10% genome-fragment
+> roll (`SimUnit.YieldsGenomeFragment`) decides only WHETHER a corpse
+> yields a fragment, deterministically — match-core has zero reference to
+> genome-core or the Mutator catalog (a repo invariant), so it cannot name
+> WHICH part family, check whether the player already owns it, or apply
+> the +5% stat affinity/Lab-unlock docs/23 itself promises; that's a real,
+> separate, not-yet-built cross-system job for whatever reads the match
+> transcript afterward (see `Salvage.cs`'s own header). Roaming Loose
+> Experiment anomalies are a distinct, not-yet-started slice of 6a (their
+> own spawn/movement/aura-cycling/capture-on-kill system). **6b** (enemy
+> faction rosters as genome data) and **6c** (utility-driven skirmish
+> commander AI) are unstarted, separate phases per amendment D's own
+> split — 6b needs real authored genome content, 6c is "a full phase on
+> its own."
+
 - `match-core`: docs/04 damage formula implementation (finally — it has never
   been implemented), arcs from `Facing`, bounded-luck rolls from the match
   stream; faction rosters as genome data files; salvage drops + loot;

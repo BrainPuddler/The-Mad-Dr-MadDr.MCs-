@@ -49,6 +49,15 @@ namespace MadDr.MatchCore
         /// chase-to-range movement yet (docs/12's Phase 4 entry), so an
         /// out-of-range order is rejected rather than queued.</summary>
         AttackUnit = 5,
+        /// <summary>docs/23 Phase 6a (docs/04): TargetEntity (the
+        /// harvester) begins a 3-second channel looting ArgA (the corpse's
+        /// entity ID, cast to int -- same reinterpreted-slot contract as
+        /// <see cref="AttackUnit"/>). Silently a no-op unless the harvester
+        /// is alive, the target actually IS a corpse still inside its 15s
+        /// salvage window with something left to loot, and the two are
+        /// within salvage range -- same "bad input never queues, just
+        /// rejects" contract as every other command kind.</summary>
+        SalvageCorpse = 6,
     }
 
     /// <summary>

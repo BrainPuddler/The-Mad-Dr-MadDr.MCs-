@@ -163,9 +163,12 @@ namespace MadDr.MatchCore
         /// Phase 4) defaults to null -- a pure-movement unit, exactly like
         /// every unit before this phase; the caller supplies the
         /// genome-derived stat block whole (same pattern as speed/radius),
-        /// match-core never derives it. Returns the new unit's entity
-        /// ID.</summary>
-        public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, double radius = DefaultUnitRadius, CombatStats? combat = null)
+        /// match-core never derives it. <paramref name="salvageValue"/>
+        /// (docs/23 Phase 6a) defaults to 0 -- a pre-Phase-6a spawn call
+        /// gets a unit whose corpse simply has nothing to loot, rather
+        /// than being forced to widen its own call site. Returns the new
+        /// unit's entity ID.</summary>
+        public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, double radius = DefaultUnitRadius, CombatStats? combat = null, int salvageValue = 0)
         {
             if (_city == null) throw new InvalidOperationException("MatchState has no city -- cannot spawn units");
             if (playerIndex < 0 || playerIndex >= _players.Length)
@@ -175,7 +178,7 @@ namespace MadDr.MatchCore
 
             var id = AllocateEntityId();
             var (x, z) = atHex.ToWorld();
-            var unit = new SimUnit(id, playerIndex, x, z, speed, radius, combat);
+            var unit = new SimUnit(id, playerIndex, x, z, speed, radius, combat, salvageValue);
             _unitsInOrder.Add(unit);
             _unitsById[id] = unit;
             return id;
@@ -401,7 +404,90 @@ namespace MadDr.MatchCore
                 // Assist and building-destruction XP are NOT implemented
                 // (docs/12's Phase 4 RPG entry: no specified assist window,
                 // no AttackBuilding command to know who dealt the damage).
-                if (!defender.IsAlive) attacker.GrantXp(UnitLeveling.KillXp(victimLevelBeforeDeath));
+                if (!defender.IsAlive)
+                {
+                    attacker.GrantXp(UnitLeveling.KillXp(victimLevelBeforeDeath));
+                    // docs/23 Phase 6a (docs/04): roll the corpse's loot
+                    // the instant it dies -- deterministic, one-time, same
+                    // tick as the killing blow so a client replaying the
+                    // command stream sees the exact same pile.
+                    defender.RollSalvage(_rng);
+                }
+            }
+        }
+
+        /// <summary>docs/23 Phase 6a / docs/04: how close a harvester must
+        /// be to a corpse to begin (and keep) channeling -- on the corpse's
+        /// own hex or directly adjacent. docs/04 doesn't give an explicit
+        /// number; this reuses melee <see cref="CombatStats.Reach"/>'s own
+        /// convention (1 = adjacent) as the v0.1 placeholder, same
+        /// "flagged, not invented in secret" discipline as every other
+        /// unspecified tuning constant this project ships with.</summary>
+        private const int SalvageRangeHexes = 1;
+
+        /// <summary>docs/23 Phase 6a (docs/04): TargetEntity (the
+        /// harvester) begins looting ArgA (the corpse). Both units must
+        /// exist, the harvester must be alive, and the target must
+        /// actually be a dead, still-<see cref="SimUnit.IsSalvageable"/>
+        /// corpse with <see cref="SimUnit.SalvageRemaining"/> &gt; 0 and
+        /// within <see cref="SalvageRangeHexes"/> -- silent no-op
+        /// otherwise, same bad-input contract as every other command.
+        /// Deliberately does NOT check faction: docs/04 says a corpse is
+        /// "lootable by either side."</summary>
+        private void ApplySalvageCorpse(Command cmd)
+        {
+            var harvester = FindUnit(cmd.TargetEntity);
+            var corpse = FindUnit(unchecked((uint)cmd.ArgA));
+            if (harvester == null || corpse == null) return;
+            if (!harvester.IsAlive || ReferenceEquals(harvester, corpse)) return;
+            if (corpse.IsAlive || !corpse.IsSalvageable(Frame) || corpse.SalvageRemaining <= 0) return;
+
+            var harvesterHex = HexAt(harvester.X, harvester.Z);
+            var corpseHex = HexAt(corpse.X, corpse.Z);
+            if (harvesterHex.DistanceTo(corpseHex) > SalvageRangeHexes) return;
+
+            harvester.BeginSalvaging(corpse.EntityId);
+        }
+
+        /// <summary>docs/23 Phase 6a: one tick of harvest-channel
+        /// resolution, entity-ID order (the same iteration law every other
+        /// per-tick system in this class follows). Re-validates range and
+        /// corpse-still-lootable EVERY tick, not just at command issuance
+        /// -- the same "an order can go stale mid-channel" idea
+        /// <see cref="TickCombat"/> already applies to Reach. An
+        /// invalidated channel cancels cleanly back to Idle rather than
+        /// erroring; a completed one pays the harvester's owner the
+        /// corpse's entire remaining pile in <see cref="ResourceKind.
+        /// Parts"/> (docs/04 doesn't describe a partial-harvest system --
+        /// one channel empties the whole pile).</summary>
+        private void TickSalvage()
+        {
+            for (var i = 0; i < _unitsInOrder.Count; i++)
+            {
+                var harvester = _unitsInOrder[i];
+                if (harvester.Order != UnitOrderKind.Salvaging || !harvester.IsAlive) continue;
+
+                var corpse = harvester.SalvageTargetId.HasValue ? FindUnit(harvester.SalvageTargetId.Value) : null;
+                if (corpse == null || corpse.IsAlive || !corpse.IsSalvageable(Frame) || corpse.SalvageRemaining <= 0)
+                {
+                    harvester.CancelSalvaging();
+                    continue;
+                }
+
+                var harvesterHex = HexAt(harvester.X, harvester.Z);
+                var corpseHex = HexAt(corpse.X, corpse.Z);
+                if (harvesterHex.DistanceTo(corpseHex) > SalvageRangeHexes)
+                {
+                    harvester.CancelSalvaging();
+                    continue;
+                }
+
+                if (!harvester.TickSalvageChannel(DtSeconds)) continue;   // still channeling
+
+                var amount = corpse.SalvageRemaining;
+                _players[harvester.PlayerIndex].Grant(ResourceKind.Parts, amount);
+                corpse.ConsumeSalvage();
+                harvester.CompleteSalvaging();
             }
         }
 
@@ -466,6 +552,12 @@ namespace MadDr.MatchCore
             // docs/23 Phase 4 (combat core, docs/04): attack resolution,
             // entity-ID order, same law as movement above.
             TickCombat();
+
+            // docs/23 Phase 6a (docs/04): harvest-channel resolution, after
+            // combat so a corpse that dies THIS tick can't be validly
+            // targeted until next tick (matches TickCombat's own "target
+            // gone -- unit just waits" idiom rather than same-tick chaining).
+            TickSalvage();
 
             // docs/23 §5 / docs/27 Phase C: separation, restoring the same
             // "never actually overlap" guarantee legacy (non-sim-driven)
@@ -533,6 +625,9 @@ namespace MadDr.MatchCore
                     break;
                 case CommandKind.AttackUnit:
                     ApplyAttackUnit(cmd);
+                    break;
+                case CommandKind.SalvageCorpse:
+                    ApplySalvageCorpse(cmd);
                     break;
                 case CommandKind.None:
                 default:
@@ -684,7 +779,15 @@ namespace MadDr.MatchCore
         /// clamped to the boundary (docs/23 §5's acceptance bar: "blocked-
         /// hex clamp never violated across 10k random steps") -- simpler
         /// and just as correct as a partial slide, since separation gets
-        /// another full attempt next tick regardless.</summary>
+        /// another full attempt next tick regardless.
+        ///
+        /// docs/23 Phase 6a: a dead unit neither pushes nor is pushed -- a
+        /// corpse is inert, not a moving solid body, and needs to stay put
+        /// at a stable hex for <see cref="TickSalvage"/>'s range check to
+        /// mean anything (a corpse drifting under a living neighbour's
+        /// separation nudge every tick was a real, if minor, bug from
+        /// Phase 4 onward: nothing filtered dead units out of this pass
+        /// before this phase).</summary>
         private void ApplySeparationPass()
         {
             if (_city == null || _blockedToGround == null || _unitsInOrder.Count < 2) return;
@@ -693,11 +796,13 @@ namespace MadDr.MatchCore
             for (var i = 0; i < _unitsInOrder.Count; i++)
             {
                 var self = _unitsInOrder[i];
+                if (!self.IsAlive) continue;
                 neighbors.Clear();
                 for (var j = 0; j < _unitsInOrder.Count; j++)
                 {
                     if (j == i) continue;
                     var other = _unitsInOrder[j];
+                    if (!other.IsAlive) continue;
                     neighbors.Add(new Flocking.Neighbor(other.X, other.Z, other.Radius));
                 }
 
