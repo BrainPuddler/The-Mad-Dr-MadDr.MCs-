@@ -25,6 +25,12 @@ public static class BuildingDresser
     // ---- 1950s palette (shared cached materials) ------------------------------
     private static readonly Dictionary<int, Material> Cache = new Dictionary<int, Material>();
 
+    // docs/23 Phase 10.3: a SEPARATE small cache for the PBR-atlas-backed
+    // materials (see MTextured) -- keyed by name rather than reusing the
+    // packed-color int key above, so this never risks colliding with M()'s
+    // existing bit-packing scheme.
+    private static readonly Dictionary<string, Material> TexturedCache = new Dictionary<string, Material>();
+
     private static Material M(float r, float g, float b, float emissive = 0f)
     {
         var key = ((int)(r * 255) << 20) | ((int)(g * 255) << 10) | (int)(b * 255) | ((int)(emissive * 3) << 30);
@@ -43,13 +49,33 @@ public static class BuildingDresser
         return mat;
     }
 
-    private static Material Brick() { return M(0.55f, 0.27f, 0.2f); }
+    /// <summary>docs/23 Phase 10.3: same idea as M(), but also applies a
+    /// PbrTextureAtlas placeholder texture -- "dressers keep their
+    /// geometry logic, gain material richness." A fixed tiling scale
+    /// (not scaled to each face's own world size -- a documented v0.1
+    /// simplification, see docs/23-balance/graphics-3-notes.md).</summary>
+    private static Material MTextured(string key, float r, float g, float b, Texture2D tex)
+    {
+        Material mat;
+        if (TexturedCache.TryGetValue(key, out mat) && mat != null) return mat;
+        mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(r, g, b);
+        if (tex != null && mat.HasProperty("_BaseMap"))
+        {
+            mat.SetTexture("_BaseMap", tex);
+            mat.SetTextureScale("_BaseMap", new Vector2(3f, 3f));
+        }
+        TexturedCache[key] = mat;
+        return mat;
+    }
+
+    private static Material Brick() { return MTextured("brick", 0.55f, 0.27f, 0.2f, PbrTextureAtlas.Brick); }
     private static Material Cream() { return M(0.87f, 0.82f, 0.68f); }
     private static Material Seafoam() { return M(0.62f, 0.78f, 0.68f); }
     private static Material Mustard() { return M(0.82f, 0.66f, 0.25f); }
-    private static Material Concrete() { return M(0.62f, 0.6f, 0.55f); }
-    private static Material Chrome() { return M(0.78f, 0.8f, 0.82f); }
-    private static Material WindowBand() { return M(0.16f, 0.2f, 0.28f); }
+    private static Material Concrete() { return MTextured("limestone", 0.62f, 0.6f, 0.55f, PbrTextureAtlas.Limestone); }
+    private static Material Chrome() { return MTextured("chrome", 0.78f, 0.8f, 0.82f, PbrTextureAtlas.Chrome); }
+    private static Material WindowBand() { return MTextured("glass", 0.16f, 0.2f, 0.28f, PbrTextureAtlas.Glass); }
     private static Material RoofTar() { return M(0.24f, 0.23f, 0.21f); }
     private static Material RustRed() { return M(0.5f, 0.24f, 0.16f); }
     private static Material NeonRed() { return M(0.95f, 0.25f, 0.3f, 1.6f); }

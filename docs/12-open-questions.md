@@ -3168,3 +3168,79 @@ the `steercheck` harness fix used earlier this session. No Unity
 Editor exists in this environment, so none of this is visually
 verified — consistent with this whole project's standing discipline
 against claiming verification that didn't happen.
+
+## docs/23 Phase 10 (Graphics): sub-phases 3-4 shipped (2026-07)
+
+Following on from sub-phases 1-2 (post stack + lighting): implemented
+Materials and Meshes, the same way — real, working code, but every
+texture/mesh is a PROCEDURALLY GENERATED placeholder rather than an
+authored asset, because this environment still has no Editor/DCC
+pipeline to author real ones.
+
+**Materials.** `PbrTextureAtlas.cs` builds six small (64x64) placeholder
+`Texture2D`s in code (brick coursing + mortar + per-brick jitter;
+two-octave mottled limestone; grained asphalt with a few brighter "wet
+streak" rows; banded chrome; scratched/riveted painted metal; a
+diagonal-sheen glass). Wired into the EXISTING dresser material cache
+functions — `BuildingDresser.Brick()`/`Concrete()`/`Chrome()`/
+`WindowBand()`, `RoadDresser.Asphalt()`/`ChromeTrim()`/`PoleMetal()` —
+with zero geometry changes and zero changes to any other existing flat
+color (`Cream`, `Seafoam`, `Mustard`, etc. are all untouched). Every
+textured material gets one fixed tiling scale (3x3) rather than a
+per-object scale computed from world size — Unity's built-in primitive
+UVs aren't world-scale-aware, and getting that right would need a
+`MaterialPropertyBlock` touch at every `SpawnPrim` call site across both
+dresser files, out of scope for a placeholder pass. Flagged, not
+silently implied as scale-correct.
+
+**Meshes.** `PropLibrary.cs` ships the actual infrastructure docs/23
+§10.4 asks for: "swap CreatePrimitive calls for a PropLibrary lookup
+(mesh assets by key, with primitive fallback so the game never breaks
+without assets)." `PropLibrary.Spawn(...)` mirrors
+`RuntimeCityBuilder.SpawnPrim`'s own calling convention (world-center
+position, local scale, one material) so no dresser call site needs to
+know whether a key resolves to a real mesh or a plain primitive — a
+future real imported-mesh asset only ever needs a one-line change to
+this file's registration, never a dresser rewrite.
+
+Backing it today: `ProceduralMeshKit.cs`, two hand-authored placeholder
+meshes for shapes `CreatePrimitive` doesn't offer (a tapered-cylinder
+`Frustum`, a lean-to-awning `Wedge`/right-triangular-prism) — built via
+the same manual vertex/triangle authoring `LabMeshBuilder` already uses
+for creature-mesh chunks, not an imported asset. Both emit every face in
+BOTH triangle windings, a deliberate safety net against a winding-order
+mistake this environment has no Editor to visually catch (doubles the
+triangle count on these small, few-per-scene props — an explicit,
+acceptable tradeoff, not a pattern for anything performance-sensitive).
+
+Two new signature props from the 2026-07 daytime mood-board addition use
+this infrastructure, wired into `RoadDresser`'s existing street-furniture
+switch as new cases 6-7 (its modulo range widened from `%6` to `%8` —
+the same incremental-variety pattern every earlier furniture pass
+already used, e.g. docs/21 batches 4-8): an ornate multi-globe lamppost
+(the `Frustum` pole plus three independently `StreetLampRegistry`-
+registered warm globes, so Phase 10.2's light budget can promote any of
+the three) and a market/vendor stall (the `Wedge` canopy over a plain
+counter box).
+
+**Deliberately NOT attempted: the mood-board's third new prop, a
+streetcar on embedded tram rails.** This is a materially bigger unit of
+work than a static prop — a moving vehicle (comparable to `TrafficCar.cs`),
+a distinct embedded-rail road-surface treatment, and region-gating logic
+that doesn't exist in any Unity dresser today (Phase 8's `CityRegion` is
+citygen-core-only; `LumenCycleController`, from this same Phase 10, is
+still the only Unity-side consumer of `CityModel.Region`, for lighting
+grade only). Shipping a shallow version of three different systems to
+check a box would cut against this project's own "flag, don't fake"
+discipline more than an honest deferral.
+
+Every numeric value (texture jitter amounts, tiling scale, frustum
+taper/segment counts, prop dimensions) is an invented v0.1 placeholder.
+Verified via `flightcheck` only (added `Texture.wrapMode`/
+`TextureWrapMode` and `Material.SetTexture`/`SetTextureScale` to the
+harness stub, matching only the exact surface this code calls). No
+Unity Editor exists in this environment, so none of this — texture
+pattern legibility, tiling frequency, the frustum/wedge silhouettes, or
+the winding-safety-net's actual rendered result — is visually verified.
+Full shipped/deferred accounting: `docs/23-balance/graphics-3-notes.md`
+and `graphics-4-notes.md`.

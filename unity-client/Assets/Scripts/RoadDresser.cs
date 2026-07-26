@@ -27,6 +27,11 @@ public static class RoadDresser
 {
     private static readonly Dictionary<int, Material> Cache = new Dictionary<int, Material>();
 
+    // docs/23 Phase 10.3: same separate-cache pattern as BuildingDresser's
+    // MTextured -- see that file's comment for why this isn't folded into
+    // M()'s own packed-int cache key.
+    private static readonly Dictionary<string, Material> TexturedCache = new Dictionary<string, Material>();
+
     private static Material M(float r, float g, float b, float emissive = 0f)
     {
         var key = ((int)(r * 255) << 20) | ((int)(g * 255) << 10) | (int)(b * 255) | ((int)(emissive * 3) << 30);
@@ -45,7 +50,22 @@ public static class RoadDresser
         return mat;
     }
 
-    private static Material Asphalt() { return M(0.17f, 0.17f, 0.18f); }
+    private static Material MTextured(string key, float r, float g, float b, Texture2D tex)
+    {
+        Material mat;
+        if (TexturedCache.TryGetValue(key, out mat) && mat != null) return mat;
+        mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(r, g, b);
+        if (tex != null && mat.HasProperty("_BaseMap"))
+        {
+            mat.SetTexture("_BaseMap", tex);
+            mat.SetTextureScale("_BaseMap", new Vector2(3f, 3f));
+        }
+        TexturedCache[key] = mat;
+        return mat;
+    }
+
+    private static Material Asphalt() { return MTextured("asphalt-wet", 0.17f, 0.17f, 0.18f, PbrTextureAtlas.AsphaltWet); }
     private static Material Sidewalk() { return M(0.58f, 0.56f, 0.52f); }
     private static Material LanePaint() { return M(0.85f, 0.7f, 0.2f); }
     private static Material CrossPaint() { return M(0.85f, 0.84f, 0.8f); }
@@ -57,11 +77,11 @@ public static class RoadDresser
     private static Material SignRed() { return M(0.78f, 0.16f, 0.13f); }
     private static Material PostGray() { return M(0.5f, 0.52f, 0.54f); }
     private static Material PoleWood() { return M(0.35f, 0.26f, 0.18f); }
-    private static Material PoleMetal() { return M(0.45f, 0.48f, 0.5f); }
+    private static Material PoleMetal() { return MTextured("painted-metal", 0.45f, 0.48f, 0.5f, PbrTextureAtlas.PaintedMetal); }
     private static Material Bulb() { return M(1f, 0.9f, 0.6f, 1.4f); }
     private static Material HydrantRed() { return M(0.75f, 0.15f, 0.12f); }
     private static Material CanGray() { return M(0.4f, 0.42f, 0.44f); }
-    private static Material ChromeTrim() { return M(0.8f, 0.82f, 0.85f); }
+    private static Material ChromeTrim() { return MTextured("chrome", 0.8f, 0.82f, 0.85f, PbrTextureAtlas.Chrome); }
     private static Material AdRed() { return M(0.82f, 0.18f, 0.16f); }
 
     private static readonly Color[] CarPastels =
@@ -325,7 +345,7 @@ public static class RoadDresser
         // pole or hydrant or trash can on the sidewalk line
         var sideSign = (h >> 3) % 2 == 0 ? 1f : -1f;
         var propSpot = center + side * (sideSign * curbLineOffset) + axis * (((h >> 5) % 7) - 3f);
-        switch ((h >> 8) % 6)
+        switch ((h >> 8) % 8)
         {
             case 0:   // streetlight: pole, arm reaching back over the road, warm bulb
             {
@@ -385,6 +405,32 @@ public static class RoadDresser
                 break;
             }
             // case 5: nothing -- empty sidewalk is a look too
+            case 6:   // 2026-07 daytime mood-board addition: ornate multi-globe lamppost -- a tapered pole (PropLibrary/ProceduralMeshKit, not a stock primitive) plus three warm globes clustered near the top
+            {
+                var holder = KnockHolder(propSpot, host);
+                PropLibrary.Spawn(b, "ornate-lamppost-pole", PrimitiveType.Cylinder,
+                    propSpot + Vector3.up * 3.1f, new Vector3(0.22f, 3.1f, 0.22f), PoleMetal(), holder);
+                for (var g = 0; g < 3; g++)
+                {
+                    var ga = g / 3f * 2f * Mathf.PI;
+                    var globeSpot = propSpot + Vector3.up * 5.9f
+                        + new Vector3(Mathf.Sin(ga) * 0.5f, 0f, Mathf.Cos(ga) * 0.5f);
+                    var globe = b.SpawnPrim(PrimitiveType.Sphere, globeSpot, new Vector3(0.4f, 0.4f, 0.4f), Bulb(), holder);
+                    StreetLampRegistry.Register(globe.transform);
+                }
+                MakeKnockable(b, holder.gameObject, 1.8f);
+                break;
+            }
+            case 7:   // 2026-07 daytime mood-board addition: market/vendor stall for denser sidewalks -- a lean-to canopy (PropLibrary/ProceduralMeshKit Wedge) over a counter
+            {
+                b.SpawnPrim(PrimitiveType.Cube, propSpot + Vector3.up * 0.5f,
+                    new Vector3(2.2f, 1f, 1.1f), PoleWood(), host);
+                var canopy = PropLibrary.Spawn(b, "market-stall-canopy", PrimitiveType.Cube,
+                    propSpot + Vector3.up * 1.9f - side * (sideSign * 0.3f),
+                    new Vector3(2.6f, 1.2f, 1.8f), h % 2 == 0 ? AdRed() : SignBlue(), host);
+                canopy.transform.rotation = Quaternion.LookRotation(-side * sideSign, Vector3.up);
+                break;
+            }
         }
     }
 

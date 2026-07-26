@@ -1042,6 +1042,31 @@ Nothing here is claimed as implemented or visually verified.
 > `ColorAdjustments`/`FilmGrain`/`Vignette`/`Bloom`/`Tonemapping`,
 > `UniversalAdditionalCameraData` — matching only the exact surface this
 > code calls, not the real API's full breadth).
+>
+> **Follow-up (2026-07): sub-phases 3-4 shipped, placeholder-generated,
+> not authored.** `PbrTextureAtlas.cs` procedurally generates six small
+> placeholder textures (brick, limestone, asphalt-wet, chrome, painted
+> metal, glass) in code — no imported asset — wired into the EXISTING
+> `BuildingDresser`/`RoadDresser` material functions (`Brick`/`Concrete`/
+> `Chrome`/`WindowBand`, `Asphalt`/`ChromeTrim`/`PoleMetal`), zero
+> geometry changes, one fixed tiling scale rather than per-object
+> world-scale-correct tiling (a documented simplification). `PropLibrary.cs`
+> ships the "mesh-by-key, primitive fallback" infrastructure the plan
+> itself asks for, backed today by `ProceduralMeshKit.cs`'s two
+> hand-authored placeholder shapes (a tapered-pole frustum, a lean-to
+> awning wedge — built the same manual vertex/triangle way
+> `LabMeshBuilder` already does for creature-mesh chunks), used for two
+> new signature props from the daytime mood-board addition: an ornate
+> multi-globe lamppost and a market/vendor stall, both wired into
+> `RoadDresser`'s existing furniture rotation. The mood-board's third new
+> prop — a streetcar on embedded tram rails — is explicitly NOT
+> attempted: it's a materially bigger unit of work (vehicle movement,
+> road-surface geometry, region-gating that doesn't exist in Unity yet)
+> than a static placeholder prop, and shipping a shallow version of three
+> different systems to check a box would cut against this project's own
+> "flag, don't fake" discipline more than leaving it honestly deferred.
+> Full accounting: `docs/23-balance/graphics-{3,4}-notes.md`. Not
+> visually verified — flightcheck-compiled only.
 
 Sequenced sub-phases (each independently shippable):
 1. **Post stack**: URP Volume — filmic tonemapping, per-region color-grading
