@@ -409,6 +409,35 @@ namespace MadDr.MatchCore
             Order = _path != null ? UnitOrderKind.MoveTo : UnitOrderKind.Idle;
         }
 
+        /// <summary>docs/23 §9 hardening audit: undo this tick's movement
+        /// outright and drop the now-suspect path. `HexPathfinder` only
+        /// ever hands out OPEN path nodes, and straight-line interpolation
+        /// between two ADJACENT open hex centers is geometrically
+        /// confined to those two hexes' own Voronoi cells (it can never
+        /// stray into a third) -- an invariant that quietly assumes this
+        /// unit's position sits exactly on that line. It doesn't always:
+        /// <see cref="MatchState.ApplySeparationPass"/> validates its OWN
+        /// nudge's destination every tick, but a unit can still
+        /// accumulate many individually-valid separation nudges that
+        /// laterally drift it OFF its path's assumed centerline over
+        /// time, until this method's own straight-line step toward the
+        /// next path node -- taken from that drifted position, not the
+        /// centerline -- clips a hex neither system ever explicitly
+        /// checked. Found by docs/23 Phase 9's own 200-unit fuzz harness
+        /// (a unit slowly nudged across a hex boundary this way, tick
+        /// 2004 of a 100k-tick run) -- not a hypothetical. Caller
+        /// (<see cref="MatchState.Tick"/>) re-validates the hex after
+        /// every regular movement step and calls this the instant it's
+        /// ever wrong: a unit stalled for one tick is a far smaller cost
+        /// than tunneling through solid ground.</summary>
+        internal void RevertToSafePosition(double x, double z)
+        {
+            X = x;
+            Z = z;
+            Order = UnitOrderKind.Idle;
+            _path = null;
+        }
+
         /// <summary>Advance one fixed tick's worth of movement. Consumes
         /// this tick's whole speed*dt budget across as many path nodes as
         /// it covers (never leaves a fractional-tick's motion on the

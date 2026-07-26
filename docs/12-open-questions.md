@@ -2825,3 +2825,154 @@ roundabout), 217 match-core tests (untouched, confirming citygen-core's
 API stayed backward compatible), plus a deterministic ASCII-dump text-art
 rendering of all three regions committed to `docs/23-balance/` (a real,
 non-fabricated textual rendering, not a claim of an actual screenshot).
+
+## docs/23 Phase 9: solidity/boundaries/destruction audit (2026-07)
+
+Shipped both halves of the hardening audit against the creator's law:
+"Must adhere to the physical boundaries of the playfield, buildings are
+solid and cannot be walked through unless they are destroyed."
+
+### match-core's own mover: the fuzz harness, at literal scale
+
+`ContainmentFuzzTests.cs` drives docs/23 §9's acceptance bar EXACTLY as
+written — 200 units, 100,000 ticks, seed-driven random `MoveTo`/
+`MoveQueue` orders (never `Math.Random` — docs/23 §0), containment
+asserted every single tick — rather than a scaled-down stand-in. It runs
+~4 minutes, a real cost accepted deliberately: this is a dedicated audit/
+stress test, not a routine unit test, and shrinking it would have reduced
+confidence in exactly the property it exists to prove. Two companions:
+a smaller building-churn fuzz that mutates the blocked set LIVE via real
+`BuildStructure`/`ApplyBuildingDamage` calls while units keep moving
+(proving containment survives blocked-set MUTATION, not just a static
+map, and that a destroyed building's exact footprint is both out of the
+blocked set and actually walkable by a real unit — not merely absent
+from a set in the abstract); and a geometric proof that `SimUnit.Tick`'s
+path-following is tunnel-proof by construction (it snaps exactly onto
+each path node regardless of how large one tick's speed budget is, so
+there's no code path that advances by a raw distance without first
+landing on an already-validated node).
+
+**The 100k-tick run found a real, subtle production bug on its very
+first try — exactly the point of building it at full scale.** At tick
+2004, unit 77 drifted into a blocked hex. Root cause, once diagnosed
+(two dead ends first: an apparent off-by-one in `NearestHex` turned out
+to be an entity-ID-vs-array-index mixup in the DIAGNOSTIC code, not a
+production bug; a brute-force nearest-hex search confirmed the hex
+conversion itself was exactly correct): `ApplySeparationPass` validates
+its OWN nudge's destination every tick (correct, and already true since
+docs/27 Phase C) — but regular path-following movement (`SimUnit.Tick`)
+was NEVER independently re-validated against the blocked set at all. It
+didn't need to be, on its own: `HexPathfinder` only ever hands out open
+path nodes, and straight-line interpolation between two ADJACENT open
+hex centers is geometrically confined to those two hexes' own Voronoi
+cells — provably, it can never stray into a third. But that geometric
+guarantee silently assumes the unit sits exactly on the path's own
+centerline, and many individually-valid separation nudges (each checked
+and passed on its own) can accumulate into a lateral drift OFF that
+centerline over enough ticks, until a LATER path-following step — taken
+from the drifted position rather than the line the geometry proof
+assumed — clips a hex neither system ever explicitly checked.
+
+**Fixed** with `SimUnit.RevertToSafePosition` (reverts position, drops
+the path, returns to Idle) plus a re-validation check added right after
+the existing per-unit `u.Tick(...)` call in `MatchState.Tick`'s own
+movement loop: the hex is checked again immediately after every regular
+movement step, and any violation reverts that tick's movement outright
+rather than let containment slip — a unit stalled for one tick costs far
+less than tunneling through solid ground. Confirmed by re-running the
+full 100k-tick/200-unit fuzz to completion afterward (clean), plus the
+rest of the match-core suite (220 tests) and citygen-core (168, untouched)
+and the `Tools~/DetHarness` determinism harness (still self-consistent —
+the hash VALUES changed from Phase 8's own run for scenarios that
+actually exercise this code path, which is the expected shape of a real
+behavior fix, not a regression).
+
+### Unity's named movers: audited by reading, not running
+
+No Editor exists in this environment to fuzz-test Unity's own movers the
+way match-core's could be. Delegated a focused, read-only static audit
+(an Explore-type agent, one pass over MonsterAgent.cs/Tank.cs/
+TrafficCar.cs/Citizen.cs/MonsterSteeringController.cs/WaypointCommander.cs/
+CaptureState.cs/RuntimeCityBuilder.cs) against the same three properties
+docs/23 §9 names: blocked-set respect, map-bounds respect, no-tunneling
+at speed. docs/23 §9 also names "fusion channel drift" and "anomaly
+wander" — neither exists as Unity code at all yet (Fusion stayed deferred
+at docs/23 §4's own RPG-layer status note; match-core's own anomalies
+have no wander movement either, per Phase 6a's status note), so there
+was nothing to audit for those two — not an oversight, just nothing built
+yet to check.
+
+**Findings, most to least severe:**
+
+1. **`MonsterAgent.cs`'s flying `FollowPath` branch — a real violation,
+   FIXED.** The grounded branch already clamps its per-tick step to
+   `Mathf.Min(scaledSpeed*dt, dist)`; the flying branch's
+   `transform.position += nose * (speed * dt)` had no such clamp at all,
+   so a frame hitch (a `dt` spike) combined with a fast flyer's
+   configured speed could overshoot `FlightArriveDist` and cut through a
+   hex-corner obstacle mid-turn. Fixed with a one-line magnitude clamp
+   to `FlightArriveDist` (8m — already documented in that constant's own
+   comment as "well under a hex... never cuts through a corner
+   obstacle") — a genuine no-op at any normal frame timing (speed×dt is
+   far smaller than 8m for any sane cruise speed), engaging only during
+   an actual dt spike, and touching nothing about the "carve, don't
+   strafe" banking/nose-direction behavior the surrounding code
+   documents. `flightcheck` recompiled clean against the real file.
+   **Not visually verified — no Editor exists in this environment.**
+
+2. **`CaptureState.TickPull` (shared by `MonsterAgent`'s captured-monster
+   drag and `Citizen`'s captured-victim drag) — a real violation, NOT
+   fixed.** Pulls the captured unit in a dead straight line toward its
+   captor with zero blocked-hex check, zero bounds check, and no
+   step-vs-hex-size bound whatsoever — a capture that spans across a
+   building drags the victim straight through it. Deliberately left
+   unfixed this pass: `CaptureState` (docs/26 Phase 6's own capture-and-
+   consume mechanic) has no reference to city/blocked-set data at all
+   today, so a real fix is a genuine interface change touching two call
+   sites, with no Editor available to confirm the web-pull still *feels*
+   right afterward (docs/26's own creator-facing tuning target) — exactly
+   the "risky to fix blind" category this project's whole session has
+   held back from rather than guessing at. Flagged here as a real,
+   confirmed gap for whoever next touches capture, not silently
+   discovered and dropped.
+
+3. **`Tank.cs`'s steer-then-move gap, and `MonsterSteeringController.
+   Combine`'s unclamped force blend — identified, NOT fixed, lower
+   confidence than #1/#2.** `Tank.cs` validates a single probe point 6m
+   ahead (`BlockedForTank`) before steering but never re-checks the
+   actual hex the subsequent movement writes to; under a frame hitch the
+   per-frame step could exceed that 6m probe distance into unchecked
+   territory. `Combine` blends separation/avoidance/alignment/cohesion
+   and renormalizes with no clamp bounding how far the blended result can
+   deviate from the original path-seek direction, so in principle a
+   strong simultaneous multi-force blend near a building edge could steer
+   a heading into an adjacent hex the path never intended to cross (the
+   actual position write happens back in `FollowPath`, which has no
+   independent obstacle re-check of its own either). Both need a specific,
+   comparatively rare condition to manifest (a real frame hitch; a strong
+   simultaneous force blend right at an edge) and both would need
+   Editor-side tuning verification to touch safely — left as documented,
+   unresolved risk.
+
+4. **`TrafficCar.cs`, `Citizen.cs`'s own movement (its capture-drag is
+   #2 above), and `WaypointCommander.cs`: confirmed SAFE.** Every
+   destination in all three comes from an already-validated network/
+   path/bounds check before any transform write, and every per-frame
+   step is already clamped to the remaining distance — no raw click
+   coordinate or unclamped step anywhere in these three files.
+
+5. **Destroyed-building footprint reopening: confirmed correct, no fix
+   needed.** `RuntimeCityBuilder.ApplyBuildingDamage` updates the SAME
+   `_battlefield` blocked-hex representation every mover's own blocked
+   check reads from, and invalidates the derived cache on change — one
+   source of truth, no desync between "the building is gone" and "the
+   hex is walkable again," for both generator-placed and player-built
+   structures. `RubbleDresser`/`BuildingDresser` are purely cosmetic and
+   hold no independent passability data of their own to drift out of
+   sync.
+
+**Verification:** 220 match-core tests (3 new: the literal 200-unit/
+100k-tick fuzz, the building-churn companion, the no-tunneling geometric
+proof), 168 citygen-core tests (untouched), `Tools~/DetHarness` still
+self-consistent, `flightcheck` recompiled clean against the one applied
+Unity fix.

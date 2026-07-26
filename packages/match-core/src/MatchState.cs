@@ -754,7 +754,30 @@ namespace MadDr.MatchCore
                 // multiplier (Hive's Day -10%, Doctor's Night +10%; 1.0 =
                 // no change for every other faction/phase).
                 var speedMultiplier = FactionLumenTable.Get(_players[u.PlayerIndex].Faction, CurrentLumenPhase).SpeedMultiplier;
+                var (preMoveX, preMoveZ) = (u.X, u.Z);
                 u.Tick(DtSeconds, speedMultiplier);
+
+                // docs/23 §9 hardening audit: re-validate the hex regular
+                // movement just landed in. HexPathfinder only ever hands
+                // out OPEN path nodes, and straight-line interpolation
+                // between two ADJACENT open hex centers can never stray
+                // into a third hex -- an invariant that quietly assumes
+                // this unit sits exactly on that line. It doesn't always:
+                // ApplySeparationPass validates its OWN nudge every tick,
+                // but many individually-valid nudges can still
+                // accumulate into a lateral drift off the path's
+                // centerline, until a later step taken from that DRIFTED
+                // position clips a hex neither system ever checked. Found
+                // by this phase's own 200-unit fuzz harness, not
+                // hypothetical -- see SimUnit.RevertToSafePosition's own
+                // doc comment for the full account.
+                if (_city != null && _blockedToGround != null)
+                {
+                    var newHex = HexAt(u.X, u.Z);
+                    if (!_city.Contains(newHex) || _blockedToGround.Contains(newHex))
+                        u.RevertToSafePosition(preMoveX, preMoveZ);
+                }
+
                 // docs/27 Phase B: a leg just finished (Idle) with more
                 // waypoints queued behind it -- compute the next leg's
                 // path immediately, in the SAME tick, so a multi-waypoint

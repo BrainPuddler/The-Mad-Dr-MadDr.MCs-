@@ -1256,7 +1256,17 @@ public class MonsterAgent : MonoBehaviour
             // speed / turn rate, a few meters -- comfortably inside the
             // flying arrive radius, so it can never orbit a waypoint.
             var nose = new Vector3(transform.forward.x, 0f, transform.forward.z).normalized;
-            transform.position += nose * (speed * dt);
+            // docs/23 §9 hardening audit: clamp the per-frame step to
+            // FlightArriveDist (8m, already "well under a hex" by this
+            // constant's own comment above) -- a no-op at any normal frame
+            // timing (speed*dt is far smaller than 8m for any sane cruise
+            // speed), but it bounds the worst case if dt ever spikes (a
+            // frame hitch) so a fast flyer can't cut through a hex-corner
+            // obstacle in one oversized step. Magnitude only -- the nose/
+            // banking direction this phase's own "carve, don't strafe"
+            // comment describes is untouched.
+            var noseStep = Mathf.Min(speed * dt, FlightArriveDist);
+            transform.position += nose * noseStep;
             return nose * speed;
         }
 
