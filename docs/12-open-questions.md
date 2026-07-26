@@ -3244,3 +3244,54 @@ pattern legibility, tiling frequency, the frustum/wedge silhouettes, or
 the winding-safety-net's actual rendered result — is visually verified.
 Full shipped/deferred accounting: `docs/23-balance/graphics-3-notes.md`
 and `graphics-4-notes.md`.
+
+## docs/23 Phase 10: street-lamp/night-ambient creator correction (2026-07)
+
+First real Editor feedback on any of Phase 10's work (everything shipped
+so far was flightcheck-compiled only, never visually verified). Creator
+report, verbatim intent: "the street lights are way too bright and
+default: spot lights pointing at the ground from above. The effect
+should be pools of lights, moving to full night with no or little
+ambient light."
+
+Grep-confirmed there is no actual `LightType.Spot` anywhere in the
+codebase (`StreetLampLightBudget`'s pooled lights are explicitly
+`LightType.Point`; the only other live light is `LumenCycleController`'s
+`Directional` sun) -- "spot lights pointing at the ground from above" is
+a description of the RESULT, not a literal type bug: a bright Point
+light mounted at lamp-head height reads exactly like a harsh downward
+spotlight once it's too intense to look like a soft glow.
+
+Root cause was brightness stacking, not geometry: `RoadDresser.Bulb()`'s
+emissive material (1.4) multiplied by `NeonRegistry`'s own Night boost
+(2.2x) pushed the bulb's rendered emissive past 3.0 -- before even
+counting the real `StreetLampLightBudget` point light (up to 3.2
+intensity) sitting at the same spot, under Night's own high Bloom
+(1.3). Two independently-bright sources plus aggressive bloom
+guaranteed a blown-out glare, never a "pool." Separately, Night's
+ambient (0.14, 0.13, 0.26) and sun intensity (0.18) kept the WHOLE scene
+lit regardless of any lamp, so even a perfectly-tuned lamp glow could
+never read as a distinct pool against genuine darkness -- there wasn't
+enough contrast for anything to look like an actual pool of light.
+
+Fixed three places, each independently:
+- `RoadDresser.Bulb()`'s emissive: 1.4 -> 0.7 (0.7*2.2 ~= 1.5 at Night,
+  down from ~3.1).
+- `StreetLampLightBudget`'s Night-peak point-light intensity: 3.2 -> 1.1.
+- `LumenCycleController`'s Night keyframe: ambient (0.14,0.13,0.26) ->
+  near-black (0.02,0.02,0.05); sun intensity 0.18 -> 0.05.
+
+Deliberately did NOT touch `NeonBoost`/Bloom/Vignette (those govern all
+neon signage broadly, not specifically streetlamps, and weren't named in
+the complaint) or switch the light to an actual downward Spot (the
+complaint explicitly calls THAT look "too bright and default" -- doubling
+down on a directional spotlight-down effect would reproduce exactly what
+was rejected, just for a different technical reason).
+
+Not re-verified visually (still no Editor access from this session) --
+flightcheck-compiled only. This is a real, values-driven correction
+(matches `maddr-aesthetic-preferences`'s "1950s monster-movie noir, not
+grimdark/washed-out" target), not a guess; if the pools still don't read
+right once someone can actually look at it, the next lever to pull is
+`StreetLampLightBudget`'s `range` (currently unchanged at 9) before
+touching intensity again.

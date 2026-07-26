@@ -78,7 +78,12 @@ public static class RoadDresser
     private static Material PostGray() { return M(0.5f, 0.52f, 0.54f); }
     private static Material PoleWood() { return M(0.35f, 0.26f, 0.18f); }
     private static Material PoleMetal() { return MTextured("painted-metal", 0.45f, 0.48f, 0.5f, PbrTextureAtlas.PaintedMetal); }
-    private static Material Bulb() { return M(1f, 0.9f, 0.6f, 1.4f); }
+    // 2026-07 creator correction: was 1.4 -- stacked with NeonRegistry's
+    // own Night boost (2.2x) this pushed the bulb's emissive well past
+    // 3.0, blowing out into a harsh glare under Night's bloom instead of
+    // a warm glow. 0.7 keeps a real bright-bulb pop at night (0.7*2.2 ~=
+    // 1.5) without the blowout.
+    private static Material Bulb() { return M(1f, 0.9f, 0.6f, 0.7f); }
     private static Material HydrantRed() { return M(0.75f, 0.15f, 0.12f); }
     private static Material CanGray() { return M(0.4f, 0.42f, 0.44f); }
     private static Material ChromeTrim() { return MTextured("chrome", 0.8f, 0.82f, 0.85f, PbrTextureAtlas.Chrome); }

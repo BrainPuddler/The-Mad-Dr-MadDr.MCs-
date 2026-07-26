@@ -244,11 +244,18 @@ public class LumenCycleController : MonoBehaviour
                 PostExposure = -0.1f, Saturation = 5f, ColorFilter = new Color(1f, 0.85f, 0.8f), Contrast = 10f,
                 VignetteIntensity = 0.3f, BloomIntensity = 0.9f, FilmGrainIntensity = 0.18f,
             },
-            // Night -- warm sodium nights, saturated neon-and-noir palette (the target look's own headline)
+            // Night -- warm sodium nights, saturated neon-and-noir palette (the target look's own headline).
+            // 2026-07 creator correction: ambient (and the moonlit sun)
+            // were bright enough that everything stayed visibly lit
+            // regardless of the street lamps -- so the lamps could never
+            // read as distinct "pools of light," just extra brightness on
+            // top of an already-lit scene. Full night now goes close to
+            // black ambient with only the faintest moonlit sun, so the
+            // lamps/signage/windows are close to the only visible light.
             new PhaseGrade
             {
-                SunColor = new Color(0.35f, 0.4f, 0.65f), SunIntensity = 0.18f, SunElevationDeg = -8f,
-                Ambient = new Color(0.14f, 0.13f, 0.26f), Fog = new Color(0.18f, 0.15f, 0.28f), FogDensity = 0.014f,
+                SunColor = new Color(0.35f, 0.4f, 0.65f), SunIntensity = 0.05f, SunElevationDeg = -8f,
+                Ambient = new Color(0.02f, 0.02f, 0.05f), Fog = new Color(0.18f, 0.15f, 0.28f), FogDensity = 0.014f,
                 NeonBoost = 2.2f, LampBoost = 1f,
                 PostExposure = -0.35f, Saturation = 22f, ColorFilter = new Color(0.85f, 0.85f, 1.05f), Contrast = 18f,
                 VignetteIntensity = 0.42f, BloomIntensity = 1.3f, FilmGrainIntensity = 0.3f,

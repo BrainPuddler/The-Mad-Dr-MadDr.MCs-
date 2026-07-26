@@ -85,8 +85,15 @@ public class StreetLampLightBudget : MonoBehaviour
             _pool.Add(light);
         }
 
+        // 2026-07 creator correction: the original 0.05..3.2 range read as
+        // "too bright and default" -- a harsh, blown-out point light doing
+        // all the work by itself. Real "pools of light" come from a MODEST
+        // light plus a genuinely dark night around it (see
+        // LumenCycleController's Night ambient), not from cranking the
+        // light itself -- a bright light against a bright scene doesn't
+        // read as a pool, it just reads as more brightness everywhere.
         var boost = DayNightState.NightAmount;
-        var intensity = Mathf.Lerp(0.05f, 3.2f, boost);
+        var intensity = Mathf.Lerp(0.02f, 1.1f, boost);
         for (var i = 0; i < _pool.Count; i++)
         {
             if (i < _picked.Count)
