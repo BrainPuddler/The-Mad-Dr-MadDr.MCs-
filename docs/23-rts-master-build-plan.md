@@ -1004,6 +1004,45 @@ rail prop, lamppost variety) still lands in the sub-phases below, gated on
 the same real assets/Editor-side tuning every sub-phase already requires.
 Nothing here is claimed as implemented or visually verified.
 
+> **Status (2026-07): sub-phases 1–2 shipped, Unity-layer only.**
+> `LumenCycleController.cs` (replacing `NightMode.cs`, whose one job — a
+> manual `N`-key binary day/dusk toggle — this supersedes) keeps its own
+> cosmetic fixed-tick counter (10 ticks/s, matching
+> `MatchState.TicksPerSecond`) and reads `LumenClock.PhaseAt(frame)` —
+> the SAME pure function Phase 7's faction modifiers use — purely for
+> presentation; it never touches a live `MatchState`, so every scene gets
+> a real cycle with zero determinism exposure (this sub-phase's own
+> acceptance line). Four keyframes (Dawn/Day/Dusk/Night) cross-fade
+> continuously (`Mathf.SmoothStep`, not a snap) across sun
+> color/intensity/elevation (Day capped to a low 30° elevation per the
+> daytime mood-board note, for long legible cast shadows, not a noon
+> angle), ambient light, fog, the existing `NeonRegistry` boost, and a
+> runtime-built URP Volume (`ColorAdjustments`/`FilmGrain`/`Vignette`/
+> `Bloom`/ACES `Tonemapping`, built via `ScriptableObject.CreateInstance`
+> — no Editor asset needed, same idiom docs/26 used for special-attack
+> definitions). Region grading is a parametric `ColorAdjustments` tint
+> keyed off `CityModel.Region` (NY steel-blue/grittier, Paris warm
+> cream/softer, Montreal cold pastel/flatter) — a documented, deliberate
+> substitute for an authored per-region LUT texture, which needs real
+> DCC/Editor tooling this environment doesn't have. Sub-phase 2's other
+> half — "street lamps as actual pixel lights on a budget" — is real:
+> `RoadDresser`'s existing emissive-only bulb prop now also registers
+> with a new `StreetLampRegistry`, and `StreetLampLightBudget` promotes
+> the nearest-camera `Budget` (default 24) of them to a real warm Point
+> light, refreshed on a timer with a reused light pool rather than
+> per-frame churn. SSAO and light cookies are NOT attempted — both need
+> an Editor-authored renderer/texture asset this environment has no way
+> to create or safely verify. Sub-phases 3–6 (materials, meshes,
+> creatures, FX) are untouched — each is genuinely gated on real art
+> assets, not a code gap. Full shipped/deferred accounting:
+> `docs/23-balance/graphics-1-notes.md` (post stack) and
+> `graphics-2-notes.md` (lighting). **Not visually verified** — no Unity
+> Editor exists in this environment; flightcheck-compiled only (the
+> harness gained minimal Volume/URP stubs — `Volume`, `VolumeProfile`,
+> `ColorAdjustments`/`FilmGrain`/`Vignette`/`Bloom`/`Tonemapping`,
+> `UniversalAdditionalCameraData` — matching only the exact surface this
+> code calls, not the real API's full breadth).
+
 Sequenced sub-phases (each independently shippable):
 1. **Post stack**: URP Volume — filmic tonemapping, per-region color-grading
    LUTs (NY steel-blue noir / Paris warm cream / Montreal cold pastel), film

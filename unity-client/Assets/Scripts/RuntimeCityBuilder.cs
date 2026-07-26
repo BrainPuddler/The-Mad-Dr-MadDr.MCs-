@@ -149,7 +149,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         SpawnTanks();
         SpawnTraffic();
 
-        if (GetComponent<NightMode>() == null) gameObject.AddComponent<NightMode>();
+        // docs/23 Phase 10: supersedes the old NightMode binary day/dusk
+        // toggle with a continuous Lumen-clock-driven cycle + post stack.
+        if (GetComponent<LumenCycleController>() == null)
+            gameObject.AddComponent<LumenCycleController>().Init(_city.Region);
+        if (GetComponent<StreetLampLightBudget>() == null)
+            gameObject.AddComponent<StreetLampLightBudget>();
 
         // camera: frame the spawn area so Play starts looking at the action
         var cam = Camera.main;

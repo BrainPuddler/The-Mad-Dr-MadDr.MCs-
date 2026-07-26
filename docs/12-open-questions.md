@@ -3072,3 +3072,99 @@ harness-only, the real Input System package already has one). No Unity
 Editor exists in this environment, so this is NOT visually or
 runtime-verified — consistent with this whole project's standing
 discipline against claiming verification it can't back up.
+
+## docs/23 Phase 10 (Graphics): sub-phases 1-2 shipped (2026-07)
+
+Implemented the first two of Phase 10's six sub-phases: Post stack and
+Lighting. Chose these two first because they're the only sub-phases
+achievable purely in code — sub-phases 3-6 (materials, meshes,
+creatures, FX) each genuinely need real texture/mesh assets from an
+Editor/DCC pipeline, which this environment does not have.
+
+`NightMode.cs` — a manual `N`-key binary day/dusk toggle from docs/21
+batch 3 — is superseded by `LumenCycleController.cs`. The new
+controller keeps its own cosmetic fixed-tick counter (10 ticks/s,
+matching `MatchState.TicksPerSecond`) and reads
+`MadDr.MatchCore.LumenClock.PhaseAt(frame)` every tick — the exact same
+pure function match-core's own Phase 7 faction modifiers already use —
+purely for presentation. It never reads or writes a live `MatchState`,
+so this stays entirely Unity-layer, satisfying the phase's own "no
+determinism regression" line. Four keyframes (Dawn/Day/Dusk/Night)
+cross-fade continuously (eased via `Mathf.SmoothStep`, not a hard
+snap) across sun color/intensity/elevation, ambient light, fog, the
+existing `NeonRegistry` boost, and a runtime-built URP Volume.
+
+Per the 2026-07 daytime mood-board addition already folded into §10's
+prose, Day's own elevation keyframe is capped low (30°) rather than a
+high noon angle, for long, legible cast shadows through most of the
+cycle; sun yaw stays fixed across the whole cycle so cast-shadow
+DIRECTION stays consistent (only elevation and color animate). Day's
+`ColorAdjustments` grade lands closer to sun-baked sepia-warm
+(saturation -18, warm color filter) than a neutral render, distinct
+from Night's saturated neon-noir push (saturation +22, cool-noir base
+filter, the highest bloom of the four phases — "tuned for neon").
+
+**Region grading is a deliberate substitution, flagged explicitly, not
+silently passed off as the real thing.** docs/23 §10 asks for
+per-region color-grading LUTs — a baked 3D lookup texture via URP's
+`ColorLookup` component, which needs an authored asset (a DCC bake or
+an Editor LUT-strip export) this environment cannot produce. What
+shipped instead is a parametric `ColorAdjustments` tint keyed off
+`CityModel.Region` (docs/23 §8's own `CityRegion` enum) — NY pushes
+steel-blue and grittier, Paris pushes warm cream and softer, Montreal
+pushes cold pastel and flatter, Generic gets the untouched baseline.
+Same visual INTENT (a distinct per-region mood), a different mechanism
+— written down here rather than calling it "the LUT system."
+
+**Street lamps are real lights now, on a budget.** `RoadDresser`'s
+existing streetlight prop was a primitive bulb sphere with only an
+emissive material — no actual light source, so its "warm sodium
+nights" read was implied by material glow alone. Both of `RoadDresser`'s
+bulb-spawn sites (the per-street prop and the roundabout ring) now also
+register their bulb `Transform` with a new `StreetLampRegistry` (the
+same loose static-registry idiom `NeonRegistry` already established, so
+the static `RoadDresser` generator never needs a reference to the new
+system). `StreetLampLightBudget` refreshes on a 0.35s timer, finds the
+nearest `Budget` (default 24) registered bulbs to `Camera.main`, and
+promotes exactly those to a real warm-sodium `Point` light (no
+shadows — these are budget fill lights, not key lights), reusing a
+small pool of `Light` components across refreshes instead of
+create/destroy churn. Every other registered bulb is completely
+unaffected — still lit by its pre-existing emissive material only.
+Light intensity rides the same day/night blend the post stack uses,
+published via a new `DayNightState.NightAmount` static so the budget
+system needs no direct reference to `LumenCycleController`.
+
+**Deferred within this sub-phase, and why:** SSAO is a URP Renderer
+Feature that has to be added to the project's `UniversalRendererData`
+asset — an Editor-authored `.asset` file this environment has no way
+to create or safely inspect/mutate without an Editor session to verify
+nothing broke; light cookies need an actual cookie texture asset, a
+DCC deliverable. Depth of field for "the Lab podium" (§10's post-stack
+line) was not even stubbed in as an inactive component — grep-confirmed
+zero hits for `Podium`/`LabScene`/etc. anywhere in `unity-client`, so
+there is no such scene to focus on yet; a real, separate prerequisite
+gap, not this sub-phase's to solve.
+
+Every numeric keyframe (sun colors/intensities/elevations, region tint
+deltas, lamp intensity/range, budget size, refresh interval) is an
+invented v0.1 placeholder — docs/23 §10 gives mood/target-look
+language, not real numbers, same as every other phase's placeholder
+convention in this log.
+
+Verified via `flightcheck` only, after two additions to the harness
+itself: (1) `packages/citygen-core`'s compiled DLL vendored into the
+harness was stale (predated Phase 8's `CityRegion` enum) and had to be
+rebuilt and re-copied — a harness-maintenance step, not a source
+change (the real citygen-core source was untouched; its 168 tests still
+pass); (2) a new, minimal `UnityEngine.Rendering`/
+`UnityEngine.Rendering.Universal` stub section (`Volume`,
+`VolumeProfile`, `VolumeParameter<T>` and its float/clamped-float/
+color/bool subtypes, `ColorAdjustments`, `FilmGrain`, `Vignette`,
+`Bloom`, `Tonemapping`, `UniversalAdditionalCameraData`) matching only
+the exact surface `LumenCycleController.cs` calls, not URP's real API
+breadth — the same "stub only what's grep-confirmed used" discipline
+the `steercheck` harness fix used earlier this session. No Unity
+Editor exists in this environment, so none of this is visually
+verified — consistent with this whole project's standing discipline
+against claiming verification that didn't happen.

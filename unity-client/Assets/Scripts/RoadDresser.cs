@@ -336,8 +336,9 @@ public static class RoadDresser
                     propSpot + Vector3.up * 4.7f - side * (sideSign * 1.2f),
                     new Vector3(0.14f, 0.14f, 2.4f), PoleMetal(), holder);
                 arm.transform.rotation = Quaternion.LookRotation(-side * sideSign, Vector3.up);
-                b.SpawnPrim(PrimitiveType.Sphere, propSpot + Vector3.up * 4.55f - side * (sideSign * 2.2f),
+                var bulb = b.SpawnPrim(PrimitiveType.Sphere, propSpot + Vector3.up * 4.55f - side * (sideSign * 2.2f),
                     new Vector3(0.5f, 0.35f, 0.5f), Bulb(), holder);
+                StreetLampRegistry.Register(bulb.transform);
                 MakeKnockable(b, holder.gameObject, 1.6f);
                 break;
             }
@@ -478,7 +479,8 @@ public static class RoadDresser
             var a = (i + 0.5f) / 5f * 2f * Mathf.PI;
             var p = c + new Vector3(Mathf.Sin(a), 0f, Mathf.Cos(a)) * (RndAsphalt + 1.2f);
             b.SpawnPrim(PrimitiveType.Cylinder, p + Vector3.up * 2.4f, new Vector3(0.16f, 2.4f, 0.16f), PoleMetal(), host);
-            b.SpawnPrim(PrimitiveType.Sphere, p + Vector3.up * 4.7f, new Vector3(0.45f, 0.35f, 0.45f), Bulb(), host);
+            var roundaboutBulb = b.SpawnPrim(PrimitiveType.Sphere, p + Vector3.up * 4.7f, new Vector3(0.45f, 0.35f, 0.45f), Bulb(), host);
+            StreetLampRegistry.Register(roundaboutBulb.transform);
         }
 
         // per-entry treatment: flared apron, give-way triangles, set-back
