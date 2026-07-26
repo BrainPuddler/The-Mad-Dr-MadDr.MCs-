@@ -32,6 +32,14 @@ namespace MadDr.MatchCore
         /// <see cref="AttackUnit"/>'s own Reach is -- an invalidated
         /// channel simply cancels back to Idle rather than erroring.</summary>
         Salvaging = 3,
+
+        /// <summary>docs/23 §6: attacking a <see cref="SimAnomaly"/>
+        /// (<see cref="SimUnit.AttackAnomalyTargetId"/>). Set by
+        /// <see cref="CommandKind.AttackAnomaly"/>; resolved by
+        /// <see cref="MatchState.TickAnomalyCombat"/>, a separate loop
+        /// from <see cref="AttackUnit"/>'s own -- an anomaly isn't a
+        /// <see cref="SimUnit"/> at all.</summary>
+        AttackAnomaly = 4,
     }
 
     /// <summary>
@@ -114,16 +122,40 @@ namespace MadDr.MatchCore
         public int EffectiveMaxVitality => Combat == null ? 0 :
             (int)System.Math.Round(Combat.Value.MaxVitality * UnitLeveling.StatMultiplier(Level, UnitLeveling.MaxVitalityPerLevel));
 
-        /// <summary>docs/23 §4: base Power scaled by level (+4%/level).</summary>
-        public int EffectivePower => Combat == null ? 0 :
-            (int)System.Math.Round(Combat.Value.Power * UnitLeveling.StatMultiplier(Level, UnitLeveling.PowerPerLevel));
+        /// <summary>docs/23 §4: base Power scaled by level (+4%/level),
+        /// THEN docs/23 §6's Damage anomaly buff (+25%, a flagged v0.1
+        /// placeholder -- docs/23 names the four buff kinds but gives no
+        /// magnitude for any of them, unlike every other numbered table
+        /// this project ships against) while <see cref="ActiveBuff"/> is
+        /// <see cref="AnomalyBuffKind.Damage"/>.</summary>
+        public int EffectivePower
+        {
+            get
+            {
+                if (Combat == null) return 0;
+                var leveled = Combat.Value.Power * UnitLeveling.StatMultiplier(Level, UnitLeveling.PowerPerLevel);
+                if (ActiveBuff == AnomalyBuffKind.Damage) leveled *= AnomalyBuffDamageMultiplier;
+                return (int)System.Math.Round(leveled);
+            }
+        }
 
         /// <summary>docs/23 §4: base movement Speed scaled by level
         /// (+2%/level) -- this is what <see cref="Tick"/>'s movement math
         /// actually consumes, not the raw <see cref="Speed"/> field
         /// (kept as the genome-derived base, same "never mutate the
-        /// identity stat" convention as <see cref="Combat"/> itself).</summary>
-        public double EffectiveSpeed => Combat == null ? Speed : Speed * UnitLeveling.StatMultiplier(Level, UnitLeveling.SpeedPerLevel);
+        /// identity stat" convention as <see cref="Combat"/> itself) --
+        /// THEN docs/23 §6's Speed anomaly buff (+25%, same flagged
+        /// placeholder magnitude as <see cref="EffectivePower"/>'s own
+        /// Damage buff) while <see cref="ActiveBuff"/> is
+        /// <see cref="AnomalyBuffKind.Speed"/>.</summary>
+        public double EffectiveSpeed
+        {
+            get
+            {
+                var leveled = Combat == null ? Speed : Speed * UnitLeveling.StatMultiplier(Level, UnitLeveling.SpeedPerLevel);
+                return ActiveBuff == AnomalyBuffKind.Speed ? leveled * AnomalyBuffSpeedMultiplier : leveled;
+            }
+        }
 
         /// <summary>The frame this unit died, or null if still alive.
         /// Drives <see cref="IsSalvageable"/>'s 15s window (docs/04:
@@ -260,11 +292,63 @@ namespace MadDr.MatchCore
         /// <see cref="Order"/> is <see cref="UnitOrderKind.AttackUnit"/>.</summary>
         public uint? AttackTargetId { get; private set; }
 
+        /// <summary>Which <see cref="SimAnomaly"/> this unit is attacking,
+        /// while <see cref="Order"/> is
+        /// <see cref="UnitOrderKind.AttackAnomaly"/>.</summary>
+        public uint? AttackAnomalyTargetId { get; private set; }
+
         /// <summary>Seconds until this unit's next attack may resolve
         /// (docs/04: Ferocity is attacks/second). Counts down every tick
         /// regardless of order, so switching targets doesn't grant a free
-        /// instant attack.</summary>
+        /// instant attack. Shared by <see cref="UnitOrderKind.AttackUnit"/>
+        /// and <see cref="UnitOrderKind.AttackAnomaly"/> -- one Ferocity
+        /// stat gates a unit's attack rate regardless of what it's
+        /// swinging at.</summary>
         private double _attackCooldownSeconds;
+
+        /// <summary>docs/23 §6: which anomaly buff (if any) this unit
+        /// currently carries, captured from a Loose Experiment's killing
+        /// blow. Buffs don't stack -- capturing a second anomaly while one
+        /// is already active simply replaces it, the same "no stacking"
+        /// convention docs/03's emitter auras already established.</summary>
+        public AnomalyBuffKind? ActiveBuff { get; private set; }
+
+        private double _buffRemainingSeconds;
+
+        /// <summary>docs/23 §6: "the buff attaches to the killing unit for
+        /// 90s" -- the one duration number docs/23 actually gives (unlike
+        /// the four buffs' own magnitudes, all flagged v0.1 placeholders --
+        /// see <see cref="EffectivePower"/>/<see cref="EffectiveSpeed"/>/
+        /// <see cref="AnomalyRegenPercentPerSecond"/>/
+        /// <see cref="AnomalyXpGainMultiplier"/>'s own doc comments).</summary>
+        public const double AnomalyBuffDurationSeconds = 90.0;
+
+        public const double AnomalyBuffDamageMultiplier = 1.25;
+        public const double AnomalyBuffSpeedMultiplier = 1.25;
+        public const double AnomalyRegenPercentPerSecond = 5.0;
+        public const double AnomalyXpGainMultiplier = 1.5;
+
+        /// <summary>Grant this unit a fresh 90s anomaly buff, called by
+        /// <see cref="MatchState.TickAnomalyCombat"/> the instant a Loose
+        /// Experiment's Vitality reaches 0.</summary>
+        internal void ApplyAnomalyBuff(AnomalyBuffKind kind)
+        {
+            ActiveBuff = kind;
+            _buffRemainingSeconds = AnomalyBuffDurationSeconds;
+        }
+
+        /// <summary>docs/23 §6's Regen buff -- a flat heal-over-time,
+        /// granted once per simulated second by
+        /// <see cref="MatchState.ApplyAnomalyBuffRegen"/> (the same "once
+        /// per simulated second, exact not fractional" idiom
+        /// <see cref="MatchState.GrantEmitterManaIncome"/> already uses
+        /// for mana), capped at <see cref="EffectiveMaxVitality"/>. A
+        /// no-op for a dead or non-combat unit.</summary>
+        internal void Heal(int amount)
+        {
+            if (Combat == null || !IsAlive || amount <= 0) return;
+            Vitality = System.Math.Min(EffectiveMaxVitality, Vitality + amount);
+        }
 
         private List<HexCoord>? _path;
         private int _pathIndex;
@@ -315,6 +399,19 @@ namespace MadDr.MatchCore
             // so switching targets (or briefly moving) never grants a
             // free instant attack the moment AttackUnit resumes.
             if (_attackCooldownSeconds > 0.0) _attackCooldownSeconds -= dt;
+
+            // docs/23 §6: an anomaly buff counts down regardless of order
+            // too, same "a timer is a timer" reasoning as the attack
+            // cooldown above.
+            if (ActiveBuff.HasValue)
+            {
+                _buffRemainingSeconds -= dt;
+                if (_buffRemainingSeconds <= 0.0)
+                {
+                    _buffRemainingSeconds = 0.0;
+                    ActiveBuff = null;
+                }
+            }
 
             if (Order != UnitOrderKind.MoveTo || _path == null) return;
 
@@ -395,19 +492,34 @@ namespace MadDr.MatchCore
         }
 
         /// <summary>docs/23 §4: award XP (a no-op for a non-combatant or a
-        /// non-positive amount). If this pushes <see cref="Level"/> up,
-        /// current <see cref="Vitality"/> rises by exactly the same
-        /// amount <see cref="EffectiveMaxVitality"/> just did -- preserving
-        /// how much damage this unit was already carrying rather than a
-        /// full heal on level-up (a documented interpretation choice;
-        /// docs/23 doesn't specify either way).</summary>
+        /// non-positive amount), scaled up by docs/23 §6's XpGain anomaly
+        /// buff (+50%, rounded -- same flagged-placeholder-magnitude
+        /// status as every other anomaly buff number) while
+        /// <see cref="ActiveBuff"/> is <see cref="AnomalyBuffKind.
+        /// XpGain"/>. If this pushes <see cref="Level"/> up, current
+        /// <see cref="Vitality"/> rises by exactly the same amount
+        /// <see cref="EffectiveMaxVitality"/> just did -- preserving how
+        /// much damage this unit was already carrying rather than a full
+        /// heal on level-up (a documented interpretation choice; docs/23
+        /// doesn't specify either way).</summary>
         internal void GrantXp(int amount)
         {
             if (Combat == null || amount <= 0) return;
+            if (ActiveBuff == AnomalyBuffKind.XpGain) amount = (int)System.Math.Round(amount * AnomalyXpGainMultiplier);
             var oldEffectiveMax = EffectiveMaxVitality;
             XP += amount;
             var newEffectiveMax = EffectiveMaxVitality;
             if (newEffectiveMax != oldEffectiveMax) Vitality += newEffectiveMax - oldEffectiveMax;
+        }
+
+        /// <summary>docs/23 §6: start (or retarget) attacking a Loose
+        /// Experiment. Same "doesn't reset cooldown" contract as
+        /// <see cref="BeginAttacking"/> -- Ferocity gates attack RATE
+        /// regardless of what this unit last swung at.</summary>
+        internal void BeginAttackingAnomaly(uint anomalyId)
+        {
+            AttackAnomalyTargetId = anomalyId;
+            Order = UnitOrderKind.AttackAnomaly;
         }
 
         /// <summary>docs/23 Phase 4: start (or retarget) an attack channel.
@@ -453,6 +565,7 @@ namespace MadDr.MatchCore
                 DeathTick = currentFrame;
                 Order = UnitOrderKind.Idle;
                 AttackTargetId = null;
+                AttackAnomalyTargetId = null;
                 SalvageTargetId = null;
                 _salvageChannelRemainingSeconds = 0.0;
                 _path = null;
@@ -510,6 +623,11 @@ namespace MadDr.MatchCore
             h.Add(YieldsGenomeFragment ? 1 : 0);
             h.Add(SalvageTargetId.HasValue ? (long)SalvageTargetId.Value : -1L);
             h.AddBits(_salvageChannelRemainingSeconds);
+
+            // docs/23 §6 (anomalies): attack-target and buff state.
+            h.Add(AttackAnomalyTargetId.HasValue ? (long)AttackAnomalyTargetId.Value : -1L);
+            h.Add(ActiveBuff.HasValue ? (int)ActiveBuff.Value : -1);
+            h.AddBits(_buffRemainingSeconds);
         }
     }
 }

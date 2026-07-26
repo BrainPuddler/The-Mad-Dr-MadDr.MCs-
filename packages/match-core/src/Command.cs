@@ -58,6 +58,16 @@ namespace MadDr.MatchCore
         /// within salvage range -- same "bad input never queues, just
         /// rejects" contract as every other command kind.</summary>
         SalvageCorpse = 6,
+        /// <summary>docs/23 §6: TargetEntity (the attacker) begins
+        /// attacking ArgA (a <see cref="SimAnomaly"/>'s entity ID, cast to
+        /// int -- same reinterpreted-slot contract as every other command
+        /// with two entity operands). Same reach/existence/alive
+        /// preconditions as <see cref="AttackUnit"/>, resolved by
+        /// <see cref="MatchState.TickAnomalyCombat"/> instead of
+        /// <see cref="MatchState.TickCombat"/> (a deliberately separate
+        /// resolution loop -- an anomaly has no facing/arc/Armor of its
+        /// own, unlike a real combatant).</summary>
+        AttackAnomaly = 7,
     }
 
     /// <summary>

@@ -96,6 +96,17 @@ namespace MadDr.MatchCore
         /// and are never looked up by one.</summary>
         private readonly List<SimEmitter> _emitters = new List<SimEmitter>();
 
+        /// <summary>docs/23 §6: Loose Experiment anomalies, entity-ID
+        /// order (same "the ONLY order this class ever iterates in" law
+        /// as <see cref="_unitsInOrder"/>/<see cref="_buildingsInOrder"/>).
+        /// Unlike emitters (pre-existing map features with no entity ID),
+        /// anomalies ARE looked up by ID -- a player attacks one via
+        /// <see cref="CommandKind.AttackAnomaly"/>, same as any other
+        /// targetable entity -- so they share the unified ID space
+        /// buildings already do.</summary>
+        private readonly List<SimAnomaly> _anomaliesInOrder = new List<SimAnomaly>();
+        private readonly Dictionary<uint, SimAnomaly> _anomaliesById = new Dictionary<uint, SimAnomaly>();
+
         /// <summary>The tick this state is AT -- 0 before the first Tick.</summary>
         public int Frame { get; private set; }
 
@@ -224,6 +235,34 @@ namespace MadDr.MatchCore
         public SimBuilding BuildingAt(int index) => _buildingsInOrder[index];
 
         public SimBuilding? FindBuilding(uint entityId) => _buildingsById.TryGetValue(entityId, out var b) ? b : null;
+
+        /// <summary>docs/23 §6: place a Loose Experiment anomaly at a hex --
+        /// setup-time API, same direct-call precedent as
+        /// <see cref="SpawnUnit"/>/<see cref="SpawnHqForPlayer"/>. The
+        /// caller (Unity/CityGen, or a test) picks which of
+        /// <see cref="CityModel.Roundabouts"/> to use and how many (docs/23:
+        /// "2-4... per match") -- match-core only needs to be handed a
+        /// hex, it doesn't decide placement count or which roundabouts to
+        /// prefer. Returns the new anomaly's entity ID.</summary>
+        public uint SpawnAnomaly(HexCoord atHex)
+        {
+            if (_city == null) throw new InvalidOperationException("MatchState has no city -- cannot spawn an anomaly");
+            var id = AllocateEntityId();
+            var (x, z) = atHex.ToWorld();
+            var anomaly = new SimAnomaly(id, x, z, Frame);
+            _anomaliesInOrder.Add(anomaly);
+            _anomaliesById[id] = anomaly;
+            return id;
+        }
+
+        public int AnomalyCount => _anomaliesInOrder.Count;
+
+        /// <summary>Read-only anomaly access in canonical (entity-ID)
+        /// order -- same contract as <see cref="UnitAt"/>/
+        /// <see cref="BuildingAt"/>.</summary>
+        public SimAnomaly AnomalyAt(int index) => _anomaliesInOrder[index];
+
+        public SimAnomaly? FindAnomaly(uint entityId) => _anomaliesById.TryGetValue(entityId, out var a) ? a : null;
 
         /// <summary>docs/03: the current Lumen Cycle phase -- a pure
         /// function of <see cref="Frame"/>, nothing to seed or drift out
@@ -416,6 +455,94 @@ namespace MadDr.MatchCore
             }
         }
 
+        /// <summary>docs/23 §6: resolve one tick's worth of attacks against
+        /// Loose Experiment anomalies -- a deliberately separate loop from
+        /// <see cref="TickCombat"/> rather than folding anomalies into
+        /// that method's own defender lookup, since an anomaly isn't a
+        /// <see cref="SimUnit"/>: no facing/arc (posMod is always a flat
+        /// 100 -- an anomaly has no orientation to flank), no Armor (0),
+        /// no Level/XP of its own to credit or derive victim-level XP
+        /// from. Everything else (Reach check, aura/affinity emitterMod,
+        /// luck/crit roll, Ferocity-gated cooldown) is identical to real
+        /// combat, reusing the same <see cref="CombatMath"/> the whole
+        /// way.</summary>
+        private void TickAnomalyCombat()
+        {
+            for (var i = 0; i < _unitsInOrder.Count; i++)
+            {
+                var attacker = _unitsInOrder[i];
+                if (attacker.Order != UnitOrderKind.AttackAnomaly || !attacker.IsAlive) continue;
+                if (!attacker.AttackAnomalyTargetId.HasValue || attacker.Combat == null) continue;
+
+                var anomaly = FindAnomaly(attacker.AttackAnomalyTargetId.Value);
+                if (anomaly == null || !anomaly.IsAlive) continue;   // already captured -- unit just waits
+                if (!attacker.CanAttackNow) continue;
+
+                var attackerHex = HexAt(attacker.X, attacker.Z);
+                var anomalyHex = HexAt(anomaly.X, anomaly.Z);
+                var combat = attacker.Combat.Value;
+                if (attackerHex.DistanceTo(anomalyHex) > combat.Reach) continue;
+
+                var inAura = IsWithinAnyEmitterAura(attackerHex);
+                var emitterMod = CombatMath.EmitterModPercent(combat.Affinity, CurrentLumenPhase, inAura);
+                var isCrit = CombatMath.RollCrit(_rng, combat.CunningPercent);
+                var luckOrCrit = isCrit ? 150 : CombatMath.RollLuckPercent(_rng);
+
+                var damage = CombatMath.ResolveDamage(attacker.EffectivePower, posModPercent: 100, emitterMod, luckOrCrit, armor: 0);
+                anomaly.ApplyDamage(damage);
+                attacker.ResetAttackCooldown();
+
+                // docs/23 §6: "killing-blow player captures it" -- snapshot
+                // whichever buff the anomaly was showing the instant it
+                // died, grant it to the attacker, and respawn immediately
+                // (same tick) rather than leaving a corpse -- an anomaly
+                // has no salvage/XP/death-window mechanics at all.
+                if (!anomaly.IsAlive)
+                {
+                    attacker.ApplyAnomalyBuff(anomaly.CurrentBuff(Frame));
+                    RespawnAnomaly(anomaly);
+                }
+            }
+        }
+
+        /// <summary>docs/23 §6: "the anomaly respawns at a random
+        /// roundabout." A city preset with no generated roundabouts at all
+        /// (<see cref="CityModel.Roundabouts"/> empty -- not every
+        /// `RoadPattern` produces any) has nowhere valid to send it; the
+        /// documented fallback is to respawn it in place rather than
+        /// silently failing or throwing, a real, flagged content-coverage
+        /// gap rather than a hidden crash.</summary>
+        private void RespawnAnomaly(SimAnomaly anomaly)
+        {
+            if (_city != null && _city.Roundabouts.Count > 0)
+            {
+                var hex = _city.Roundabouts[_rng.IntRange(_city.Roundabouts.Count)];
+                var (x, z) = hex.ToWorld();
+                anomaly.Respawn(x, z, Frame);
+            }
+            else
+            {
+                anomaly.Respawn(anomaly.X, anomaly.Z, Frame);
+            }
+        }
+
+        /// <summary>docs/23 §6's Regen buff: a flat heal-over-time, granted
+        /// once per simulated second (same idiom as
+        /// <see cref="GrantEmitterManaIncome"/>'s own mana grant) rather
+        /// than a fractional per-tick heal, so the amount healed is always
+        /// an exact integer with no rounding drift accumulating across
+        /// ticks.</summary>
+        private void ApplyAnomalyBuffRegen()
+        {
+            for (var i = 0; i < _unitsInOrder.Count; i++)
+            {
+                var u = _unitsInOrder[i];
+                if (u.ActiveBuff != AnomalyBuffKind.Regen || !u.IsAlive) continue;
+                var amount = (int)System.Math.Round(u.EffectiveMaxVitality * SimUnit.AnomalyRegenPercentPerSecond / 100.0);
+                u.Heal(amount);
+            }
+        }
+
         /// <summary>docs/23 Phase 6a / docs/04: how close a harvester must
         /// be to a corpse to begin (and keep) channeling -- on the corpse's
         /// own hex or directly adjacent. docs/04 doesn't give an explicit
@@ -553,6 +680,11 @@ namespace MadDr.MatchCore
             // entity-ID order, same law as movement above.
             TickCombat();
 
+            // docs/23 §6: anomaly-attack resolution -- a separate loop
+            // from TickCombat (see TickAnomalyCombat's own doc comment),
+            // but same entity-ID-order law.
+            TickAnomalyCombat();
+
             // docs/23 Phase 6a (docs/04): harvest-channel resolution, after
             // combat so a corpse that dies THIS tick can't be validly
             // targeted until next tick (matches TickCombat's own "target
@@ -602,7 +734,13 @@ namespace MadDr.MatchCore
             // it once every 10 completed ticks is exact, not a
             // fractional approximation), checked on the POST-increment
             // Frame so it fires on the 10th/20th/30th... tick.
-            if (Frame % TicksPerSecond == 0) GrantEmitterManaIncome();
+            if (Frame % TicksPerSecond == 0)
+            {
+                GrantEmitterManaIncome();
+                // docs/23 §6: the Regen anomaly buff, same once-per-second
+                // exact-integer grant idiom as mana income above.
+                ApplyAnomalyBuffRegen();
+            }
         }
 
         private void ApplyCommand(Command cmd)
@@ -628,6 +766,9 @@ namespace MadDr.MatchCore
                     break;
                 case CommandKind.SalvageCorpse:
                     ApplySalvageCorpse(cmd);
+                    break;
+                case CommandKind.AttackAnomaly:
+                    ApplyAttackAnomaly(cmd);
                     break;
                 case CommandKind.None:
                 default:
@@ -657,6 +798,25 @@ namespace MadDr.MatchCore
             if (fromHex.DistanceTo(toHex) > attacker.Combat.Value.Reach) return;
 
             attacker.BeginAttacking(defender.EntityId);
+        }
+
+        /// <summary>docs/23 §6: TargetEntity begins attacking the
+        /// <see cref="SimAnomaly"/> at ArgA. Same existence/alive/Reach
+        /// preconditions as <see cref="ApplyAttackUnit"/>, minus the
+        /// defender-Combat-stats check -- an anomaly is never a
+        /// combatant, it's a captureable pickup.</summary>
+        private void ApplyAttackAnomaly(Command cmd)
+        {
+            var attacker = FindUnit(cmd.TargetEntity);
+            var anomaly = FindAnomaly(unchecked((uint)cmd.ArgA));
+            if (attacker == null || anomaly == null) return;
+            if (attacker.Combat == null || !attacker.IsAlive || !anomaly.IsAlive) return;
+
+            var fromHex = HexAt(attacker.X, attacker.Z);
+            var toHex = HexAt(anomaly.X, anomaly.Z);
+            if (fromHex.DistanceTo(toHex) > attacker.Combat.Value.Reach) return;
+
+            attacker.BeginAttackingAnomaly(anomaly.EntityId);
         }
 
         /// <summary>docs/23 §13-A: order TargetEntity to walk to hex
@@ -872,6 +1032,8 @@ namespace MadDr.MatchCore
             for (var i = 0; i < _buildingsInOrder.Count; i++) _buildingsInOrder[i].WriteTo(h);
             h.Add(_emitters.Count);
             for (var i = 0; i < _emitters.Count; i++) _emitters[i].WriteTo(h);
+            h.Add(_anomaliesInOrder.Count);
+            for (var i = 0; i < _anomaliesInOrder.Count; i++) _anomaliesInOrder[i].WriteTo(h);
             return h.Value;
         }
     }

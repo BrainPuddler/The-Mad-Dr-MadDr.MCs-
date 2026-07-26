@@ -2379,3 +2379,81 @@ death-time roll, full harvest payout, empty-corpse/out-of-range/decayed-
 corpse rejection, mid-channel cancellation on the corpse moving away,
 corpse-stays-put-under-separation, and a same-seed-same-hash determinism
 proof), 152 citygen-core tests (untouched).
+
+## docs/23 Phase 6a: roaming Loose Experiment anomalies (2026-07)
+
+Shipped the second half of Phase 6a (per §13 amendment D's split) — "2-4
+Loose Experiments wander the neutral streets per match... cycling their
+aura every 20s through Damage-Speed-Regen-XP-gain. Killing-blow player
+captures it: the buff attaches to the killing unit for 90s, then the
+anomaly respawns at a random roundabout" (docs/23 §6) — minus the wander
+half, sim-side.
+
+**`Anomaly.cs`'s `SimAnomaly`:** a deliberately SEPARATE, lightweight
+entity kind from `SimUnit` — no owning player, no `CombatStats` of its
+own, no facing/arc, no salvage/XP mechanics on "death." Same "a map
+feature with its own runtime state, not shoehorned into the player-unit
+model" relationship `SimEmitter` already has to a Landmark, extended here
+to something that's also directly attackable. `CurrentBuff(frame)` is a
+PURE function of `(frame - SpawnFrame) / CycleTicks % 4` — no internal
+mutable timer to drift, the same shape `LumenClock` already established
+for the match-wide day/night cycle, just re-based per anomaly so a
+respawn restarts its own cycle at Damage.
+
+**Spawning:** `MatchState.SpawnAnomaly(hex)` is a setup-time API (same
+direct-call precedent as `SpawnUnit`/`SpawnHqForPlayer`) — the caller
+picks which of `CityModel.Roundabouts` to use and how many (docs/23: "2-4
+per match"); match-core doesn't decide placement itself.
+
+**Combat:** `CommandKind.AttackAnomaly` + a new `MatchState.
+TickAnomalyCombat` loop, deliberately separate from `TickCombat` (an
+anomaly isn't a `SimUnit`) but reusing the exact same `CombatMath`
+machinery (aura/affinity emitterMod, luck/crit roll, Ferocity-gated
+cooldown) with a flat posMod of 100 (no facing to flank) and 0 Armor. The
+instant an anomaly's Vitality reaches 0, the attacker's current tick
+snapshots `CurrentBuff(Frame)`, grants that buff for 90s (docs/23's own
+real duration number), and the anomaly respawns immediately at a new
+random roundabout hex (`_rng.IntRange`) with its cycle restarted — no
+corpse, no salvage/XP mechanics apply to an anomaly at all.
+
+**The buff itself:** `SimUnit.ActiveBuff` (nullable enum) + a countdown
+decremented every tick alongside the existing attack cooldown. Damage
+(+25%) and Speed (+25%) multiply `EffectivePower`/`EffectiveSpeed`
+directly. Regen (5%/simulated-second) heals via a NEW `MatchState.
+ApplyAnomalyBuffRegen`, gated the same "once per simulated second, exact
+integer, no fractional-tick drift" way `GrantEmitterManaIncome` already
+grants mana. XpGain (+50%) scales the amount inside `SimUnit.GrantXp`.
+**Every one of these four magnitudes is an invented v0.1 placeholder** —
+docs/23 names which four buffs exist and their shared 90s duration, but
+gives no numbers for what any of them actually DO, a genuinely different
+kind of gap than every other "missing mechanism" logged so far this
+session (the mechanism here is real and wired end-to-end; only the
+tuning is a guess, flagged as such in `SimUnit.cs`'s own doc comments).
+
+**Explicitly deferred, not faked:** wander movement ("drift along
+sidewalks, Citizen movement reuse") — match-core has no Citizen-as-sim-
+entity walker to reuse at all, the same missing-prerequisite gap already
+logged against Citizens/upkeep in this file's Phase 3 entry. An anomaly
+sits still at its (re)spawn hex between captures; it is still fully
+functional as a contested, timed capture point, just not roaming yet. A
+city preset that generates zero `CityModel.Roundabouts` (not every
+`RoadPattern` does — only `MainStreet`, confirmed by reading
+`CityGenerator.cs`'s own `isMainStreet` gate) has nowhere valid to
+respawn an anomaly to; handled by respawning in place rather than a
+silent failure, a real, flagged content-coverage gap, not resolved here.
+
+**A test-writing lesson, not a production bug:** an early draft of the
+Regen-buff test gave the "wounder" unit a normal Ferocity, which kept
+re-attacking every tick for the ~400 ticks the test spent waiting for the
+anomaly's cycle to reach Regen, killing the healable unit outright before
+it could capture the buff. Fixed by giving the wounder a near-zero
+Ferocity (one guaranteed hit, then effectively never again) — the
+production combat/cooldown code was never wrong, the test's own setup was
+under-constrained.
+
+**Verification:** 157 match-core tests (10 new: buff-cycle ordering and
+per-anomaly epoch, spawn placement, out-of-range rejection, capture +
+respawn + buff-cycle-restart, Damage buff raising EffectivePower, buff
+expiry at exactly 90s, Regen healing exactly once per simulated second,
+XpGain scaling kill XP, and a same-seed-same-hash determinism proof), 152
+citygen-core tests (untouched).

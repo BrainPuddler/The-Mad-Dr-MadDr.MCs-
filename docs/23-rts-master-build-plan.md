@@ -524,9 +524,39 @@ formations, group arrival facing, minimap orders). This phase adds the feel.
 > WHICH part family, check whether the player already owns it, or apply
 > the +5% stat affinity/Lab-unlock docs/23 itself promises; that's a real,
 > separate, not-yet-built cross-system job for whatever reads the match
-> transcript afterward (see `Salvage.cs`'s own header). Roaming Loose
-> Experiment anomalies are a distinct, not-yet-started slice of 6a (their
-> own spawn/movement/aura-cycling/capture-on-kill system). **6b** (enemy
+> transcript afterward (see `Salvage.cs`'s own header). **The roaming
+> anomaly half of 6a is also done, sim-side** (157 match-core tests
+> total): `SimAnomaly` (a deliberately separate, lightweight entity kind,
+> not a `SimUnit` — no owning player, no facing/arc, no salvage/XP of its
+> own), spawned via `MatchState.SpawnAnomaly(hex)` at a caller-chosen
+> `CityModel.Roundabouts` entry; `CurrentBuff(frame)` cycles Damage→Speed→
+> Regen→XpGain every 20s as a PURE function of (frame − its own spawn
+> frame), the same "nothing to seed or drift out of sync" shape
+> `LumenClock` already established. `CommandKind.AttackAnomaly` +
+> `MatchState.TickAnomalyCombat` (a separate resolution loop from
+> `TickCombat`, reusing the same `CombatMath`/aura/luck machinery but with
+> a flat posMod and 0 Armor — an anomaly has no facing to flank) resolve
+> attacks against it; the instant its Vitality reaches 0, the attacker
+> captures whichever buff it was showing and it respawns immediately at a
+> new random roundabout, cycle restarted. The captured buff (90s, docs/23's
+> own real number) actually moves the needle: Damage/Speed raise
+> `EffectivePower`/`EffectiveSpeed` by a flat multiplier, Regen heals a
+> flat percent of max Vitality once per simulated second (same exact-
+> integer idiom `GrantEmitterManaIncome` already uses for mana), XpGain
+> scales `GrantXp`. **Every one of those four buff MAGNITUDES (+25%/+25%/
+> 5%-per-second/+50%) is an invented v0.1 placeholder** — docs/23 names
+> which four buffs exist and their 90s duration, but gives no numbers for
+> what any of them actually do, a genuinely different kind of gap than
+> "missing mechanism" (the mechanism is real; the tuning is guessed).
+> **Explicitly deferred, not faked:** wander movement ("drift along
+> sidewalks, Citizen movement reuse") — match-core has no Citizen-walker
+> to reuse at all (the same missing-prerequisite gap docs/12's Phase 3
+> entry already logs for Citizens/upkeep); an anomaly sits still at its
+> (re)spawn hex between captures, still fully functional as a contested,
+> timed capture point. A city preset that generates no `Roundabouts` at
+> all (not every `RoadPattern` does) has nowhere valid to respawn an
+> anomaly to — flagged, handled by respawning in place rather than a
+> silent failure or a crash, a real content-coverage gap. **6b** (enemy
 > faction rosters as genome data) and **6c** (utility-driven skirmish
 > commander AI) are unstarted, separate phases per amendment D's own
 > split — 6b needs real authored genome content, 6c is "a full phase on
