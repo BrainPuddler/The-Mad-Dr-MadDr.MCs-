@@ -183,6 +183,27 @@ namespace MadDr.MatchCore
         /// corpse.</summary>
         public int SalvageValue { get; }
 
+        /// <summary>docs/06's `regeneration` quirk: "a passive, free, 1%
+        /// max-HP/s trickle, out-of-combat only, and gene-dependent (not
+        /// every creature has it)." Supplied whole by the caller at spawn
+        /// time (an optional bool, default false) -- same genome-agnostic
+        /// pattern as every other stat this class accepts rather than
+        /// derives. docs/23 §7's Doctor regen swing (-10% Day / +15%
+        /// Night) MODIFIES this quirk's own rate; it invents no baseline
+        /// of its own for a unit that lacks the quirk (0%/s x anything is
+        /// still 0%/s) -- see <see cref="MatchState.
+        /// ApplyRegenerationQuirk"/>.</summary>
+        public bool HasRegenerationQuirk { get; }
+
+        /// <summary>The frame this unit last dealt or received damage, or
+        /// null if it never has. Drives docs/06's "out of combat only"
+        /// gate for <see cref="HasRegenerationQuirk"/> -- stamped at the
+        /// two existing points combat already resolves
+        /// (<see cref="ApplyDamage"/> for the receiving side,
+        /// <see cref="ResetAttackCooldown"/> for the dealing side), not a
+        /// new call site MatchState has to remember to hit.</summary>
+        public int? LastCombatFrame { get; private set; }
+
         /// <summary>How much of <see cref="SalvageValue"/> is still
         /// waiting to be looted from this corpse -- 0 while alive, rolled
         /// once at death (<see cref="SalvageMath.RollAmount"/>, 40-60%),
@@ -364,7 +385,7 @@ namespace MadDr.MatchCore
         /// pathfound for `SetPath` either.</summary>
         private readonly Queue<HexCoord> _waypointQueue = new Queue<HexCoord>();
 
-        internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed, double radius, CombatStats? combat, int salvageValue = 0)
+        internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed, double radius, CombatStats? combat, int salvageValue = 0, bool hasRegenerationQuirk = false)
         {
             EntityId = entityId;
             PlayerIndex = playerIndex;
@@ -375,6 +396,7 @@ namespace MadDr.MatchCore
             Combat = combat;
             Vitality = combat?.MaxVitality ?? 0;
             SalvageValue = salvageValue;
+            HasRegenerationQuirk = hasRegenerationQuirk;
         }
 
         /// <summary>Begin walking a precomputed path (HexPathfinder output,
@@ -392,8 +414,17 @@ namespace MadDr.MatchCore
         /// it covers (never leaves a fractional-tick's motion on the
         /// table) so results don't depend on how finely a path happens to
         /// be subdivided relative to speed -- same idiom as Unity's
-        /// FollowPath, ported to fixed dt instead of Time.deltaTime.</summary>
-        internal void Tick(double dt)
+        /// FollowPath, ported to fixed dt instead of Time.deltaTime.
+        /// <paramref name="speedMultiplier"/> (docs/23 §7's Lumen-cycle
+        /// faction modifier) defaults to 1.0 -- every pre-Phase-7 caller
+        /// keeps compiling and moving at the identical rate it always did.
+        /// Computed by <see cref="MatchState"/> (which alone knows this
+        /// unit's owning Faction and the current <see cref="LumenPhase"/>)
+        /// and passed in fresh each tick, the same "SimUnit stays
+        /// self-contained, MatchState supplies external context" division
+        /// of labor <see cref="ApplySeparationOffset"/> already
+        /// uses.</summary>
+        internal void Tick(double dt, double speedMultiplier = 1.0)
         {
             // docs/23 Phase 4: cooldown counts down regardless of order,
             // so switching targets (or briefly moving) never grants a
@@ -417,8 +448,9 @@ namespace MadDr.MatchCore
 
             // docs/23 §4: EffectiveSpeed (base Speed x the level bonus),
             // not the raw base -- a leveled-up unit actually moves
-            // faster, not just hits harder.
-            var budget = EffectiveSpeed * dt;
+            // faster, not just hits harder. docs/23 §7: THEN the Lumen-
+            // cycle faction speed multiplier on top.
+            var budget = EffectiveSpeed * speedMultiplier * dt;
             while (budget > 0.0 && Order == UnitOrderKind.MoveTo)
             {
                 if (_path == null || _pathIndex >= _path.Count)
@@ -538,9 +570,13 @@ namespace MadDr.MatchCore
         /// <summary>Start the cooldown for this unit's NEXT attack --
         /// called by `MatchState` immediately after resolving one
         /// (docs/04: Ferocity is attacks/second, so the cooldown is
-        /// exactly its reciprocal).</summary>
-        internal void ResetAttackCooldown()
+        /// exactly its reciprocal). Also stamps <see cref="LastCombatFrame"/>
+        /// for the DEALING side of the exchange -- see that property's own
+        /// doc comment for why this is the natural hook rather than a new
+        /// call site.</summary>
+        internal void ResetAttackCooldown(int currentFrame)
         {
+            LastCombatFrame = currentFrame;
             if (Combat != null) _attackCooldownSeconds = 1.0 / Combat.Value.Ferocity;
         }
 
@@ -558,6 +594,7 @@ namespace MadDr.MatchCore
         internal void ApplyDamage(int amount, int currentFrame)
         {
             if (Combat == null || !IsAlive || amount <= 0) return;
+            LastCombatFrame = currentFrame;
             Vitality -= amount;
             if (Vitality <= 0)
             {
@@ -628,6 +665,14 @@ namespace MadDr.MatchCore
             h.Add(AttackAnomalyTargetId.HasValue ? (long)AttackAnomalyTargetId.Value : -1L);
             h.Add(ActiveBuff.HasValue ? (int)ActiveBuff.Value : -1);
             h.AddBits(_buffRemainingSeconds);
+
+            // docs/23 Phase 7: the regeneration quirk is a fixed identity
+            // stat (same "hashed anyway" consistency as SalvageValue);
+            // LastCombatFrame is real mutable state two clients must agree
+            // on, or a desync in the out-of-combat gate would go
+            // undetected.
+            h.Add(HasRegenerationQuirk ? 1 : 0);
+            h.Add(LastCombatFrame ?? -1);
         }
     }
 }

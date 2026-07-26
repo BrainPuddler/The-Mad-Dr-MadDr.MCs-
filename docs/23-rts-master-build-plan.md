@@ -662,6 +662,53 @@ in-between — b-movie logic, legible strategy (time your push with your hour).
 Emitter polarity flips (docs/03) sync to this same clock.
 
 ### Phase 7 tasks
+
+> **Status (2026-07): match-core done, sim-side.** `LumenClock`/emitter-
+> polarity output shipped with **Phase 3.5**, not here — this task list
+> predates that phase landing and still lists them as Phase 7's own job;
+> this status note covers only the genuinely NEW piece, the faction
+> modifier table (217 match-core tests total). `FactionLumenModifier`/
+> `FactionLumenTable` reuse docs/23 §7's own six real numbers VERBATIM
+> (unlike Phase 6b's invented roster placeholders, these are first-party
+> figures, not a guess this package had to fill in). Three of the six
+> cells are actually wired into gameplay: Army's Day +15% weapon damage
+> feeds a new optional `lumenModPercent` term on `CombatMath.
+> ResolveDamage` (default 100 -- every pre-Phase-7 call site, including
+> every existing test, keeps compiling and producing the IDENTICAL
+> result); Hive's Day -10% / Doctor's Night +10% speed feed a new
+> `speedMultiplier` parameter on `SimUnit.Tick` (default 1.0, same
+> backward-compatible-default pattern); Doctor's regen swing (-10% Day /
+> +15% Night) scales docs/06's REAL `regeneration` quirk rate ("1% max
+> HP/s out of combat, gene-dependent") via a new `SimUnit.
+> HasRegenerationQuirk` flag (optional spawn param, same genome-agnostic
+> pattern as `CombatStats`/`SalvageValue`) and a new
+> `MatchState.ApplyRegenerationQuirk`, gated by a new `SimUnit.
+> LastCombatFrame` tracker stamped at the two points combat already
+> resolves (no new call site MatchState has to remember to hit). Squaring
+> docs/23's table (which reads as if every Doctor unit has a baseline
+> regen to modify) against docs/06 (which says regen is an OPT-IN quirk,
+> not universal) resolves cleanly with no invented baseline: the modifier
+> only ever matters for a unit that actually has the quirk (0%/s x
+> anything is still 0%/s for one that doesn't). **Explicitly deferred, not
+> faked:** Army's -15% vision-radius and Hive's +15% Dusk/Dawn Ichor
+> income are stored as real DATA on `FactionLumenModifier` but consumed by
+> nothing -- match-core has no fog-of-war/vision system at all (a Unity/
+> minimap concern), and no generic per-faction resource income tick exists
+> yet (docs/12's Phase 3 entry logs this same gap, unchanged since).
+> Unity's NightMode/sun-angle/moon-dial HUD tasks are untouched (Unity-
+> side, no design pass attempted this slice, same split every prior phase
+> used).
+> **Acceptance, both bars met:** a golden table test pins all twelve
+> (faction x phase) cells against docs/23 §7's own numbers exactly; a
+> scripted duel (fixed seed, committed as this phase's test transcript,
+> same "run once, verify, keep the seed" style every prior combat test
+> already uses) has the identical Army-vs-Hive matchup WIN at Day (Army's
+> real damage bonus tips a fight it would otherwise lose) and LOSE the
+> same matchup at Night (no bonus active) -- luck-noise eliminated from
+> the comparison by forcing a guaranteed crit (`cunningPercent: 100`) and
+> a non-adjacent Reach so `Facing.ArcOf`'s own Front/Flank/Rear
+> classification can't introduce a second uncontrolled variable.
+
 - `match-core`: `LumenClock` (tick-driven, deterministic), faction modifier
   table, emitter polarity hook.
 - Unity: drive `NightMode` from the clock (replacing the N-key toggle with a

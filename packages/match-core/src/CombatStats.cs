@@ -124,17 +124,21 @@ namespace MadDr.MatchCore
 
         /// <summary>docs/04's damage formula, verbatim: <c>damage =
         /// max(1, round(Power x posMod x emitterMod x luckRoll) -
-        /// Armor)</c>. All three multiplier terms are integer PERCENTS
-        /// (see this class's own header); the product is computed in a
-        /// `long` to avoid overflow at the theoretical maxima (posMod up
-        /// to 180 with the +10/+20 bonuses added by the caller, emitterMod
-        /// up to 125, luckRoll's crit replacement at 150) before dividing
-        /// back down by 100^3 with round-half-up (docs/04 says "round,"
-        /// not "floor").</summary>
-        public static int ResolveDamage(int power, int posModPercent, int emitterModPercent, int luckOrCritPercent, int armor)
+        /// Armor)</c>, extended by docs/23 §7's Lumen-cycle faction
+        /// modifier (<paramref name="lumenModPercent"/>, default 100 = no
+        /// change -- every pre-Phase-7 call site keeps compiling and
+        /// producing the identical result it always did). All FOUR
+        /// multiplier terms are integer PERCENTS (see this class's own
+        /// header); the product is computed in a `long` to avoid overflow
+        /// at the theoretical maxima (posMod up to 180 with the +10/+20
+        /// bonuses added by the caller, emitterMod up to 125, luckRoll's
+        /// crit replacement at 150, lumenMod up to 115 per docs/23 §7's own
+        /// table) before dividing back down by 100^4 with round-half-up
+        /// (docs/04 says "round," not "floor").</summary>
+        public static int ResolveDamage(int power, int posModPercent, int emitterModPercent, int luckOrCritPercent, int armor, int lumenModPercent = 100)
         {
-            var product = (long)power * posModPercent * emitterModPercent * luckOrCritPercent;
-            var scale = 100L * 100L * 100L;
+            var product = (long)power * posModPercent * emitterModPercent * luckOrCritPercent * lumenModPercent;
+            var scale = 100L * 100L * 100L * 100L;
             var rounded = (product + scale / 2) / scale;   // round-half-up
             var damage = (int)rounded - armor;
             return Math.Max(1, damage);

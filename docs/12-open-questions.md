@@ -2629,3 +2629,94 @@ throttling, a deterministic AI-vs-AI skirmish, and 12 generated
 commanders all actually acting), 152 citygen-core tests (untouched), and
 the `Tools~/DetHarness` acceptance harness still prints identical hashes
 twice.
+
+## docs/23 Phase 7: the Lumen Cycle faction modifier table (2026-07)
+
+Shipped Phase 7's genuinely new piece. `LumenClock` and emitter-polarity
+output already shipped with Phase 3.5 — Phase 7's own task list predates
+that phase landing and still lists them as its job, which this status
+note corrects rather than silently re-doing the work.
+
+**`FactionLumenModifier`/`FactionLumenTable`** carry docs/23 §7's own
+table VERBATIM — a rare case this session where the numbers are real,
+first-party figures (not an invented v0.1 placeholder the way Phase 6b's
+roster stats were), because docs/23 §7 itself authored them directly.
+
+**Three of the six cells are wired into real gameplay:**
+
+- **Army's Day +15% weapon damage** — `CombatMath.ResolveDamage` gained a
+  new optional `lumenModPercent` parameter (default 100), folded into the
+  existing integer-percent product exactly like `posModPercent`/
+  `emitterModPercent` already are (docs/04's own "no double in the actual
+  damage computation" bar, now a 100^4 scale instead of 100^3). Computed
+  fresh at the point of attack in both `TickCombat` and `TickAnomalyCombat`
+  via a new `LumenDamagePercentFor` helper.
+- **Hive's Day -10% / Doctor's Night +10% speed** — `SimUnit.Tick` gained
+  a new `speedMultiplier` parameter (default 1.0), multiplying the
+  existing movement budget alongside `EffectiveSpeed`. Computed fresh
+  per-unit, per-tick, in `MatchState`'s own unit-movement loop (the only
+  place that knows both a unit's owning Faction and the current
+  `LumenPhase` — `SimUnit` itself stays self-contained and knows
+  neither).
+- **Doctor's regen swing** — scales docs/06's REAL `regeneration` quirk
+  rate ("1% max HP/s out of combat, gene-dependent — not every creature
+  has it"), not an invented baseline. New `SimUnit.HasRegenerationQuirk`
+  (optional spawn param, same genome-agnostic pattern as `CombatStats`/
+  `SalvageValue`) and `SimUnit.LastCombatFrame` (stamped for free at the
+  two points combat already resolves — `ApplyDamage` for the receiving
+  side, the now-`int`-taking `ResetAttackCooldown` for the dealing side —
+  rather than a new call site `MatchState` has to remember to hit). New
+  `MatchState.ApplyRegenerationQuirk`, granted once per simulated second
+  (same exact-integer idiom `GrantEmitterManaIncome`/`ApplyAnomalyBuffRegen`
+  already use), gated by a v0.1 "3 simulated seconds since last combat
+  activity" out-of-combat threshold (docs/06 names the mechanic, not this
+  number).
+
+**A real design tension resolved with no invented number needed:**
+docs/23 §7's table reads as if every Doctor unit has SOME baseline regen
+rate to modify (-10%/+15%), but docs/06 says regeneration is an OPT-IN
+quirk, not a universal trait. Squaring the two: the Lumen modifier only
+ever matters for a unit that actually rolled the quirk — for one that
+didn't, 0%/s times any multiplier is still 0%/s. No baseline had to be
+invented to make the table make sense.
+
+**Explicitly deferred, not faked:** Army's -15% vision-radius and Hive's
++15% Dusk/Dawn Ichor income are real numbers, stored on
+`FactionLumenModifier`, consumed by nothing. Match-core has no fog-of-war/
+vision system at all (`BattlefieldState`'s blocked-hex set governs
+PATHING, not visibility — a Unity/minimap concern per Phase 1's own task
+list); ordinary per-faction resource income (as opposed to emitter Mana,
+which Phase 3.5 already grants) still doesn't exist anywhere in
+match-core — the same gap docs/12's Phase 3 entry already logged, still
+unresolved. Both numbers are on record now so the moment either
+prerequisite system lands, the real figure is already there rather than
+requiring a second trip back to docs/23 §7 to look it up again.
+
+**A test-design lesson, not a production bug:** the first draft of the
+"Army's damage is boosted at Day" test tried to bound the comparison by
+computing "Day's worst-case luck roll" vs "Night's best-case luck roll" —
+but a flat +15% modifier can never dominate a wider ±15% luck band from
+either side (the two ranges genuinely overlap), so that assertion was
+mathematically impossible to satisfy, not a bug in the modifier. Fixed by
+eliminating randomness from the comparison entirely (`cunningPercent: 100`
+forces a guaranteed crit, so `luckOrCritPercent` is a fixed 150 with no
+RNG draw at all) rather than trying to out-argue the luck band. A second,
+related fix: the same test's first attempt placed attacker and defender
+ADJACENT, so `Facing.ArcOf`'s own Front/Flank/Rear classification (driven
+by the defender's default facing) silently added a SECOND uncontrolled
+multiplier neither hand-computed expectation accounted for. Fixed by
+using `Reach: 3` against a hex at exactly distance 2 — `TickCombat`'s own
+"posMod is flat 100 unless the pair is exactly adjacent" rule then applies
+deterministically.
+
+**Verification:** 217 match-core tests (24 new: the golden 12-cell
+modifier table, the two DATA-only numbers, `ResolveDamage`'s new parameter
+including its backward-compatible default, Army/Hive/Doctor's damage and
+speed modifiers wired into real combat/movement, the regeneration quirk's
+baseline rate/Day-Night scaling/quirk-gating/out-of-combat gating, a
+same-seed-same-hash proof spanning a real phase transition, and the
+scripted Day-win/Night-loss duel), 152 citygen-core tests (untouched), and
+the `Tools~/DetHarness` acceptance harness still prints identical hashes
+twice (the hash values themselves changed from prior phases, as expected
+-- `SimUnit.WriteTo` now hashes two new fields, so it hasn't drifted, it's
+covering more state).

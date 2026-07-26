@@ -177,9 +177,11 @@ namespace MadDr.MatchCore
         /// match-core never derives it. <paramref name="salvageValue"/>
         /// (docs/23 Phase 6a) defaults to 0 -- a pre-Phase-6a spawn call
         /// gets a unit whose corpse simply has nothing to loot, rather
-        /// than being forced to widen its own call site. Returns the new
-        /// unit's entity ID.</summary>
-        public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, double radius = DefaultUnitRadius, CombatStats? combat = null, int salvageValue = 0)
+        /// than being forced to widen its own call site.
+        /// <paramref name="hasRegenerationQuirk"/> (docs/23 Phase 7 /
+        /// docs/06) defaults to false, same backward-compatible-default
+        /// pattern. Returns the new unit's entity ID.</summary>
+        public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, double radius = DefaultUnitRadius, CombatStats? combat = null, int salvageValue = 0, bool hasRegenerationQuirk = false)
         {
             if (_city == null) throw new InvalidOperationException("MatchState has no city -- cannot spawn units");
             if (playerIndex < 0 || playerIndex >= _players.Length)
@@ -189,7 +191,7 @@ namespace MadDr.MatchCore
 
             var id = AllocateEntityId();
             var (x, z) = atHex.ToWorld();
-            var unit = new SimUnit(id, playerIndex, x, z, speed, radius, combat, salvageValue);
+            var unit = new SimUnit(id, playerIndex, x, z, speed, radius, combat, salvageValue, hasRegenerationQuirk);
             _unitsInOrder.Add(unit);
             _unitsById[id] = unit;
             return id;
@@ -456,12 +458,16 @@ namespace MadDr.MatchCore
                 // docs/23 §4: EffectivePower (base Power x the attacker's
                 // own level bonus), not the raw base -- a leveled-up
                 // attacker hits harder. Armor is never level-scaled
-                // (docs/23 §4 only lists MaxHP/damage/speed).
+                // (docs/23 §4 only lists MaxHP/damage/speed). docs/23 §7:
+                // THEN the attacker's own faction/Lumen-phase damage
+                // modifier (Army's Day +15%; 100/no-op for every other
+                // faction/phase).
                 var victimLevelBeforeDeath = defender.Level;
-                var damage = CombatMath.ResolveDamage(attacker.EffectivePower, posMod, emitterMod, luckOrCrit, defender.Combat!.Value.Armor);
+                var lumenMod = LumenDamagePercentFor(attacker);
+                var damage = CombatMath.ResolveDamage(attacker.EffectivePower, posMod, emitterMod, luckOrCrit, defender.Combat!.Value.Armor, lumenMod);
                 defender.ApplyDamage(damage, Frame);
                 if (attackerHex.DistanceTo(defenderHex) == 1) attacker.FaceToward(ApproachEdgeFromTo(attackerHex, defenderHex));
-                attacker.ResetAttackCooldown();
+                attacker.ResetAttackCooldown(Frame);
 
                 // docs/23 §4: "kill = 40 XP flat + 4xvictim level" -- credit
                 // the attacker the instant its blow finishes the target.
@@ -513,9 +519,10 @@ namespace MadDr.MatchCore
                 var isCrit = CombatMath.RollCrit(_rng, combat.CunningPercent);
                 var luckOrCrit = isCrit ? 150 : CombatMath.RollLuckPercent(_rng);
 
-                var damage = CombatMath.ResolveDamage(attacker.EffectivePower, posModPercent: 100, emitterMod, luckOrCrit, armor: 0);
+                var lumenMod = LumenDamagePercentFor(attacker);
+                var damage = CombatMath.ResolveDamage(attacker.EffectivePower, posModPercent: 100, emitterMod, luckOrCrit, armor: 0, lumenMod);
                 anomaly.ApplyDamage(damage);
-                attacker.ResetAttackCooldown();
+                attacker.ResetAttackCooldown(Frame);
 
                 // docs/23 §6: "killing-blow player captures it" -- snapshot
                 // whichever buff the anomaly was showing the instant it
@@ -672,6 +679,53 @@ namespace MadDr.MatchCore
             return false;
         }
 
+        /// <summary>docs/23 §7: this attacker's own faction/Lumen-phase
+        /// damage percent (Army's Day +15%; 100 = no change for every
+        /// other faction/phase). Looked up fresh at the moment of attack
+        /// rather than cached -- cheap (an array read), and correct across
+        /// a phase transition mid-fight.</summary>
+        private int LumenDamagePercentFor(SimUnit attacker) =>
+            FactionLumenTable.Get(_players[attacker.PlayerIndex].Faction, CurrentLumenPhase).DamagePercent;
+
+        /// <summary>docs/23 Phase 7 / docs/06: the `regeneration` quirk's
+        /// real rate (1% max-HP/s), scaled by this unit's own faction/
+        /// Lumen-phase regen modifier (Doctor: -10% Day / +15% Night),
+        /// granted once per simulated second -- same exact-integer, no-
+        /// fractional-drift idiom <see cref="GrantEmitterManaIncome"/>
+        /// already uses for mana and <see cref="ApplyAnomalyBuffRegen"/>
+        /// for the anomaly buff. "Out of combat only" (docs/06) is
+        /// <see cref="OutOfCombatThresholdTicks"/> since this unit's own
+        /// <see cref="SimUnit.LastCombatFrame"/> -- a v0.1 placeholder
+        /// (docs/06 says "out of combat," not how long that takes to
+        /// kick in). A unit that never rolled the quirk at spawn
+        /// (<see cref="SimUnit.HasRegenerationQuirk"/> false, every
+        /// pre-Phase-7 spawn call) is skipped entirely -- no invented
+        /// baseline for a unit that has none.</summary>
+        private void ApplyRegenerationQuirk()
+        {
+            for (var i = 0; i < _unitsInOrder.Count; i++)
+            {
+                var u = _unitsInOrder[i];
+                if (!u.HasRegenerationQuirk || !u.IsAlive || u.Combat == null) continue;
+                if (u.LastCombatFrame.HasValue && Frame - u.LastCombatFrame.Value < OutOfCombatThresholdTicks) continue;
+
+                var modifier = FactionLumenTable.Get(_players[u.PlayerIndex].Faction, CurrentLumenPhase).RegenMultiplier;
+                var amount = (int)Math.Round(u.EffectiveMaxVitality * RegenerationQuirkPercentPerSecond / 100.0 * modifier);
+                u.Heal(amount);
+            }
+        }
+
+        /// <summary>docs/06: "regeneration -- 1% max HP/s out of combat."</summary>
+        private const double RegenerationQuirkPercentPerSecond = 1.0;
+
+        /// <summary>How long since this unit last dealt or took damage
+        /// before it counts as "out of combat" for the regeneration quirk
+        /// -- docs/06 names the mechanic but not this number; 3 simulated
+        /// seconds is a flagged v0.1 placeholder, the same standing policy
+        /// as every other unsourced tuning constant this project ships
+        /// with.</summary>
+        private const int OutOfCombatThresholdTicks = 3 * TicksPerSecond;
+
         /// <summary>Advance the simulation by exactly one tick, applying
         /// this tick's commands. Pure function of (current state,
         /// commands): no wall-clock, no ambient randomness -- every draw
@@ -696,7 +750,11 @@ namespace MadDr.MatchCore
             for (var i = 0; i < _unitsInOrder.Count; i++)
             {
                 var u = _unitsInOrder[i];
-                u.Tick(DtSeconds);
+                // docs/23 §7: this unit's own faction/Lumen-phase speed
+                // multiplier (Hive's Day -10%, Doctor's Night +10%; 1.0 =
+                // no change for every other faction/phase).
+                var speedMultiplier = FactionLumenTable.Get(_players[u.PlayerIndex].Faction, CurrentLumenPhase).SpeedMultiplier;
+                u.Tick(DtSeconds, speedMultiplier);
                 // docs/27 Phase B: a leg just finished (Idle) with more
                 // waypoints queued behind it -- compute the next leg's
                 // path immediately, in the SAME tick, so a multi-waypoint
@@ -768,6 +826,8 @@ namespace MadDr.MatchCore
                 // docs/23 §6: the Regen anomaly buff, same once-per-second
                 // exact-integer grant idiom as mana income above.
                 ApplyAnomalyBuffRegen();
+                // docs/23 Phase 7 / docs/06: the regeneration quirk, same idiom.
+                ApplyRegenerationQuirk();
             }
         }
 
