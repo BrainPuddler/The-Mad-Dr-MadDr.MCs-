@@ -937,23 +937,74 @@ asphalt reflections, period chrome, film grain, unhurried noir palette. The
 pipeline stays URP (docs/10 decision) — AAA here means art direction +
 modern URP features, not an engine swap.
 
+**Daytime mood board addition (2026-07, creator-supplied reference — an
+isometric 1930s-40s city-street illustration, akin to Omerta: City of
+Gangsters' own period art direction):** the paragraph above is written
+almost entirely for NIGHT ("warm sodium nights... unhurried noir palette")
+— this reference fills in what the game's DAYTIME mood should be, since
+docs/23 §7's Lumen clock already cycles through both and Day needs its own
+equally-considered look, not just "noir minus the neon." Concretely:
+- **Sun-baked, dusty, desaturated-sepia warmth** at Day — closer to an aged
+  photograph than a clean blue-sky render. Distinct from Night's saturated
+  neon-and-sodium palette; the two should read as clearly different moods
+  across the same city, not just brighter/darker versions of one grade.
+- **Low sun angle, long cast shadows** as Day's own visual signature (the
+  reference's defining feature) — not just a lighting rig detail, a
+  deliberate art-direction choice for the "unhurried" read the existing
+  target-look paragraph already asks for, extended to daytime.
+- **Individually legible period brick coursing and weathering** on
+  facades (existing `BuildingDresser` brick material is a flat color today
+  — §10.3's PBR atlas pass is where this becomes texture, not a re-tint).
+- **Hand-painted-looking shop signage under awnings**, not clean vector
+  lettering — a prop/material detail for whichever pass authors storefront
+  signage.
+- **A streetcar/tram running on visibly embedded rail lines** down a
+  cobblestone/brick street — RoadDresser already has a railyard district
+  (docs/21 batch 3); this asks for street-level embedded tram rails as a
+  distinct, denser-urban prop, likely a New York/§8 region-specific detail
+  given that region's own "elevated-rail segments" callout.
+- **Ornate multi-globe lampposts** and **a dense, period-dressed pedestrian
+  crowd** (Citizen already exists; this is about prop/costume variety, not
+  new mechanics) reading busy and lived-in, not sparse.
+- **Chrome-trimmed period sedans** in muted body colors (black, dark green,
+  maroon) — consistent with the existing target look's own "period chrome"
+  line, just confirming it applies to Day too, not only Night's wet-asphalt
+  reflections.
+
+This is a mood-board/target-look revision only — genuinely new render
+work (a Day-specific color-grading LUT, brick/signage textures, the tram-
+rail prop, lamppost variety) still lands in the sub-phases below, gated on
+the same real assets/Editor-side tuning every sub-phase already requires.
+Nothing here is claimed as implemented or visually verified.
+
 Sequenced sub-phases (each independently shippable):
 1. **Post stack**: URP Volume — filmic tonemapping, per-region color-grading
    LUTs (NY steel-blue noir / Paris warm cream / Montreal cold pastel), film
    grain, vignette, bloom tuned for neon, depth of field for the Lab podium.
+   Per the daytime addition above, the Day LUT (regardless of region) should
+   land closer to sun-baked sepia-warm than a neutral/cool grade, distinct
+   from each region's own NIGHT variant.
 2. **Lighting**: real sun animation from the Lumen clock (§7), street lamps as
    actual pixel lights on a budget (nearest-N to camera), light cookies for
-   window spill, SSAO.
+   window spill, SSAO. Day's sun angle should stay LOW enough for long,
+   legible cast shadows through most of the cycle (per the reference above),
+   not a high overhead noon angle.
 3. **Materials**: replace flat colors with a small PBR atlas set (brick,
    limestone, asphalt-wet, chrome, painted metal, glass) applied through the
    existing dresser material cache — dressers keep their geometry logic,
-   gain material richness. Wet-street shader (roads darken + reflect at night
-   / after §7 dusk).
+   gain material richness. This is where `BuildingDresser`'s flat `Brick()`/
+   `Cream()`/etc. materials (docs/21 batch 2) gain real coursing/weathering
+   texture instead of a re-tint. Wet-street shader (roads darken + reflect
+   at night / after §7 dusk).
 4. **Meshes**: primitive-kit → authored-mesh swap points. Keep the
    deterministic dresser *placement* logic; swap `CreatePrimitive` calls for
    a `PropLibrary` lookup (mesh assets by key, with primitive fallback so the
    game never breaks without assets). Assets themselves are creator-side
-   (Editor/DCC work); the code side ships the library + fallback.
+   (Editor/DCC work); the code side ships the library + fallback. New
+   signature props from the daytime reference belong here: an embedded
+   tram-rail street variant + streetcar prop (likely New York/§8-scoped),
+   an ornate multi-globe lamppost variant alongside the existing streetlamp
+   kit, and a market/vendor-stall prop for denser sidewalks.
 5. **Creatures**: creature-mesh gains normal-mapped skin material params
    (gloss/emissive already flow through), vertex-blend seams at sockets,
    corpse-part gore caps for salvage scenes.

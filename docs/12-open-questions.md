@@ -2976,3 +2976,38 @@ yet to check.
 proof), 168 citygen-core tests (untouched), `Tools~/DetHarness` still
 self-consistent, `flightcheck` recompiled clean against the one applied
 Unity fix.
+
+## docs/23 Phase 10: daytime mood-board reference added (2026-07)
+
+Creator supplied a concrete visual reference (an isometric 1930s-40s
+city-street illustration, in the spirit of Omerta: City of Gangsters'
+own period art direction) for what Phase 10's DAYTIME look should be.
+docs/23 §10's existing target-look paragraph is written almost entirely
+for NIGHT ("warm sodium nights... unhurried noir palette"); Day needed
+its own equally-considered mood rather than reading as just "noir minus
+the neon," especially since §7's Lumen clock already cycles through both
+in every real match.
+
+Folded into §10 as a mood-board addition, not implemented code: sun-baked
+desaturated-sepia warmth (distinct from Night's saturated neon/sodium
+palette), a low sun angle with long legible cast shadows as Day's own
+signature rather than a neutral noon angle, individually legible brick
+coursing/weathering (today's `BuildingDresser` bricks are a flat color —
+real texture is §10.3's PBR-atlas job), hand-painted-looking shop
+signage, an embedded tram-rail street + streetcar prop (likely New York/
+§8-scoped, alongside the existing railyard district), ornate multi-globe
+lampposts, a denser period-dressed pedestrian crowd, and chrome-trimmed
+period sedans in muted body colors.
+
+**Explicitly not done:** no code or asset was touched. Two of the three
+reference image URLs the creator first supplied (media.craiyon.com,
+gaminglives.com) were blocked outright by this session's own outbound
+network policy ("gateway answered 403 to CONNECT (policy denial)") — not
+a transient failure, a deliberate restriction — so the actual reference
+used was a directly-uploaded local image file. Turning this mood board
+into real render results (a Day-specific color-grading LUT, brick/
+signage textures, the tram-rail prop, lamppost variety) still needs the
+same real assets + Editor-side iteration every Phase 10 sub-phase already
+requires (no Editor exists in this environment); nothing here was
+visually verified, consistent with this whole project's standing
+discipline against claiming verification it can't back up.
