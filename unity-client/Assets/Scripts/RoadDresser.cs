@@ -427,7 +427,17 @@ public static class RoadDresser
                     var globeSpot = propSpot + Vector3.up * 5.9f
                         + new Vector3(Mathf.Sin(ga) * 0.5f, 0f, Mathf.Cos(ga) * 0.5f);
                     var globe = b.SpawnPrim(PrimitiveType.Sphere, globeSpot, new Vector3(0.22f, 0.22f, 0.22f), Bulb(), holder);
-                    GlowPointRegistry.Register(globe.transform, LampColor);
+                    // ONE real light for the whole cluster, not one per
+                    // globe (2026-07): three lights 0.5m apart stack to
+                    // ~3x intensity on the same patch of pavement -- a
+                    // real contributor to the blown-out white pools -- and
+                    // burn three of the city-wide budget's slots on a
+                    // single fixture. All three globes still GLOW (that's
+                    // their emissive material, independent of this); they
+                    // just share one promoted light. Registered on globe 0
+                    // rather than a new empty: it sits 0.5m from the
+                    // cluster centre, which is noise at this light's range.
+                    if (g == 0) GlowPointRegistry.Register(globe.transform, LampColor);
                 }
                 MakeKnockable(b, holder.gameObject, 1.8f);
                 break;

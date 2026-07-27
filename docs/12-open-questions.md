@@ -3746,3 +3746,54 @@ and what its live Intensity/Range/enabled values are, to know if the
 remaining "no visible real light" symptom is a separate bug or was
 actually fixed by the Per-Vertex correction and just wasn't visible
 against a still-broken (Skybox-mode) ambient background.
+
+## docs/28 ROOT CAUSE of the black props: double-winding zeroed every normal (2026-07)
+
+The actual reason `ornate-lamppost-pole` and `market-stall-canopy`
+rendered as pure black silhouettes -- through every previous fix
+attempt, and even while sitting inside a blown-out white pool of light.
+Nothing to do with the lights at all.
+
+`ProceduralMeshKit.Tri()` emitted every face in BOTH triangle windings
+(`a,b,c` and `a,c,b`). That was deliberate -- the class comment explains
+it as belt-and-braces against a winding-order mistake, since this
+environment has no Editor to visually catch an inside-out face. But
+`Mesh.RecalculateNormals()` sets each vertex normal to the average of
+the face normals sharing it, so with every face present in both
+windings, each contributes +N and -N, which cancel to EXACTLY ZERO. A
+zero normal makes `dot(N, L)` zero for every light, so the surface is
+pure black under any lighting whatsoever -- unfixable by range,
+intensity, budget, bloom, ambient, or render mode. This is why only
+these two props were affected: everything else in the city is a stock
+Unity primitive with correct normals.
+
+Fixed by emitting each face once, and replacing the double-winding
+safety net with `FaceOutward()` -- a pass that re-winds any triangle
+whose normal points toward the mesh centroid. That's strictly better
+than the old trick: it gives the same "can't get winding wrong without an
+Editor" guarantee, keeps normals intact, and halves the triangle count.
+Exact for convex shapes (both of these are); a concave mesh would need
+real authored winding. It deliberately uses the same cross product
+`RecalculateNormals` does, so the check is self-consistent with the
+normals actually generated.
+
+Verified numerically in the scratchpad flight-check harness rather than
+by eye (no Editor here): the old double-wound frustum yields 22/22 zero
+normals, the fixed one 0 zero and 0 inward-facing, triangle count 80 ->
+40. The harness's `Mesh.RecalculateNormals`/`Vector3` stubs had to be
+given real implementations first -- they were `{ }` / `return 0f`
+no-ops, which would have made any such test silently vacuous.
+
+**LabMeshBuilder checked, not affected:** it assigns `mesh.normals`
+explicitly from creature-mesh chunk data and never calls
+`RecalculateNormals`, so creature geometry never had this bug despite
+ProceduralMeshKit's comment citing it as the pattern it copied.
+
+### Also: one real light per lamppost, not one per globe
+
+The ornate lamppost registered a glow point for EACH of its three globes,
+0.5m apart -- so three real lights stacked on the same patch of
+pavement (~3x intensity, a real contributor to the blown-out white
+pools) and three of the city-wide budget's slots went to a single
+fixture. Now registers one. All three globes still glow; that's their
+emissive material, independent of light promotion.

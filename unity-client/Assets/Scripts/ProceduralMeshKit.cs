@@ -10,24 +10,61 @@ using UnityEngine;
 /// a creature body. Real generated meshes, not imported assets -- this
 /// environment has no DCC/Editor pipeline to author real ones.
 ///
-/// Every face is emitted in BOTH triangle windings (see Quad/Tri) rather
-/// than risking an invisible or wrong-shaded face from a winding-order
-/// mistake this environment has no Editor to visually catch. That
-/// doubles the triangle count -- fine for these small, few-per-scene
-/// props; not a pattern to copy for anything performance-sensitive.
+/// Winding order is fixed up programmatically (see FaceOutward) rather
+/// than trusted to hand-authoring, since this environment has no Editor
+/// to visually catch an inside-out face.
+///
+/// **2026-07 -- why NOT double-winding (the bug this replaces):** these
+/// helpers used to emit every face in BOTH windings, as belt-and-braces
+/// against a winding mistake. That silently destroyed lighting.
+/// `RecalculateNormals` sets each vertex normal to the average of the
+/// face normals sharing it -- with every face present in both windings,
+/// each contributes +N and -N, which cancel to EXACTLY ZERO. A zero
+/// normal makes dot(N, L) zero for every light, so the prop renders pure
+/// black no matter how bright/close/numerous the lights are. That is why
+/// the ornate lamppost and market stall stayed solid black while stock
+/// primitives around them lit correctly, and why no amount of tuning
+/// light range/intensity/bloom ever moved them. Emit each face ONCE.
 /// </summary>
 public static class ProceduralMeshKit
 {
     private static void Tri(List<int> tris, int a, int b, int c)
     {
         tris.Add(a); tris.Add(b); tris.Add(c);
-        tris.Add(a); tris.Add(c); tris.Add(b);   // reverse-wound twin
     }
 
     private static void Quad(List<int> tris, int a, int b, int c, int d)
     {
         Tri(tris, a, b, c);
         Tri(tris, a, c, d);
+    }
+
+    /// <summary>Re-winds any triangle that faces inward so every face
+    /// points away from the mesh centroid -- the Editor-free replacement
+    /// for the old double-winding safety net. Exact for CONVEX shapes
+    /// (both shapes here are convex); a concave mesh would need real
+    /// authored winding instead.
+    ///
+    /// Deliberately uses the SAME cross product Unity's own
+    /// RecalculateNormals does, so the test is self-consistent with the
+    /// normals that get generated straight after -- if this says a face
+    /// points outward, RecalculateNormals agrees.</summary>
+    private static void FaceOutward(List<Vector3> verts, List<int> tris)
+    {
+        var center = Vector3.zero;
+        for (var i = 0; i < verts.Count; i++) center += verts[i];
+        center /= Mathf.Max(1, verts.Count);
+
+        for (var t = 0; t + 2 < tris.Count; t += 3)
+        {
+            var a = verts[tris[t]];
+            var b = verts[tris[t + 1]];
+            var c = verts[tris[t + 2]];
+            var faceNormal = Vector3.Cross(b - a, c - a);
+            var outward = (a + b + c) / 3f - center;
+            if (Vector3.Dot(faceNormal, outward) >= 0f) continue;
+            var swap = tris[t + 1]; tris[t + 1] = tris[t + 2]; tris[t + 2] = swap;
+        }
     }
 
     /// <summary>A tapered cylinder -- centered at local origin like
@@ -60,6 +97,8 @@ public static class ProceduralMeshKit
             Tri(tris, topCenter, topRing[i], topRing[next]);
         }
 
+        FaceOutward(verts, tris);
+
         var mesh = new Mesh();
         mesh.vertices = verts.ToArray();
         mesh.triangles = tris.ToArray();
@@ -74,7 +113,7 @@ public static class ProceduralMeshKit
     /// the open/sloped side).</summary>
     public static Mesh Wedge()
     {
-        var v = new[]
+        var v = new List<Vector3>
         {
             new Vector3(-0.5f, -0.5f, -0.5f),  // 0 back-bottom-left
             new Vector3(0.5f, -0.5f, -0.5f),   // 1 back-bottom-right
@@ -90,8 +129,10 @@ public static class ProceduralMeshKit
         Tri(tris, 0, 2, 4);       // left end cap
         Tri(tris, 1, 5, 3);       // right end cap
 
+        FaceOutward(v, tris);
+
         var mesh = new Mesh();
-        mesh.vertices = v;
+        mesh.vertices = v.ToArray();
         mesh.triangles = tris.ToArray();
         mesh.RecalculateNormals();
         mesh.RecalculateBounds();
