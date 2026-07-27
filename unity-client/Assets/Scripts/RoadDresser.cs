@@ -50,7 +50,14 @@ public static class RoadDresser
         return mat;
     }
 
-    private static Material MTextured(string key, float r, float g, float b, Texture2D tex)
+    // `smoothness < 0` is a sentinel meaning "leave the shader's own
+    // default alone" -- every EXISTING caller (PoleMetal, ChromeTrim)
+    // omits it and keeps its prior look untouched. Metallic is
+    // deliberately NOT exposed here: wet asphalt's shine comes from a
+    // thin water film acting as a dielectric coating, not the surface
+    // being metal -- boosting Metallic would tint reflections with the
+    // road's own dark albedo instead of reading as a clear glint.
+    private static Material MTextured(string key, float r, float g, float b, Texture2D tex, float smoothness = -1f)
     {
         Material mat;
         if (TexturedCache.TryGetValue(key, out mat) && mat != null) return mat;
@@ -61,11 +68,22 @@ public static class RoadDresser
             mat.SetTexture("_BaseMap", tex);
             mat.SetTextureScale("_BaseMap", new Vector2(3f, 3f));
         }
+        if (smoothness >= 0f && mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", smoothness);
         TexturedCache[key] = mat;
         return mat;
     }
 
-    private static Material Asphalt() { return MTextured("asphalt-wet", 0.17f, 0.17f, 0.18f, PbrTextureAtlas.AsphaltWet); }
+    // 2026-07 creator report: "make the roads more reflective, I can
+    // barely see the lights on them." Nothing in this file ever set
+    // _Smoothness/_Metallic on ANY material -- every prop, including the
+    // road, was rendering at the URP/Lit shader's own default smoothness
+    // (~0.5, a middling matte-ish surface), which doesn't produce a
+    // tight, bright specular glint from a point/spot light the way wet
+    // pavement does. A high smoothness concentrates whatever light DOES
+    // hit the surface into a small, intense highlight -- that's the
+    // mechanism that makes a streetlight actually visible AS a reflection
+    // on the road, independent of the light's own intensity.
+    private static Material Asphalt() { return MTextured("asphalt-wet", 0.17f, 0.17f, 0.18f, PbrTextureAtlas.AsphaltWet, 0.92f); }
     private static Material Sidewalk() { return M(0.58f, 0.56f, 0.52f); }
     private static Material LanePaint() { return M(0.85f, 0.7f, 0.2f); }
     private static Material CrossPaint() { return M(0.85f, 0.84f, 0.8f); }

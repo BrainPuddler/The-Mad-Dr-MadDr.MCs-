@@ -4095,3 +4095,34 @@ future check meaningless without warning. Harness-only, lives outside
 the repo.
 
 None of this round's four changes have been seen in a real render yet.
+
+## docs/28: roads weren't reflective at all -- no material ever set Smoothness (2026-07)
+
+Creator confirmed the lighting timing (docs/28 row 12) is working, then:
+"make the roads more reflective, I can barely see the lights on them."
+
+Root cause: nothing in RoadDresser.cs's `M()`/`MTextured()` material
+helpers ever set `_Smoothness` or `_Metallic` on ANY material, ever --
+every prop in the city, including the road surface, has been rendering
+at the URP/Lit shader's own default smoothness (~0.5, a middling
+matte-ish response) since the very first version of this file. A
+mid-smoothness surface spreads whatever light hits it into a broad, dim
+specular response rather than concentrating it into a tight, bright
+highlight -- so even with the real streetlights now genuinely bright
+(docs/28 row 11's `spotIntensityMultiplier`) and correctly positioned,
+they were never going to read as a visible GLINT on the pavement itself,
+independent of how bright the light source is.
+
+Added an optional `smoothness` parameter to `MTextured()` (sentinel
+`-1` = leave the shader default alone, so `PoleMetal()`/`ChromeTrim()`
+-- the two other callers -- are untouched) and set `Asphalt()`
+specifically to 0.92 (high, tight highlight). Metallic deliberately left
+alone: wet asphalt's shine comes from a thin water film acting as a
+dielectric coating, not the road being literal metal -- boosting
+Metallic would tint reflections with the road's own dark albedo color
+instead of reading as a clean glint.
+
+Not numerically checkable the way earlier rows were (this is a shader
+property with no meaningful pass/fail math -- confirmed the code path
+compiles and passes the right constant, nothing more). Purely visual;
+needs an actual look in the Editor.

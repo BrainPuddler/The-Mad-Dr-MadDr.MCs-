@@ -42,6 +42,7 @@ condensed, current-state version.
 | 11 | Direction: "the down facing spotlight needs to be a lot brighter to read properly" | Not investigated as a bug — a Spot light's cone concentrates the same `intensity` into a narrower solid angle than a Point light, and Unity's spot attenuation reads noticeably dimmer per-pixel at a wide-ish 48° cone than an omnidirectional Point at the same value | New `DynamicLightBudget.spotIntensityMultiplier` (default 5), applied ONLY to Spot-type promoted lights on top of `peakIntensity` — Point lights (windows, ornate lamppost, etc.) are unaffected | **Untuned guess, same status as `peakIntensity` itself** — needs live nudging once visible, not yet seen in a render |
 | 12 | Direction, correcting row 10: "ALL the lights should turn off during the day" + "ramp on quickly, hold for the duration of the night, and turn shortly after dawn" | Row 10's shape held through all of Dawn and faded out gradually across the first half of Day (45s) — not what "shortly after dawn" meant. Also: `intensity`'s floor was 0.02 (near-zero, not off) and `neonBoost`'s floor was Day's own authored 0.35 ("barely visible," the ORIGINAL pre-this-whole-effort design intent) — neither was a true 0 | `ComputeNightIntensity` reshaped: fast ease-in over the first 25% of Dusk (unchanged), flat hold through the rest of Dusk + all of Night (unchanged), an eased fade-out over the first 35% of **Dawn** (~10.5s, moved from Day), flat hard 0 for the rest of Dawn + all of Day. Both `DynamicLightBudget`'s `intensity` and `LumenCycleController`'s `neonBoost` now `Lerp` from a hard `0f` floor instead of 0.02/0.35 | **Verified numerically against the compiled method** (reflection, every hold/fade segment boundary+midpoint re-sampled against the new shape) — not yet seen in a real render |
 | 13 | Direction: "the building can turn on randomly approaching night time, as if real humans were in the room and realize it's getting too dark... the same goes for late at night, imagine people going to bed... this can vary greatly, but not all lights go off" | Not a bug — `nightAmount` now holds perfectly flat through the whole night (row 12), so it structurally CAN'T tell "just got dark" apart from "3am" the way a per-window bedtime needs to; a new, independent clock was needed | New `DayNightState.CycleProgress` (raw 0..1 cycle position, doesn't hold flat) + new `LightBehaviorKind.Window` in `EmissiveAnimator`: each registration gets its own randomized (deterministic from the existing per-window `seed`, same "same seed always furnishes the same city" approach as everywhere else in this codebase) arrival time in [37.5%, 75%) of the cycle and bedtime in [75%, 98%) of the cycle, dark outside that span, lit (with the existing Flicker-style wobble) inside it, ~2.4s smoothstep transitions at each edge instead of a hard pop. 15% of windows are `AlwaysOn` and skip the bedtime check entirely ("not all lights go off"). `BuildingDresser`'s window registration switched from `Flicker` to `Window`. Purely an emissive/`MaterialPropertyBlock` effect (creator's own direction) — never touches `GlowPointRegistry`/`DynamicLightBudget`, no second real-light system | **Verified numerically** (reflection into `EmissiveAnimator`'s private state): 400 sampled registrations all landed in-range with correct ordering, the AlwaysOn rate came out to 15.25% against a 15% target, and the on/off gate function was confirmed 0 outside a window's span, 1 inside it, and permanently 1 for an AlwaysOn entry — not yet seen in a real render |
+| 14 | Confirmed row 12's timing is working, then: "make the roads more reflective, I can barely see the lights on them" | Nothing in `RoadDresser.cs`'s `M()`/`MTextured()` material helpers has EVER set `_Smoothness`/`_Metallic`, on ANY material, since the file's first version — every prop including the road has always rendered at the URP/Lit shader's own default smoothness (~0.5, a diffuse-leaning middling response). A mid-smoothness surface spreads light into a broad, dim specular response instead of a tight bright glint, so even a correctly-positioned, correctly-bright real light (rows 11/12) was never going to visibly reflect off the pavement itself | Added an optional `smoothness` param to `MTextured()` (sentinel `-1` = leave shader default, so `PoleMetal()`/`ChromeTrim()` are untouched); `Asphalt()` now passes 0.92. `_Metallic` deliberately left alone — wet asphalt's shine is a thin water film acting as a dielectric coating, not the road being literal metal; boosting Metallic would tint reflections with the road's own dark albedo instead of a clean glint | **Not numerically checkable** (a shader property with no meaningful pass/fail math) — confirmed only that the code path compiles and passes the intended constant; purely visual, needs an actual look |
 
 **Row 1's own description of `nightAmount` "decaying through the back
 half of the night phase" is now historical** — that was true of the OLD
@@ -49,16 +50,16 @@ mechanism at the time it caused the `bloomScale` bug; row 10 (itself now
 superseded by row 12) replaced that mechanism, and `nightAmount` now
 holds flat through the whole night instead.
 
-**As of the last commit: rows 1, 3, 4, 5, 5b, 6, 7 are creator-confirmed
-working. Row 8 (wall-clearance) is still unverified — visibility being
-fixed doesn't confirm position is correct, those are independent
-questions. Row 9 confirms the lighting pipeline works end-to-end;
-`peakIntensity`'s actual value (currently 12, an untuned placeholder) is
-still an open tuning task, not a bug hunt — same status now applies to
-row 11's new `spotIntensityMultiplier` (5, also untuned). Rows 12 and 13
-are reasoned + numerically checked against the actual compiled/reflected
-code, but NONE of rows 11-13 have been seen in a real render yet — that
-whole block is the active open thread.**
+**As of the last commit: rows 1, 3, 4, 5, 5b, 6, 7, and 12 (the fade
+timing, explicitly) are creator-confirmed working. Row 8
+(wall-clearance) is still unverified — visibility being fixed doesn't
+confirm position is correct, those are independent questions. Row 9
+confirms the lighting pipeline works end-to-end; `peakIntensity`'s
+actual value (currently 12, an untuned placeholder) is still an open
+tuning task, not a bug hunt — same status now applies to row 11's
+`spotIntensityMultiplier` (5) and row 14's `Asphalt()` smoothness (0.92),
+both also untuned/unconfirmed. Row 13 (window occupancy) is reasoned +
+numerically checked but not yet seen in a real render.**
 
 ## 0. The core problem with "just add more Lights"
 
