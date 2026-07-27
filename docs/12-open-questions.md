@@ -4486,3 +4486,86 @@ Note: the static `m_ShadowDistance` values set in `PC_RPAsset.asset`/
 pre-first-Update()/Editor-preview fallback -- this component overwrites
 them within the same frame during actual play. Left them in place
 rather than reverting; harmless, and still a sane fallback.
+
+## 2026-07: Sun elevation not visibly moving during Day/Night (docs/28 row 24)
+
+Creator, after confirming the shadow-distance fix (row 23): "so are the
+shadows baked? is that why they don't animate when the sun rises and
+sets?" then, correcting the actual target once I'd ruled baking out:
+"The sun should be moving throughout the day not just sunrise and
+sunset!"
+
+Checked the baked-lighting hypothesis first, since it's a reasonable
+thing to suspect and I hadn't explicitly ruled it out before: no
+GameObject in this codebase ever sets `isStatic`/`staticEditorFlags`
+(confirmed by grep across `unity-client/Assets/Scripts`), and
+`SampleScene.unity`'s `LightmapSettings` block has `m_LightingSettings:
+{fileID: 0}` -- no Lighting Settings asset is assigned to the scene at
+all. Baked lightmaps need static geometry to bake onto and a Lighting
+Settings asset to bake with; neither exists here. The sun itself
+(`LumenCycleController.Start()`) is a plain `AddComponent<Light>()`
+created fresh every session with `shadows = LightShadows.Soft` and its
+`lightmapBakeType` never touched -- worth noting as the same "property
+never explicitly set" pattern as elsewhere in this file, but with zero
+static geometry to bake against it can't be the cause of anything
+looking frozen. Structurally: nothing here is baked.
+
+That redirected the real question to why elevation specifically reads
+as static-looking. Found it in `ApplyBlend()`: `SunYawDeg` (compass
+direction) already got the "proportion the sweep to phase duration"
+treatment in row 20, but `SunElevationDeg` was still just
+`Mathf.Lerp(a.SunElevationDeg, b.SunElevationDeg, blend)` between
+adjacent phase keyframes -- locking the SWEEP MAGNITUDE to whatever the
+two authored values happen to differ by, with no regard for how long
+that phase lasts. Dawn (30s) and Day (90s) both authored a 27-degree
+swing (3->30, 30->3 respectively), so elevation moved 3x faster during
+Dawn than during Day; Dusk/Night had the same 3x mismatch (11 degrees
+over 30s vs 11 degrees over 90s). Yaw sweeps the compass at a constant,
+clearly-visible rate all day; elevation all but crawled through the
+long Day/Night phases and only visibly bobbed during the short Dawn/
+Dusk windows -- exactly "moving throughout the day, not just sunrise
+and sunset."
+
+Fix: `LumenCycleController.ComputeSunElevationDeg(int cycleT)`, a new
+dedicated function (same shape as `ComputeNightIntensity` -- this file's
+established pattern for "the plain per-phase Lerp doesn't fit this
+field") that treats elevation as one continuous arc across the WHOLE
+2400-tick cycle instead of four independent phase-to-phase blends. The
+peak and trough sit at each long phase's MIDPOINT (solar noon at
+tick 750 = Dawn's 300 ticks + half of Day's 900; solar midnight at
+tick 1950 = Dusk's end (1500) + half of Night's 900) rather than only
+at phase boundaries, so the climb from Dawn's low anchor (3 deg) to
+Day's peak (30 deg) spans Dawn plus the FIRST half of Day, and the
+descent from that peak to Dusk's low anchor (3 deg) spans the SECOND
+half of Day plus all of Dusk -- every tick of Day sits inside an
+actively-moving segment. Night mirrors this around its own trough
+(-8 deg). Reuses the exact same four authored elevation values already
+in `BuildGrades` (Dawn/Dusk 3, Day 30, Night -8) -- no new tuning
+numbers, purely a different interpolation between them, so this doesn't
+touch "long shadows at sunrise/sunset" (still the elevation floor at
+both transition boundaries) or "kept low, never a high overhead noon
+angle" (peak is still 30, same as before).
+
+Each of the four segments still eases with `SmoothStep`, matching this
+controller's existing "unhurried" style. That does mean the two
+PASS-THROUGH points (the Dawn-anchor/cycle-wrap and the Dusk-anchor,
+where the sun is mid-climb/mid-descent, not actually turning around)
+get a brief, momentary softening right at that instant from both
+adjoining segments' SmoothStep flattening toward their own endpoints --
+a small cosmetic wrinkle, not a functional dead zone, and confirmed
+below to be far smaller than the bug it replaces.
+
+Verified via reflection against the compiled `ComputeSunElevationDeg`
+(temporary harness, removed after verifying): the four keyframe values
+(3 at cycleT=0, 30 at cycleT=750, 3 at cycleT=1200, -8 at cycleT=1950)
+all matched exactly; the function is continuous across the full cycle
+(max single-tick step 0.09 deg, no jump); every 90-tick sliding window
+inside Day and inside Night moves at least 0.5 degrees EXCEPT the two
+windows straddling the genuine peak/trough themselves (expected --
+a real sun legitimately slows near solar noon/midnight, confirmed by
+checking a window well clear of each extremum still moves several
+degrees); and the old bug's headline number -- average rate across Dawn
+vs. average rate across Day's climb half -- went from the old code's
+exact 3.0x mismatch to 0.81x (i.e. now roughly comparable, no longer a
+one-phase-crawls-the-other-doesn't split). Not yet seen in a real
+render.

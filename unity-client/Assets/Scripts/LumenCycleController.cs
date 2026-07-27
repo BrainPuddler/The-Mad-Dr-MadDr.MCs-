@@ -340,7 +340,18 @@ public class LumenCycleController : MonoBehaviour
         // light TRAVELS, so an X-euler of 0 is horizontal (elevation 0,
         // sunrise/sunset) and 90 points straight down (elevation 90, noon
         // overhead) -- X-euler == elevation directly, no 90-minus flip.
-        var elevation = Mathf.Lerp(a.SunElevationDeg, b.SunElevationDeg, blend);
+        //
+        // 2026-07 creator: "the sun should be moving throughout the day,
+        // not just sunrise and sunset." Unlike SunYawDeg (below), elevation
+        // was still using the plain adjacent-phase Lerp -- which locks each
+        // phase's elevation SWEEP to whatever its two authored keyframes
+        // happen to differ by, with no regard for how long that phase
+        // actually lasts. Dawn (30s) and Day (90s) both authored a
+        // 27-degree swing, so elevation moved 3x faster during Dawn than
+        // during Day -- a visible bob at the Dawn/Dusk transitions, a
+        // near-flat crawl through the long Day/Night phases. See
+        // ComputeSunElevationDeg below.
+        var elevation = ComputeSunElevationDeg(cycleT);
         // Yaw sweeps the compass continuously across the whole cycle
         // (Dawn->Day->Dusk->Night->next Dawn), each phase's own
         // SunYawDeg a waypoint on ONE monotonic sweep, proportioned to
@@ -485,6 +496,65 @@ public class LumenCycleController : MonoBehaviour
         }
 
         return 1f;   // Night: fully on the whole phase
+    }
+
+    /// <summary>Sun elevation as one continuous arc across the whole
+    /// cycle, instead of ApplyBlend's old plain adjacent-phase Lerp
+    /// (which SunYawDeg's own comment already explains the same problem
+    /// for: sweep magnitude locked to two authored keyframes' raw
+    /// difference, with no regard for how long the phase between them
+    /// actually lasts). 2026-07 creator: "the sun should be moving
+    /// throughout the day, not just sunrise and sunset."
+    ///
+    /// Fix: put the peak and trough at each long phase's MIDPOINT (solar
+    /// noon, solar midnight) instead of only at phase boundaries, so the
+    /// climb from Dawn's low anchor to Day's peak spans Dawn + the first
+    /// half of Day, and the descent from that peak to Dusk's low anchor
+    /// spans the second half of Day + Dusk -- every tick of Day sits
+    /// inside an actively-moving segment, none of it a flat crawl. Same
+    /// shape mirrored for Night's trough. Reuses BuildGrades' own
+    /// authored elevation keyframes (Dawn/Dusk both low, Day the peak,
+    /// Night the trough) -- no new tuning numbers, just a different
+    /// interpolation between the same four values.
+    ///
+    /// Each of the 4 segments still eases with SmoothStep (matching this
+    /// controller's "unhurried" style everywhere else) -- the two real
+    /// turning points (midday peak, midnight trough) get a genuine
+    /// rounded top/bottom from that; the two pass-through points (Dawn's
+    /// own anchor at the wrap, Dusk's own anchor) get a momentary, brief
+    /// softening right at that instant rather than a true stop -- a small
+    /// trade-off, and a far smaller one than the 3x sustained rate
+    /// mismatch this replaces.</summary>
+    private float ComputeSunElevationDeg(int cycleT)
+    {
+        var dawnElev = _grades[(int)LumenPhase.Dawn].SunElevationDeg;
+        var dayPeakElev = _grades[(int)LumenPhase.Day].SunElevationDeg;
+        var duskElev = _grades[(int)LumenPhase.Dusk].SunElevationDeg;
+        var nightTroughElev = _grades[(int)LumenPhase.Night].SunElevationDeg;
+
+        var dawnEnd = LumenClock.DawnTicks;
+        var midDay = dawnEnd + LumenClock.DayTicks / 2;
+        var dayEnd = dawnEnd + LumenClock.DayTicks;
+        var duskEnd = dayEnd + LumenClock.DuskTicks;
+        var midNight = duskEnd + LumenClock.NightTicks / 2;
+
+        if (cycleT < midDay)
+        {
+            var progress = cycleT / (float)midDay;
+            return Mathf.Lerp(dawnElev, dayPeakElev, Mathf.SmoothStep(0f, 1f, progress));
+        }
+        if (cycleT < dayEnd)
+        {
+            var progress = (cycleT - midDay) / (float)(dayEnd - midDay);
+            return Mathf.Lerp(dayPeakElev, duskElev, Mathf.SmoothStep(0f, 1f, progress));
+        }
+        if (cycleT < midNight)
+        {
+            var progress = (cycleT - dayEnd) / (float)(midNight - dayEnd);
+            return Mathf.Lerp(duskElev, nightTroughElev, Mathf.SmoothStep(0f, 1f, progress));
+        }
+        var wrapProgress = (cycleT - midNight) / (float)(LumenClock.CycleTicks - midNight);
+        return Mathf.Lerp(nightTroughElev, dawnElev, Mathf.SmoothStep(0f, 1f, wrapProgress));
     }
 
     private static PhaseGrade[] BuildGrades(CityRegion region)
