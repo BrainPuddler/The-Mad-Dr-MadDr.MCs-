@@ -95,6 +95,36 @@ public class LumenCycleController : MonoBehaviour
     [Range(0f, 40f)]
     public float fogGlowBoost = 15f;
 
+    // 2026-07 creator: "I want the lights to truly pop, bright and
+    // diffuse through the fog" (referencing an HDRP volumetric-fog
+    // technique -- see the maddr-lighting-system skill for why that
+    // specific approach doesn't port to this project's URP pipeline, and
+    // what a URP-native "light source fog" approximation looks like).
+    //
+    // Two DIFFERENT Bloom parameters were never explicitly set anywhere
+    // in this file before now, both silently riding whatever URP's
+    // Bloom component defaults to:
+    //  - `scatter` controls how FAR/SOFT the blur spreads -- the actual
+    //    "diffuse" knob (bigger = a wider, hazier glow), distinct from
+    //    `intensity` (how much bloom gets ADDED, i.e. brightness).
+    //    fogGlowBoost above only ever touched intensity.
+    //  - `threshold` is the HDR brightness cutoff above which a pixel
+    //    blooms at all -- lower means more of the scene contributes,
+    //    which is the "pop" half: at a high default threshold, only the
+    //    very brightest core of a light blooms; lowering it lets a
+    //    bigger share of each light's own brightness read as glow.
+    [Tooltip("Base Bloom scatter (spread/softness of the blur) at every time of day -- URP's own field, just never wired up here before. Higher = a wider, hazier glow.")]
+    [Range(0f, 1f)]
+    public float bloomScatter = 0.7f;
+
+    [Tooltip("How much CURRENT fog density ADDS to bloomScatter (clamped to 1) -- fog specifically makes the glow more diffuse/spread-out, not just brighter. 0 = fog doesn't change scatter.")]
+    [Range(0f, 50f)]
+    public float fogDiffusionBoost = 8f;
+
+    [Tooltip("HDR brightness cutoff above which a pixel blooms at all. LOWER this for lights to 'pop' more readily -- URP's own Bloom default (~0.9) is fairly conservative, letting only a light's brightest core bloom.")]
+    [Range(0f, 2f)]
+    public float bloomThreshold = 0.6f;
+
     [Tooltip("Ambient light at full night. Near 0 gives a genuinely dark night the lamps can pool against.")]
     [Range(0f, 0.3f)]
     public float nightAmbient = 0.02f;
@@ -133,6 +163,9 @@ public class LumenCycleController : MonoBehaviour
         if (profile == null) return;
         bloomScale = profile.BloomScale;
         fogGlowBoost = profile.FogGlowBoost;
+        bloomScatter = profile.BloomScatter;
+        fogDiffusionBoost = profile.FogDiffusionBoost;
+        bloomThreshold = profile.BloomThreshold;
         nightAmbient = profile.NightAmbientBrightness;
     }
 
@@ -194,6 +227,7 @@ public class LumenCycleController : MonoBehaviour
         _vignette.intensity.overrideState = true;
         _bloom.intensity.overrideState = true;
         _bloom.threshold.overrideState = true;
+        _bloom.scatter.overrideState = true;
         _filmGrain.intensity.overrideState = true;
         _tonemapping.mode.overrideState = true;
         _tonemapping.mode.value = TonemappingMode.ACES;   // filmic tonemapping, per §10's own target look
@@ -365,6 +399,16 @@ public class LumenCycleController : MonoBehaviour
         // glow specifically when it's foggy, not just a flat multiplier.
         var fogGlow = 1f + fogDensity * fogGlowBoost;
         _bloom.intensity.value = Mathf.Lerp(a.BloomIntensity, b.BloomIntensity, blend) * bloomScale * fogGlow;
+        // threshold/scatter were both previously left at whatever URP's
+        // Bloom component defaults to -- never assigned despite threshold
+        // having overrideState=true since Phase 1. scatter is the actual
+        // "diffuse" lever (spread of the blur); threshold is the "pop"
+        // lever (how much of each light's own brightness counts at all).
+        // Fog specifically widens scatter -- "diffuse through the fog" --
+        // clamped to 1 since it's a normalized URP parameter, not an
+        // open-ended multiplier like intensity.
+        _bloom.threshold.value = bloomThreshold;
+        _bloom.scatter.value = Mathf.Clamp01(bloomScatter + fogDensity * fogDiffusionBoost);
         _filmGrain.intensity.value = Mathf.Lerp(a.FilmGrainIntensity, b.FilmGrainIntensity, blend);
     }
 

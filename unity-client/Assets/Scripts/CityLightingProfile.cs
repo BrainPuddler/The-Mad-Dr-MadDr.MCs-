@@ -89,6 +89,18 @@ public class CityLightingProfile : ScriptableObject
     [Range(0f, 40f)]
     public float FogGlowBoost = 15f;
 
+    [Tooltip("Base Bloom scatter (spread/softness of the blur) at every time of day. Higher = a wider, hazier glow -- the actual 'diffuse' knob, distinct from intensity.")]
+    [Range(0f, 1f)]
+    public float BloomScatter = 0.7f;
+
+    [Tooltip("How much CURRENT fog density adds to BloomScatter (clamped to 1) -- fog specifically makes the glow more diffuse, not just brighter.")]
+    [Range(0f, 50f)]
+    public float FogDiffusionBoost = 8f;
+
+    [Tooltip("HDR brightness cutoff above which a pixel blooms at all. Lower = lights 'pop' more readily.")]
+    [Range(0f, 2f)]
+    public float BloomThreshold = 0.6f;
+
     [Tooltip("Ambient light brightness at full Night -- near 0 for a genuinely dark night the lamps/windows/signs can stand out against.")]
     [Range(0f, 1f)]
     public float NightAmbientBrightness = 0.02f;

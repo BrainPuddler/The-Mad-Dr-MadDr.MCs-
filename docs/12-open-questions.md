@@ -4235,3 +4235,52 @@ sitting exactly on the ground plane is degenerate (near-zero effective
 FOV) -- 8 was already the zoom code's own established floor before this
 change, reused rather than inventing a second number for "how low can
 this camera usefully go."
+
+## docs/28 row 18: bloom scatter/threshold wired up + maddr-lighting-system skill (2026-07)
+
+Creator: "I want the lights to truly pop, bright and diffuse through the
+fog. use something like this: [Medium article, 'Creating Light-Source
+Fog In Unity HDRP']. add it to your lighting skill." Fetched the article
+(direct fetch 403'd, corroborated via search results instead) to confirm
+the exact mechanism before responding: HDRP's `HDAdditionalLightData`
+"Volumetric" light toggle + a Fog Volume override with volumetric fog
+enabled, or a `LocalVolumetricFog` box component. Both are HDRP-only --
+`UnityEngine.Rendering.HighDefinition` namespace, no URP equivalent.
+This project is confirmed URP (CLAUDE.md, `ShaderUtil.
+FindRenderableShader()`, the whole Volume stack in LumenCycleController).
+Flagged the mismatch rather than attempting a literal port; creator
+confirmed "stay in URP tho."
+
+Found a real, useful lever within URP's own Bloom component instead:
+`Bloom.scatter` (spread/softness of the blur -- the actual "diffuse"
+knob, distinct from `intensity`) had never been touched anywhere in this
+codebase. `Bloom.threshold` was WORSE than untouched -- its
+`overrideState` was set to `true` since Phase 1, but the VALUE itself
+was never assigned, so it silently rode URP's own default (~0.9) the
+entire time. Same "flag/mode set, value never actually driven" shape as
+the ambientMode bug (docs/28 row 5b) and the Per-Vertex rendering-mode
+bug (row 5) -- worth naming as its own recurring pattern now that it's
+shown up a third time.
+
+Added: `bloomScatter` (base scatter) + `fogDiffusionBoost` (fog-density-
+driven additive boost to scatter, clamped to 1) for "diffuse through the
+fog"; `bloomThreshold` (explicit, lower than URP's own default) for
+"pop." All three wired into `ApplyBlend()`'s per-frame Bloom assignment
+and mirrored onto `CityLightingProfile`.
+
+Per the "add it to your lighting skill" request: created `.claude/
+skills/maddr-lighting-system/SKILL.md`, mirroring the existing
+`maddr-aesthetic-preferences` skill's format/depth. Captures (1) the
+URP-only pipeline boundary and this specific HDRP-article mismatch as a
+concrete example of how to handle a reference technique from the wrong
+pipeline, (2) the two-tier light-budget architecture, (3) the actual
+"light source fog" mechanism now in place, (4) the recurring "property
+never explicitly set, silently used SOME default" bug pattern across
+ambientMode/Per-Vertex/double-winding-normals/this-round's-threshold as
+one named class of bug to check for first, and (5) this session's
+verification discipline (flightcheck harness, catching broken stubs,
+asking rather than guessing a third number). Points back to docs/28 §0.5
+as the source of truth rather than duplicating its full detail.
+
+Reasoned, not numerically checkable (pure Bloom/shader parameters, no
+meaningful pass/fail math) -- not yet seen in a real render.
