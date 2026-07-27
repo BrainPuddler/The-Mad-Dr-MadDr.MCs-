@@ -90,6 +90,7 @@ public class LumenCycleController : MonoBehaviour
     private Bloom _bloom;
     private FilmGrain _filmGrain;
     private Tonemapping _tonemapping;
+    private Exposure _exposure;
 
     /// <summary>Call once, right after AddComponent -- region is known to
     /// the caller (RuntimeCityBuilder already generated the CityModel) but
@@ -143,6 +144,7 @@ public class LumenCycleController : MonoBehaviour
         _bloom = profile.Add<Bloom>(true);
         _filmGrain = profile.Add<FilmGrain>(true);
         _tonemapping = profile.Add<Tonemapping>(true);
+        _exposure = profile.Add<Exposure>(true);
 
         _colorAdjustments.postExposure.overrideState = true;
         _colorAdjustments.saturation.overrideState = true;
@@ -155,10 +157,33 @@ public class LumenCycleController : MonoBehaviour
         _tonemapping.mode.overrideState = true;
         _tonemapping.mode.value = TonemappingMode.ACES;   // filmic tonemapping, per §10's own target look
 
+        // 2026-07 creator question: "does it have anything to do with
+        // autoexposure?" -- yes, potentially: nothing here previously
+        // touched URP's actual Exposure component at all (postExposure
+        // above is a manual ColorAdjustments EV offset, a DIFFERENT
+        // thing). If the project's URP template scene ships a default
+        // Volume with Exposure set to Automatic, it was still fully
+        // active and untouched by any of this -- and auto-exposure
+        // metering a genuinely dark night scene would crank up gain,
+        // inflating every bright emissive point BEFORE Bloom even sees
+        // it, completely independent of emissiveScale/nightBloom. Forcing
+        // Fixed mode here, at a high priority so this volume wins over
+        // any pre-existing scene volume, removes that variable entirely.
+        _exposure.mode.overrideState = true;
+        _exposure.mode.value = ExposureMode.Fixed;
+        _exposure.fixedExposure.overrideState = true;
+        _exposure.fixedExposure.value = 0f;
+        _exposure.compensation.overrideState = true;
+        _exposure.compensation.value = 0f;
+
         var volumeGo = new GameObject("LumenCyclePostStack");
         var volume = volumeGo.AddComponent<Volume>();
         volume.isGlobal = true;
-        volume.priority = 0f;
+        // high priority so this volume's overrides win over any
+        // pre-existing default Volume the URP project template may have
+        // shipped with (see the Exposure note above) -- this is the
+        // AUTHORED look, it should never lose a tie to a template default.
+        volume.priority = 100f;
         volume.weight = 1f;
         volume.profile = profile;
     }

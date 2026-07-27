@@ -3472,3 +3472,29 @@ profile can't silently undo this correction.
 Still not visually verified from this side (no Editor) -- but unlike the
 previous two attempts, the point here is that the numbers no longer need
 to be right the first time: every one of them is now a live slider.
+
+## docs/28: force Fixed exposure -- creator asked "autoexposure?" (2026-07)
+
+Good catch, and a real gap: nothing built so far touched URP's actual
+`Exposure` volume component at all -- `ColorAdjustments.postExposure`
+(which `LumenCycleController` does animate) is a DIFFERENT, manual EV
+offset layered on top of whatever the real exposure/metering does, not
+the same thing. If the project's URP template scene shipped a default
+Volume with Exposure set to Automatic (common in fresh URP template
+scenes), it would have been silently active this whole time, invisible
+to every knob added so far -- auto-exposure metering a scene this
+project just made genuinely dark at night would crank up gain, inflating
+every bright emissive point BEFORE Bloom even sees it, independent of
+`emissiveScale`/`nightBloom`/anything else.
+
+Fixed by adding an explicit `Exposure` override to
+`LumenCycleController`'s runtime-built Volume: Mode=Fixed,
+fixedExposure=0, compensation=0, all override-stated. Also raised that
+Volume's own `priority` from 0 to 100 so its overrides win over ANY
+pre-existing scene Volume regardless of tie-breaking order -- the
+authored look should never lose a priority tie to a template default.
+
+Not confirmed from this side whether the project's actual scene had an
+Automatic-exposure Volume in the first place (no Editor access) -- but
+removing the possibility entirely costs nothing and closes a real gap
+either way.
