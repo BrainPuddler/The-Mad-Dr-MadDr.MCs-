@@ -3905,3 +3905,28 @@ worth checking next: is DynamicLightBudget actually promoting THIS
 prop's glow point (nearest-N budget competition), or is the Light
 GameObject disabled/inactive, or is there a camera/rendering-layer
 mismatch not yet considered.
+
+## docs/28: intensity diagnostic confirmed lights render; backed off from blown-out default (2026-07)
+
+Creator confirmed real lights ARE visible with `peakIntensity` at the
+deliberately blown-out diagnostic value of 80 -- rules out "not
+rendering at all" for good. Also confirms row 7 (the culling fix for
+ornate-lamppost-pole/market-stall-canopy) actually worked: the props are
+visible, not back-face culled.
+
+No config bug found to explain why the ORIGINAL 0.7 default was
+apparently invisible -- checked specifically for a Physical Light Units
+mismatch (would show up as an intensity/lumens scale gap exactly like
+this) on the Pipeline Asset; not present. Simplest remaining explanation
+is 0.7 was just genuinely too dim against this scene's ambient/exposure,
+not a bug.
+
+Backed `peakIntensity` off from 80 (diagnostic extreme) to 12 (untuned
+middle-ground starting point) on both `DynamicLightBudget` and
+`CityLightingProfile`. Explicitly NOT claiming 12 is correct -- nobody
+has tested intermediate values between the old invisible 0.7 and the
+working-but-blown-out 80, so the actual "looks right" number is still
+unknown. This field is read live every refresh specifically so it can
+be nudged in Play mode without another code round-trip; that's the
+fastest path to the real number now that end-to-end visibility is
+confirmed working.

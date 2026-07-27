@@ -73,18 +73,26 @@ public class DynamicLightBudget : MonoBehaviour
     [Range(0, 128)]
     public int budget = 24;
 
-    // 2026-07 creator diagnostic: "can't see lights, make them at least
-    // 40-120 just to make sure it's not an intensity thing." The old
-    // [Range(0f, 5f)] made that physically impossible to test -- the
-    // Inspector slider itself capped any value at 5. Widened so the
-    // ceiling doesn't get in the way of the diagnostic; default bumped
-    // deliberately high (blown-out bright) rather than a "reasonable"
-    // number, since the point right now is maximum visibility, not a
-    // good look. Turn this back down toward 0.5-1.5 once it's confirmed
-    // a real light is visible at all.
+    // 2026-07: the diagnostic worked -- creator confirmed real lights
+    // ARE visible at the deliberately-blown-out 80 default, which rules
+    // out "not rendering at all" and narrows this to plain intensity
+    // tuning. The old 0.7 default (this component's original number)
+    // apparently really was just too dim to read on the creator's setup;
+    // no config bug found to explain the gap (checked: no Physical Light
+    // Units flag on the Pipeline Asset, which would've explained an
+    // intensity/lumens scale mismatch -- it's just off).
+    //
+    // Backed off from the 80 diagnostic extreme to a middle-ground
+    // starting point, NOT a confirmed-good final value -- the true
+    // "looks right" threshold between the old invisible 0.7 and the
+    // blown-out 80 hasn't been narrowed down by testing intermediate
+    // values yet. This field is read live every ~0.35s refresh
+    // specifically so it can be nudged in Play mode without a code
+    // round-trip -- that's the fastest way to find the real number now
+    // that visibility itself is confirmed working.
     [Tooltip("Intensity a promoted light reaches at full night. Turn this DOWN if lit areas look blown out. Note: this does NOT control the glowing bulb spheres themselves -- those are emissive geometry, see LumenCycleController's emissive/bloom fields.")]
     [Range(0f, 150f)]
-    public float peakIntensity = 80f;
+    public float peakIntensity = 12f;
 
     // 2026-07 correction: an earlier pass here cut this to 3f on the
     // theory that 7f was washing over neighboring props. Wrong call --
