@@ -116,7 +116,13 @@ public class LumenCycleController : MonoBehaviour
     {
         if (_grades == null) _grades = BuildGrades(CityRegion.Generic);
 
-        var sunGo = new GameObject("LumenCycleSun");
+        // 2026-07 creator confusion: these auto-created objects have no
+        // tunable fields of their own -- everything here gets overwritten
+        // from LumenCycleController's OWN fields (on the RuntimeCityBuilder
+        // GameObject) every frame, so hand-editing THESE never sticks.
+        // Named defensively so that's obvious in the Hierarchy instead of
+        // discovered the hard way.
+        var sunGo = new GameObject("(auto) Sun -- edit LumenCycleController instead");
         _sun = sunGo.AddComponent<Light>();
         _sun.type = LightType.Directional;
         _sun.shadows = LightShadows.Soft;
@@ -176,7 +182,7 @@ public class LumenCycleController : MonoBehaviour
         _exposure.compensation.overrideState = true;
         _exposure.compensation.value = 0f;
 
-        var volumeGo = new GameObject("LumenCyclePostStack");
+        var volumeGo = new GameObject("(auto) Post Stack -- edit LumenCycleController instead");
         var volume = volumeGo.AddComponent<Volume>();
         volume.isGlobal = true;
         // high priority so this volume's overrides win over any

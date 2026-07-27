@@ -142,7 +142,13 @@ public class DynamicLightBudget : MonoBehaviour
 
         while (_pool.Count < _picked.Count)
         {
-            var go = new GameObject("DynamicLight");
+            // 2026-07 creator confusion: these pooled lights have no
+            // tunable fields of their own -- position/color/intensity/
+            // range are overwritten from THIS component's own fields
+            // every refresh (~3x/sec), so hand-editing one directly in
+            // the Hierarchy never sticks. Named defensively so that's
+            // obvious instead of discovered the hard way.
+            var go = new GameObject("(auto) pooled light -- edit DynamicLightBudget instead");
             var light = go.AddComponent<Light>();
             light.type = LightType.Point;
             light.shadows = LightShadows.None;   // budget fill lights -- never shadow casters

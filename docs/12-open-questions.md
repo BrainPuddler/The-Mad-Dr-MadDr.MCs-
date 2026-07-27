@@ -3498,3 +3498,40 @@ Not confirmed from this side whether the project's actual scene had an
 Automatic-exposure Volume in the first place (no Editor access) -- but
 removing the possibility entirely costs nothing and closes a real gap
 either way.
+
+## docs/28: "dragging sliders, toggling lights on/off no effect" (2026-07)
+
+Creator report after the live-tunability fix. Code review confirmed the
+wiring itself is correct (emissiveScale/nightBloom/nightAmbient/budget/
+peakIntensity/range/enableRealLights are all genuinely read fresh every
+frame or refresh cycle, no baking bug) -- the likely cause is a UX trap,
+not a logic bug: `LumenCycleController`/`DynamicLightBudget` each
+auto-create separate GameObjects at runtime (`"LumenCycleSun"`,
+`"LumenCyclePostStack"`, and one `"DynamicLight"` per pooled real light)
+that are easy to find in the Hierarchy and easy to mistake for "the
+light" -- but none of them carry the tunable fields. Editing them
+directly (e.g. a pooled light's own Intensity) gets silently overwritten
+by the owning component on its next refresh (`DynamicLightBudget`
+repositions/recolors/resizes its whole pool ~3x/second), which reads as
+"no effect" even though the drag itself worked for one instant.
+
+The ACTUAL fields live on the `LumenCycleController`/`DynamicLightBudget`
+script components themselves, sitting on the `RuntimeCityBuilder`
+GameObject (added there by `RuntimeCityBuilder.Start()`), not on any of
+their auto-created children.
+
+Renamed every auto-created object defensively so this can't happen
+again: `"(auto) Sun -- edit LumenCycleController instead"`, `"(auto)
+Post Stack -- edit LumenCycleController instead"`, `"(auto) pooled light
+-- edit DynamicLightBudget instead"`.
+
+Also flagged (not yet confirmed) a second, simpler possibility: several
+of these fields are weighted by how far into night the cycle currently
+is (`nightAmount`) -- testing at midday would show near-zero effect from
+`nightBloom`/`nightAmbient`/real-light intensity by design, independent
+of any bug. Pointed the creator at the existing `N`-key 20x time-lapse
+toggle to reach full night quickly for testing.
+
+Not re-confirmed from this side (no Editor access) -- this is a
+plausible, reasoned diagnosis based on the actual object-creation code,
+not a guess at new numbers.
