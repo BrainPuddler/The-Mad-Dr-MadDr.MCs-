@@ -4401,3 +4401,39 @@ dark gray (0.35/0.34/0.36) two rounds ago to a genuinely light gray
 
 Neither this round's sun changes nor the road color have been seen in a
 real render yet.
+
+## docs/28 row 22: shadows weren't rendering at all -- URP shadow distance shorter than the default camera view (2026-07)
+
+Creator: "I see the light shifting but not the shadows." Not a bug in
+last round's sun-sweep math (already verified against the compiled
+code) -- checked the actual camera framing instead. `RuntimeCityBuilder.
+Build()` calls `rig.SnapTo(WorldOf(_city.CenterHex), 70f)`, and
+`SimpleCameraRig.SnapTo` positions the camera at `focus + (0, distance,
+-distance*0.8)` -- i.e. `(0, 70, -56)` relative to the city center, a
+straight-line distance of sqrt(70^2+56^2) =~ 89.6 units. Both
+`PC_RPAsset.asset` and `Mobile_RPAsset.asset` had `m_ShadowDistance: 50`
+-- shorter than even the DEFAULT starting camera distance, before any
+zooming out at all (`SimpleCameraRig.MaxHeight` allows zooming out to
+400). Ambient/color/sun-tint changes aren't distance-limited (they're
+whole-scene RenderSettings), so they stayed visible everywhere -- actual
+shadow casting requires being within `m_ShadowDistance` of the camera,
+which wasn't true for most of the visible city even at the default
+zoom. This is why "the light shifting" was visible but "the shadows"
+were not: the shadow system was never getting the chance to render at
+all in the typical view, regardless of how correct the sun's rotation
+math was (row 20 already verified that math independently).
+
+Also checked and ruled out, since they're both quick, real ways this
+class of bug can happen: `_sun.shadows` IS set (`LightShadows.Soft`,
+`LumenCycleController.Start()`); nothing in `RoadDresser`/
+`BuildingDresser`/`RuntimeCityBuilder` marks generated geometry static
+or touches `Renderer.shadowCastingMode`/`receiveShadows` away from
+Unity's own defaults (On/true).
+
+Fixed: `m_ShadowDistance` raised on `PC_RPAsset.asset` (50->150, several
+times the default view distance, room to zoom in/out) and
+`Mobile_RPAsset.asset` (50->100, more conservative for mobile GPU
+budget but still clears the ~90-unit default view with margin). Pure
+asset-value edit, no C# involved -- no flightcheck build applicable;
+confirmed correct by the direct distance arithmetic above, not yet seen
+in a real render.
