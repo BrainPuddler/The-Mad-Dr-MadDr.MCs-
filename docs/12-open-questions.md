@@ -3672,3 +3672,52 @@ pooled lights' `lightmapBakeType = Realtime` at creation -- a fresh
 `AddComponent<Light>()` defaults to Mixed bake mode, which asks for
 GI/baked participation these repositioned-every-refresh runtime lights
 were never going to meaningfully provide.
+
+## docs/28 root cause found: Additional Lights set to Per Vertex, not Per Pixel (2026-07)
+
+The real culprit behind "no lit patch on the ground, pole solid black,"
+after `bloomScale`/`range` fixes made zero visible difference: both URP
+Pipeline Assets (`Assets/Settings/PC_RPAsset.asset` and
+`Mobile_RPAsset.asset`) had `m_AdditionalLightsRenderingMode: 1`
+(PerVertex) rather than `2` (PerPixel). Every prop this city builds is a
+raw primitive (Cube/Cylinder/Sphere via `SpawnPrim`, no subdivision) --
+a ground quad might have 4-8 vertices, a pole cylinder vertices only at
+its top/bottom rings. Per-vertex lighting evaluates a light's
+contribution ONLY at mesh vertices and interpolates across faces, so a
+small point light positioned mid-face on this kind of low-poly geometry
+can produce visibly ~zero illumination across most of the surface even
+though the light itself is completely correctly configured -- exactly
+matching "the light appears not to exist" despite `range`/`intensity`
+both being right. This is why two separate code-side fixes (`range`
+7->3->8, `bloomScale`) made no visible difference to the ground
+pool/pole blackness specifically, while `bloomScale` DID visibly change
+the halo (bloom is a post-process, unaffected by this setting).
+
+Fixed both Pipeline Assets to PerPixel. Deliberate trade-off, flagged
+here rather than silently: PerPixel additional lights cost more on
+`Mobile_RPAsset` specifically (that's presumably why PerVertex was
+chosen there originally) -- correctness (the whole `DynamicLightBudget`
+system being visually inert otherwise) was prioritized over the
+unmeasured mobile performance cost. Revisit if mobile profiling shows a
+real problem; the fallback would be capping the additional-lights budget
+lower on mobile specifically rather than reverting to PerVertex, since
+PerVertex effectively defeats this whole feature on primitive geometry.
+
+## docs/28: Refresh() crash when real lights disabled (2026-07)
+
+Creator-found crash, reproducible: toggling `enableRealLights` off (or
+dragging `budget` to 0) threw `ArgumentOutOfRangeException` in
+`DynamicLightBudget.Refresh()` every 0.35s refresh, forever. Cause: with
+`activeBudget == 0`, the "is this closer than my current worst pick"
+fallback ran on the very first registered glow point while `_pickedSq`
+was still empty, indexing `[0]` into an empty list. Fixed by only taking
+that branch when `_pickedSq.Count > 0` -- with nothing picked yet (which
+is exactly the `activeBudget == 0` case), there's nothing to replace, so
+the point is correctly just skipped.
+
+Side note for future debugging: disabling the sun and checking whether
+shadows shift when moving a prop around is NOT a valid way to check
+whether one of these pooled lights exists -- they are deliberately
+created with `shadows = LightShadows.None` (never shadow casters, a
+performance choice for budget fill lights), so absence of shadow change
+is expected either way and proves nothing either direction.

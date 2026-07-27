@@ -147,7 +147,14 @@ public class DynamicLightBudget : MonoBehaviour
                 _picked.Add(i);
                 _pickedSq.Add(d);
             }
-            else
+            // 2026-07 creator-found crash: with activeBudget == 0 (either
+            // enableRealLights off, or budget dragged to 0), the "is this
+            // better than my worst pick" fallback below ran on the very
+            // first glow point with _pickedSq still empty -- indexing
+            // [0] into an empty list threw ArgumentOutOfRangeException,
+            // every refresh, forever. Guard it: with nothing picked yet,
+            // there's nothing to replace.
+            else if (_pickedSq.Count > 0)
             {
                 var worst = 0;
                 for (var j = 1; j < _pickedSq.Count; j++) if (_pickedSq[j] > _pickedSq[worst]) worst = j;
