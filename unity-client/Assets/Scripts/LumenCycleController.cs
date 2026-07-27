@@ -67,9 +67,20 @@ public class LumenCycleController : MonoBehaviour
     [Range(0f, 3f)]
     public float emissiveScale = 1f;
 
-    [Tooltip("Bloom intensity at full night. Bloom is what turns a small bright sphere into a BIG soft ball of light -- if the lights look too LARGE (rather than too bright), this is the knob, not intensity.")]
+    // 2026-07 creator report: "some effect but even set to 0 way too
+    // large." Real bug -- this used to be a value the code blended
+    // TOWARD, weighted by how far into night it was (`nightAmount`),
+    // which decays continuously from 1.0 back down through the whole
+    // second half of the night phase (as it blends onward toward Dawn).
+    // So 0 only ever meant "no bloom" at the single instant nightAmount
+    // hit exactly 1.0 -- for most of "night" a real chunk of the OLD
+    // hardcoded per-phase baseline (0.4 to 1.3) was still mixed in
+    // regardless of this field. Now a genuine multiplier on the WHOLE
+    // bloom curve at every time of day, same model emissiveScale already
+    // correctly used -- 0 means zero bloom, always, full stop.
+    [Tooltip("Multiplies bloom intensity at EVERY time of day (not just night). Bloom is what turns a small bright sphere into a BIG soft ball of light -- if the lights look too LARGE (rather than too bright), this is the knob, not emissiveScale. 0 = no bloom, ever.")]
     [Range(0f, 2f)]
-    public float nightBloom = 0.25f;
+    public float bloomScale = 0.3f;
 
     [Tooltip("Ambient light at full night. Near 0 gives a genuinely dark night the lamps can pool against.")]
     [Range(0f, 0.3f)]
@@ -107,7 +118,7 @@ public class LumenCycleController : MonoBehaviour
     public void ApplyProfile(CityLightingProfile profile)
     {
         if (profile == null) return;
-        nightBloom = profile.NightBloomIntensity;
+        bloomScale = profile.NightBloomIntensity;
         nightAmbient = profile.NightAmbientBrightness;
     }
 
@@ -280,9 +291,11 @@ public class LumenCycleController : MonoBehaviour
         _colorAdjustments.colorFilter.value = Color.Lerp(a.ColorFilter, b.ColorFilter, blend);
         _colorAdjustments.contrast.value = Mathf.Lerp(a.Contrast, b.Contrast, blend);
         _vignette.intensity.value = Mathf.Lerp(a.VignetteIntensity, b.VignetteIntensity, blend);
-        // same live-read treatment: blend the authored keyframe bloom
-        // toward the live `nightBloom` field as night comes on
-        _bloom.intensity.value = Mathf.Lerp(Mathf.Lerp(a.BloomIntensity, b.BloomIntensity, blend), nightBloom, nightAmount);
+        // bloomScale is a true multiplier on the whole authored bloom
+        // curve at every time of day (same model as emissiveScale) --
+        // NOT blended toward, so 0 is always exactly 0, never partially
+        // mixed with the old per-phase baseline regardless of nightAmount.
+        _bloom.intensity.value = Mathf.Lerp(a.BloomIntensity, b.BloomIntensity, blend) * bloomScale;
         _filmGrain.intensity.value = Mathf.Lerp(a.FilmGrainIntensity, b.FilmGrainIntensity, blend);
     }
 
@@ -339,7 +352,7 @@ public class LumenCycleController : MonoBehaviour
 
         // NOTE: Night's ambient/bloom and the neon boost ceiling are NOT
         // baked in here any more -- ApplyBlend reads the live
-        // `nightAmbient`/`nightBloom`/`emissiveScale` fields instead, so
+        // `nightAmbient`/`bloomScale`/`emissiveScale` fields instead, so
         // they're tunable in Play mode. Baking them here was the reason
         // "nothing changes when I alter" anything (2026-07 creator report).
 

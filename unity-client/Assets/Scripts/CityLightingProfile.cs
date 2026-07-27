@@ -24,7 +24,7 @@ using UnityEngine;
 /// picture immediately. Editing this asset mid-Play does nothing until
 /// the city is rebuilt, by design. If lights look wrong:
 ///   * too BRIGHT a glowing ball  -> LumenCycleController.emissiveScale
-///   * too LARGE a glowing ball   -> LumenCycleController.nightBloom
+///   * too LARGE a glowing ball   -> LumenCycleController.bloomScale
 ///   * washed-out scene overall   -> LumenCycleController.nightAmbient
 ///   * lit ground area too strong -> DynamicLightBudget.peakIntensity
 ///   * lit ground area too wide   -> DynamicLightBudget.range

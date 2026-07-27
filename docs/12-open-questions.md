@@ -3572,3 +3572,42 @@ it -- only that the two are internally consistent with each other. Only
 trust a flightcheck pass for URP-specific types when the stub predates
 the calling code, or when the type's existence is independently
 confirmed (docs, an existing working call site elsewhere in the repo).
+
+## docs/28: bloom knob set to 0 still too large -- was blended, not multiplied (2026-07)
+
+Creator: "some effect but even set to 0 way too large" -- referring to
+`nightBloom`. Real bug, found by re-reading `ApplyBlend()`: `nightBloom`
+was a value the code blended TOWARD, weighted by `nightAmount` (how far
+into night). `nightAmount` decays continuously from 1.0 back down
+through the ENTIRE second half of the night phase as it blends onward
+toward Dawn -- so `nightBloom = 0` only ever produced true zero bloom at
+the single instant `nightAmount` hit exactly 1.0. For most of what reads
+as "night" to a player, a real chunk of the old hardcoded per-phase
+baseline (0.4 to 1.3 across Dawn/Day/Dusk/Night) was still mixed in
+regardless of the field. `emissiveScale` did not have this problem --
+it was already a true always-on multiplier on the whole curve -- which
+is exactly why it showed "some effect" while the bloom knob showed none.
+
+Fixed by renaming `nightBloom` -> `bloomScale` and changing it to the
+same multiplier model as `emissiveScale`: `finalBloom =
+Lerp(a.BloomIntensity, b.BloomIntensity, blend) * bloomScale`, applied
+at every time of day, never blended toward. 0 now means zero bloom,
+always, full stop -- no partial mixing regardless of time-of-day.
+Default changed from 0.25 (an absolute target) to 0.3 (a scale on a
+curve that already ranges 0.4-1.3), giving a similar effective result at
+night while fixing the actual bug.
+
+**Known parallel gap, not yet reported as a problem, so not touched:**
+`nightAmbient` has the exact same "blended toward, weighted by
+nightAmount" shape as the old buggy bloom field -- setting it very low
+will ALSO only approach true darkness asymptotically through the back
+half of the night phase, for the same underlying reason. Left as-is
+because (a) it hasn't been reported as wrong, and (b) unlike bloom, a
+flat always-on multiplier doesn't fit ambient the same way -- ambient
+SHOULD stay bright at midday, so "multiply the whole curve" isn't the
+right fix shape here the way it was for bloom. If this needs fixing
+later, revisit with a construction that reaches a hard target
+specifically once nightAmount is unambiguously ~1 (e.g. a steeper
+easing curve on nightAmount itself, or gating on the Night phase
+directly rather than the LampBoost-derived blend), not a straight port
+of the bloomScale fix.

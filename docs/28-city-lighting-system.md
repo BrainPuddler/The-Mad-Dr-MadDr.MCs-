@@ -72,7 +72,7 @@ nothing is overwritten.
 | Symptom | Knob |
 | --- | --- |
 | Glowing ball too **bright** | `LumenCycleController.emissiveScale` |
-| Glowing ball too **large** | `LumenCycleController.nightBloom` |
+| Glowing ball too **large** | `LumenCycleController.bloomScale` |
 | Whole scene washed out | `LumenCycleController.nightAmbient` |
 | Lit ground patch too strong | `DynamicLightBudget.peakIntensity` |
 | Lit ground patch too wide | `DynamicLightBudget.range` |
@@ -87,7 +87,7 @@ Two independent reasons, both now fixed:
    spread into much larger soft blobs by **Bloom**. A `Light` component
    illuminates *other* surfaces — it does not itself render as a ball on
    screen. So no amount of changing light intensity/range could ever fix
-   the reported symptom; `emissiveScale` and `nightBloom` are the knobs
+   the reported symptom; `emissiveScale` and `bloomScale` are the knobs
    that actually target it. (The bulb spheres were also literally
    oversized — 0.5 m across at RTS camera height — now ~0.25 m.)
 2. **The pooled `DynamicLight` GameObjects are overwritten ~3×/second**
