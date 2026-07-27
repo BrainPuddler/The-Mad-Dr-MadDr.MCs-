@@ -37,9 +37,13 @@ public class CityLightingProfile : ScriptableObject
     [Range(4, 128)]
     public int RealLightBudget = 24;
 
+    // Widened + defaulted high alongside DynamicLightBudget.peakIntensity
+    // (2026-07 diagnostic: "make lights at least 40-120, just to rule out
+    // an intensity thing") -- kept in sync so assigning a profile asset
+    // later wouldn't silently reset the diagnostic value back down.
     [Tooltip("Peak intensity a promoted real light reaches at full night. THE fix for 'lights are too bright' if it recurs -- turn this down first.")]
-    [Range(0f, 5f)]
-    public float RealLightPeakIntensity = 0.7f;
+    [Range(0f, 150f)]
+    public float RealLightPeakIntensity = 80f;
 
     [Tooltip("How far each light reaches, in meters, as a straight-line radius from the light itself -- NOT a ground-projected pool size. Needs to comfortably exceed the tallest fixture's mount height (~5.9m for the ornate lamppost globes) or it can't reach the ground at all.")]
     [Range(1f, 25f)]

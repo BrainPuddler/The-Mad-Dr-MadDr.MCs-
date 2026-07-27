@@ -3881,3 +3881,27 @@ visually confirmed (no Editor in this environment, same standing caveat
 as every other row in this table) but reasoned directly from the actual
 constants in play (`HexCoord.HexMeters`, `BuildingDresser.Half`,
 `RoadDresser`'s own width/offset constants), not from a guess.
+
+## docs/28: temporary diagnostic -- peakIntensity widened + defaulted high (2026-07)
+
+Creator ran the wall-clearance/culling fixes and still can't see any
+real lights, and asked to crank intensity to at least 40-120 as a blunt
+test of whether it's simply too dim to notice versus something not
+rendering at all. Couldn't actually do that before this change --
+`peakIntensity` was `[Range(0f, 5f)]` on both `DynamicLightBudget` and
+`CityLightingProfile`, so the Inspector slider itself capped any value
+at 5 regardless of what was typed in.
+
+Widened both to `[Range(0f, 150f)]` and bumped the default 0.7f -> 80f
+on both (kept in sync so assigning a profile asset later wouldn't reset
+the diagnostic value). This is intentionally NOT a good final look --
+the point right now is maximum visibility for the diagnostic, not
+balance. Turn back down toward 0.5-1.5 once a real light is confirmed
+visible at all.
+
+If lights are STILL invisible even at intensity ~80, that rules out
+"just too dim" definitively and points at something else entirely --
+worth checking next: is DynamicLightBudget actually promoting THIS
+prop's glow point (nearest-N budget competition), or is the Light
+GameObject disabled/inactive, or is there a camera/rendering-layer
+mismatch not yet considered.
