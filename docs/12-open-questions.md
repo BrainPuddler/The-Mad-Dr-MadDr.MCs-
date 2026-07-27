@@ -4208,3 +4208,12 @@ private instance method needing a live Camera/GameObject pool to
 exercise meaningfully, unlike the earlier trapezoid/window-occupancy
 logic which was cleanly isolable as pure static methods. Nothing in this
 round has been seen in a real render yet.
+
+## docs/28 row 17: all street lights 90% brighter (2026-07)
+
+Creator: "it's better. Make all the street lights 90% brighter." Flat
+x1.9 across both Point and Spot Max/Min (row 16's split already covers
+"all the street lights" as its two halves): pointIntensityMax 12->22.8,
+pointIntensityMin 4->7.6, spotIntensityMax 60->114, spotIntensityMin
+18->34.2. Mirrored onto CityLightingProfile. Simple numeric scale, no
+new math to verify beyond the arithmetic itself.

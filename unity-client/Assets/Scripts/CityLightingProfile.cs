@@ -45,19 +45,19 @@ public class CityLightingProfile : ScriptableObject
     // redesign that replaced the old single RealLightPeakIntensity).
     [Tooltip("Point-type real-light intensity ceiling (clear conditions) at full night -- the ornate lamppost, roundabout bulb, windows: everything except the overhanging streetlight.")]
     [Range(0f, 150f)]
-    public float RealLightPointIntensityMax = 12f;
+    public float RealLightPointIntensityMax = 22.8f;
 
     [Tooltip("Point-type real-light intensity floor in HEAVY fog at full night.")]
     [Range(0f, 150f)]
-    public float RealLightPointIntensityMin = 4f;
+    public float RealLightPointIntensityMin = 7.6f;
 
     [Tooltip("Spot-type real-light intensity ceiling (clear conditions) at full night -- currently only the overhanging streetlight.")]
     [Range(0f, 300f)]
-    public float RealLightSpotIntensityMax = 60f;
+    public float RealLightSpotIntensityMax = 114f;
 
     [Tooltip("Spot-type real-light intensity floor in HEAVY fog at full night.")]
     [Range(0f, 300f)]
-    public float RealLightSpotIntensityMin = 18f;
+    public float RealLightSpotIntensityMin = 34.2f;
 
     [Tooltip("Fog density at which lights reach their fog-dimmed minimum -- see DynamicLightBudget.fogDimReferenceDensity.")]
     [Range(0.001f, 0.05f)]

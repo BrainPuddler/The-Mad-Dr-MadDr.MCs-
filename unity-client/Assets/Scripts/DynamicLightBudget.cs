@@ -102,21 +102,26 @@ public class DynamicLightBudget : MonoBehaviour
     // lamppost, roundabout bulb, and windows are all Point; the
     // overhanging streetlight is the only Spot. Untuned starting values,
     // same status as the fields they replace -- nudge live once visible.
+    // 2026-07: creator confirmed the fog pass reads better ("it's
+    // better"), then: "make all the street lights 90% brighter." Applied
+    // as a flat x1.9 across BOTH types' Max and Min -- "all the street
+    // lights" is both halves of the Point/Spot split this system already
+    // uses for "overhang vs all others."
     [Tooltip("Point-type real-light intensity ceiling (clear conditions) at full night -- the ornate lamppost, roundabout bulb, windows: everything except the overhanging streetlight.")]
     [Range(0f, 150f)]
-    public float pointIntensityMax = 12f;
+    public float pointIntensityMax = 22.8f;
 
     [Tooltip("Point-type real-light intensity floor in HEAVY fog at full night. Should stay above 0 -- fog dims a light, it doesn't extinguish it.")]
     [Range(0f, 150f)]
-    public float pointIntensityMin = 4f;
+    public float pointIntensityMin = 7.6f;
 
     [Tooltip("Spot-type real-light intensity ceiling (clear conditions) at full night -- currently only the overhanging streetlight. Higher baseline than the Point max: a Spot's cone concentrates the same intensity into a narrower solid angle and reads dimmer per-pixel at an equal value for a wide-ish cone like 48 degrees.")]
     [Range(0f, 300f)]
-    public float spotIntensityMax = 60f;
+    public float spotIntensityMax = 114f;
 
     [Tooltip("Spot-type real-light intensity floor in HEAVY fog at full night.")]
     [Range(0f, 300f)]
-    public float spotIntensityMin = 18f;
+    public float spotIntensityMin = 34.2f;
 
     // 2026-07 creator: "it should add a glow to the light diffusing it,
     // like real lights in the fog." Basic RenderSettings fog only fades
