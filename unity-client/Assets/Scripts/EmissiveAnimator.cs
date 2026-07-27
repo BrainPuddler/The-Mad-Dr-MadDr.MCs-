@@ -43,6 +43,27 @@ public enum LightBehaviorKind
     /// index along a sequence; each registered bulb compares its own
     /// SequenceIndex to the current step.</summary>
     Chase,
+
+    /// <summary>Occupied-window behavior (2026-07 creator direction):
+    /// "the building can turn on randomly approaching night time, as if
+    /// real humans were in the room and realize it's getting too dark...
+    /// the same goes for late at night -- imagine people going to bed
+    /// and shutting off their house light, this can vary greatly, but
+    /// not all lights go off." Each registration gets its OWN randomized
+    /// (deterministic from `seed`) "someone gets home" time somewhere
+    /// across late day/dusk/early night, and most get their own randomized
+    /// "someone goes to bed" time somewhere in the back half of night --
+    /// dark outside that window, lit (with the same Flicker-style wobble)
+    /// inside it. A held-out fraction never gets a bedtime at all (lit
+    /// the whole night through) -- the "not all lights go off" case.
+    /// Distinct from Flicker: Flicker just wobbles brightness within an
+    /// already-on/off state driven by the GLOBAL day/night boost; Window
+    /// adds its OWN per-instance on/off schedule on top of that, since
+    /// nightAmount itself now holds perfectly flat through the whole
+    /// night (see LumenCycleController.ComputeNightIntensity) and can't
+    /// tell "just got dark" apart from "3am" the way a per-window
+    /// schedule needs to.</summary>
+    Window,
 }
 
 public static class EmissiveAnimator
@@ -57,7 +78,24 @@ public static class EmissiveAnimator
         public int SequenceIndex;   // Chase only: this bulb's slot
         public int SequenceLength;  // Chase only: how many bulbs share this sequence
         public float NextDropout;   // Buzz only: next scheduled full-dropout time
+        public float OnCycleFrac;   // Window only: this window's "someone's home" time (0..1 of the full cycle)
+        public float OffCycleFrac;  // Window only: this window's "lights out" time (0..1 of the full cycle)
+        public bool AlwaysOn;       // Window only: skips OffCycleFrac entirely -- "not all lights go off"
     }
+
+    // Window occupancy timing, as fractions of the FULL day/night cycle
+    // (DayNightState.CycleProgress: 0 at Dawn's start, 1 at Night's end).
+    // Ticks, for reference (LumenClock, 10 ticks/s): Dawn [0,300)
+    // Day [300,1200) Dusk [1200,1500) Night [1500,2400).
+    private const float OnRangeStart = 0.375f;   // 900 ticks -- 3/4 through Day: earliest arrivals
+    private const float OnRangeEnd = 0.75f;      // 1800 ticks -- 1/3 into Night: latest arrivals
+    private const float OffRangeStart = 0.75f;   // 1800 ticks -- earliest bedtimes
+    private const float OffRangeEnd = 0.98f;     // 2352 ticks -- latest bedtimes, just shy of Dawn
+    private const float AlwaysOnProbability = 0.15f;
+    // How long the on/off transition itself takes, as a fraction of the
+    // cycle -- a hard instant snap would read as a glitch, not a person
+    // flipping a switch. ~0.01 of a 240s cycle is ~2.4s.
+    private const float OccupancyTransitionFrac = 0.01f;
 
     private static readonly List<Entry> Animated = new List<Entry>();
 
@@ -93,6 +131,19 @@ public static class EmissiveAnimator
             SequenceLength = Mathf.Max(1, sequenceLength),
             NextDropout = Time.time + seed * 3f + CityLightingProfile.Active.BuzzDropoutIntervalSeconds,
         };
+        if (kind == LightBehaviorKind.Window)
+        {
+            // Deterministic from `seed` (a hash of the window's own hex/
+            // floor/slot, per BuildingDresser) rather than UnityEngine.
+            // Random, matching this codebase's "same seed always
+            // furnishes the same city" ethos everywhere else -- three
+            // DIFFERENT multipliers on the same seed decorrelate the
+            // three draws (same trick Frac(seed * K) already uses for
+            // Flicker/Buzz elsewhere in this file).
+            entry.OnCycleFrac = Mathf.Lerp(OnRangeStart, OnRangeEnd, Frac(seed * 41.3f));
+            entry.OffCycleFrac = Mathf.Lerp(OffRangeStart, OffRangeEnd, Frac(seed * 59.7f + 3f));
+            entry.AlwaysOn = Frac(seed * 91.1f + 7f) < AlwaysOnProbability;
+        }
         Apply(entry, 1f);
         Animated.Add(entry);
     }
@@ -137,9 +188,41 @@ public static class EmissiveAnimator
                     mult = lit ? 1f : profile.ChaseOffFloor;
                     break;
                 }
+                case LightBehaviorKind.Window:
+                {
+                    // Same wobble-while-lit as Flicker (a window that's
+                    // "occupied" still isn't perfectly steady), gated by
+                    // this window's OWN randomized on/off schedule on top
+                    // -- see OccupancyGate. Reads DayNightState.CycleProgress
+                    // rather than NeonBoost/NightAmount specifically
+                    // because those hold flat through the whole night now
+                    // (the "hold for the duration of the night" fix) and
+                    // can't distinguish "just got dark" from "3am" the way
+                    // a bedtime schedule needs to.
+                    var speed = Mathf.Lerp(profile.FlickerSpeedRange.x, profile.FlickerSpeedRange.y, Frac(e.Seed));
+                    var wave = 0.5f + 0.5f * Mathf.Sin(t * speed * Mathf.PI * 2f + e.Seed * 17.3f);
+                    var wobble = Mathf.Lerp(profile.FlickerFloor, 1f, wave * wave);
+                    mult = wobble * OccupancyGate(e, DayNightState.CycleProgress);
+                    break;
+                }
             }
             Apply(e, mult);
         }
+    }
+
+    /// <summary>1 while this window's cycle-relative "on" state is
+    /// active, 0 otherwise, with a short smoothstep transition at each
+    /// edge instead of an instant snap (a person flipping a switch reads
+    /// as a beat of motion, not a single-frame pop). AlwaysOn skips the
+    /// off half entirely -- "not all lights go off."</summary>
+    private static float OccupancyGate(Entry e, float cycleProgress)
+    {
+        if (e.AlwaysOn) return 1f;
+        var onGate = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(
+            e.OnCycleFrac - OccupancyTransitionFrac, e.OnCycleFrac + OccupancyTransitionFrac, cycleProgress));
+        var offGate = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(
+            e.OffCycleFrac - OccupancyTransitionFrac, e.OffCycleFrac + OccupancyTransitionFrac, cycleProgress));
+        return Mathf.Min(onGate, offGate);
     }
 
     private static void Apply(Entry e, float mult)

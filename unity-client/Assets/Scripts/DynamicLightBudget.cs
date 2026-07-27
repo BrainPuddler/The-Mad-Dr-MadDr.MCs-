@@ -141,6 +141,22 @@ public class DynamicLightBudget : MonoBehaviour
     [Range(1f, 179f)]
     public float spotConeAngle = 48f;
 
+    // 2026-07 creator report, right after the Spot conversion: "the down
+    // facing spotlight needs to be a lot brighter to read properly."
+    // Unlike a Point light (which spreads peakIntensity's worth of light
+    // in every direction), a Spot's cone concentrates the SAME
+    // peakIntensity into a narrower solid angle, and Unity's spot
+    // attenuation model reads noticeably dimmer per-pixel than a Point at
+    // an equal `intensity` value for a wide-ish cone like 48 degrees --
+    // it doesn't get the same "concentration" payoff a narrow beam would.
+    // Rather than raise peakIntensity for every Point light too (windows,
+    // the ornate lamppost, etc., which weren't the complaint), Spot-type
+    // slots get their own extra multiplier on top. Untuned guess, same as
+    // peakIntensity itself -- nudge live once it's visible.
+    [Tooltip("Extra multiplier on top of peakIntensity, applied ONLY to Spot-type promoted lights (currently: the overhanging streetlight). Point lights are unaffected.")]
+    [Range(1f, 20f)]
+    public float spotIntensityMultiplier = 5f;
+
     private const float RefreshInterval = 0.35f;
     // Unity's forward-is-local-+Z convention: an X-euler of 90 points
     // straight down (same convention LumenCycleController's sun rotation
@@ -238,8 +254,15 @@ public class DynamicLightBudget : MonoBehaviour
         // more brightness everywhere. Read from the live fields above
         // every refresh, so dragging them in Play mode takes effect
         // within one refresh interval (~0.35s).
+        //
+        // 2026-07 correction: the low end used to be a 0.02 floor, not a
+        // hard 0 -- "ALL the lights should turn off during the day" means
+        // exactly that, not "very dim." NightAmount itself now genuinely
+        // reaches 0 for the whole Day (LumenCycleController's
+        // ComputeNightIntensity), so Lerp(0f, ...) at boost==0 is exactly
+        // 0, not a residual glow.
         var boost = DayNightState.NightAmount;
-        var intensity = Mathf.Lerp(0.02f, peakIntensity, boost);
+        var intensity = Mathf.Lerp(0f, peakIntensity, boost);
         for (var i = 0; i < _pool.Count; i++)
         {
             if (i < _picked.Count)
@@ -249,18 +272,23 @@ public class DynamicLightBudget : MonoBehaviour
                 pooled.gameObject.SetActive(true);
                 pooled.transform.position = GlowPointRegistry.TransformAt(idx).position;
                 pooled.color = GlowPointRegistry.ColorAt(idx);
-                pooled.intensity = intensity;
                 pooled.range = range;
                 // Which registered point lands on which pooled slot can
                 // change refresh to refresh (nearest-to-camera reshuffles
-                // as the camera moves), so type/rotation/cone have to be
-                // re-applied here too, not just set once at creation.
+                // as the camera moves), so type/rotation/cone/intensity-
+                // multiplier all have to be re-applied here too, not just
+                // set once at creation.
                 var kind = GlowPointRegistry.LightTypeAt(idx);
                 pooled.type = kind;
                 if (kind == LightType.Spot)
                 {
                     pooled.transform.rotation = SpotDownRotation;
                     pooled.spotAngle = spotConeAngle;
+                    pooled.intensity = intensity * spotIntensityMultiplier;
+                }
+                else
+                {
+                    pooled.intensity = intensity;
                 }
             }
             else

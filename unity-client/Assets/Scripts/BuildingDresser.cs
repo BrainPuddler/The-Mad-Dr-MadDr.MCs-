@@ -282,8 +282,16 @@ public static class BuildingDresser
         var go = b.SpawnPrim(PrimitiveType.Cube, pos, scale, WindowGlow(), t);
         var renderer = go.GetComponent<Renderer>();
         var seed = ((floorSeed & 0x7fffffff) % 10007) / 10007f;
+        // 2026-07 creator direction: "the building can turn on randomly
+        // approaching night time, as if real humans were in the room...
+        // the same goes for late at night, imagine people going to bed
+        // and shutting off their house light... not all lights go off."
+        // Window (was Flicker) adds a per-instance randomized on/off
+        // occupancy schedule on top of the existing wobble -- purely an
+        // emissive/MaterialPropertyBlock effect, same mechanism as the
+        // bulb geometry, not a second real-light system.
         EmissiveAnimator.Register(renderer, WindowGlowColor * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
-            LightBehaviorKind.Flicker, seed);
+            LightBehaviorKind.Window, seed);
         GlowPointRegistry.Register(go.transform, WindowGlowColor);
     }
 

@@ -4013,3 +4013,85 @@ untouched call site is unaffected), an explicit
 `Register(t, color, LightType.Spot)` call yields `LightType.Spot`, and
 `spotConeAngle` defaults to exactly 48. Not yet seen lighting up an
 actual road in a real render.
+
+## docs/28 round 2: spotlight brightness, true day/night on-off, per-window occupancy (2026-07)
+
+Creator direction, four parts in one message:
+
+1. **"the down facing spotlight needs to be a lot brighter to read
+   properly."** Not a bug -- a Spot's cone concentrates the same
+   `intensity` into a narrower solid angle than a Point light, and
+   Unity's spot attenuation reads noticeably dimmer per-pixel at a
+   wide-ish 48 degree cone than an omnidirectional Point at an equal
+   value. Added `DynamicLightBudget.spotIntensityMultiplier` (default
+   5), applied only to Spot-type promoted lights on top of
+   `peakIntensity` -- Point lights (windows, the ornate lamppost, etc.,
+   which weren't the complaint) are unaffected. Untuned guess, same
+   status as `peakIntensity` itself.
+
+2. **"ALL the lights should turn off during the day."** Two separate
+   non-zero floors were quietly preventing this: `DynamicLightBudget`'s
+   promoted-light `intensity` floor was 0.02 (near-zero, not off), and
+   `LumenCycleController`'s `neonBoost` floor was Day's own authored
+   0.35 ("barely visible against daylight" -- the ORIGINAL, pre-this-
+   effort design intent, now explicitly superseded). Both now `Lerp`
+   from a hard `0f`.
+
+3. **"Ramp on quickly, hold for the duration of the night, and turn
+   shortly after dawn"** -- a correction to the PREVIOUS round's shape
+   (docs/28 row 10), which held through all of Dawn and faded out
+   gradually across the first half of Day (45s). That wasn't "shortly
+   after dawn." `ComputeNightIntensity` reshaped: the fade-out now
+   happens over the first 35% of DAWN itself (~10.5s, moved from Day),
+   with Day held at a flat hard 0 the entire phase, no fade there at
+   all anymore. The Dusk fast-ramp-in (first 25%, ~7.5s) and the Night
+   hold are unchanged.
+
+4. **"The building can turn on randomly approaching night time, as if
+   real humans were in the room and realize it's getting too dark. The
+   same goes for late at night... people going to bed... this can vary
+   greatly. BUT not all light go off."** Mid-turn, the creator clarified
+   this should be "not real lights but lit texture like the bulbs" --
+   i.e. purely emissive/`MaterialPropertyBlock`, never
+   `GlowPointRegistry`/`DynamicLightBudget`. Since `nightAmount` now
+   holds perfectly flat through the whole night (point 3 above), it
+   structurally can't distinguish "just got dark" from "3am" -- a
+   per-window bedtime needs its own clock. Added
+   `DayNightState.CycleProgress` (raw 0..1 position, doesn't hold flat)
+   and a new `LightBehaviorKind.Window` in `EmissiveAnimator`: each
+   registration gets its own randomized (deterministic from the
+   existing per-window `seed` -- same "same seed always furnishes the
+   same city" approach used everywhere else in this codebase, not
+   `UnityEngine.Random`) arrival time in [37.5%, 75%) of the cycle and
+   bedtime in [75%, 98%) of the cycle, dark outside that span, lit
+   (with the existing Flicker-style wobble) inside it, ~2.4s smoothstep
+   transitions at the edges instead of a hard pop. 15% of windows are
+   `AlwaysOn` and skip the bedtime check entirely. `BuildingDresser`'s
+   window registration switched from `Flicker` to `Window`.
+
+Verified numerically against the actual compiled/reflected code, not by
+eye (still no Editor in this environment): re-sampled every hold/fade
+boundary and midpoint of the reshaped `ComputeNightIntensity` against
+the new Dawn-fade/Day-hold shape; registered 400 Window entries and
+confirmed every arrival/bedtime fraction landed in its intended range
+with correct ordering, the AlwaysOn rate came out to 15.25% against a
+15% target, and the occupancy gate function reads 0 outside a window's
+span, 1 inside it, and permanently 1 for an AlwaysOn entry regardless of
+cycle position.
+
+**Second harness gap found and fixed while writing this check** (same
+pattern as the SmoothStep/Clamp01/Lerp gap found earlier this session):
+`Mathf.Floor`/`FloorToInt` were STILL `return 0f;`/`return 0;` no-op
+stubs, which silently broke `EmissiveAnimator`'s own `Frac()` helper
+(`v - Floor(v)`, used by Flicker/Buzz/Chase AND this round's new Window
+hashing) -- the first AlwaysOn-rate check came back as exactly 0/400
+before this was caught, not because the shipped logic was wrong, but
+because `Frac(x) == x` (never actually fractional) under the broken
+stub made the `< 0.15` comparison compare against values like 7-98
+instead of a genuine 0..1 fraction. Fixed the whole remaining batch
+(`Floor`, `FloorToInt`, `Approximately`, `RoundToInt`, `CeilToInt`) while
+in there, same reasoning as before: a silently-wrong stub makes any
+future check meaningless without warning. Harness-only, lives outside
+the repo.
+
+None of this round's four changes have been seen in a real render yet.

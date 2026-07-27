@@ -38,22 +38,27 @@ condensed, current-state version.
 | — | (side finding, not a symptom report) | Ornate lamppost registered a real light per globe (3, half a metre apart) — ~3x stacked intensity on one pavement patch, 3 of 24 budget slots on one fixture | Register one real light per fixture; all 3 globes still glow (emissive, unaffected) | Bundled into the #6/#7 commits, not separately re-verified |
 | 8 | "I believe you put the lights in the wall" | `RoadDresser` had NO wall-clearance check at all — `curbLineOffset` assumed a fixed margin to any neighboring building that two independent effects could break: `CardinalAnchor`'s straightening nudge stacking with the curb offset on the same axis (north/south streets), and an arterial street's own curb offset exceeding the raw row gap to a north/south-adjacent building (any street). Full derivation in the docs/12 decision log (search "no wall-clearance check") | `RoadDresser.ClearLateralOffset` now checks the actual building position (via `city.Buildings`) and clamps the sideways offset to stay `BuildingDresser.Half + 1.5m` clear of it, instead of trusting the arithmetic | **Reasoned fix, awaiting creator re-verification** — row 7's confirmation was about the props being visible again, not about their position relative to walls; still separately unverified |
 | 9 | After #7/#8, real lights STILL invisible | Not a bug — `DynamicLightBudget.peakIntensity`/`CityLightingProfile.RealLightPeakIntensity` were `[Range(0f, 5f)]`, capping the Inspector slider itself at 5 regardless of what was typed in, and the 0.7 default was apparently just too dim to read on the creator's setup (no config bug found to explain it — checked for a Physical Light Units mismatch specifically, not present) | Widened both to `[Range(0f, 150f)]`; creator confirmed lights visible at a deliberately blown-out diagnostic default of 80. Backed off to 12 as an untuned starting point — **not** a confirmed-good value, the real threshold between "too dim" and "too bright" hasn't been narrowed down yet | **Confirmed lights render at all; final brightness still needs live tuning** |
-| 10 | Direction, not a bug report: "make the lights fade a lot faster and hold for duration of the night, then fade off during the daytime" | `nightAmount` (drives real-light intensity + ambient darkness) came from the same continuous per-phase cross-fade as sun/fog/color-grading — it never held steady, drifting toward the next phase's value across the ENTIRE current phase (row 1's `bloomScale` bug was literally invented to route around this same mechanism) | Added `ComputeNightIntensity`: a dedicated trapezoid — fast ease-in over the first 25% of Dusk, flat 1.0 through the rest of Dusk + all of Night + all of Dawn, eased fade-out over the first 50% of Day, flat 0.0 the rest. `nightAmount` and `neonBoost` both read from it now (`neonBoost` moved from the old 4-stop Dawn/Day/Dusk/Night lerp to a 2-stop Day/Night one, so glow and real lights move together). Sun/fog/color-grading/bloom deliberately left on the old per-phase curve — this was about "the lights," not the whole mood | **Verified numerically against the compiled method** (reflection, sampled every hold/fade segment boundary+midpoint across the full cycle) — not yet seen in a real render |
+| 10 | Direction, not a bug report: "make the lights fade a lot faster and hold for duration of the night, then fade off during the daytime" | `nightAmount` (drives real-light intensity + ambient darkness) came from the same continuous per-phase cross-fade as sun/fog/color-grading — it never held steady, drifting toward the next phase's value across the ENTIRE current phase (row 1's `bloomScale` bug was literally invented to route around this same mechanism) | Added `ComputeNightIntensity`, a dedicated trapezoid. **Superseded by row 12** — this round's shape (fade-out over the first half of Day) turned out not to match "turn shortly after dawn" once the creator clarified it; see row 12 for the actual current shape | **Superseded** — see row 12 |
+| 11 | Direction: "the down facing spotlight needs to be a lot brighter to read properly" | Not investigated as a bug — a Spot light's cone concentrates the same `intensity` into a narrower solid angle than a Point light, and Unity's spot attenuation reads noticeably dimmer per-pixel at a wide-ish 48° cone than an omnidirectional Point at the same value | New `DynamicLightBudget.spotIntensityMultiplier` (default 5), applied ONLY to Spot-type promoted lights on top of `peakIntensity` — Point lights (windows, ornate lamppost, etc.) are unaffected | **Untuned guess, same status as `peakIntensity` itself** — needs live nudging once visible, not yet seen in a render |
+| 12 | Direction, correcting row 10: "ALL the lights should turn off during the day" + "ramp on quickly, hold for the duration of the night, and turn shortly after dawn" | Row 10's shape held through all of Dawn and faded out gradually across the first half of Day (45s) — not what "shortly after dawn" meant. Also: `intensity`'s floor was 0.02 (near-zero, not off) and `neonBoost`'s floor was Day's own authored 0.35 ("barely visible," the ORIGINAL pre-this-whole-effort design intent) — neither was a true 0 | `ComputeNightIntensity` reshaped: fast ease-in over the first 25% of Dusk (unchanged), flat hold through the rest of Dusk + all of Night (unchanged), an eased fade-out over the first 35% of **Dawn** (~10.5s, moved from Day), flat hard 0 for the rest of Dawn + all of Day. Both `DynamicLightBudget`'s `intensity` and `LumenCycleController`'s `neonBoost` now `Lerp` from a hard `0f` floor instead of 0.02/0.35 | **Verified numerically against the compiled method** (reflection, every hold/fade segment boundary+midpoint re-sampled against the new shape) — not yet seen in a real render |
+| 13 | Direction: "the building can turn on randomly approaching night time, as if real humans were in the room and realize it's getting too dark... the same goes for late at night, imagine people going to bed... this can vary greatly, but not all lights go off" | Not a bug — `nightAmount` now holds perfectly flat through the whole night (row 12), so it structurally CAN'T tell "just got dark" apart from "3am" the way a per-window bedtime needs to; a new, independent clock was needed | New `DayNightState.CycleProgress` (raw 0..1 cycle position, doesn't hold flat) + new `LightBehaviorKind.Window` in `EmissiveAnimator`: each registration gets its own randomized (deterministic from the existing per-window `seed`, same "same seed always furnishes the same city" approach as everywhere else in this codebase) arrival time in [37.5%, 75%) of the cycle and bedtime in [75%, 98%) of the cycle, dark outside that span, lit (with the existing Flicker-style wobble) inside it, ~2.4s smoothstep transitions at each edge instead of a hard pop. 15% of windows are `AlwaysOn` and skip the bedtime check entirely ("not all lights go off"). `BuildingDresser`'s window registration switched from `Flicker` to `Window`. Purely an emissive/`MaterialPropertyBlock` effect (creator's own direction) — never touches `GlowPointRegistry`/`DynamicLightBudget`, no second real-light system | **Verified numerically** (reflection into `EmissiveAnimator`'s private state): 400 sampled registrations all landed in-range with correct ordering, the AlwaysOn rate came out to 15.25% against a 15% target, and the on/off gate function was confirmed 0 outside a window's span, 1 inside it, and permanently 1 for an AlwaysOn entry — not yet seen in a real render |
 
 **Row 1's own description of `nightAmount` "decaying through the back
 half of the night phase" is now historical** — that was true of the OLD
-mechanism at the time it caused the `bloomScale` bug; row 10 replaced
-that mechanism, and `nightAmount` now holds flat through the whole
-night instead.
+mechanism at the time it caused the `bloomScale` bug; row 10 (itself now
+superseded by row 12) replaced that mechanism, and `nightAmount` now
+holds flat through the whole night instead.
 
 **As of the last commit: rows 1, 3, 4, 5, 5b, 6, 7 are creator-confirmed
 working. Row 8 (wall-clearance) is still unverified — visibility being
 fixed doesn't confirm position is correct, those are independent
 questions. Row 9 confirms the lighting pipeline works end-to-end;
 `peakIntensity`'s actual value (currently 12, an untuned placeholder) is
-the remaining open tuning task, not a bug hunt. Row 10 (the fade
-trapezoid) is reasoned + numerically checked but NOT yet seen in a real
-render — the actual fade timing/feel is worth a look next time.**
+still an open tuning task, not a bug hunt — same status now applies to
+row 11's new `spotIntensityMultiplier` (5, also untuned). Rows 12 and 13
+are reasoned + numerically checked against the actual compiled/reflected
+code, but NONE of rows 11-13 have been seen in a real render yet — that
+whole block is the active open thread.**
 
 ## 0. The core problem with "just add more Lights"
 
@@ -190,8 +195,17 @@ Four behavior kinds (`LightBehaviorKind`):
   it registered, ignoring the day/night cycle from then on. Most props
   in a 1950s city (plain streetlamp bulbs, most signage) are Steady and
   need no registration at all.
-- **Flicker** — windows, occasional neon dropout: a slow, per-instance,
-  out-of-phase brightness wobble. Used for house/apartment windows today.
+- **Flicker** — occasional neon dropout: a slow, per-instance,
+  out-of-phase brightness wobble.
+- **Window** (2026-07, replaced Flicker for house/apartment windows) —
+  the same wobble PLUS a per-instance, deterministically-randomized
+  arrival/bedtime occupancy schedule read against `DayNightState.
+  CycleProgress` (a raw, non-holding 0..1 clock -- `NightAmount` itself
+  holds flat through the whole night by design, so it can't tell "just
+  got dark" apart from "3am" the way a bedtime needs to). ~2.4s
+  smoothstep transitions at each edge, not a hard pop. 15% of windows
+  are `AlwaysOn` and skip the bedtime half entirely. Creator direction:
+  "as if real humans were in the room... not all lights go off."
 - **Buzz** — a failing neon tube: fast, small-amplitude flutter plus
   occasional brief full dropouts. Used for the movie palace's neon today.
 - **Chase** — a marquee "clique" sequencer: a shared clock advances a lit
@@ -209,7 +223,7 @@ otherwise ignores the day/night cycle entirely.
 | --- | --- | --- | --- |
 | Streetlamp bulb (overhanging, arm-over-the-road) | `RoadDresser.Bulb()`, profile-driven brightness | Yes, registered as **Spot** (2026-07: was Point — now aimed straight down at the road, `DynamicLightBudget.spotConeAngle` wide, default 48°) | Steady |
 | Ornate multi-globe lamppost | same `Bulb()` material, 3 globes | Yes, ONE registered per fixture (2026-07: was all 3, ~0.5m apart — stacked to ~3x intensity on one patch of pavement and burned 3 budget slots on a single fixture) | Steady |
-| Apartment windows | new `BuildingDresser.WindowGlow()`, ~2-in-5 floors lit | Yes, registered | **Flicker** |
+| Apartment windows | new `BuildingDresser.WindowGlow()`, ~2-in-5 floors lit | Yes, registered | **Window** (2026-07: was Flicker — now randomized per-window arrival/bedtime occupancy scheduling, see §0.5 row 13; still wobbles like Flicker while lit) |
 | Movie palace neon (underglow/blade/letters) | existing `NeonTeal`/`SignWhite`/`NeonRed` | No (decorative, not budgeted) | **Buzz** |
 | Movie palace marquee chaser row | new small bulb row | No (decorative, not budgeted) | **Chase** |
 
