@@ -20,6 +20,7 @@ public static class GlowPointRegistry
     {
         public Transform Transform;
         public Color Color;
+        public LightType LightType;
     }
 
     private static readonly List<Point> Points = new List<Point>();
@@ -28,15 +29,25 @@ public static class GlowPointRegistry
     /// promoted at this point should be tinted -- independent of
     /// whatever emissive material color the prop itself uses (a window
     /// might glow warm-white while its material is a cooler blue-glass
-    /// tint, for instance).</summary>
-    public static void Register(Transform point, Color color)
+    /// tint, for instance). `lightType` defaults to Point (an
+    /// omnidirectional pool of light, the right choice for most fixtures
+    /// -- a bare bulb, a window, a sign). Pass `LightType.Spot` for a
+    /// fixture that should read as directional (2026-07: the overhanging
+    /// streetlight's bulb, aimed straight down at the road) --
+    /// DynamicLightBudget aims any Spot-type promoted light straight
+    /// down and applies its own shared cone angle; this registry only
+    /// carries WHICH kind, not a per-point direction/angle, since every
+    /// current spot use case wants the same "pointing down at the road"
+    /// aim.</summary>
+    public static void Register(Transform point, Color color, LightType lightType = LightType.Point)
     {
-        Points.Add(new Point { Transform = point, Color = color });
+        Points.Add(new Point { Transform = point, Color = color, LightType = lightType });
     }
 
     public static int Count { get { return Points.Count; } }
     public static Transform TransformAt(int i) { return Points[i].Transform; }
     public static Color ColorAt(int i) { return Points[i].Color; }
+    public static LightType LightTypeAt(int i) { return Points[i].LightType; }
 }
 
 /// <summary>
@@ -116,7 +127,25 @@ public class DynamicLightBudget : MonoBehaviour
     [Tooltip("Turn every real light off entirely -- the fastest way to check whether the lights or the emissive bulb geometry is what you're actually seeing.")]
     public bool enableRealLights = true;
 
+    // 2026-07 creator direction: "make the overhanging street lights
+    // spotlights, pointing down at the road. Make cone angle 48 degrees
+    // wide." GlowPointRegistry now carries a LightType per point
+    // (RoadDresser's overhanging-streetlight bulb registers as Spot;
+    // everything else stays the previous Point default). This is the
+    // ONE shared cone angle every promoted Spot light uses -- there's no
+    // per-fixture angle yet since only one fixture kind asks for Spot
+    // today; if a second one wants a different cone, this needs to move
+    // onto GlowPointRegistry's per-point data instead of staying a
+    // single shared field here.
+    [Tooltip("Cone angle (degrees) for any promoted light registered as a Spot (currently: the overhanging streetlight, aimed straight down at the road). Ignored for Point lights.")]
+    [Range(1f, 179f)]
+    public float spotConeAngle = 48f;
+
     private const float RefreshInterval = 0.35f;
+    // Unity's forward-is-local-+Z convention: an X-euler of 90 points
+    // straight down (same convention LumenCycleController's sun rotation
+    // already relies on and documents).
+    private static readonly Quaternion SpotDownRotation = Quaternion.Euler(90f, 0f, 0f);
 
     private readonly List<Light> _pool = new List<Light>();
     private readonly List<int> _picked = new List<int>();
@@ -216,11 +245,23 @@ public class DynamicLightBudget : MonoBehaviour
             if (i < _picked.Count)
             {
                 var idx = _picked[i];
-                _pool[i].gameObject.SetActive(true);
-                _pool[i].transform.position = GlowPointRegistry.TransformAt(idx).position;
-                _pool[i].color = GlowPointRegistry.ColorAt(idx);
-                _pool[i].intensity = intensity;
-                _pool[i].range = range;
+                var pooled = _pool[i];
+                pooled.gameObject.SetActive(true);
+                pooled.transform.position = GlowPointRegistry.TransformAt(idx).position;
+                pooled.color = GlowPointRegistry.ColorAt(idx);
+                pooled.intensity = intensity;
+                pooled.range = range;
+                // Which registered point lands on which pooled slot can
+                // change refresh to refresh (nearest-to-camera reshuffles
+                // as the camera moves), so type/rotation/cone have to be
+                // re-applied here too, not just set once at creation.
+                var kind = GlowPointRegistry.LightTypeAt(idx);
+                pooled.type = kind;
+                if (kind == LightType.Spot)
+                {
+                    pooled.transform.rotation = SpotDownRotation;
+                    pooled.spotAngle = spotConeAngle;
+                }
             }
             else
             {

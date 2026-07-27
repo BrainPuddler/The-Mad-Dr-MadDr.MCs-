@@ -207,7 +207,7 @@ otherwise ignores the day/night cycle entirely.
 
 | Light kind | Tier 1 (glow) | Tier 2 (real light) | Behavior |
 | --- | --- | --- | --- |
-| Streetlamp bulb | `RoadDresser.Bulb()`, profile-driven brightness | Yes, registered | Steady |
+| Streetlamp bulb (overhanging, arm-over-the-road) | `RoadDresser.Bulb()`, profile-driven brightness | Yes, registered as **Spot** (2026-07: was Point — now aimed straight down at the road, `DynamicLightBudget.spotConeAngle` wide, default 48°) | Steady |
 | Ornate multi-globe lamppost | same `Bulb()` material, 3 globes | Yes, ONE registered per fixture (2026-07: was all 3, ~0.5m apart — stacked to ~3x intensity on one patch of pavement and burned 3 budget slots on a single fixture) | Steady |
 | Apartment windows | new `BuildingDresser.WindowGlow()`, ~2-in-5 floors lit | Yes, registered | **Flicker** |
 | Movie palace neon (underglow/blade/letters) | existing `NeonTeal`/`SignWhite`/`NeonRed` | No (decorative, not budgeted) | **Buzz** |
@@ -234,7 +234,16 @@ silently skipped):
 
 1. Spawn the prop with its emissive material as usual.
 2. If it should compete for a real light: `GlowPointRegistry.Register(
-   transform, tintColor)`.
+   transform, tintColor)`. Omitting the third argument gets a Point
+   light (omnidirectional pool — right for most fixtures). Pass
+   `LightType.Spot` if the fixture is aimed at something specific (2026-
+   07: the overhanging streetlight, aimed down at the road) —
+   `DynamicLightBudget` aims every promoted Spot light straight down and
+   applies its own shared `spotConeAngle`; there's no per-point
+   direction/angle yet since only one fixture kind has asked for Spot so
+   far. A second one wanting a DIFFERENT aim/angle would need that
+   moved onto `GlowPointRegistry`'s per-point data instead of staying a
+   single shared field on `DynamicLightBudget`.
 3. If it should animate: `EmissiveAnimator.Register(renderer,
    baseEmissionColorBeforeBoost, kind, seed, ...)` — `baseEmission` is
    the material's own `color * emissive` (matching how `M()` computes

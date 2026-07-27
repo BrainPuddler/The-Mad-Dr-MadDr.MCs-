@@ -3974,3 +3974,42 @@ needed, since a stub silently returning 0 makes any future numeric
 verification of ANYTHING touching it meaningless without warning. Harness-
 only change, not part of the shipped game -- lives in the session
 scratchpad, not the repo.
+
+## docs/28: overhanging streetlight -> Spot light, pointing down, 48deg cone (2026-07)
+
+Creator direction: "Change the overhanging street lights to spotlights,
+pointing down at the road. Make cone angle 48 degrees wide." "The
+overhanging street lights" is unambiguous -- exactly one fixture in
+RoadDresser's furniture roster has an arm reaching OVER the road
+(case 0, "streetlight: pole, arm reaching back over the road, warm
+bulb"); every other glow point (ornate lamppost globes, windows, neon,
+roundabout bulb) isn't aimed at anything and stays a Point light.
+
+`GlowPointRegistry`'s `Point` struct and `Register()` now carry a
+`LightType` (defaults to `Point`, so every existing call site is
+unchanged without editing it). `DynamicLightBudget` re-applies
+`pooled.type` from the registered point's `LightType` every refresh
+(not just at pool-creation time), since which registered point lands on
+which pooled slot reshuffles as the camera moves -- a slot that was
+Point last refresh can become Spot this refresh. For Spot-type slots,
+also sets `spotAngle` from a new live `spotConeAngle` field (default
+48, matching the ask) and rotates the pooled light to
+`SpotDownRotation = Quaternion.Euler(90, 0, 0)` -- Unity's
+forward-is-local-+Z convention, the SAME rotation convention
+LumenCycleController's sun already relies on and documents ("an X-euler
+of 90 points straight down").
+
+`RoadDresser`'s case 0 now registers with `LightType.Spot` instead of
+the implicit default.
+
+Verified numerically (no Editor here): built out a real `Quaternion`
+implementation in the flightcheck harness (`AngleAxis`/`Euler`/multiply/
+rotate-vector -- were `default(Quaternion)` stubs, an all-zero quaternion
+isn't even a valid rotation) and confirmed
+`SpotDownRotation * Vector3.forward` actually comes out to (0, -1, 0),
+not up or sideways. Also confirmed via reflection: a plain
+`Register(t, color)` call still yields `LightType.Point` (so every
+untouched call site is unaffected), an explicit
+`Register(t, color, LightType.Spot)` call yields `LightType.Spot`, and
+`spotConeAngle` defaults to exactly 48. Not yet seen lighting up an
+actual road in a real render.

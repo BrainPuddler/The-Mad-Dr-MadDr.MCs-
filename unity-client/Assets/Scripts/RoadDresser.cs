@@ -421,7 +421,15 @@ public static class RoadDresser
                 // starting point for a "pool of light" read.
                 var bulb = b.SpawnPrim(PrimitiveType.Sphere, propSpot + Vector3.up * 4.55f - side * (sideSign * 2.2f),
                     new Vector3(0.26f, 0.2f, 0.26f), Bulb(), holder);
-                GlowPointRegistry.Register(bulb.transform, LampColor);
+                // 2026-07 creator direction: "make the overhanging street
+                // lights spotlights, pointing down at the road" -- this is
+                // the ONE fixture with an arm reaching OVER the road
+                // (every other glow point stays the Point default: the
+                // ornate lamppost's globes, windows, neon, etc. aren't
+                // "aimed" at anything in particular). DynamicLightBudget
+                // aims any promoted Spot light straight down and applies
+                // its own shared cone angle.
+                GlowPointRegistry.Register(bulb.transform, LampColor, LightType.Spot);
                 MakeKnockable(b, holder.gameObject, 1.6f);
                 break;
             }
