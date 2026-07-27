@@ -154,8 +154,11 @@ public static class BuildingDresser
         }
     }
 
-    // massing cubes are hexSize*0.9 = 18m across; faces sit at +-9m
-    private const float Half = 9f;
+    // massing cubes are hexSize*0.9 = 18m across; faces sit at +-9m.
+    // Public: RoadDresser's street-furniture placement needs this to keep
+    // poles/lights clear of a building occupying the hex across the curb
+    // (see RoadDresser.ClearLateralOffset).
+    public const float Half = 9f;
 
     // ---- small tier: suburbia / roadside America ------------------------------
 

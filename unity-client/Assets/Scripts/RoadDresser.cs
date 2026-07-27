@@ -127,6 +127,14 @@ public static class RoadDresser
         foreach (var bridge in city.Bridges)
             foreach (var hex in bridge.Footprint) bridgeHexes.Add(hex);
 
+        // docs/28 "I believe you put the lights in the wall": street
+        // furniture placement has no other wall-avoidance check (see
+        // ClearLateralOffset) -- it needs to know which hexes are actually
+        // building footprint to keep poles/lights off them.
+        var buildingHexes = new HashSet<HexCoord>();
+        foreach (var building in city.Buildings)
+            foreach (var hex in building.Footprint) buildingHexes.Add(hex);
+
         foreach (var hex in city.Roads)
         {
             // bridge deck hexes are dressed entirely by BridgeDresser
@@ -164,7 +172,7 @@ public static class RoadDresser
             AddArm(card.N, 0, -1, new Vector3(0f, 0f, -1f), HalfSpanNS);
             AddArm(card.S, 0, 1, new Vector3(0f, 0f, 1f), HalfSpanNS);
 
-            DressHex(builder, hex, center, connectors, arterial.Contains(hex), roundabouts.Contains(hex), host);
+            DressHex(builder, hex, center, connectors, arterial.Contains(hex), roundabouts.Contains(hex), buildingHexes, host);
 
             // railyard siding (docs/21 batch 2, item 6): a parallel rail
             // track alongside straight road hexes near a rail_depot
@@ -248,8 +256,43 @@ public static class RoadDresser
     private const float RoadWidth = 7.5f;
     private const float ArterialRoadWidth = 14f;   // a real 3-4 lane arterial (creator direction, 2026-07), not a residential street
 
+    // minimum gap left between a piece of street furniture and a
+    // building's wall face, beyond the building's own half-extent
+    private const float FurnitureClearance = 1.5f;
+
+    /// <summary>Clamps a sideways placement offset so it never reaches
+    /// into, or hugs the wall of, a building occupying the hex directly
+    /// across the curb in that direction. `curbLineOffset` (RoadWidth-
+    /// derived) assumes a building is always at least a fixed distance
+    /// away, but that distance isn't fixed in world space: CardinalAnchor's
+    /// straightening nudge shifts a vertical street's whole hex up to
+    /// HexMeters/4 along the SAME axis a north/south street's curb offset
+    /// uses, and a horizontal street's own curb offset can independently
+    /// exceed the raw row-to-row gap to a building on an arterial street.
+    /// This checks the real building position instead of trusting the
+    /// arithmetic to always leave room (docs/28 "I believe you put the
+    /// lights in the wall").</summary>
+    private static float ClearLateralOffset(RuntimeCityBuilder b, HexCoord hex, Vector3 center,
+        Vector3 sideDir, HashSet<HexCoord> buildingHexes, float desired)
+    {
+        var (col, row) = Offset(hex);
+        HexCoord neighbor;
+        if (sideDir.x > 0.5f) neighbor = HexCoord.FromOffset(col + 1, row);
+        else if (sideDir.x < -0.5f) neighbor = HexCoord.FromOffset(col - 1, row);
+        else if (sideDir.z > 0.5f) neighbor = HexCoord.FromOffset(col, row + 1);
+        else neighbor = HexCoord.FromOffset(col, row - 1);
+
+        if (!buildingHexes.Contains(neighbor)) return desired;
+
+        var buildingCenter = b.WorldOf(neighbor);
+        var distanceToBuilding = Vector3.Dot(buildingCenter - center, sideDir);
+        var maxSafe = distanceToBuilding - BuildingDresser.Half - FurnitureClearance;
+        return Mathf.Clamp(desired, 0f, Mathf.Max(0f, maxSafe));
+    }
+
     private static void DressHex(RuntimeCityBuilder b, HexCoord hex, Vector3 center,
-        List<(Vector3 dir, bool arterial, float half)> connectors, bool isArterialHex, bool isRoundabout, Transform host)
+        List<(Vector3 dir, bool arterial, float half)> connectors, bool isArterialHex, bool isRoundabout,
+        HashSet<HexCoord> buildingHexes, Transform host)
     {
         // 1. APPROACH ARMS -- straight cardinal strips (drawn first so
         //    the center treatment overlays their inner ends)
@@ -348,9 +391,18 @@ public static class RoadDresser
         if (connectors.Count == 2 && h % 3 == 0)
             SpawnCar(b, hex, center + side * (h % 2 == 0 ? parkOffset : -parkOffset), axisAngle, host);
 
-        // pole or hydrant or trash can on the sidewalk line
+        // pole or hydrant or trash can on the sidewalk line. `curbLineOffset`
+        // assumes there's always room between the curb and the neighboring
+        // hex, but CardinalAnchor's straightening nudge (see that method)
+        // can land ON the same world axis as this sideways offset for a
+        // north/south street -- the two silently stacked and pushed
+        // furniture past a building's wall face (docs/28 "I believe you put
+        // the lights in the wall"). ClearLateralOffset checks the actual
+        // building position instead of trusting the fixed margin.
         var sideSign = (h >> 3) % 2 == 0 ? 1f : -1f;
-        var propSpot = center + side * (sideSign * curbLineOffset) + axis * (((h >> 5) % 7) - 3f);
+        var sideDir = side * sideSign;
+        var safeCurbOffset = ClearLateralOffset(b, hex, center, sideDir, buildingHexes, curbLineOffset);
+        var propSpot = center + sideDir * safeCurbOffset + axis * (((h >> 5) % 7) - 3f);
         switch ((h >> 8) % 8)
         {
             case 0:   // streetlight: pole, arm reaching back over the road, warm bulb

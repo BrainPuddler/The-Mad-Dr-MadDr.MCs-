@@ -36,12 +36,12 @@ condensed, current-state version.
 | 6 | ornate-lamppost-pole / market-stall-canopy rendered **pure black** even sitting inside a correctly-working light pool | `ProceduralMeshKit` emitted every face in both windings (deliberate anti-mistake guard) — `RecalculateNormals` averages face normals per vertex, so +N and -N cancelled to exactly zero, and a zero normal makes `dot(N,L)` zero for *any* light | Single winding + `FaceOutward()` (re-winds any triangle facing the mesh centroid). Verified numerically in the flightcheck harness (22/22 zero normals → 0/0) since there's no Editor to look at | **Was INCOMPLETE** — see #7 |
 | 7 | Same two props **vanished entirely** (regression from #6) | Fixing #6 reintroduced exactly the risk double-winding existed to prevent: whether Unity's front-face culling agrees with `FaceOutward()`'s notion of "outward" can't be verified without an Editor — it disagreed, so the correctly-wound faces got back-face culled | `PropLibrary.Spawn` clones the material and sets `_Cull = Off`, but ONLY for registered-builder (ProceduralMeshKit) meshes, never the primitive fallback | **Reasoned fix, awaiting creator re-verification** — robust to either winding direction by construction, but not yet confirmed against a real render |
 | — | (side finding, not a symptom report) | Ornate lamppost registered a real light per globe (3, half a metre apart) — ~3x stacked intensity on one pavement patch, 3 of 24 budget slots on one fixture | Register one real light per fixture; all 3 globes still glow (emissive, unaffected) | Bundled into the #6/#7 commits, not separately re-verified |
-| — | "I believe you put the lights in the wall" | Not yet root-caused — raised while the props were invisible (row 7's bug), so hard to judge whether it was a real position bug or just confusing to evaluate against invisible geometry | Not yet attempted | **Open** — re-check after #7 is confirmed |
+| 8 | "I believe you put the lights in the wall" | `RoadDresser` had NO wall-clearance check at all — `curbLineOffset` assumed a fixed margin to any neighboring building that two independent effects could break: `CardinalAnchor`'s straightening nudge stacking with the curb offset on the same axis (north/south streets), and an arterial street's own curb offset exceeding the raw row gap to a north/south-adjacent building (any street). Full derivation in the docs/12 decision log (search "no wall-clearance check") | `RoadDresser.ClearLateralOffset` now checks the actual building position (via `city.Buildings`) and clamps the sideways offset to stay `BuildingDresser.Half + 1.5m` clear of it, instead of trusting the arithmetic | **Reasoned fix, awaiting creator re-verification** |
 
 **As of the last commit (`5fd5a4f`): rows 1, 3, 4, 5, 5b, 6 are creator-
-confirmed working. Row 7 (culling fix) and the "lights in the wall"
-report are NOT YET re-verified against a real render — that's the
-active open thread, not a settled state.**
+confirmed working. Row 7 (culling fix) and row 8 (wall-clearance fix)
+are NOT YET re-verified against a real render — that's the active open
+thread, not a settled state.**
 
 ## 0. The core problem with "just add more Lights"
 

@@ -3826,3 +3826,58 @@ billboard posts, other cylinders), which don't have this problem and
 shouldn't pay the double-sided fill-rate cost. Only 1-3 procedural-mesh
 prop instances exist per scene, so the extra material instances are
 negligible.
+
+## docs/28 root cause found: street furniture had no wall-clearance check at all (2026-07)
+
+Root-caused the last open row in the bug table -- "I believe you put the
+lights in the wall," left unresolved because it was raised while the
+props were still invisible (the previous row's culling bug), so hard to
+judge whether it was a real position bug or just confusing to evaluate
+against invisible geometry.
+
+It's real, and it isn't limited to the two `PropLibrary` props -- it hits
+`RoadDresser`'s entire street-furniture switch (streetlight, telephone
+pole, hydrant, trash can, billboard, ornate lamppost, market stall),
+because every one of them spawns at the same `propSpot`, and nothing in
+`RoadDresser.cs` ever queried a building's position. The curb offset
+(`curbLineOffset`, derived from `RoadWidth`) was pure arithmetic on the
+assumption that a neighboring building is always at least a fixed
+distance away -- an assumption two different things could silently
+break:
+
+- `CardinalAnchor`'s road-straightening nudge (added so a north/south
+  street renders on one straight world-x line instead of the hex grid's
+  natural sawtooth) shifts a vertical street's whole hex up to
+  `HexMeters/4` (5m) along world X -- the SAME axis a north/south
+  street's sideways curb offset uses. The two aren't correlated (the
+  nudge's sign comes from hex row parity, the curb offset's sign from an
+  independent hash bit), so on about half of affected hexes they add
+  instead of cancelling: `5m nudge + 6.2m residential curb offset =
+  11.2m`, past an 18m-wide building's 11m near-wall distance (`HexMeters`
+  20m hex spacing minus `BuildingDresser.Half` 9m) -- the fixture lands
+  inside the building. On an arterial street (9.45m curb offset) the
+  overshoot is worse (14.45m, 3.45m inside the wall).
+- Independent of the nudge, an EAST/WEST street's own arterial curb
+  offset (9.45m) can exceed the raw north/south row-to-row gap to a
+  building (~17.32m spacing, 8.66m half, minus the 9m building half =
+  8.32m to the wall) -- an arterial street's furniture can end up just
+  inside a north/south-adjacent building's wall with no nudge involved
+  at all.
+
+Fixed by checking the actual building position instead of trusting the
+fixed margin. `RoadDresser.Build` now collects every building footprint
+hex into a set (`city.Buildings` was already available there, unused for
+this). A new `ClearLateralOffset` clamps the sideways placement offset:
+it looks up whether the hex directly across the curb (in the same
+cardinal direction the furniture is being offset toward) is a building
+hex, and if so, computes the real distance to that building's world
+position and clamps the offset to stay `BuildingDresser.Half + 1.5m`
+clear of it (exposed `BuildingDresser.Half`, previously private, since
+`RoadDresser` needs the same number rather than a second guess at it).
+Worst case (a building hard up against the curb on a dead-end), furniture
+slides toward the road centerline instead of sitting at the curb --
+never into the wall, which is the failure mode that mattered. Not
+visually confirmed (no Editor in this environment, same standing caveat
+as every other row in this table) but reasoned directly from the actual
+constants in play (`HexCoord.HexMeters`, `BuildingDresser.Half`,
+`RoadDresser`'s own width/offset constants), not from a guess.
