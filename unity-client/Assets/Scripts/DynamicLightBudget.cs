@@ -84,26 +84,55 @@ public class DynamicLightBudget : MonoBehaviour
     [Range(0, 128)]
     public int budget = 24;
 
-    // 2026-07: the diagnostic worked -- creator confirmed real lights
-    // ARE visible at the deliberately-blown-out 80 default, which rules
-    // out "not rendering at all" and narrows this to plain intensity
-    // tuning. The old 0.7 default (this component's original number)
-    // apparently really was just too dim to read on the creator's setup;
-    // no config bug found to explain the gap (checked: no Physical Light
-    // Units flag on the Pipeline Asset, which would've explained an
-    // intensity/lumens scale mismatch -- it's just off).
+    // 2026-07, two rounds. Round 1 diagnostic: creator confirmed real
+    // lights ARE visible at a deliberately-blown-out 80 (ruled out "not
+    // rendering at all"), backed off to an untuned middle-ground 12.
     //
-    // Backed off from the 80 diagnostic extreme to a middle-ground
-    // starting point, NOT a confirmed-good final value -- the true
-    // "looks right" threshold between the old invisible 0.7 and the
-    // blown-out 80 hasn't been narrowed down by testing intermediate
-    // values yet. This field is read live every ~0.35s refresh
-    // specifically so it can be nudged in Play mode without a code
-    // round-trip -- that's the fastest way to find the real number now
-    // that visibility itself is confirmed working.
-    [Tooltip("Intensity a promoted light reaches at full night. Turn this DOWN if lit areas look blown out. Note: this does NOT control the glowing bulb spheres themselves -- those are emissive geometry, see LumenCycleController's emissive/bloom fields.")]
+    // Round 2 direction: "give me a setting in the editor to set the max
+    // and minimum ON setting for the overhang streetlights, and all
+    // others streetlights" -- plus fog should actively throttle real
+    // lights (see fogDimReferenceDensity below). The old single
+    // `peakIntensity` (shared by every Point-type light) and
+    // `spotIntensityMultiplier` (a flat extra factor for Spot) are
+    // replaced by an explicit Max/Min pair PER TYPE: Max is the ceiling
+    // in clear conditions, Min is the floor in heavy fog -- fog dims a
+    // light's core, it doesn't extinguish it, so Min should stay above
+    // 0. "All others streetlights" maps directly onto the existing
+    // Point/Spot split (GlowPointRegistry's LightType) -- the ornate
+    // lamppost, roundabout bulb, and windows are all Point; the
+    // overhanging streetlight is the only Spot. Untuned starting values,
+    // same status as the fields they replace -- nudge live once visible.
+    [Tooltip("Point-type real-light intensity ceiling (clear conditions) at full night -- the ornate lamppost, roundabout bulb, windows: everything except the overhanging streetlight.")]
     [Range(0f, 150f)]
-    public float peakIntensity = 12f;
+    public float pointIntensityMax = 12f;
+
+    [Tooltip("Point-type real-light intensity floor in HEAVY fog at full night. Should stay above 0 -- fog dims a light, it doesn't extinguish it.")]
+    [Range(0f, 150f)]
+    public float pointIntensityMin = 4f;
+
+    [Tooltip("Spot-type real-light intensity ceiling (clear conditions) at full night -- currently only the overhanging streetlight. Higher baseline than the Point max: a Spot's cone concentrates the same intensity into a narrower solid angle and reads dimmer per-pixel at an equal value for a wide-ish cone like 48 degrees.")]
+    [Range(0f, 300f)]
+    public float spotIntensityMax = 60f;
+
+    [Tooltip("Spot-type real-light intensity floor in HEAVY fog at full night.")]
+    [Range(0f, 300f)]
+    public float spotIntensityMin = 18f;
+
+    // 2026-07 creator: "it should add a glow to the light diffusing it,
+    // like real lights in the fog." Basic RenderSettings fog only fades
+    // a SURFACE's rendered color toward the fog color by camera
+    // distance -- it has no concept of a light source's own reach, so it
+    // can't make a lamp look "swallowed" by fog on its own. This
+    // normalizes the CURRENT RenderSettings.fogDensity (already driven
+    // by LumenCycleController's day/night grades) into a 0..1 "how foggy
+    // right now" factor used to blend each light's own Max->Min above --
+    // the crude, non-volumetric approximation of light scattering this
+    // session's toolset can actually deliver. See LumenCycleController.
+    // fogGlowBoost for the companion "diffuse halo" half of the effect
+    // (bloom, not light intensity).
+    [Tooltip("Fog density at which lights reach their fog-dimmed MINIMUM -- current RenderSettings.fogDensity is divided by this and clamped 0..1 to blend each light between its Max and Min. Lower = lights dim out in lighter fog.")]
+    [Range(0.001f, 0.05f)]
+    public float fogDimReferenceDensity = 0.016f;
 
     // 2026-07 correction: an earlier pass here cut this to 3f on the
     // theory that 7f was washing over neighboring props. Wrong call --
@@ -141,22 +170,6 @@ public class DynamicLightBudget : MonoBehaviour
     [Range(1f, 179f)]
     public float spotConeAngle = 48f;
 
-    // 2026-07 creator report, right after the Spot conversion: "the down
-    // facing spotlight needs to be a lot brighter to read properly."
-    // Unlike a Point light (which spreads peakIntensity's worth of light
-    // in every direction), a Spot's cone concentrates the SAME
-    // peakIntensity into a narrower solid angle, and Unity's spot
-    // attenuation model reads noticeably dimmer per-pixel than a Point at
-    // an equal `intensity` value for a wide-ish cone like 48 degrees --
-    // it doesn't get the same "concentration" payoff a narrow beam would.
-    // Rather than raise peakIntensity for every Point light too (windows,
-    // the ornate lamppost, etc., which weren't the complaint), Spot-type
-    // slots get their own extra multiplier on top. Untuned guess, same as
-    // peakIntensity itself -- nudge live once it's visible.
-    [Tooltip("Extra multiplier on top of peakIntensity, applied ONLY to Spot-type promoted lights (currently: the overhanging streetlight). Point lights are unaffected.")]
-    [Range(1f, 20f)]
-    public float spotIntensityMultiplier = 5f;
-
     private const float RefreshInterval = 0.35f;
     // Unity's forward-is-local-+Z convention: an X-euler of 90 points
     // straight down (same convention LumenCycleController's sun rotation
@@ -177,7 +190,11 @@ public class DynamicLightBudget : MonoBehaviour
     {
         if (profile == null) return;
         budget = profile.RealLightBudget;
-        peakIntensity = profile.RealLightPeakIntensity;
+        pointIntensityMax = profile.RealLightPointIntensityMax;
+        pointIntensityMin = profile.RealLightPointIntensityMin;
+        spotIntensityMax = profile.RealLightSpotIntensityMax;
+        spotIntensityMin = profile.RealLightSpotIntensityMin;
+        fogDimReferenceDensity = profile.FogDimReferenceDensity;
         range = profile.RealLightRange;
     }
 
@@ -259,10 +276,23 @@ public class DynamicLightBudget : MonoBehaviour
         // hard 0 -- "ALL the lights should turn off during the day" means
         // exactly that, not "very dim." NightAmount itself now genuinely
         // reaches 0 for the whole Day (LumenCycleController's
-        // ComputeNightIntensity), so Lerp(0f, ...) at boost==0 is exactly
-        // 0, not a residual glow.
+        // ComputeNightIntensity), so Lerp(0f, ceiling, 0) is exactly 0,
+        // not a residual glow.
+        //
+        // 2026-07 round 2: "give me a setting... for the max and minimum
+        // ON setting" + fog should actively throttle real lights. Each
+        // type's ceiling is no longer a flat peakIntensity -- it's
+        // Lerp(Max, Min, fogT), where fogT is how close the CURRENT fog
+        // density is to fogDimReferenceDensity. Heavier fog pulls the
+        // ceiling down toward Min; the night boost above still separately
+        // gates the whole thing to 0 during the day.
         var boost = DayNightState.NightAmount;
-        var intensity = Mathf.Lerp(0f, peakIntensity, boost);
+        var fogT = fogDimReferenceDensity > 0f
+            ? Mathf.Clamp01(RenderSettings.fogDensity / fogDimReferenceDensity) : 0f;
+        var pointCeiling = Mathf.Lerp(pointIntensityMax, pointIntensityMin, fogT);
+        var spotCeiling = Mathf.Lerp(spotIntensityMax, spotIntensityMin, fogT);
+        var pointIntensity = Mathf.Lerp(0f, pointCeiling, boost);
+        var spotIntensity = Mathf.Lerp(0f, spotCeiling, boost);
         for (var i = 0; i < _pool.Count; i++)
         {
             if (i < _picked.Count)
@@ -275,20 +305,20 @@ public class DynamicLightBudget : MonoBehaviour
                 pooled.range = range;
                 // Which registered point lands on which pooled slot can
                 // change refresh to refresh (nearest-to-camera reshuffles
-                // as the camera moves), so type/rotation/cone/intensity-
-                // multiplier all have to be re-applied here too, not just
-                // set once at creation.
+                // as the camera moves), so type/rotation/cone/intensity
+                // all have to be re-applied here too, not just set once
+                // at creation.
                 var kind = GlowPointRegistry.LightTypeAt(idx);
                 pooled.type = kind;
                 if (kind == LightType.Spot)
                 {
                     pooled.transform.rotation = SpotDownRotation;
                     pooled.spotAngle = spotConeAngle;
-                    pooled.intensity = intensity * spotIntensityMultiplier;
+                    pooled.intensity = spotIntensity;
                 }
                 else
                 {
-                    pooled.intensity = intensity;
+                    pooled.intensity = pointIntensity;
                 }
             }
             else

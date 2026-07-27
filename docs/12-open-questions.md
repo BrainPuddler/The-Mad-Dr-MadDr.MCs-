@@ -4137,3 +4137,74 @@ material in the file) and changed its base color from near-black
 (0.17/0.17/0.18) to a mid dark gray (0.35/0.34/0.36) instead -- contrast
 against the road color, not surface glossiness, is the mechanism now
 being relied on to make a warm streetlight glow visible.
+
+## docs/28 row 16: fog now dims + diffuses real lights, thicker overall (2026-07)
+
+Creator: "I think the fog isn't transmitting or limiting the
+transmission of the lights." Checked the actual scene file
+(`SampleScene.unity`) before touching anything: `m_FogMode: 3`
+(ExponentialSquared) and `m_AmbientMode: 0` (Skybox) are both already
+correctly serialized -- NOT the same class of bug as the earlier
+ambientMode fix (that one really did default to something that silently
+discarded tuned values; this one doesn't). The actual gap: basic
+`RenderSettings` fog fades a rendered SURFACE's color toward the fog
+color based on camera distance -- it has no concept of a light SOURCE's
+own reach, so it structurally cannot make a lamp look "swallowed" by fog
+regardless of how fogDensity/fogColor are tuned. That's a real,
+explainable limitation of the technique, not a bug to hunt further.
+
+Asked a clarifying question rather than guess at another numeric fix
+blind (two of this session's earlier guesses already needed correcting)
+-- creator answered "both [throttle lights AND thicken fog], plus a
+diffusing glow like real lights in the fog, and give me max/min settings
+for the overhang streetlights vs all others."
+
+Implementation:
+- `DynamicLightBudget`'s old single `peakIntensity` (shared by every
+  Point-type light) + `spotIntensityMultiplier` (a flat Spot factor)
+  replaced by four explicit fields: `pointIntensityMax`/
+  `pointIntensityMin`/`spotIntensityMax`/`spotIntensityMin`. "Overhang
+  streetlights vs all others" maps directly onto the EXISTING Point/Spot
+  split (`GlowPointRegistry.LightType`) -- the overhanging streetlight is
+  the only Spot; the ornate lamppost, roundabout bulb, and windows are
+  all Point. No new categorization infrastructure needed.
+- New `fogDimReferenceDensity`: current `RenderSettings.fogDensity`
+  divided by this and clamped 0..1 gives `fogT`, used to `Lerp` each
+  type's ceiling from Max (clear) toward Min (heavy fog) -- Min stays
+  above 0 deliberately, since real fog dims a light's core, it doesn't
+  extinguish it.
+- New `LumenCycleController.fogGlowBoost`: `1 + fogDensity *
+  fogGlowBoost`, multiplied into the existing `bloomScale`-scaled bloom
+  curve -- the "diffusing glow" half, since bloom (already the mechanism
+  that turns a small bright point into a soft spread halo) is the
+  closest approximation this toolset can give to real light scattering
+  without a volumetric rendering system.
+- `FogDensity` bumped ~1.5-1.7x across all four phase grades (Dawn
+  0.006->0.010, Day 0.003->0.005, Dusk 0.008->0.014, Night 0.014->0.022)
+  for "thicker overall" -- chosen to stay readable (Night's new value
+  puts ~70% fog blend at a 50m view distance under Exp2 falloff, not a
+  total whiteout).
+- All new fields mirrored onto `CityLightingProfile` (`RealLightPoint/
+  SpotIntensityMax/Min`, `FogDimReferenceDensity`, `FogGlowBoost`) for
+  the same seed-defaults-at-build-time pattern every other tunable here
+  already follows.
+
+Mid-turn, before this was finished, the creator ALSO reverted the
+previous "roads more reflective" fix: "the road is too shiny put it
+back to the original setting. Change the road from black to a textured
+mid dark gray, that should help us see the light better." Reverted
+`Asphalt()`'s 0.92 smoothness override (back to shader default) and
+recolored from near-black (0.17/0.17/0.18) to mid dark gray
+(0.35/0.34/0.36) -- contrast against the road's own color is now the
+mechanism relied on, not surface glossiness. Handled first, as its own
+commit, before returning to the fog work.
+
+Verification for the fog/streetlight math: hand-checked the algebra
+(fogT=0 -> ceiling=Max; fogT=1 -> ceiling=Min), which composes entirely
+from `Mathf.Lerp`/`Clamp01`, already verified for real via the harness
+stub fixes earlier this session -- no new dedicated numeric test written
+for this round, since `Refresh()` (where the new math lives) is a
+private instance method needing a live Camera/GameObject pool to
+exercise meaningfully, unlike the earlier trapezoid/window-occupancy
+logic which was cleanly isolable as pure static methods. Nothing in this
+round has been seen in a real render yet.

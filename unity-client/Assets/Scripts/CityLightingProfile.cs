@@ -26,8 +26,9 @@ using UnityEngine;
 ///   * too BRIGHT a glowing ball  -> LumenCycleController.emissiveScale
 ///   * too LARGE a glowing ball   -> LumenCycleController.bloomScale
 ///   * washed-out scene overall   -> LumenCycleController.nightAmbient
-///   * lit ground area too strong -> DynamicLightBudget.peakIntensity
+///   * lit ground area too strong -> DynamicLightBudget.pointIntensityMax/spotIntensityMax
 ///   * lit ground area too wide   -> DynamicLightBudget.range
+///   * lights don't dim in fog    -> DynamicLightBudget.fogDimReferenceDensity
 /// </summary>
 [CreateAssetMenu(fileName = "CityLightingProfile", menuName = "MadDr/City Lighting Profile")]
 public class CityLightingProfile : ScriptableObject
@@ -37,13 +38,30 @@ public class CityLightingProfile : ScriptableObject
     [Range(4, 128)]
     public int RealLightBudget = 24;
 
-    // Kept in sync with DynamicLightBudget.peakIntensity (2026-07: the
-    // "make it 40-120" diagnostic confirmed real lights DO render; this
-    // is now backed off to a middle-ground starting point pending actual
-    // tuning, not a confirmed-good value -- see that field's own comment.
-    [Tooltip("Peak intensity a promoted real light reaches at full night. THE fix for 'lights are too bright' if it recurs -- turn this down first.")]
+    // 2026-07: kept in sync with DynamicLightBudget's own fields of the
+    // same names minus the "RealLight" prefix -- see that component for
+    // the full history (the "make it 40-120" diagnostic that confirmed
+    // real lights DO render, then the Max/Min-per-type + fog-dimming
+    // redesign that replaced the old single RealLightPeakIntensity).
+    [Tooltip("Point-type real-light intensity ceiling (clear conditions) at full night -- the ornate lamppost, roundabout bulb, windows: everything except the overhanging streetlight.")]
     [Range(0f, 150f)]
-    public float RealLightPeakIntensity = 12f;
+    public float RealLightPointIntensityMax = 12f;
+
+    [Tooltip("Point-type real-light intensity floor in HEAVY fog at full night.")]
+    [Range(0f, 150f)]
+    public float RealLightPointIntensityMin = 4f;
+
+    [Tooltip("Spot-type real-light intensity ceiling (clear conditions) at full night -- currently only the overhanging streetlight.")]
+    [Range(0f, 300f)]
+    public float RealLightSpotIntensityMax = 60f;
+
+    [Tooltip("Spot-type real-light intensity floor in HEAVY fog at full night.")]
+    [Range(0f, 300f)]
+    public float RealLightSpotIntensityMin = 18f;
+
+    [Tooltip("Fog density at which lights reach their fog-dimmed minimum -- see DynamicLightBudget.fogDimReferenceDensity.")]
+    [Range(0.001f, 0.05f)]
+    public float FogDimReferenceDensity = 0.016f;
 
     [Tooltip("How far each light reaches, in meters, as a straight-line radius from the light itself -- NOT a ground-projected pool size. Needs to comfortably exceed the tallest fixture's mount height (~5.9m for the ornate lamppost globes) or it can't reach the ground at all.")]
     [Range(1f, 25f)]
@@ -66,6 +84,10 @@ public class CityLightingProfile : ScriptableObject
     [Tooltip("Multiplies URP Bloom intensity at EVERY time of day (not just night) -- a true scale on the authored curve, not an absolute target. High values are what turn a city full of lit windows/signs into a wall of white bloom.")]
     [Range(0f, 2f)]
     public float BloomScale = 0.3f;
+
+    [Tooltip("How much extra Bloom the CURRENT fog density adds on top of BloomScale -- 'real lights in the fog' get a softer, more diffuse halo instead of just dimming. See LumenCycleController.fogGlowBoost.")]
+    [Range(0f, 40f)]
+    public float FogGlowBoost = 15f;
 
     [Tooltip("Ambient light brightness at full Night -- near 0 for a genuinely dark night the lamps/windows/signs can stand out against.")]
     [Range(0f, 1f)]
