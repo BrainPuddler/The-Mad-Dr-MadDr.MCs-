@@ -3642,3 +3642,33 @@ shrinking range while holding intensity constant naturally reads as a
 *more* concentrated pool near the fixture (steeper falloff over a
 shorter distance), which is the "real pool of light" look the code
 comments already describe as the goal.
+
+## docs/28 correction: range=3f broke ground pooling entirely (2026-07)
+
+Direct regression from the previous range-tightening commit (7f -> 3f).
+The ornate lamppost's globes are mounted 5.9m up (RoadDresser.cs "case 6"
+globeSpot). `DynamicLightBudget.range` is a straight-line radius from the
+light's OWN position, not a ground-projected pool size -- a light with
+3m of range mounted 5.9m up cannot reach the ground AT ALL. Screenshot
+evidence confirmed it: no lit patch on the ground, and the pole itself
+rendered pure black (near-zero night ambient, nothing else was lighting
+it either). The prior commit's math check (hex spacing 20m, furniture
+offset +/-3m => no cross-prop bleed possible under 7m) was right, but
+the conclusion drawn from it -- "so just make the dome smaller" -- didn't
+account for the light needing to physically reach down from its own
+mount height first.
+
+Restored `range` to 8f (both `DynamicLightBudget` and
+`CityLightingProfile.RealLightRange`), comfortably above the tallest
+street fixture's mount height, leaving a real ground pool radius (~5.4m
+diameter for the globes specifically: sqrt(8^2-5.9^2)). If the on-screen
+glow still reads as oversized after this, that's the bloom knob
+(`bloomScale`) or the emissive geometry itself, not this field -- range
+governs ground reach, not the screen-space halo size around the source.
+
+Also fixed the reported console warning ("Realtime indirect bounce
+shadowing is only supported for Directional") by explicitly setting the
+pooled lights' `lightmapBakeType = Realtime` at creation -- a fresh
+`AddComponent<Light>()` defaults to Mixed bake mode, which asks for
+GI/baked participation these repositioned-every-refresh runtime lights
+were never going to meaningfully provide.

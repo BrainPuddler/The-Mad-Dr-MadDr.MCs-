@@ -41,9 +41,9 @@ public class CityLightingProfile : ScriptableObject
     [Range(0f, 5f)]
     public float RealLightPeakIntensity = 0.7f;
 
-    [Tooltip("How far each light reaches, in meters. This is the SIZE of the pool of light on the ground -- keep this tight (a pool AT the fixture, not a dome that reaches neighboring props).")]
+    [Tooltip("How far each light reaches, in meters, as a straight-line radius from the light itself -- NOT a ground-projected pool size. Needs to comfortably exceed the tallest fixture's mount height (~5.9m for the ornate lamppost globes) or it can't reach the ground at all.")]
     [Range(1f, 25f)]
-    public float RealLightRange = 3f;
+    public float RealLightRange = 8f;
 
     [Header("Emissive material brightness (the glow on the prop itself)")]
     [Tooltip("Base emissive multiplier for a lit bulb/window/sign BEFORE the night boost below. This is what clipped to solid white balls -- keep BulbEmissiveBase * MaxNightBoost comfortably under ~1.2 to avoid the prop itself rendering as a flat white blob.")]

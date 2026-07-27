@@ -77,17 +77,24 @@ public class DynamicLightBudget : MonoBehaviour
     [Range(0f, 5f)]
     public float peakIntensity = 0.7f;
 
-    // 2026-07 creator report: "the real lights under market-stall-canopy,
-    // ornate-lamppost-pole, etc" read as way too large. A Point light
-    // illuminates ANY nearby geometry within range, not just the prop that
-    // registered it -- 7m was wide enough to wash a big soft dome across
-    // the ground, the pole, and neighboring street furniture, the same
-    // "small source, big footprint" shape the bloom bug had, just via
-    // real-time lighting instead of post-process. Tightened so the pool
-    // stays local to the fixture it's actually promoted from.
-    [Tooltip("How far each light reaches, in meters. This is the SIZE of the pool of light on the ground -- keep this tight (a pool AT the fixture, not a dome that reaches neighboring props).")]
+    // 2026-07 correction: an earlier pass here cut this to 3f on the
+    // theory that 7f was washing over neighboring props. Wrong call --
+    // the ornate lamppost's globes sit 5.9m up (RoadDresser.cs, the
+    // "case 6" globeSpot), and a Point light's range is a straight-line
+    // radius from its own position, not a ground-projected radius. 3m of
+    // range from a light mounted 5.9m up cannot reach the ground AT ALL
+    // (screenshot confirmed: no pool on the ground, and the pole itself
+    // went pure black -- ambient is near-zero at night and nothing else
+    // was lighting it either). Restored well above the tallest street
+    // fixture's mount height so it can actually reach the pavement, with
+    // a real pool radius left over (sqrt(8^2 - 5.9^2) =~ 5.4m ground
+    // diameter for the globes specifically). If the on-screen glow still
+    // looks oversized, that's bloom (LumenCycleController.bloomScale),
+    // not this -- this field is about ground reach, not screen-space
+    // halo size.
+    [Tooltip("How far each light reaches, in meters, as a straight-line radius from the light itself -- NOT a ground-projected pool size. Needs to comfortably exceed the tallest fixture's mount height (~5.9m for the ornate lamppost globes) or it can't reach the ground at all.")]
     [Range(1f, 25f)]
-    public float range = 3f;
+    public float range = 8f;
 
     [Tooltip("Turn every real light off entirely -- the fastest way to check whether the lights or the emissive bulb geometry is what you're actually seeing.")]
     public bool enableRealLights = true;
@@ -160,6 +167,14 @@ public class DynamicLightBudget : MonoBehaviour
             var light = go.AddComponent<Light>();
             light.type = LightType.Point;
             light.shadows = LightShadows.None;   // budget fill lights -- never shadow casters
+            // A freshly AddComponent'd Light defaults to Mixed bake mode,
+            // which is what the "Realtime indirect bounce shadowing is
+            // only supported for Directional" console warning is about --
+            // Mixed asks for baked/GI participation these pooled lights
+            // (repositioned every refresh, never baked) can't meaningfully
+            // provide. Explicit Realtime silences it and matches what
+            // these actually are.
+            light.lightmapBakeType = LightmapBakeType.Realtime;
             _pool.Add(light);
         }
 

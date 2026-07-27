@@ -75,7 +75,8 @@ nothing is overwritten.
 | Glowing ball too **large** | `LumenCycleController.bloomScale` |
 | Whole scene washed out | `LumenCycleController.nightAmbient` |
 | Lit ground patch too strong | `DynamicLightBudget.peakIntensity` |
-| Lit ground patch too wide | `DynamicLightBudget.range` |
+| Lit ground patch too wide | `DynamicLightBudget.range` (note: this is a straight-line radius from the light's own position, not a ground-projected size -- it must comfortably exceed the fixture's mount height or there's no ground patch at all, see the 2026-07 correction in the field's own comment) |
+| No pool on the ground at all | Check `DynamicLightBudget.range` isn't shorter than the fixture's mount height (e.g. the ornate lamppost globes sit 5.9m up) |
 | Isolate lights vs. glow | `DynamicLightBudget.enableRealLights` (off) |
 
 ### Why "altering the DynamicLight" specifically did nothing
