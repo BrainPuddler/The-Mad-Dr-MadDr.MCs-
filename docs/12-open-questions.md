@@ -3797,3 +3797,32 @@ pavement (~3x intensity, a real contributor to the blown-out white
 pools) and three of the city-wide budget's slots went to a single
 fixture. Now registers one. All three globes still glow; that's their
 emissive material, independent of light promotion.
+
+## docs/28 follow-up: single-winding fix made the props vanish entirely (2026-07)
+
+Direct regression from the previous commit. Fixing the double-winding
+zero-normal bug (switching to single, "outward" winding via
+`FaceOutward()`) reintroduced exactly the risk double-winding existed to
+prevent in the first place: whether Unity's front-face culling agrees
+with what this code computes as "outward" can't be verified without an
+Editor to look at, and it turned out to disagree -- the creator reported
+`ornate-lamppost-pole` and `market-stall-canopy` had gone from rendering
+black to not rendering AT ALL (back-face culled).
+
+Rather than gamble a second time on getting the exact cross-product
+handedness right by reasoning alone (unverifiable in this environment),
+made it robust to being wrong either way: `PropLibrary.Spawn` now clones
+the material and sets `_Cull` to `Off` specifically for meshes that came
+from a REGISTERED builder (i.e. only the ProceduralMeshKit-driven props,
+never the primitive fallback path, which doesn't need it). Renders
+correctly regardless of which way the winding actually landed, while
+keeping the correct, non-degenerate, consistently-outward normals from
+the previous fix for correct lighting.
+
+Deliberately a per-instance clone, not applied to the shared cached
+material -- `PoleMetal()`/`AdRed()`/`SignBlue()` etc. are also used by
+ordinary, correctly-wound stock primitives elsewhere (hydrant posts,
+billboard posts, other cylinders), which don't have this problem and
+shouldn't pay the double-sided fill-rate cost. Only 1-3 procedural-mesh
+prop instances exist per scene, so the extra material instances are
+negligible.

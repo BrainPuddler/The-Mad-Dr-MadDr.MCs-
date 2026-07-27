@@ -52,7 +52,26 @@ public static class PropLibrary
         go.transform.position = position;
         go.transform.localScale = scale;
         go.AddComponent<MeshFilter>().sharedMesh = mesh;
-        go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+
+        // 2026-07 creator-found regression: ProceduralMeshKit switched
+        // from double-winding every face (belt-and-braces against a
+        // winding mistake, at the cost of cancelling every normal to
+        // zero -- see that file's comment) to single, correctly-outward
+        // winding. That fixed the normals but reopened exactly the risk
+        // double-winding existed to prevent: whether Unity's front-face
+        // culling agrees with "outward" as THIS code computes it can't be
+        // verified without an Editor, and it turned out to disagree --
+        // the props vanished entirely (back-face culled) instead of
+        // rendering black. Disable culling on a per-instance CLONE
+        // (not the shared cached `mat` -- that material is also used by
+        // ordinary, correctly-wound stock primitives elsewhere, which
+        // don't need this and shouldn't pay the double-sided fill-rate
+        // cost) so these specific meshes render regardless of which way
+        // the winding actually landed. Only reached for a REGISTERED
+        // mesh -- the primitive fallback path below never hits this.
+        var instanceMat = new Material(mat);
+        instanceMat.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+        go.AddComponent<MeshRenderer>().material = instanceMat;
         return go;
     }
 }
