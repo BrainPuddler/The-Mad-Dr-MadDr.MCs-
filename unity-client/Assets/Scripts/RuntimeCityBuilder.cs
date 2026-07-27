@@ -162,13 +162,18 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // docs/23 Phase 10: supersedes the old NightMode binary day/dusk
         // toggle with a continuous Lumen-clock-driven cycle + post stack.
         if (GetComponent<LumenCycleController>() == null)
-            gameObject.AddComponent<LumenCycleController>().Init(_city.Region);
+        {
+            var lumen = gameObject.AddComponent<LumenCycleController>();
+            lumen.ApplyProfile(lightingProfile);   // no-op when unassigned -- keeps the component's own Inspector values
+            lumen.Init(_city.Region);
+        }
         // docs/28: generalized from the streetlamp-only budget -- now
         // spends one shared real-light budget across every registered
         // glow point (streetlamps, windows, neon, marquee), whichever kind
-        // they are.
+        // they are. Its tuning fields live on the component itself (live
+        // in Play mode); an assigned profile just seeds them.
         if (GetComponent<DynamicLightBudget>() == null)
-            gameObject.AddComponent<DynamicLightBudget>();
+            gameObject.AddComponent<DynamicLightBudget>().ApplyProfile(lightingProfile);
         if (GetComponent<EmissiveAnimatorDriver>() == null)
             gameObject.AddComponent<EmissiveAnimatorDriver>();
 

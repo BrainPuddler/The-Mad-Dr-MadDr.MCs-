@@ -53,13 +53,47 @@ time by `RuntimeCityBuilder`) is the natural fit — and it's an asset
 players/testers can duplicate per-region or per-mood later without
 touching code.
 
-**Live-tuning note:** `DynamicLightBudget` re-reads the profile every
-refresh cycle, so `RealLightBudget`/`RealLightPeakIntensity`/
-`RealLightRange` change instantly in Play mode. Emissive base brightness
-and Night's ambient/bloom/boost ceiling are baked in once at city-build
-time (the same "cached shared material, computed once" convention every
-dresser here already follows) — changing those needs a stop/tweak/
-replay, not a special live-reload path.
+### Where to actually tune at runtime (corrected 2026-07)
+
+The first version of this got the ergonomics wrong: half the values were
+baked into `_grades`/cached materials at city-build time, and with no
+profile asset assigned `CityLightingProfile.Default` is a runtime-created
+object that appears nowhere in the Inspector — so the creator's report
+was exactly right, **nothing they could reach changed anything.**
+
+The live knobs are now **plain fields on the two MonoBehaviours**
+(`LumenCycleController`, `DynamicLightBudget`, both on the
+`RuntimeCityBuilder` GameObject), read every frame / every refresh, so
+dragging them in Play mode changes the picture immediately. The profile
+asset is the *authored defaults* layer: assigned, it seeds those fields
+at city-build time; unassigned, the components keep their own values and
+nothing is overwritten.
+
+| Symptom | Knob |
+| --- | --- |
+| Glowing ball too **bright** | `LumenCycleController.emissiveScale` |
+| Glowing ball too **large** | `LumenCycleController.nightBloom` |
+| Whole scene washed out | `LumenCycleController.nightAmbient` |
+| Lit ground patch too strong | `DynamicLightBudget.peakIntensity` |
+| Lit ground patch too wide | `DynamicLightBudget.range` |
+| Isolate lights vs. glow | `DynamicLightBudget.enableRealLights` (off) |
+
+### Why "altering the DynamicLight" specifically did nothing
+
+Two independent reasons, both now fixed:
+
+1. **The glowing balls are not the dynamic lights.** They are the
+   emissive bulb *geometry* (small spheres with an emissive material),
+   spread into much larger soft blobs by **Bloom**. A `Light` component
+   illuminates *other* surfaces — it does not itself render as a ball on
+   screen. So no amount of changing light intensity/range could ever fix
+   the reported symptom; `emissiveScale` and `nightBloom` are the knobs
+   that actually target it. (The bulb spheres were also literally
+   oversized — 0.5 m across at RTS camera height — now ~0.25 m.)
+2. **The pooled `DynamicLight` GameObjects are overwritten ~3×/second**
+   by `DynamicLightBudget.Refresh()`, which repositions/recolors/resizes
+   them from its own fields. Hand-editing those objects in the hierarchy
+   could never stick. The component's fields are the real source.
 
 ## 2. GlowPointRegistry + DynamicLightBudget — the shared real-light pool
 

@@ -58,12 +58,51 @@ public static class GlowPointRegistry
 /// </summary>
 public class DynamicLightBudget : MonoBehaviour
 {
+    // 2026-07 creator report: "nothing changes when I alter the
+    // DynamicLight." Two reasons, both fixed here. (1) These numbers used
+    // to live ONLY on CityLightingProfile -- and with no profile asset
+    // assigned, `CityLightingProfile.Default` is a runtime-created object
+    // that appears nowhere in the Inspector, so there was literally
+    // nothing to edit. They are now plain fields on this component:
+    // visible, and editable LIVE in Play mode. (2) The pooled
+    // "DynamicLight" GameObjects this spawns are overwritten every
+    // refresh (~3x/second), so hand-editing THOSE in the hierarchy never
+    // sticks -- edit these fields instead, they're the actual source.
+    [Header("Real dynamic lights -- editable live in Play mode")]
+    [Tooltip("Total real Light components across the WHOLE city (streetlamps + windows + neon combined), spent on whichever glow points are nearest the camera.")]
+    [Range(0, 128)]
+    public int budget = 24;
+
+    [Tooltip("Intensity a promoted light reaches at full night. Turn this DOWN if lit areas look blown out. Note: this does NOT control the glowing bulb spheres themselves -- those are emissive geometry, see LumenCycleController's emissive/bloom fields.")]
+    [Range(0f, 5f)]
+    public float peakIntensity = 0.7f;
+
+    [Tooltip("How far each light reaches, in meters. This is the SIZE of the pool of light on the ground.")]
+    [Range(1f, 25f)]
+    public float range = 7f;
+
+    [Tooltip("Turn every real light off entirely -- the fastest way to check whether the lights or the emissive bulb geometry is what you're actually seeing.")]
+    public bool enableRealLights = true;
+
     private const float RefreshInterval = 0.35f;
 
     private readonly List<Light> _pool = new List<Light>();
     private readonly List<int> _picked = new List<int>();
     private readonly List<float> _pickedSq = new List<float>();
     private float _timer;
+
+    /// <summary>Seed the live fields from an authored profile asset --
+    /// called by RuntimeCityBuilder ONLY when one is actually assigned,
+    /// so an unassigned profile leaves this component's own Inspector
+    /// values (what the creator typed) alone instead of silently
+    /// overwriting them with defaults.</summary>
+    public void ApplyProfile(CityLightingProfile profile)
+    {
+        if (profile == null) return;
+        budget = profile.RealLightBudget;
+        peakIntensity = profile.RealLightPeakIntensity;
+        range = profile.RealLightRange;
+    }
 
     private void Update()
     {
@@ -78,8 +117,7 @@ public class DynamicLightBudget : MonoBehaviour
         var cam = Camera.main;
         if (cam == null) return;
         var camPos = cam.transform.position;
-        var profile = CityLightingProfile.Active;
-        var budget = profile.RealLightBudget;
+        var activeBudget = enableRealLights ? budget : 0;
 
         _picked.Clear();
         _pickedSq.Clear();
@@ -89,7 +127,7 @@ public class DynamicLightBudget : MonoBehaviour
             var t = GlowPointRegistry.TransformAt(i);
             if (t == null) continue;   // a knocked-over/destroyed prop simply drops out
             var d = (t.position - camPos).sqrMagnitude;
-            if (_picked.Count < budget)
+            if (_picked.Count < activeBudget)
             {
                 _picked.Add(i);
                 _pickedSq.Add(d);
@@ -111,18 +149,15 @@ public class DynamicLightBudget : MonoBehaviour
             _pool.Add(light);
         }
 
-        // 2026-07 creator correction: the original hardcoded range read as
-        // "too bright and default" -- a harsh, blown-out light doing all
-        // the work by itself. Real "pools of light" come from a MODEST
-        // light plus a genuinely dark night around it (LumenCycleController's
-        // Night ambient), not from cranking the light -- a bright light
-        // against an already-bright scene doesn't read as a pool, it just
-        // reads as more brightness everywhere. All three of Budget/Peak/
-        // Range now live on CityLightingProfile so this never needs a
-        // repeat blind numeric guess.
+        // Real "pools of light" come from a MODEST light plus a genuinely
+        // dark night around it (LumenCycleController's Night ambient), not
+        // from cranking the light -- a bright light against an
+        // already-bright scene doesn't read as a pool, it just reads as
+        // more brightness everywhere. Read from the live fields above
+        // every refresh, so dragging them in Play mode takes effect
+        // within one refresh interval (~0.35s).
         var boost = DayNightState.NightAmount;
-        var intensity = Mathf.Lerp(0.02f, profile.RealLightPeakIntensity, boost);
-        var range = profile.RealLightRange;
+        var intensity = Mathf.Lerp(0.02f, peakIntensity, boost);
         for (var i = 0; i < _pool.Count; i++)
         {
             if (i < _picked.Count)

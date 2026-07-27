@@ -362,8 +362,13 @@ public static class RoadDresser
                     propSpot + Vector3.up * 4.7f - side * (sideSign * 1.2f),
                     new Vector3(0.14f, 0.14f, 2.4f), PoleMetal(), holder);
                 arm.transform.rotation = Quaternion.LookRotation(-side * sideSign, Vector3.up);
+                // 2026-07 creator correction: bulb spheres were literally
+                // too large (0.5m across at RTS camera height), and Bloom
+                // then spreads a bright sphere into something much bigger
+                // than its own geometry -- a small emitter is the correct
+                // starting point for a "pool of light" read.
                 var bulb = b.SpawnPrim(PrimitiveType.Sphere, propSpot + Vector3.up * 4.55f - side * (sideSign * 2.2f),
-                    new Vector3(0.5f, 0.35f, 0.5f), Bulb(), holder);
+                    new Vector3(0.26f, 0.2f, 0.26f), Bulb(), holder);
                 GlowPointRegistry.Register(bulb.transform, LampColor);
                 MakeKnockable(b, holder.gameObject, 1.6f);
                 break;
@@ -421,7 +426,7 @@ public static class RoadDresser
                     var ga = g / 3f * 2f * Mathf.PI;
                     var globeSpot = propSpot + Vector3.up * 5.9f
                         + new Vector3(Mathf.Sin(ga) * 0.5f, 0f, Mathf.Cos(ga) * 0.5f);
-                    var globe = b.SpawnPrim(PrimitiveType.Sphere, globeSpot, new Vector3(0.4f, 0.4f, 0.4f), Bulb(), holder);
+                    var globe = b.SpawnPrim(PrimitiveType.Sphere, globeSpot, new Vector3(0.22f, 0.22f, 0.22f), Bulb(), holder);
                     GlowPointRegistry.Register(globe.transform, LampColor);
                 }
                 MakeKnockable(b, holder.gameObject, 1.8f);
@@ -531,7 +536,7 @@ public static class RoadDresser
             var a = (i + 0.5f) / 5f * 2f * Mathf.PI;
             var p = c + new Vector3(Mathf.Sin(a), 0f, Mathf.Cos(a)) * (RndAsphalt + 1.2f);
             b.SpawnPrim(PrimitiveType.Cylinder, p + Vector3.up * 2.4f, new Vector3(0.16f, 2.4f, 0.16f), PoleMetal(), host);
-            var roundaboutBulb = b.SpawnPrim(PrimitiveType.Sphere, p + Vector3.up * 4.7f, new Vector3(0.45f, 0.35f, 0.45f), Bulb(), host);
+            var roundaboutBulb = b.SpawnPrim(PrimitiveType.Sphere, p + Vector3.up * 4.7f, new Vector3(0.24f, 0.2f, 0.24f), Bulb(), host);
             GlowPointRegistry.Register(roundaboutBulb.transform, LampColor);
         }
 

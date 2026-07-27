@@ -3412,3 +3412,63 @@ initializers; no other instance of this bug exists.
 Not yet re-confirmed against a live Play session from this side (no
 Editor access), but this is a real, understood, mechanical fix for a
 real reported crash, not a guess.
+
+## docs/28 fix: lights still too big/bright, and nothing was tunable (2026-07)
+
+Creator report: "The lights are too big and too bright on the screen.
+Nothing changes when I alter the DynamicLight." The second half is the
+important diagnostic -- it says the knob and the symptom were never
+connected.
+
+**Two independent causes, both real, both fixed.**
+
+1. **The glowing balls are not the dynamic lights at all.** They're the
+   emissive bulb GEOMETRY -- small spheres with an emissive material --
+   spread into much larger soft blobs by URP Bloom. A `Light` component
+   illuminates OTHER surfaces; it never renders as a ball on screen. So
+   changing `DynamicLightBudget`'s light intensity/range could not
+   possibly have fixed what was being looked at. The knobs that actually
+   target it are emissive brightness and bloom. (The spheres were also
+   literally oversized for RTS camera height -- 0.5m across -- now
+   ~0.25m, with the roundabout ring and ornate-lamppost globes shrunk to
+   match.)
+
+2. **Nothing reachable was tunable.** Two compounding mistakes in the
+   previous commit: (a) the profile-driven values (night ambient, night
+   bloom, neon-boost ceiling) were BAKED into `_grades` once in
+   `BuildGrades()` at city-build time, so even editing a profile asset
+   mid-Play did nothing; (b) with no profile asset assigned -- the
+   creator's actual situation -- `CityLightingProfile.Default` is a
+   runtime-created ScriptableObject that appears in no Inspector at all,
+   and `DynamicLightBudget` had had its own `public int Budget` field
+   REMOVED in favor of reading the profile, so selecting that component
+   showed literally nothing to edit. A ScriptableObject was the right
+   idea for authored defaults and the wrong single answer for live
+   tuning.
+
+**Fix:** the live knobs are now plain public fields on the two
+MonoBehaviours (`LumenCycleController.emissiveScale`/`nightBloom`/
+`nightAmbient`, `DynamicLightBudget.budget`/`peakIntensity`/`range`/
+`enableRealLights`), read every frame (or every ~0.35s refresh) rather
+than baked -- so dragging them in Play mode takes effect immediately.
+`ApplyBlend` now blends the authored keyframe toward those live values
+weighted by how far into night it is, instead of `BuildGrades` stamping
+them in once. The profile asset keeps its role as the AUTHORED DEFAULTS
+layer: `RuntimeCityBuilder` calls `ApplyProfile(lightingProfile)` on both
+components at build time, and that method early-returns on null -- so an
+unassigned profile leaves whatever the creator typed into the component
+Inspector alone instead of silently overwriting it with defaults (the
+trap the naive "always seed from profile" version would have had).
+
+Added `DynamicLightBudget.enableRealLights` as a diagnostic toggle
+specifically so the emissive-geometry-vs-real-light question can be
+answered in one click next time rather than by reasoning about it.
+
+Profile defaults also lowered to match the new component defaults
+(BulbEmissiveBase 0.45->0.25, MaxNightBoost 1.5->1.0, NightBloom
+0.5->0.25, RealLightPeak 0.9->0.7, RealLightRange 8->7) so an assigned
+profile can't silently undo this correction.
+
+Still not visually verified from this side (no Editor) -- but unlike the
+previous two attempts, the point here is that the numbers no longer need
+to be right the first time: every one of them is now a live slider.

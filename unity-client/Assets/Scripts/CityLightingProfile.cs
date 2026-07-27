@@ -11,19 +11,23 @@ using UnityEngine;
 /// it onto RuntimeCityBuilder's `Lighting Profile` field, and retune
 /// without touching code.
 ///
-/// Nothing REQUIRES an assigned asset -- every reader falls back to
-/// <see cref="Default"/> (this class's own field defaults) so a scene
-/// that never assigns one keeps working exactly as before.
+/// Nothing REQUIRES an assigned asset. This profile holds AUTHORED
+/// DEFAULTS: when one is assigned, <see cref="RuntimeCityBuilder"/>
+/// seeds <see cref="DynamicLightBudget"/>'s and
+/// <see cref="LumenCycleController"/>'s own Inspector fields from it at
+/// city-build time. When it's NOT assigned, those components simply keep
+/// whatever values are already on them -- nothing is overwritten.
 ///
-/// Live-tuning notes: <see cref="DynamicLightBudget"/> re-reads this
-/// profile every refresh cycle (a few times a second), so
-/// RealLightBudget/Peak/Range changes take effect immediately in Play
-/// mode. The Night ambient/bloom/neon-boost ceiling and the emissive
-/// base brightness are baked into the generated city/grades once at
-/// scene start (the same "cached shared material"/"computed once"
-/// convention every dresser in this project already uses) -- changing
-/// those needs a stop/tweak/replay, not a special case worth the extra
-/// complexity of true live cross-fade re-blending.
+/// **Where to tune at runtime (2026-07):** the live knobs are the FIELDS
+/// ON THOSE TWO COMPONENTS, not this asset -- they're read every frame
+/// (or every ~0.35s refresh), so dragging them in Play mode changes the
+/// picture immediately. Editing this asset mid-Play does nothing until
+/// the city is rebuilt, by design. If lights look wrong:
+///   * too BRIGHT a glowing ball  -> LumenCycleController.emissiveScale
+///   * too LARGE a glowing ball   -> LumenCycleController.nightBloom
+///   * washed-out scene overall   -> LumenCycleController.nightAmbient
+///   * lit ground area too strong -> DynamicLightBudget.peakIntensity
+///   * lit ground area too wide   -> DynamicLightBudget.range
 /// </summary>
 [CreateAssetMenu(fileName = "CityLightingProfile", menuName = "MadDr/City Lighting Profile")]
 public class CityLightingProfile : ScriptableObject
@@ -35,19 +39,19 @@ public class CityLightingProfile : ScriptableObject
 
     [Tooltip("Peak intensity a promoted real light reaches at full night. THE fix for 'lights are too bright' if it recurs -- turn this down first.")]
     [Range(0f, 5f)]
-    public float RealLightPeakIntensity = 0.9f;
+    public float RealLightPeakIntensity = 0.7f;
 
     [Range(1f, 25f)]
-    public float RealLightRange = 8f;
+    public float RealLightRange = 7f;
 
     [Header("Emissive material brightness (the glow on the prop itself)")]
     [Tooltip("Base emissive multiplier for a lit bulb/window/sign BEFORE the night boost below. This is what clipped to solid white balls -- keep BulbEmissiveBase * MaxNightBoost comfortably under ~1.2 to avoid the prop itself rendering as a flat white blob.")]
     [Range(0f, 2f)]
-    public float BulbEmissiveBase = 0.45f;
+    public float BulbEmissiveBase = 0.25f;
 
     [Tooltip("The ceiling NeonRegistry's boost reaches at full night. Multiplies BulbEmissiveBase (and every other registered neon material's own emissive).")]
     [Range(0f, 3f)]
-    public float MaxNightBoost = 1.5f;
+    public float MaxNightBoost = 1.0f;
 
     [Tooltip("The boost at full Day -- kept low so neon/bulbs are barely visible against daylight, per the target look.")]
     [Range(0f, 1f)]
@@ -56,7 +60,7 @@ public class CityLightingProfile : ScriptableObject
     [Header("Post-processing (Night mood)")]
     [Tooltip("URP Bloom intensity at full Night. High values are what turn a city full of lit windows/signs into a wall of white bloom.")]
     [Range(0f, 2f)]
-    public float NightBloomIntensity = 0.5f;
+    public float NightBloomIntensity = 0.25f;
 
     [Tooltip("Ambient light brightness at full Night -- near 0 for a genuinely dark night the lamps/windows/signs can stand out against.")]
     [Range(0f, 1f)]

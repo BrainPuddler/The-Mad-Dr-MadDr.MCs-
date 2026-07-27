@@ -54,6 +54,27 @@ public class LumenCycleController : MonoBehaviour
         public float FilmGrainIntensity;
     }
 
+    // 2026-07 creator report: "lights are too big and too bright on the
+    // screen... nothing changes when I alter the DynamicLight." The
+    // glowing BALLS are not the dynamic lights at all -- they're the
+    // emissive bulb geometry, amplified by Bloom, which is what spreads a
+    // small bright sphere into a big soft blob that can wash out the
+    // playfield. These are THE two knobs for that, and unlike the
+    // previous profile-only versions they're read live every frame, so
+    // dragging them in Play mode changes the picture immediately.
+    [Header("Glow brightness -- editable live in Play mode")]
+    [Tooltip("Master multiplier on every emissive material in the city (bulbs, windows, neon). THIS is what controls how bright the glowing balls themselves look. Drop toward 0 to kill the glow entirely and see what's left.")]
+    [Range(0f, 3f)]
+    public float emissiveScale = 1f;
+
+    [Tooltip("Bloom intensity at full night. Bloom is what turns a small bright sphere into a BIG soft ball of light -- if the lights look too LARGE (rather than too bright), this is the knob, not intensity.")]
+    [Range(0f, 2f)]
+    public float nightBloom = 0.25f;
+
+    [Tooltip("Ambient light at full night. Near 0 gives a genuinely dark night the lamps can pool against.")]
+    [Range(0f, 0.3f)]
+    public float nightAmbient = 0.02f;
+
     private const float SunYawDeg = -35f;  // fixed cast-shadow direction across the whole cycle -- only elevation/color animate
     private const float TimeLapseMultiplier = 20f;
     private static readonly double TickInterval = 1.0 / MatchState.TicksPerSecond;
@@ -76,6 +97,18 @@ public class LumenCycleController : MonoBehaviour
     public void Init(CityRegion region)
     {
         _grades = BuildGrades(region);
+    }
+
+    /// <summary>Seed the live fields above from an authored profile asset
+    /// -- called by RuntimeCityBuilder ONLY when one is actually
+    /// assigned, so an unassigned profile leaves whatever was typed into
+    /// this component's own Inspector alone instead of silently
+    /// overwriting it.</summary>
+    public void ApplyProfile(CityLightingProfile profile)
+    {
+        if (profile == null) return;
+        nightBloom = profile.NightBloomIntensity;
+        nightAmbient = profile.NightAmbientBrightness;
     }
 
     private void Start()
@@ -195,23 +228,33 @@ public class LumenCycleController : MonoBehaviour
         var elevation = Mathf.Lerp(a.SunElevationDeg, b.SunElevationDeg, blend);
         _sun.transform.rotation = Quaternion.Euler(elevation, SunYawDeg, 0f);
 
-        RenderSettings.ambientLight = Color.Lerp(a.Ambient, b.Ambient, blend);
+        // night-driven fields read the LIVE Inspector values above rather
+        // than the baked keyframe, so Play-mode edits take effect this
+        // frame -- `nightAmount` is how far into full night we are, which
+        // is exactly the weight each of those live knobs should carry.
+        var nightAmount = Mathf.Lerp(a.LampBoost, b.LampBoost, blend);
+
+        var ambient = Color.Lerp(a.Ambient, b.Ambient, blend);
+        var nightAmbientColor = new Color(nightAmbient, nightAmbient, nightAmbient * 2f);
+        RenderSettings.ambientLight = Color.Lerp(ambient, nightAmbientColor, nightAmount);
         var fogDensity = Mathf.Lerp(a.FogDensity, b.FogDensity, blend);
         RenderSettings.fog = fogDensity > 0.0005f;
         RenderSettings.fogColor = Color.Lerp(a.Fog, b.Fog, blend);
         RenderSettings.fogDensity = fogDensity;
 
-        var neonBoost = Mathf.Lerp(a.NeonBoost, b.NeonBoost, blend);
+        var neonBoost = Mathf.Lerp(a.NeonBoost, b.NeonBoost, blend) * emissiveScale;
         NeonRegistry.SetBoost(neonBoost);
         DayNightState.NeonBoost = neonBoost;
-        DayNightState.NightAmount = Mathf.Lerp(a.LampBoost, b.LampBoost, blend);
+        DayNightState.NightAmount = nightAmount;
 
         _colorAdjustments.postExposure.value = Mathf.Lerp(a.PostExposure, b.PostExposure, blend);
         _colorAdjustments.saturation.value = Mathf.Lerp(a.Saturation, b.Saturation, blend);
         _colorAdjustments.colorFilter.value = Color.Lerp(a.ColorFilter, b.ColorFilter, blend);
         _colorAdjustments.contrast.value = Mathf.Lerp(a.Contrast, b.Contrast, blend);
         _vignette.intensity.value = Mathf.Lerp(a.VignetteIntensity, b.VignetteIntensity, blend);
-        _bloom.intensity.value = Mathf.Lerp(a.BloomIntensity, b.BloomIntensity, blend);
+        // same live-read treatment: blend the authored keyframe bloom
+        // toward the live `nightBloom` field as night comes on
+        _bloom.intensity.value = Mathf.Lerp(Mathf.Lerp(a.BloomIntensity, b.BloomIntensity, blend), nightBloom, nightAmount);
         _filmGrain.intensity.value = Mathf.Lerp(a.FilmGrainIntensity, b.FilmGrainIntensity, blend);
     }
 
@@ -266,22 +309,11 @@ public class LumenCycleController : MonoBehaviour
 
         ApplyRegionTint(grades, region);
 
-        // docs/28: the specific fields that were causing "way too bright"
-        // now come from CityLightingProfile instead of another hardcoded
-        // guess -- the creator's actual tuning knob. Everything else (sun
-        // color/elevation, fog, color grading, vignette/grain) stays the
-        // authored mood-board keyframe; only Night's ambient/bloom/boost
-        // ceiling and Day's boost ceiling are profile-driven.
-        var profile = CityLightingProfile.Active;
-        var night = grades[(int)LumenPhase.Night];
-        night.Ambient = new Color(profile.NightAmbientBrightness, profile.NightAmbientBrightness, profile.NightAmbientBrightness * 2f);
-        night.BloomIntensity = profile.NightBloomIntensity;
-        night.NeonBoost = profile.MaxNightBoost;
-        grades[(int)LumenPhase.Night] = night;
-
-        var day = grades[(int)LumenPhase.Day];
-        day.NeonBoost = profile.DayNeonBoost;
-        grades[(int)LumenPhase.Day] = day;
+        // NOTE: Night's ambient/bloom and the neon boost ceiling are NOT
+        // baked in here any more -- ApplyBlend reads the live
+        // `nightAmbient`/`nightBloom`/`emissiveScale` fields instead, so
+        // they're tunable in Play mode. Baking them here was the reason
+        // "nothing changes when I alter" anything (2026-07 creator report).
 
         return grades;
     }
