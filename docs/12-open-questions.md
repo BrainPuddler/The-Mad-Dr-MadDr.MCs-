@@ -3930,3 +3930,47 @@ unknown. This field is read live every refresh specifically so it can
 be nudged in Play mode without another code round-trip; that's the
 fastest path to the real number now that end-to-end visibility is
 confirmed working.
+
+## docs/28: "lights" now hold through night, fade off in daytime (2026-07)
+
+Creator direction: "make the lights fade a lot faster and hold for
+duration of the night, then fade off during the daytime." The OLD
+`nightAmount` (drives real-light intensity + ambient darkness) came
+from the SAME continuous per-phase cross-fade `ApplyBlend` uses for
+sun/fog/color-grading -- which never actually held steady: it kept
+drifting toward the next phase's value across the ENTIRE current phase
+(this is literally the mechanism `bloomScale` was invented to route
+around earlier this session).
+
+Added `ComputeNightIntensity`, a dedicated trapezoid independent of that
+per-phase blend: fast ease-in during the first 25% of Dusk (30s phase ->
+7.5s fade, ~4x quicker than the old full-phase ramp), flat 1.0 through
+the rest of Dusk + all of Night + all of Dawn (real streetlights stay on
+through early morning, not just "night" by the clock), an eased fade-out
+during the first 50% of Day, flat 0.0 for the rest. `nightAmount` and
+`neonBoost` (bulb/window/sign brightness) both now read from this --
+`neonBoost` switched from the old 4-stop Dawn/Day/Dusk/Night lerp to a
+2-stop Day/Night lerp weighted by the same trapezoid, so the glow and
+the real lights snap on/off together instead of drifting apart. Sun
+color/intensity/elevation, fog, and post-processing color-grading
+(exposure/saturation/contrast/vignette/film grain) deliberately kept the
+OLD continuous 4-stop cross-fade unchanged -- the ask was specifically
+about "the lights," not the whole day/night mood; bloom similarly
+untouched (still tracks the old per-phase curve, scaled by
+`bloomScale`) unless a follow-up asks for it too.
+
+Verified numerically against the actual compiled method (via reflection
+-- it's private) rather than by eye: sampled the boundary and midpoint
+of every hold/fade segment across the full 2400-tick cycle, all match
+the intended shape. This also surfaced a real gap in the flightcheck
+harness itself: `Mathf.SmoothStep`/`Clamp01`/`Clamp`/`Lerp` (the single
+most-called Mathf function in this whole file) and several other Mathf
+members were STILL `return 0f;` no-op stubs, left over from before this
+session started fixing them one call at a time as each was needed.
+Fixed the whole remaining batch (`Lerp`, `SmoothStep`, `Clamp01`,
+`Clamp`, `Sign`, `Exp`, `InverseLerp`, `MoveTowards`, `Atan2`,
+`DeltaAngle`, `Round`) rather than just the ones this specific check
+needed, since a stub silently returning 0 makes any future numeric
+verification of ANYTHING touching it meaningless without warning. Harness-
+only change, not part of the shipped game -- lives in the session
+scratchpad, not the repo.

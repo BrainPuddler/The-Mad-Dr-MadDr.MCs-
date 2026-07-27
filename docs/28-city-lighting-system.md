@@ -38,13 +38,22 @@ condensed, current-state version.
 | — | (side finding, not a symptom report) | Ornate lamppost registered a real light per globe (3, half a metre apart) — ~3x stacked intensity on one pavement patch, 3 of 24 budget slots on one fixture | Register one real light per fixture; all 3 globes still glow (emissive, unaffected) | Bundled into the #6/#7 commits, not separately re-verified |
 | 8 | "I believe you put the lights in the wall" | `RoadDresser` had NO wall-clearance check at all — `curbLineOffset` assumed a fixed margin to any neighboring building that two independent effects could break: `CardinalAnchor`'s straightening nudge stacking with the curb offset on the same axis (north/south streets), and an arterial street's own curb offset exceeding the raw row gap to a north/south-adjacent building (any street). Full derivation in the docs/12 decision log (search "no wall-clearance check") | `RoadDresser.ClearLateralOffset` now checks the actual building position (via `city.Buildings`) and clamps the sideways offset to stay `BuildingDresser.Half + 1.5m` clear of it, instead of trusting the arithmetic | **Reasoned fix, awaiting creator re-verification** — row 7's confirmation was about the props being visible again, not about their position relative to walls; still separately unverified |
 | 9 | After #7/#8, real lights STILL invisible | Not a bug — `DynamicLightBudget.peakIntensity`/`CityLightingProfile.RealLightPeakIntensity` were `[Range(0f, 5f)]`, capping the Inspector slider itself at 5 regardless of what was typed in, and the 0.7 default was apparently just too dim to read on the creator's setup (no config bug found to explain it — checked for a Physical Light Units mismatch specifically, not present) | Widened both to `[Range(0f, 150f)]`; creator confirmed lights visible at a deliberately blown-out diagnostic default of 80. Backed off to 12 as an untuned starting point — **not** a confirmed-good value, the real threshold between "too dim" and "too bright" hasn't been narrowed down yet | **Confirmed lights render at all; final brightness still needs live tuning** |
+| 10 | Direction, not a bug report: "make the lights fade a lot faster and hold for duration of the night, then fade off during the daytime" | `nightAmount` (drives real-light intensity + ambient darkness) came from the same continuous per-phase cross-fade as sun/fog/color-grading — it never held steady, drifting toward the next phase's value across the ENTIRE current phase (row 1's `bloomScale` bug was literally invented to route around this same mechanism) | Added `ComputeNightIntensity`: a dedicated trapezoid — fast ease-in over the first 25% of Dusk, flat 1.0 through the rest of Dusk + all of Night + all of Dawn, eased fade-out over the first 50% of Day, flat 0.0 the rest. `nightAmount` and `neonBoost` both read from it now (`neonBoost` moved from the old 4-stop Dawn/Day/Dusk/Night lerp to a 2-stop Day/Night one, so glow and real lights move together). Sun/fog/color-grading/bloom deliberately left on the old per-phase curve — this was about "the lights," not the whole mood | **Verified numerically against the compiled method** (reflection, sampled every hold/fade segment boundary+midpoint across the full cycle) — not yet seen in a real render |
+
+**Row 1's own description of `nightAmount` "decaying through the back
+half of the night phase" is now historical** — that was true of the OLD
+mechanism at the time it caused the `bloomScale` bug; row 10 replaced
+that mechanism, and `nightAmount` now holds flat through the whole
+night instead.
 
 **As of the last commit: rows 1, 3, 4, 5, 5b, 6, 7 are creator-confirmed
 working. Row 8 (wall-clearance) is still unverified — visibility being
 fixed doesn't confirm position is correct, those are independent
 questions. Row 9 confirms the lighting pipeline works end-to-end;
 `peakIntensity`'s actual value (currently 12, an untuned placeholder) is
-the remaining open tuning task, not a bug hunt.**
+the remaining open tuning task, not a bug hunt. Row 10 (the fade
+trapezoid) is reasoned + numerically checked but NOT yet seen in a real
+render — the actual fade timing/feel is worth a look next time.**
 
 ## 0. The core problem with "just add more Lights"
 

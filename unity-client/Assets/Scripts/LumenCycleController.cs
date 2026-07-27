@@ -239,7 +239,11 @@ public class LumenCycleController : MonoBehaviour
     /// "unhurried noir" target line.</summary>
     private void ApplyBlend()
     {
-        var t = _frame % LumenClock.CycleTicks;
+        // kept immutable (unlike the phase-detection `t` below, which
+        // subtracts as it walks phases) -- ComputeNightIntensity needs
+        // the raw cycle-relative tick position.
+        var cycleT = _frame % LumenClock.CycleTicks;
+        var t = cycleT;
         LumenPhase phase;
         LumenPhase next;
         float progress;
@@ -283,7 +287,28 @@ public class LumenCycleController : MonoBehaviour
         // than the baked keyframe, so Play-mode edits take effect this
         // frame -- `nightAmount` is how far into full night we are, which
         // is exactly the weight each of those live knobs should carry.
-        var nightAmount = Mathf.Lerp(a.LampBoost, b.LampBoost, blend);
+        //
+        // 2026-07 creator direction: "make the lights fade a lot faster
+        // and hold for duration of the night, then fade off during the
+        // daytime." The OLD nightAmount came from the SAME continuous
+        // per-phase cross-fade as the sun/fog/color-grading above --
+        // which never actually held steady anywhere. It kept drifting
+        // toward Dawn's dimmer value across the ENTIRE Night phase (this
+        // is literally the bug bloomScale was invented to route around,
+        // see docs/12), and crept up slowly across the entire 30s Dusk
+        // phase. ComputeNightIntensity replaces it with a dedicated
+        // trapezoid, independent of the phase-blend mood-grading above:
+        // fast ease-in early in Dusk, then a flat hold through the rest
+        // of Dusk + all of Night + all of Dawn (real-world streetlights
+        // stay on through early morning, not just "night" by the clock),
+        // a fade-out during the first half of Day, flat off for the
+        // rest. Deliberately collapses the old 4-stop Dawn/Day/Dusk/
+        // Night authored curve into a 2-stop day/night one for THIS
+        // specific pathway -- sun color/fog/vignette/etc below keep
+        // their previous 4-stop continuous cross-fade unchanged, since
+        // this request was about "the lights," not the whole day/night
+        // mood.
+        var nightAmount = ComputeNightIntensity(cycleT);
 
         var ambient = Color.Lerp(a.Ambient, b.Ambient, blend);
         var nightAmbientColor = new Color(nightAmbient, nightAmbient, nightAmbient * 2f);
@@ -293,7 +318,14 @@ public class LumenCycleController : MonoBehaviour
         RenderSettings.fogColor = Color.Lerp(a.Fog, b.Fog, blend);
         RenderSettings.fogDensity = fogDensity;
 
-        var neonBoost = Mathf.Lerp(a.NeonBoost, b.NeonBoost, blend) * emissiveScale;
+        // Day/Night's own authored NeonBoost values are the two stops --
+        // same reasoning as nightAmount just above, so the glowing bulbs/
+        // signs/windows snap on and off in step with the real lights and
+        // ambient darkness instead of lagging behind on the slower
+        // 4-stop mood curve.
+        var dayNeonBoost = _grades[(int)LumenPhase.Day].NeonBoost;
+        var nightNeonBoost = _grades[(int)LumenPhase.Night].NeonBoost;
+        var neonBoost = Mathf.Lerp(dayNeonBoost, nightNeonBoost, nightAmount) * emissiveScale;
         NeonRegistry.SetBoost(neonBoost);
         DayNightState.NeonBoost = neonBoost;
         DayNightState.NightAmount = nightAmount;
@@ -309,6 +341,51 @@ public class LumenCycleController : MonoBehaviour
         // mixed with the old per-phase baseline regardless of nightAmount.
         _bloom.intensity.value = Mathf.Lerp(a.BloomIntensity, b.BloomIntensity, blend) * bloomScale;
         _filmGrain.intensity.value = Mathf.Lerp(a.FilmGrainIntensity, b.FilmGrainIntensity, blend);
+    }
+
+    // Fraction of Dusk's duration spent easing 0->1 ("a lot faster" per
+    // the creator's own words -- Dusk is 30s/300 ticks, so 0.25 is a
+    // 7.5s fade-in, roughly 4x quicker than the old full-phase ramp).
+    private const float FadeInFraction = 0.25f;
+    // Fraction of Day's duration spent easing 1->0 -- deliberately
+    // unhurried ("fade off during the daytime", no "faster" qualifier
+    // given for this direction, unlike the fade-in).
+    private const float FadeOutFraction = 0.5f;
+
+    /// <summary>"The lights" trapezoid: fast ease-in early in Dusk, flat
+    /// 1.0 through the rest of Dusk + all of Night + all of Dawn (real
+    /// streetlights stay on through early morning, not just "night" by
+    /// the clock), an eased fade-out during the first half of Day, flat
+    /// 0.0 for the rest. Independent of the continuous per-phase
+    /// cross-fade `ApplyBlend` still uses for sun/fog/color-grading --
+    /// this is specifically the curve for "the lights holding through
+    /// the night, fading off in the day" (2026-07 creator direction),
+    /// not a general mood blend.</summary>
+    private static float ComputeNightIntensity(int cycleT)
+    {
+        var dawnEnd = LumenClock.DawnTicks;
+        var dayEnd = dawnEnd + LumenClock.DayTicks;
+        var duskEnd = dayEnd + LumenClock.DuskTicks;
+
+        if (cycleT < dawnEnd) return 1f;   // Dawn: still fully on
+
+        if (cycleT < dayEnd)                // Day: fade out, then hold off
+        {
+            var dayT = cycleT - dawnEnd;
+            var fadeTicks = LumenClock.DayTicks * FadeOutFraction;
+            if (dayT >= fadeTicks) return 0f;
+            return 1f - Mathf.SmoothStep(0f, 1f, dayT / fadeTicks);
+        }
+
+        if (cycleT < duskEnd)               // Dusk: fast fade in, then hold on
+        {
+            var duskT = cycleT - dayEnd;
+            var fadeTicks = LumenClock.DuskTicks * FadeInFraction;
+            if (duskT >= fadeTicks) return 1f;
+            return Mathf.SmoothStep(0f, 1f, duskT / fadeTicks);
+        }
+
+        return 1f;   // Night: fully on the whole phase
     }
 
     private static PhaseGrade[] BuildGrades(CityRegion region)
