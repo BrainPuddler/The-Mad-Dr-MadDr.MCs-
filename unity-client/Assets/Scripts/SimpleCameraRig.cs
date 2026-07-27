@@ -7,6 +7,10 @@ using UnityEngine.InputSystem;
 /// in this project).
 ///
 ///   WASD / arrows      : pan (relative to view yaw)
+///   SHIFT + up/down    : move the camera straight up/down (world Y),
+///                        clamped so it can never go below MinHeight --
+///                        overrides the plain up/down-arrow pan for as
+///                        long as Shift is held
 ///   Q / E              : rotate
 ///   scroll wheel       : zoom
 ///   MIDDLE-mouse drag  : grab-pan -- the ground point you grab stays
@@ -21,8 +25,21 @@ public class SimpleCameraRig : MonoBehaviour
     public float panSpeed = 60f;
     public float rotateSpeed = 90f;
     public float zoomSpeed = 8f;
+    public float verticalMoveSpeed = 40f;   // Shift+up/down, in units/sec
     public float edgeScrollMargin = 14f;   // pixels from an edge that trigger auto-scroll
     public float focusLerp = 9f;            // how snappily FocusOn glides to its target
+
+    // 2026-07 creator direction: "shift+down/up arrow moves the camera
+    // down/up. Do not allow moving below the ground." Shared with zoom's
+    // own existing height clamp (previously two separate `8f`/`400f`
+    // literals) so both ways of changing height agree on the same floor/
+    // ceiling instead of drifting apart. MinHeight isn't 0 -- ground is
+    // y=0 (docs/18: "feet stand on y=0"), and a camera sitting exactly
+    // ON the ground plane is degenerate (near-zero vertical FOV, mostly
+    // clipping) -- 8 units up is the practical "as low as this camera
+    // can usefully go," already the zoom code's own floor before this.
+    private const float MinHeight = 8f;
+    private const float MaxHeight = 400f;
 
     private float _yaw;
     private Camera _cam;
@@ -79,14 +96,37 @@ public class SimpleCameraRig : MonoBehaviour
             if (keyboard.eKey.isPressed) { _yaw += rotateSpeed * dt; manual = true; }
         }
 
-        // yaw-relative pan: keyboard plus edge-scroll fold into one vector
+        var shiftHeld = keyboard != null && (keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed);
+
+        // yaw-relative pan: keyboard plus edge-scroll fold into one vector.
+        // Up/down arrows are excluded while Shift is held -- Shift steals
+        // them for the vertical move below instead of also panning
+        // forward/back at the same time.
         var pan = Vector3.zero;
         if (keyboard != null)
         {
-            if (keyboard.wKey.isPressed || keyboard.upArrowKey.isPressed) pan.z += 1f;
-            if (keyboard.sKey.isPressed || keyboard.downArrowKey.isPressed) pan.z -= 1f;
+            if (keyboard.wKey.isPressed || (keyboard.upArrowKey.isPressed && !shiftHeld)) pan.z += 1f;
+            if (keyboard.sKey.isPressed || (keyboard.downArrowKey.isPressed && !shiftHeld)) pan.z -= 1f;
             if (keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed) pan.x -= 1f;
             if (keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed) pan.x += 1f;
+        }
+
+        // Shift + up/down arrow: move the camera straight up/down (world
+        // Y), clamped to the same [MinHeight, MaxHeight] band zoom uses --
+        // "do not allow moving below the ground" (2026-07 creator
+        // direction).
+        if (keyboard != null && shiftHeld)
+        {
+            var vertical = 0f;
+            if (keyboard.upArrowKey.isPressed) vertical += 1f;
+            if (keyboard.downArrowKey.isPressed) vertical -= 1f;
+            if (Mathf.Abs(vertical) > 0.01f)
+            {
+                var pos = transform.position;
+                pos.y = Mathf.Clamp(pos.y + vertical * verticalMoveSpeed * dt, MinHeight, MaxHeight);
+                transform.position = pos;
+                manual = true;
+            }
         }
 
         // edge auto-scroll -- suppressed while grab-dragging (the drag owns
@@ -141,7 +181,7 @@ public class SimpleCameraRig : MonoBehaviour
             if (Mathf.Abs(scroll) > 0.01f)
             {
                 var newPos = transform.position + transform.forward * scroll * zoomSpeed * 0.02f;
-                if (newPos.y > 8f && newPos.y < 400f) { transform.position = newPos; manual = true; }
+                if (newPos.y > MinHeight && newPos.y < MaxHeight) { transform.position = newPos; manual = true; }
             }
         }
 

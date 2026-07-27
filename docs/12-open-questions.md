@@ -4217,3 +4217,21 @@ x1.9 across both Point and Spot Max/Min (row 16's split already covers
 pointIntensityMin 4->7.6, spotIntensityMax 60->114, spotIntensityMin
 18->34.2. Mirrored onto CityLightingProfile. Simple numeric scale, no
 new math to verify beyond the arithmetic itself.
+
+## SimpleCameraRig: Shift+Up/Down moves camera vertically, floor-clamped (2026-07)
+
+Creator: "if I press shift+down arrow or up arrow. Move the camera Down
+or Up. Do not allow moving below the ground." Up/down arrows already
+drove forward/back pan; while Shift is held they're now excluded from
+pan and instead move the camera along world Y at a new
+`verticalMoveSpeed` (40 units/sec), clamped to `[MinHeight, MaxHeight]`.
+
+Extracted `MinHeight`/`MaxHeight` (8f/400f) as named consts shared with
+the EXISTING zoom clamp, which previously had its own inline `8f`/`400f`
+literals -- both ways of changing camera height now agree on the same
+floor/ceiling instead of two copies that could drift apart. `MinHeight`
+is 8, not 0: ground is y=0 (docs/18, "feet stand on y=0"), and a camera
+sitting exactly on the ground plane is degenerate (near-zero effective
+FOV) -- 8 was already the zoom code's own established floor before this
+change, reused rather than inventing a second number for "how low can
+this camera usefully go."
