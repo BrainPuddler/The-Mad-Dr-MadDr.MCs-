@@ -4437,3 +4437,52 @@ budget but still clears the ~90-unit default view with margin). Pure
 asset-value edit, no C# involved -- no flightcheck build applicable;
 confirmed correct by the direct distance arithmetic above, not yet seen
 in a real render.
+
+## docs/28 row 23: shadow distance now scales with camera zoom, not a fixed worst-case value (2026-07)
+
+Creator: "Limit the shadows then to objects in the camera view and close
+to the visible area." Row 22's fix (raising `m_ShadowDistance` to a
+static 150/100) solved "shadows don't render at all" but left shadow
+distance fixed at a value sized for the default camera framing --
+either too short when zoomed out further, or wastefully long (URP
+culls/draws shadow casters out to that whole radius every frame) at the
+much more common close/medium zoom levels.
+
+Added dynamic shadow-distance control to `SimpleCameraRig` (which
+already owns the camera and already uses height as a zoom proxy
+elsewhere in the file): `UpdateShadowDistance()` writes directly to
+`(GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset).
+shadowDistance` every frame (plus once from `SnapTo`, to avoid a
+one-frame flash of the static asset default). Formula is proportional-
+with-a-cap, not a straight Lerp across the camera's full height range:
+`shadowDistancePerHeight` (1.9) is the exact `SnapTo` camera-to-ground
+ratio (offset `(0, h, -h*0.8)` -> distance `h * sqrt(1+0.8^2) = h*1.28`)
+plus margin so the covered area reaches the actual visible frustum, not
+just the exact center point; `shadowDistanceFloor` (15) keeps extreme
+close zoom from shrinking distance to something that flickers/pops;
+`shadowDistanceCap` (250) holds the line past a certain height rather
+than letting distance keep growing linearly out to what height=400
+would otherwise demand (~780) -- individual shadows are visually tiny
+at extreme zoom-out anyway, and spreading URP's cascades over an
+ever-larger area for no visible benefit was exactly the waste this
+request was about avoiding.
+
+Verified against the actual compiled `UpdateShadowDistance()` via
+reflection, specifically re-checking the EXACT scenario that started
+this whole thread (docs/28 row 22): at the default camera height (70,
+`RuntimeCityBuilder`'s own `SnapTo` call), computed shadow distance is
+148 -- comfortably above the ~89.64-unit actual camera-to-focus
+distance, confirming this dynamic version doesn't reintroduce the
+original "shadows silently don't render" bug. Also confirmed: distance
+at min zoom (30.2) is well under half of the default value (the actual
+performance win being asked for); distance at max zoom is capped at
+exactly 250, not the ~780 the uncapped proportional formula would give;
+the cap engages well before height=400; and the whole curve is
+non-decreasing across the entire height range. All values matched hand
+derivation exactly.
+
+Note: the static `m_ShadowDistance` values set in `PC_RPAsset.asset`/
+`Mobile_RPAsset.asset` last round are now effectively just the
+pre-first-Update()/Editor-preview fallback -- this component overwrites
+them within the same frame during actual play. Left them in place
+rather than reverting; harmless, and still a sane fallback.

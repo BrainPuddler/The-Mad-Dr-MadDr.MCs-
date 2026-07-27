@@ -1,5 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 /// <summary>
 /// RTS camera, StarCraft-style. New Input System API only (see
@@ -41,6 +43,39 @@ public class SimpleCameraRig : MonoBehaviour
     private const float MinHeight = 8f;
     private const float MaxHeight = 400f;
 
+    // 2026-07 creator direction: "limit the shadows to objects in the
+    // camera view and close to the visible area." Shadow distance was a
+    // fixed value in the URP Pipeline Asset (docs/28 row 22 -- sized for
+    // the DEFAULT camera framing), which means it was either too short
+    // for a zoomed-out overview or wastefully long for the much more
+    // common close/medium zoom levels most RTS play actually happens at
+    // -- URP has to cull/draw shadow casters out to whatever that
+    // distance is, every frame, regardless of how much of it is actually
+    // useful at the current zoom. Tied to camera height (this
+    // component's own existing zoom proxy, see panSpeed's `scale` below)
+    // via the SAME geometry SnapTo itself uses -- camera offset is
+    // `(0, h, -h*0.8)`, so straight-line camera-to-focus distance is
+    // `h * sqrt(1 + 0.8^2) = h * 1.28` at any height reached that way
+    // (scroll-zoom moves along a very similar ~50 deg pitch, close
+    // enough to reuse the same ratio). `shadowDistancePerHeight` is that
+    // 1.28 with margin on top, since the visible ground extends past
+    // just the exact center point out to the frustum's far edge.
+    //
+    // Deliberately proportional-with-a-cap, NOT a straight Lerp across
+    // the full [MinHeight, MaxHeight] range: distance-to-ground is
+    // linear in height all the way out to MaxHeight=400 (h*1.28=512),
+    // but shadow distance shouldn't keep growing that far -- individual
+    // shadows are visually tiny at extreme zoom-out anyway, and URP's
+    // cascades would spread thinner (blockier) over an ever-larger area
+    // for no visible benefit. `shadowDistanceCap` holds the line past
+    // whatever height that cap works out to (~124 with these defaults).
+    [Tooltip("Shadow distance (meters) per meter of camera height -- ~1.28 (the exact SnapTo camera-to-ground ratio) plus margin so the covered area extends to the actual visible frustum, not just the exact center point.")]
+    public float shadowDistancePerHeight = 1.9f;
+    [Tooltip("Flat floor added on top, so extreme close zoom doesn't shrink shadow distance to something so tight it flickers/pops in and out.")]
+    public float shadowDistanceFloor = 15f;
+    [Tooltip("Hard cap regardless of zoom -- keeps shadow distance (and cascade quality) from degrading at extreme zoom-out, where individual shadows are visually tiny anyway.")]
+    public float shadowDistanceCap = 250f;
+
     private float _yaw;
     private Camera _cam;
 
@@ -62,6 +97,7 @@ public class SimpleCameraRig : MonoBehaviour
         _dragging = false;
         transform.position = focus + new Vector3(0f, distance, -distance * 0.8f);
         transform.rotation = Quaternion.Euler(50f, _yaw, 0f);
+        UpdateShadowDistance();   // avoid a one-frame flash of whatever the asset's own default was
     }
 
     /// <summary>Glide the camera so `worldPoint` ends up centered, keeping
@@ -202,6 +238,21 @@ public class SimpleCameraRig : MonoBehaviour
         }
 
         transform.rotation = Quaternion.Euler(50f, _yaw, 0f);
+
+        UpdateShadowDistance();
+    }
+
+    /// <summary>Shrinks/grows URP's shadow distance with the camera's
+    /// current zoom (height) instead of leaving it at one fixed value
+    /// sized for the worst case -- see the field comments above. A plain
+    /// float write on the active pipeline asset every frame; cheap next
+    /// to the pan/zoom math already running here, no need to throttle.</summary>
+    private void UpdateShadowDistance()
+    {
+        var urpAsset = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
+        if (urpAsset == null) return;
+        var proportional = transform.position.y * shadowDistancePerHeight + shadowDistanceFloor;
+        urpAsset.shadowDistance = Mathf.Min(proportional, shadowDistanceCap);
     }
 
     /// <summary>Where the ray through a screen point meets the y=0 ground
