@@ -4126,3 +4126,14 @@ Not numerically checkable the way earlier rows were (this is a shader
 property with no meaningful pass/fail math -- confirmed the code path
 compiles and passes the right constant, nothing more). Purely visual;
 needs an actual look in the Editor.
+
+## docs/28 row 14 correction: road too shiny, recolored instead (2026-07)
+
+Creator: "the road is too shiny put it back to the original setting.
+Change the road from black to a textured mid dark gray, that should
+help us see the light better." Reverted `Asphalt()`'s smoothness
+override (0.92 -> unset, back to shader default, matching every other
+material in the file) and changed its base color from near-black
+(0.17/0.17/0.18) to a mid dark gray (0.35/0.34/0.36) instead -- contrast
+against the road color, not surface glossiness, is the mechanism now
+being relied on to make a warm streetlight glow visible.

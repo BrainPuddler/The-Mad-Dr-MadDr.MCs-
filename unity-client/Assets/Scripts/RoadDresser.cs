@@ -73,17 +73,16 @@ public static class RoadDresser
         return mat;
     }
 
-    // 2026-07 creator report: "make the roads more reflective, I can
-    // barely see the lights on them." Nothing in this file ever set
-    // _Smoothness/_Metallic on ANY material -- every prop, including the
-    // road, was rendering at the URP/Lit shader's own default smoothness
-    // (~0.5, a middling matte-ish surface), which doesn't produce a
-    // tight, bright specular glint from a point/spot light the way wet
-    // pavement does. A high smoothness concentrates whatever light DOES
-    // hit the surface into a small, intense highlight -- that's the
-    // mechanism that makes a streetlight actually visible AS a reflection
-    // on the road, independent of the light's own intensity.
-    private static Material Asphalt() { return MTextured("asphalt-wet", 0.17f, 0.17f, 0.18f, PbrTextureAtlas.AsphaltWet, 0.92f); }
+    // 2026-07: 0.92 smoothness (the previous pass here, chasing "I can
+    // barely see the lights on them") read as too shiny -- reverted to
+    // the shader default (no override, same as every other textured
+    // material). Creator's own follow-up call: a lighter base color
+    // gives the light better CONTRAST to read against instead, not a
+    // glossier surface -- was near-black (0.17/0.17/0.18), now a mid
+    // dark gray so a warm streetlight glow has something to stand out
+    // from rather than needing to fight a shiny near-black surface for
+    // visibility.
+    private static Material Asphalt() { return MTextured("asphalt-wet", 0.35f, 0.34f, 0.36f, PbrTextureAtlas.AsphaltWet); }
     private static Material Sidewalk() { return M(0.58f, 0.56f, 0.52f); }
     private static Material LanePaint() { return M(0.85f, 0.7f, 0.2f); }
     private static Material CrossPaint() { return M(0.85f, 0.84f, 0.8f); }
