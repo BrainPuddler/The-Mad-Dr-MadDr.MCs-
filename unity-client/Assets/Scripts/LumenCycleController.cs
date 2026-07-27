@@ -124,6 +124,18 @@ public class LumenCycleController : MonoBehaviour
 
     private void Start()
     {
+        // 2026-07 creator report ("objects still black, no light I can
+        // see"): RenderSettings.ambientLight is a no-op unless ambientMode
+        // is Flat -- a fresh Unity scene defaults to Skybox mode, where
+        // ambient instead comes from the skybox material (which, for a
+        // procedural sky tied to the Sun, can go dark/unpredictable the
+        // moment the directional light is disabled or aimed below the
+        // horizon for Night). Every ambient value this controller computes
+        // below -- day brightness, nightAmbient, the whole blend -- was
+        // silently doing nothing without this. Set once; nothing else in
+        // this project ever sets ambient mode.
+        RenderSettings.ambientMode = AmbientMode.Flat;
+
         if (_grades == null) _grades = BuildGrades(CityRegion.Generic);
 
         // 2026-07 creator confusion: these auto-created objects have no

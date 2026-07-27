@@ -3721,3 +3721,28 @@ whether one of these pooled lights exists -- they are deliberately
 created with `shadows = LightShadows.None` (never shadow casters, a
 performance choice for budget fill lights), so absence of shadow change
 is expected either way and proves nothing either direction.
+
+## docs/28: RenderSettings.ambientLight was a no-op -- ambientMode never set (2026-07)
+
+Found while chasing "objects still black, no light I can see" after the
+Per-Vertex fix. `RenderSettings.ambientLight` (LumenCycleController's
+whole day/night ambient blend, including `nightAmbient`) only has any
+effect when `RenderSettings.ambientMode == AmbientMode.Flat`. A fresh
+Unity scene defaults to `AmbientMode.Skybox`, and nothing in this
+codebase ever set it to Flat -- meaning every ambient value this
+controller has ever computed was silently discarded, and real scene
+ambient was instead coming from the skybox material, which (for a
+procedural sky tied to the Sun) can go dark or behave unpredictably the
+moment the directional light is disabled or pushed below the horizon for
+Night -- exactly the conditions the creator was testing under.
+
+Fixed: `LumenCycleController.Start()` now sets
+`RenderSettings.ambientMode = AmbientMode.Flat` once. Note this doesn't
+by itself explain a still-invisible REAL LIGHT (ambient mode only
+affects the ambient term, not a Point light's own direct contribution,
+which shouldn't depend on it) -- still need to confirm via the Hierarchy
+whether `DynamicLightBudget`'s pooled Light GameObject actually exists
+and what its live Intensity/Range/enabled values are, to know if the
+remaining "no visible real light" symptom is a separate bug or was
+actually fixed by the Per-Vertex correction and just wasn't visible
+against a still-broken (Skybox-mode) ambient background.
