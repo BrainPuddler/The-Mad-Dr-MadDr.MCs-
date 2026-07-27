@@ -90,7 +90,6 @@ public class LumenCycleController : MonoBehaviour
     private Bloom _bloom;
     private FilmGrain _filmGrain;
     private Tonemapping _tonemapping;
-    private Exposure _exposure;
 
     /// <summary>Call once, right after AddComponent -- region is known to
     /// the caller (RuntimeCityBuilder already generated the CityModel) but
@@ -150,7 +149,6 @@ public class LumenCycleController : MonoBehaviour
         _bloom = profile.Add<Bloom>(true);
         _filmGrain = profile.Add<FilmGrain>(true);
         _tonemapping = profile.Add<Tonemapping>(true);
-        _exposure = profile.Add<Exposure>(true);
 
         _colorAdjustments.postExposure.overrideState = true;
         _colorAdjustments.saturation.overrideState = true;
@@ -163,32 +161,31 @@ public class LumenCycleController : MonoBehaviour
         _tonemapping.mode.overrideState = true;
         _tonemapping.mode.value = TonemappingMode.ACES;   // filmic tonemapping, per §10's own target look
 
-        // 2026-07 creator question: "does it have anything to do with
-        // autoexposure?" -- yes, potentially: nothing here previously
-        // touched URP's actual Exposure component at all (postExposure
-        // above is a manual ColorAdjustments EV offset, a DIFFERENT
-        // thing). If the project's URP template scene ships a default
-        // Volume with Exposure set to Automatic, it was still fully
-        // active and untouched by any of this -- and auto-exposure
-        // metering a genuinely dark night scene would crank up gain,
-        // inflating every bright emissive point BEFORE Bloom even sees
-        // it, completely independent of emissiveScale/nightBloom. Forcing
-        // Fixed mode here, at a high priority so this volume wins over
-        // any pre-existing scene volume, removes that variable entirely.
-        _exposure.mode.overrideState = true;
-        _exposure.mode.value = ExposureMode.Fixed;
-        _exposure.fixedExposure.overrideState = true;
-        _exposure.fixedExposure.value = 0f;
-        _exposure.compensation.overrideState = true;
-        _exposure.compensation.value = 0f;
+        // 2026-07 correction: the previous commit added a
+        // `UnityEngine.Rendering.Universal.Exposure` VolumeComponent
+        // override here to answer "does it have anything to do with
+        // autoexposure?" -- that type does not exist. Unlike HDRP, URP
+        // has no general scene-referred auto-exposure/eye-adaptation
+        // Volume component at all; this compiled cleanly against
+        // flightcheck's OWN hand-written stub (which had no way to catch
+        // an invented type -- a real gap in that harness's reliability
+        // for URP-specific code, noted in docs/12) but failed for real in
+        // the Editor with CS0246. The real, only exposure control URP's
+        // Volume stack offers is `ColorAdjustments.postExposure` above (a
+        // manual EV offset, already wired since Phase 10.1) -- there is
+        // no "automatic" mode to accidentally leave enabled here, so the
+        // autoexposure theory for the brightness bug does not apply.
+        // (A camera with "Use Physical Properties" enabled has its own
+        // fixed, non-adaptive Aperture/Shutter/ISO exposure math, but
+        // this project doesn't touch that either.)
 
         var volumeGo = new GameObject("(auto) Post Stack -- edit LumenCycleController instead");
         var volume = volumeGo.AddComponent<Volume>();
         volume.isGlobal = true;
         // high priority so this volume's overrides win over any
         // pre-existing default Volume the URP project template may have
-        // shipped with (see the Exposure note above) -- this is the
-        // AUTHORED look, it should never lose a tie to a template default.
+        // shipped with -- this is the AUTHORED look, it should never lose
+        // a priority tie to a template default.
         volume.priority = 100f;
         volume.weight = 1f;
         volume.profile = profile;

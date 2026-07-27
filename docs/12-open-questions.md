@@ -3535,3 +3535,40 @@ toggle to reach full night quickly for testing.
 Not re-confirmed from this side (no Editor access) -- this is a
 plausible, reasoned diagnosis based on the actual object-creation code,
 not a guess at new numbers.
+
+## docs/28: Exposure component doesn't exist in URP -- reverted (2026-07)
+
+Real compile error from the creator's Editor: `CS0246: The type or
+namespace name 'Exposure' could not be found`, in
+`LumenCycleController.cs`.
+
+Root cause: my own mistake, not a project issue. I invented
+`UnityEngine.Rendering.Universal.Exposure` in response to the creator's
+"does it have anything to do with autoexposure?" question -- URP has NO
+general scene-referred auto-exposure/eye-adaptation Volume component at
+all (unlike HDRP, which does have one by that name). It compiled clean
+against `flightcheck`'s own hand-written Unity/URP stub because I ALSO
+added a matching fabricated stub for it in that same commit -- the
+harness can only verify internal self-consistency against whatever it
+already mocks, it can never catch an invented type, and I stubbed the
+one thing that needed catching. Confirmed only when the real Editor
+failed with CS0246.
+
+Fixed by reverting: removed the `Exposure`/`ExposureMode` component
+creation from `LumenCycleController.BuildVolume()`, the `_exposure`
+field, and the matching fabricated stub types from the flightcheck
+harness (left a comment there instead, warning against re-adding a stub
+for an API without confirming it's real first). The actual, only
+exposure-adjacent control URP's Volume stack offers is
+`ColorAdjustments.postExposure` -- a manual EV offset, already wired
+since Phase 10.1 -- so the autoexposure theory for the brightness bug
+doesn't apply at all; there was never an "automatic" mode in play to
+disable.
+
+Lesson for this harness going forward: flightcheck compiling clean is
+NOT evidence that referenced Unity/URP API surface is real when the
+stub for that surface was added in the SAME change as the code using
+it -- only that the two are internally consistent with each other. Only
+trust a flightcheck pass for URP-specific types when the stub predates
+the calling code, or when the type's existence is independently
+confirmed (docs, an existing working call site elsewhere in the repo).
