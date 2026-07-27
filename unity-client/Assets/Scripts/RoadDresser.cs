@@ -78,11 +78,11 @@ public static class RoadDresser
     // the shader default (no override, same as every other textured
     // material). Creator's own follow-up call: a lighter base color
     // gives the light better CONTRAST to read against instead, not a
-    // glossier surface -- was near-black (0.17/0.17/0.18), now a mid
-    // dark gray so a warm streetlight glow has something to stand out
-    // from rather than needing to fight a shiny near-black surface for
-    // visibility.
-    private static Material Asphalt() { return MTextured("asphalt-wet", 0.35f, 0.34f, 0.36f, PbrTextureAtlas.AsphaltWet); }
+    // glossier surface -- was near-black (0.17/0.17/0.18), raised to a
+    // mid dark gray (0.35/0.34/0.36), then "still too dark" -- raised
+    // again to a genuinely light gray. Contrast against the road's own
+    // color remains the mechanism relied on, not glossiness.
+    private static Material Asphalt() { return MTextured("asphalt-wet", 0.52f, 0.51f, 0.53f, PbrTextureAtlas.AsphaltWet); }
     private static Material Sidewalk() { return M(0.58f, 0.56f, 0.52f); }
     private static Material LanePaint() { return M(0.85f, 0.7f, 0.2f); }
     private static Material CrossPaint() { return M(0.85f, 0.84f, 0.8f); }

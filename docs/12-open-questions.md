@@ -4335,3 +4335,69 @@ conversation -- includes the concrete compatibility findings above so a
 future session doesn't have to re-research feasibility, only decide
 whether to spend the performance budget. No code changes this round;
 purely a researched-and-declined-for-now decision.
+
+## docs/28 row 20: sun sweeps the compass, long shadows at dawn/dusk (2026-07)
+
+Creator: "I need the sun / light source to move across the sky in a
+realistic manner, so shadows move and shift realistically. I want those
+long shadows at sunrise and sunsets." Root cause: `SunYawDeg` was a
+single fixed constant (-35f, "only elevation/color animate" per its own
+comment) -- elevation already animated per-phase, but yaw never did, so
+the sun bobbed up and down in place without ever sweeping the compass:
+shadow LENGTH changed over the cycle, shadow DIRECTION never did.
+
+Added `SunYawDeg` to `PhaseGrade` (per-phase, blended the same way
+`SunElevationDeg` already was), tracing ONE continuous 360-degree sweep
+across the full cycle: Dawn 60->105 (45deg over 300 ticks), Day 105->240
+(135deg over 900 ticks), Dusk 240->285 (45deg over 300 ticks), Night
+285->(285+135=)420=60 (135deg over 900 ticks, wrapping seamlessly back
+to Dawn's own 60). Each phase's share of the sweep is proportioned to
+its own share of the 2400-tick cycle specifically so angular speed --
+and therefore how fast shadows visibly swing -- stays constant instead
+of visibly speeding up during the shorter Dawn/Dusk phases.
+
+The Night->Dawn boundary is the one place a naive `Mathf.Lerp(a.SunYawDeg,
+b.SunYawDeg, blend)` would have been wrong: Night's raw value (285) is
+LARGER than the next Dawn's raw value (60), so lerping straight toward
+60 would sweep BACKWARD across the daytime side of the sky (285->240->
+180->120->60) instead of continuing forward through the below-horizon
+side (285->330->360/0->60). Fixed with a Night-specific `+360` added to
+the interpolation target before lerping -- Quaternion.Euler handles any
+angle beyond 360 fine (periodic), the +360 only matters for getting the
+interpolation DIRECTION right.
+
+Also: "long shadows at sunrise and sunset" -- Dawn's own SunElevationDeg
+dropped from 8 to 3, Dusk's from 4 to 3 (now symmetric), so both
+transitions sit right at the dramatic near-horizon angle at their
+respective phase boundary (Dawn START, Dusk END) instead of Dawn already
+being partway risen by the time its own keyframe is read.
+
+Verified against the ACTUAL compiled `Start()`/`ApplyBlend()` via
+reflection (not a hand-derived model of the math) -- sampled the sun's
+resulting `Light.transform.rotation` at 240 points across a full cycle,
+extracted yaw by rotating `Vector3.forward` and reading the horizontal
+angle (sign-convention-agnostic, doesn't assume which way "increasing"
+points), then checked: yaw genuinely changes (not the old constant);
+total sweep over one full cycle is 360.00003 degrees; the sweep is
+monotonic the ENTIRE way round INCLUDING across the Night->Dawn wrap
+(the specific risk the +360 code exists to prevent); no anomalous single-
+sample jump. All passed, and the observed max per-sample step (2.25 deg)
+exactly matches the predicted peak of SmoothStep's derivative (1.5x the
+linear average of 1.5deg/sample), a clean independent confirmation the
+easing curve itself is behaving as designed.
+
+Building this test surfaced two more stub gaps in the flightcheck
+harness, both `return null;`/`return default(T);` no-ops that would have
+NullReferenceException'd the moment `Start()` was actually exercised
+(the first test this session to do so) rather than just called via a
+static method: `Component.transform` and `GameObject.AddComponent<T>()`.
+Both now have real backing (a lazily-created `Transform`, and actual
+`new T()` construction). Harness-only, lives outside the repo.
+
+Same round: creator, mid-turn: "lighten up the roads even more they are
+still too dark" -- `Asphalt()`'s base color raised again, from the mid
+dark gray (0.35/0.34/0.36) two rounds ago to a genuinely light gray
+(0.52/0.51/0.53). Not numerically checkable (pure color choice).
+
+Neither this round's sun changes nor the road color have been seen in a
+real render yet.

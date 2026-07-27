@@ -40,6 +40,19 @@ public class LumenCycleController : MonoBehaviour
         public Color SunColor;
         public float SunIntensity;
         public float SunElevationDeg;   // kept LOW even at Day's peak -- docs/23 Phase 10's own daytime mood-board note: long, legible cast shadows, never a high overhead noon angle
+        // 2026-07 creator direction: "I need the sun to move across the
+        // sky in a realistic manner, so shadows move and shift
+        // realistically." This used to be a single fixed constant
+        // (SunYawDeg = -35f, "only elevation/color animate") -- the sun
+        // bobbed up and down in place but never swept the compass, so
+        // shadow DIRECTION never changed, only shadow LENGTH. Per-phase
+        // now, blended the same way SunElevationDeg is, tracing one
+        // continuous sweep across the whole cycle (see the wrap-aware
+        // math in ApplyBlend -- this field alone isn't quite enough,
+        // since Night's blend target needs +360 to keep sweeping FORWARD
+        // through the below-horizon side back to the next Dawn instead
+        // of reversing back across the daytime side).
+        public float SunYawDeg;
         public Color Ambient;
         public Color Fog;
         public float FogDensity;
@@ -129,7 +142,6 @@ public class LumenCycleController : MonoBehaviour
     [Range(0f, 0.3f)]
     public float nightAmbient = 0.02f;
 
-    private const float SunYawDeg = -35f;  // fixed cast-shadow direction across the whole cycle -- only elevation/color animate
     private const float TimeLapseMultiplier = 20f;
     private static readonly double TickInterval = 1.0 / MatchState.TicksPerSecond;
 
@@ -329,7 +341,22 @@ public class LumenCycleController : MonoBehaviour
         // sunrise/sunset) and 90 points straight down (elevation 90, noon
         // overhead) -- X-euler == elevation directly, no 90-minus flip.
         var elevation = Mathf.Lerp(a.SunElevationDeg, b.SunElevationDeg, blend);
-        _sun.transform.rotation = Quaternion.Euler(elevation, SunYawDeg, 0f);
+        // Yaw sweeps the compass continuously across the whole cycle
+        // (Dawn->Day->Dusk->Night->next Dawn), each phase's own
+        // SunYawDeg a waypoint on ONE monotonic sweep, proportioned to
+        // that phase's share of the cycle (see BuildGrades) so angular
+        // speed stays constant rather than visibly speeding up during
+        // the shorter Dawn/Dusk phases. Night is the one wrap point:
+        // its target (next Dawn's own SunYawDeg, a SMALLER raw number
+        // than Night's) needs +360 added before lerping, or the sweep
+        // would reverse direction and cross back over the daytime side
+        // of the sky instead of continuing forward through the
+        // below-horizon side. Quaternion.Euler handles any angle > 360
+        // fine (sin/cos are periodic) -- the +360 only matters for
+        // getting the INTERPOLATION direction right, not the final angle.
+        var targetYaw = phase == LumenPhase.Night ? b.SunYawDeg + 360f : b.SunYawDeg;
+        var yaw = Mathf.Lerp(a.SunYawDeg, targetYaw, blend);
+        _sun.transform.rotation = Quaternion.Euler(elevation, yaw, 0f);
 
         // night-driven fields read the LIVE Inspector values above rather
         // than the baked keyframe, so Play-mode edits take effect this
@@ -470,12 +497,31 @@ public class LumenCycleController : MonoBehaviour
         // 0.022 against Exp2 falloff puts ~70% fog blend at a 50m view
         // distance, noticeably present without erasing the RTS camera's
         // own view of the action.
+        //
+        // 2026-07: SunYawDeg values below trace ONE continuous compass
+        // sweep across the whole cycle (creator: "the sun to move across
+        // the sky in a realistic manner, so shadows move and shift
+        // realistically" -- yaw used to be a single fixed constant).
+        // Each phase's share of the 360 degree sweep is proportioned to
+        // its OWN share of the 2400-tick cycle (LumenClock: Dawn/Dusk
+        // 300 ticks each, Day/Night 900 each) so angular speed -- and
+        // therefore how fast shadows visibly swing -- stays constant
+        // instead of the sun looking like it speeds up during the
+        // shorter Dawn/Dusk phases: Dawn 60->105 (45 deg), Day 105->240
+        // (135 deg), Dusk 240->285 (45 deg), Night 285->(285+135=420=)
+        // 60 (135 deg, wrapping seamlessly back to Dawn's own 60 -- see
+        // the Night-specific +360 handling in ApplyBlend). Also: Dawn/
+        // Dusk's own SunElevationDeg dropped from 8/4 to a matching 3 --
+        // "I want those long shadows at sunrise and sunset" -- lower and
+        // now symmetric, so both transitions start (Dawn) or end (Dusk)
+        // right at the dramatic near-horizon angle rather than Dawn
+        // already being partway risen.
         var grades = new[]
         {
             // Dawn
             new PhaseGrade
             {
-                SunColor = new Color(1f, 0.75f, 0.55f), SunIntensity = 0.6f, SunElevationDeg = 8f,
+                SunColor = new Color(1f, 0.75f, 0.55f), SunIntensity = 0.6f, SunElevationDeg = 3f, SunYawDeg = 60f,
                 Ambient = new Color(0.35f, 0.32f, 0.38f), Fog = new Color(0.4f, 0.32f, 0.38f), FogDensity = 0.010f,
                 NeonBoost = 0.9f, LampBoost = 0.5f,
                 PostExposure = 0f, Saturation = -5f, ColorFilter = new Color(1f, 0.93f, 0.85f), Contrast = 5f,
@@ -484,7 +530,7 @@ public class LumenCycleController : MonoBehaviour
             // Day -- sun-baked, dusty, desaturated-sepia warmth (2026-07 daytime mood-board addition), NOT a clean blue-sky render
             new PhaseGrade
             {
-                SunColor = new Color(1f, 0.97f, 0.88f), SunIntensity = 1.1f, SunElevationDeg = 30f,
+                SunColor = new Color(1f, 0.97f, 0.88f), SunIntensity = 1.1f, SunElevationDeg = 30f, SunYawDeg = 105f,
                 Ambient = new Color(0.55f, 0.53f, 0.5f), Fog = new Color(0.55f, 0.5f, 0.42f), FogDensity = 0.005f,
                 NeonBoost = 0.35f, LampBoost = 0.05f,
                 PostExposure = 0.15f, Saturation = -18f, ColorFilter = new Color(1.05f, 0.95f, 0.78f), Contrast = 8f,
@@ -493,7 +539,7 @@ public class LumenCycleController : MonoBehaviour
             // Dusk
             new PhaseGrade
             {
-                SunColor = new Color(0.95f, 0.5f, 0.35f), SunIntensity = 0.5f, SunElevationDeg = 4f,
+                SunColor = new Color(0.95f, 0.5f, 0.35f), SunIntensity = 0.5f, SunElevationDeg = 3f, SunYawDeg = 240f,
                 Ambient = new Color(0.32f, 0.22f, 0.3f), Fog = new Color(0.35f, 0.22f, 0.28f), FogDensity = 0.014f,
                 NeonBoost = 1.4f, LampBoost = 0.8f,
                 PostExposure = -0.1f, Saturation = 5f, ColorFilter = new Color(1f, 0.85f, 0.8f), Contrast = 10f,
@@ -509,7 +555,7 @@ public class LumenCycleController : MonoBehaviour
             // lamps/signage/windows are close to the only visible light.
             new PhaseGrade
             {
-                SunColor = new Color(0.35f, 0.4f, 0.65f), SunIntensity = 0.05f, SunElevationDeg = -8f,
+                SunColor = new Color(0.35f, 0.4f, 0.65f), SunIntensity = 0.05f, SunElevationDeg = -8f, SunYawDeg = 285f,
                 Ambient = new Color(0.02f, 0.02f, 0.05f), Fog = new Color(0.18f, 0.15f, 0.28f), FogDensity = 0.022f,
                 NeonBoost = 2.2f, LampBoost = 1f,
                 PostExposure = -0.35f, Saturation = 22f, ColorFilter = new Color(0.85f, 0.85f, 1.05f), Contrast = 18f,

@@ -48,6 +48,8 @@ condensed, current-state version.
 | 17 | Confirmed row 16 "it's better", then: "make all the street lights 90% brighter" | Not a bug — a plain scale-up request | Flat x1.9 on all four of row 16's Max/Min fields (both halves of the Point/Spot split = "all the street lights"): pointIntensityMax 12->22.8, pointIntensityMin 4->7.6, spotIntensityMax 60->114, spotIntensityMin 18->34.2. Mirrored onto `CityLightingProfile` | **Applied as stated, simple arithmetic** — not yet re-confirmed against a render |
 | 18 | "I want the lights to truly pop, bright and diffuse through the fog. Use something like [an HDRP Local Volumetric Fog / light-source-fog article]" — corrected mid-turn to "stay in URP tho" | The referenced technique (`HDAdditionalLightData` volumetric lights + HDRP's `LocalVolumetricFog`) is HDRP-only and doesn't exist in this project's pipeline (confirmed URP, CLAUDE.md). Separately: `Bloom.scatter` (the actual "diffuse/spread" parameter, distinct from `intensity`) and `Bloom.threshold`'s VALUE (its `overrideState` was `true` since Phase 1, but the value itself was never assigned — same "flag set, value never driven" shape as ambientMode/row 5b) had both been silently riding URP's own Bloom defaults this whole time | New `bloomScatter`/`fogDiffusionBoost` (fog-density-driven scatter boost, clamped to 1) for "diffuse," new `bloomThreshold` (lower than URP's ~0.9 default) for "pop." All three wired into `ApplyBlend()` and mirrored onto `CityLightingProfile`. Created `.claude/skills/maddr-lighting-system` per the creator's "add it to your lighting skill" — captures the URP-vs-HDRP boundary, this fog-approximation mechanism, and the recurring "property never explicitly set" bug pattern that rows 5b/5/6/18 all share, so future sessions don't re-derive or re-hit any of this | **Reasoned, not numerically checkable** (pure Bloom/shader parameters) — not yet seen in a real render |
 | 19 | "study this too: github.com/mseonKim/URP-VolumetricFog-ForwardPlus, see if it can be used" | N/A — feasibility research, not a bug | Confirmed genuinely usable: `PC_Renderer.asset` is already `m_RenderingMode: 2` (ForwardPlus, the package's hard requirement); URP 17.3.0 exceeds its 14.0.8 minimum; Unity Companion License is compatible. `Mobile_Renderer.asset` is plain Forward (`0`) so it'd be PC-only. Asked whether to integrate (a new external git dependency + a one-time Editor-only Renderer Feature registration step this environment can't safely do blind); creator asked for an ease/quality/performance comparison against row 18's Bloom approach instead, then chose to stay with row 18 for performance, with the volumetric package kept as a documented future option (`.claude/skills/maddr-lighting-system` §3) | **Evaluated and documented, deliberately not integrated** — this is the final state for this thread, not a pending task |
+| 20 | "I need the sun to move across the sky in a realistic manner, so shadows move and shift realistically. I want those long shadows at sunrise and sunsets" | `SunYawDeg` was a single fixed constant ("only elevation/color animate," its own comment said so) — elevation already animated per-phase, yaw never did, so the sun bobbed up/down in place without sweeping the compass: shadow LENGTH changed over the cycle, shadow DIRECTION never did | `SunYawDeg` moved into `PhaseGrade` (per-phase, blended like elevation already was), tracing one continuous 360° sweep proportioned to each phase's own share of the 2400-tick cycle (constant angular speed, not visibly faster during the shorter Dawn/Dusk). Night->Dawn needs a `+360` on the Lerp TARGET specifically (Night's raw yaw is larger than the next Dawn's), or the sweep would reverse across the daytime side instead of continuing through the below-horizon side — `ApplyBlend` now branches on `phase == Night` for this one case. Also: Dawn's `SunElevationDeg` 8->3, Dusk's 4->3 (now symmetric) for "long shadows at sunrise and sunset" specifically, so both transitions sit at the dramatic near-horizon angle right at their own phase boundary | **Verified against the actual compiled `Start()`/`ApplyBlend()` via reflection** (240 samples across a full cycle, sign-convention-agnostic — checked total sweep is 360°, monotonic including the wrap, no anomalous jump; the observed max per-sample step independently matched the predicted SmoothStep peak-derivative value) — not yet seen in a real render |
+| 21 | Same message: "lighten up the roads even more they are still too dark" | Row 15's mid dark gray (0.35/0.34/0.36) still read too dark | `Asphalt()`'s base color raised again to a genuinely light gray (0.52/0.51/0.53) | **Applied as stated** — not a numerically checkable claim (pure color choice), not yet re-confirmed against a render |
 
 **Row 1's own description of `nightAmount` "decaying through the back
 half of the night phase" is now historical** — that was true of the OLD
@@ -61,14 +63,16 @@ timing, explicitly) are creator-confirmed working. Row 8
 confirm position is correct, those are independent questions. Row 9
 confirms the lighting pipeline works end-to-end. `peakIntensity` no
 longer exists (row 16 replaced it with per-type Max/Min pairs); those
-new defaults, row 11's now-folded-in Spot ceiling, and row 15's road
-color/smoothness are all still open, unconfirmed tuning tasks. Row 13
-(window occupancy) and row 16 (fog dimming + diffuse glow) are reasoned
-+ checked as far as this environment allows, but NONE of rows 13-18 have
-been seen in a real render yet -- that's the whole active open thread.
-See `.claude/skills/maddr-lighting-system` (added row 18) for the
-condensed, pattern-level version of this table if you're picking up
-this system cold.**
+new defaults, row 11's now-folded-in Spot ceiling, and row 15/21's road
+color are all still open, unconfirmed tuning tasks. Row 13 (window
+occupancy), row 16 (fog dimming + diffuse glow), and row 20 (sun
+compass sweep) are reasoned + checked as far as this environment
+allows, but NONE of rows 13-21 have been seen in a real render yet --
+that's the whole active open thread. Row 19 is the one exception:
+research only, deliberately not integrated, not a pending render check.
+See `.claude/skills/maddr-lighting-system` for the condensed,
+pattern-level version of this table if you're picking up this system
+cold.**
 
 ## 0. The core problem with "just add more Lights"
 
