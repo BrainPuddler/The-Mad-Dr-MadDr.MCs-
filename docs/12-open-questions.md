@@ -3611,3 +3611,34 @@ specifically once nightAmount is unambiguously ~1 (e.g. a steeper
 easing curve on nightAmount itself, or gating on the Night phase
 directly rather than the LampBoost-derived blend), not a straight port
 of the bloomScale fix.
+
+## docs/28 follow-up: "real lights under market-stall-canopy, ornate-lamppost-pole" too large (2026-07)
+
+Creator clarified the previous "even set to 0 way too large" report: the
+objects showing the symptom are the REAL dynamic lights (Tier 2, actual
+`Light` components from `DynamicLightBudget`) near these two street-
+furniture props, not (only) bloom on the bulb geometry.
+
+Checked the geometry before touching anything: hex centers are exactly
+20m apart (`HexCoord.HexMeters`, packages/citygen-core/src/HexCoord.cs:27),
+and `RoadDresser`'s per-hex furniture offset is only ±3m along the road
+axis, so two separate furniture slots can never end up closer than ~14m
+apart -- beyond the old 7m light range. So this wasn't cross-prop bleed
+between a lamppost's hex and a market stall's hex.
+
+Simpler cause: `DynamicLightBudget`'s pooled `Light` is a raw Unity Point
+light. It illuminates ANY nearby geometry within `range` -- the ground,
+the pole itself, a market stall's canopy surface if it's anywhere close
+-- not just the prop that registered the glow point. A 7m range is a 14m-
+diameter dome, which reads as a big soft wash across everything nearby
+rather than a contained "pool of light AT the fixture." Same "small
+source, big footprint" shape as the bloom bug, just via real-time
+lighting instead of post-process.
+
+Fixed by tightening the default: `DynamicLightBudget.range` and
+`CityLightingProfile.RealLightRange` 7f -> 3f. Left `peakIntensity`
+alone -- the report was specifically about size, not brightness, and
+shrinking range while holding intensity constant naturally reads as a
+*more* concentrated pool near the fixture (steeper falloff over a
+shorter distance), which is the "real pool of light" look the code
+comments already describe as the goal.

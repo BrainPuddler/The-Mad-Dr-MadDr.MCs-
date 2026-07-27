@@ -41,8 +41,9 @@ public class CityLightingProfile : ScriptableObject
     [Range(0f, 5f)]
     public float RealLightPeakIntensity = 0.7f;
 
+    [Tooltip("How far each light reaches, in meters. This is the SIZE of the pool of light on the ground -- keep this tight (a pool AT the fixture, not a dome that reaches neighboring props).")]
     [Range(1f, 25f)]
-    public float RealLightRange = 7f;
+    public float RealLightRange = 3f;
 
     [Header("Emissive material brightness (the glow on the prop itself)")]
     [Tooltip("Base emissive multiplier for a lit bulb/window/sign BEFORE the night boost below. This is what clipped to solid white balls -- keep BulbEmissiveBase * MaxNightBoost comfortably under ~1.2 to avoid the prop itself rendering as a flat white blob.")]
@@ -58,9 +59,9 @@ public class CityLightingProfile : ScriptableObject
     public float DayNeonBoost = 0.35f;
 
     [Header("Post-processing (Night mood)")]
-    [Tooltip("URP Bloom intensity at full Night. High values are what turn a city full of lit windows/signs into a wall of white bloom.")]
+    [Tooltip("Multiplies URP Bloom intensity at EVERY time of day (not just night) -- a true scale on the authored curve, not an absolute target. High values are what turn a city full of lit windows/signs into a wall of white bloom.")]
     [Range(0f, 2f)]
-    public float NightBloomIntensity = 0.25f;
+    public float BloomScale = 0.3f;
 
     [Tooltip("Ambient light brightness at full Night -- near 0 for a genuinely dark night the lamps/windows/signs can stand out against.")]
     [Range(0f, 1f)]

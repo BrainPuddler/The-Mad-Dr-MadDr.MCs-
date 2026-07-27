@@ -77,9 +77,17 @@ public class DynamicLightBudget : MonoBehaviour
     [Range(0f, 5f)]
     public float peakIntensity = 0.7f;
 
-    [Tooltip("How far each light reaches, in meters. This is the SIZE of the pool of light on the ground.")]
+    // 2026-07 creator report: "the real lights under market-stall-canopy,
+    // ornate-lamppost-pole, etc" read as way too large. A Point light
+    // illuminates ANY nearby geometry within range, not just the prop that
+    // registered it -- 7m was wide enough to wash a big soft dome across
+    // the ground, the pole, and neighboring street furniture, the same
+    // "small source, big footprint" shape the bloom bug had, just via
+    // real-time lighting instead of post-process. Tightened so the pool
+    // stays local to the fixture it's actually promoted from.
+    [Tooltip("How far each light reaches, in meters. This is the SIZE of the pool of light on the ground -- keep this tight (a pool AT the fixture, not a dome that reaches neighboring props).")]
     [Range(1f, 25f)]
-    public float range = 7f;
+    public float range = 3f;
 
     [Tooltip("Turn every real light off entirely -- the fastest way to check whether the lights or the emissive bulb geometry is what you're actually seeing.")]
     public bool enableRealLights = true;

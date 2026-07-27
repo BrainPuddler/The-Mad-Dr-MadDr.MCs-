@@ -118,7 +118,7 @@ public class LumenCycleController : MonoBehaviour
     public void ApplyProfile(CityLightingProfile profile)
     {
         if (profile == null) return;
-        bloomScale = profile.NightBloomIntensity;
+        bloomScale = profile.BloomScale;
         nightAmbient = profile.NightAmbientBrightness;
     }
 
