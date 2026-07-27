@@ -100,7 +100,7 @@ the fog context, since they're just genuinely useful Bloom parameters:
   URP's own default (~0.9) the entire time. A high threshold means only
   a light's very brightest core blooms; lowering it (`bloomThreshold`,
   now explicit) lets more of the scene's own brightness "pop." This is
-  the exact same failure pattern as everything in §3 below: an
+  the exact same failure pattern as everything in §4 below: an
   `overrideState = true` alone does nothing without also setting
   `.value` — don't assume a flag being true means the parameter is
   actually being driven anywhere.
@@ -112,17 +112,67 @@ the fog context, since they're just genuinely useful Bloom parameters:
   analog to "fog absorbs a light source" without true volumetric
   scattering.
 
-If asked to push this further, the natural next lever (not yet
-implemented, no Editor here to validate it) is a custom URP Renderer
-Feature doing a screen-space radial blur ("god rays") from each bright
-light's screen position — a well-established URP-native technique for
-light-shaft-through-atmosphere, meaningfully more invasive (new HLSL +
-C# Renderer Feature, registered on the URP Renderer asset) than
-anything else in this doc. Flag that scope explicitly before attempting
-it; it's a different category of change from tuning existing Volume
-parameters.
+**Ceiling on this approach, honestly stated**: it's a 2D screen-space
+trick. It cannot produce true light shafts, cannot occlude a light's
+glow by actual 3D fog density between camera and source, and every
+light dims by the same flat global fog factor regardless of how much
+fog is actually between it and the camera. It reads as "hazier bloom,"
+not "light visibly diffusing through a fog volume." If a report keeps
+coming back to wanting the LATTER specifically, that's a sign this
+ceiling has been hit — see §3.
 
-## 3. The recurring bug pattern: "a property was never explicitly set, so it silently used SOME default"
+## 3. Real volumetric fog for URP — evaluated, not integrated (2026-07)
+
+**github.com/mseonKim/URP-VolumetricFog-ForwardPlus** — a genuine
+froxel-based volumetric fog system for URP (ported from HDRP's
+approach, unlike the HDRP-only article in §0 this is actually usable
+here). Researched in depth when the §2 Bloom approximation's ceiling
+was reached; NOT currently integrated — the creator chose to stick
+with §2's free approach for performance reasons. Documented here so a
+future session doesn't have to re-research it from scratch if that
+decision changes.
+
+**Confirmed compatible, concretely** (not just "should work"):
+- `Assets/Settings/PC_Renderer.asset` has `m_RenderingMode: 2`
+  (ForwardPlus) — the package's hard requirement, already satisfied on
+  the PC target. `Mobile_Renderer.asset` is `m_RenderingMode: 0`
+  (plain Forward) — this package would be **PC-only**; Mobile keeps
+  whatever fog system is active there, consistent with this project's
+  existing PC/Mobile tiering elsewhere (e.g. the Per-Vertex lighting
+  fix applied to both, but plenty of other settings already differ per
+  tier).
+- Package needs `com.unity.render-pipelines.universal` >=14.0.8; this
+  project is on `17.3.0`. It has a RenderGraph-specific code path
+  "only implemented for Unity 6" — this project IS Unity 6000.3.13f1,
+  so that's the path that actually runs.
+- License: Unity Companion License — compatible with use in a Unity
+  project, no conflict.
+- Integration surface, if this is ever picked back up: add the package
+  to `Packages/manifest.json` (safe, ordinary Package Manager
+  resolution); the `FPVolumetricFog` `ScriptableRendererFeature` has
+  exactly one serialized field (`renderPassEvent`) but STILL has to be
+  added to `PC_Renderer.asset` via the Editor's "Add Renderer Feature"
+  button, not hand-authored YAML — that asset backs the whole pipeline
+  and a blind edit risks corrupting it with no Editor here to verify
+  against; the `FPVolumetricFogVolume` Volume Component has a rich,
+  well-designed parameter set including `enablePointAndSpotLight`/
+  `localScatteringIntensity`, meaning it's built to have actual local
+  lights (this project's `DynamicLightBudget`-promoted real lights)
+  genuinely scatter into the fog volume — the real version of what §2
+  approximates.
+- Real GPU cost, not free like §2 — froxel volumetric fog (a MaxZ pass
+  + a volumetric lighting pass + denoise, every frame) has a genuine
+  per-frame budget line, tunable via `screenResolutionPercentage`
+  (default 12.5%) and `volumeSliceCount` (default 128) down to a
+  cheaper-but-still-genuinely-volumetric middle ground if performance
+  allows some but not full-quality cost.
+
+**If this gets picked back up**: don't ship it at default quality
+settings without discussing the performance tradeoff again explicitly
+— the creator's stated reason for not integrating it now was
+performance, not quality or feasibility.
+
+## 4. The recurring bug pattern: "a property was never explicitly set, so it silently used SOME default"
 
 This is, by a wide margin, the single most common root cause across the
 entire docs/28 saga. Every one of these looked like "the light/fog/
@@ -169,7 +219,7 @@ etc.) for what a `RenderSettings` sub-property is ACTUALLY set to beats
 guessing from Unity's documented "default" — a scene can carry its own
 serialized override that differs from a fresh-scene default.
 
-## 4. Verification discipline (no Editor exists in this environment)
+## 5. Verification discipline (no Editor exists in this environment)
 
 Every fix in docs/28 was reasoned from creator-supplied screenshots/
 console output/live Inspector values, not directly observed — and

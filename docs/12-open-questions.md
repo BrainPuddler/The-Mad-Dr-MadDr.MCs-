@@ -4284,3 +4284,54 @@ as the source of truth rather than duplicating its full detail.
 
 Reasoned, not numerically checkable (pure Bloom/shader parameters, no
 meaningful pass/fail math) -- not yet seen in a real render.
+
+## docs/28 row 19: URP-VolumetricFog-ForwardPlus evaluated, kept as documented option (2026-07)
+
+Creator: "study this too. https://github.com/mseonKim/URP-VolumetricFog-
+ForwardPlus see if it can be used." Fetched the repo (direct README
+fetch 403'd, corroborated via search + raw file fetches of LICENSE,
+package.json, FPVolumetricFog.cs, FPVolumetricFogVolume.cs instead) and
+cross-checked against this project's actual serialized settings before
+answering:
+
+- `Assets/Settings/PC_Renderer.asset`: `m_RenderingMode: 2` (ForwardPlus)
+  -- the package's hard requirement, already satisfied on the PC target.
+- `Mobile_Renderer.asset`: `m_RenderingMode: 0` (plain Forward) -- this
+  package would be PC-only.
+- package.json requires `com.unity.render-pipelines.universal` >=14.0.8;
+  this project's manifest.json has 17.3.0. Has a RenderGraph path "only
+  implemented for Unity 6" -- this project is 6000.3.13f1.
+- License: Unity Companion License, compatible with this project.
+- Integration surface: `FPVolumetricFog` (a `ScriptableRendererFeature`,
+  one serialized field) needs Editor-side registration on
+  `PC_Renderer.asset` via the Inspector's "Add Renderer Feature" button
+  -- not safely hand-authorable as raw YAML without an Editor to verify
+  against (that asset backs the whole pipeline). `FPVolumetricFogVolume`
+  (the Volume Component) has `enablePointAndSpotLight`/
+  `localScatteringIntensity` -- built to have actual local lights
+  (this project's `DynamicLightBudget`-promoted real lights) genuinely
+  scatter into the fog, the real version of what row 18's Bloom
+  approximation fakes.
+- Real GPU cost (froxel-based: MaxZ pass + volumetric lighting pass +
+  denoise, every frame), tunable via `screenResolutionPercentage`
+  (default 12.5%) / `volumeSliceCount` (default 128) down to a
+  cheaper-but-still-genuinely-volumetric middle ground.
+
+Asked whether to proceed (adding a new external git dependency is a
+real decision, not a parameter tweak) rather than just doing it. Creator
+asked for an ease/quality/performance comparison against row 18's Bloom
+approach instead of an immediate yes/no. Answered honestly that there's
+no option winning all three -- row 18 is free and already shipped but
+structurally can't produce true light-through-fog scattering (2D
+screen-space trick, not 3D); this package IS the real mechanism but has
+a genuine per-frame cost even at reduced settings. Creator decided:
+stay with row 18 for performance, keep this package noted "just in
+case."
+
+Documented as a NEW section (§3) in `.claude/skills/maddr-lighting-
+system` rather than only in this log entry, since the explicit ask was
+to preserve it as a revisitable future option, not just a record of a
+conversation -- includes the concrete compatibility findings above so a
+future session doesn't have to re-research feasibility, only decide
+whether to spend the performance budget. No code changes this round;
+purely a researched-and-declined-for-now decision.
