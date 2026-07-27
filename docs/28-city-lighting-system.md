@@ -1,12 +1,47 @@
 # 28. City lighting system
 
-**Status: Phases 1-3 implemented (2026-07).** This doc covers the
-architecture for every light in the city — streetlamps, house/apartment
-windows, neon signs, marquee chasers — after the first real Editor look
-at docs/23 Phase 10's street lamps showed them as "big opaque balls of
-light... turning the playfield white." That symptom, and the ask for
-"a bunch of different lights... keeping them performant," are what this
-plan answers.
+**Status: Phases 1-3 implemented, then debugged against a real Editor
+through several rounds (2026-07).** This doc covers the architecture for
+every light in the city — streetlamps, house/apartment windows, neon
+signs, marquee chasers — after the first real Editor look at docs/23
+Phase 10's street lamps showed them as "big opaque balls of light...
+turning the playfield white." That symptom, and the ask for "a bunch of
+different lights... keeping them performant," are what this plan
+answers.
+
+**If you're picking this up cold, read §0.5 first, not the rest of the
+doc in order.** It's the single table of every bug this system has hit
+and its current status — everything else here is architecture that
+mostly hasn't changed since Phase 1.
+
+## 0.5. Bug history + current status (read this first)
+
+The creator debugged this live against a real Editor across many
+rounds — this repo has no Editor, so every fix here was reasoned from
+symptoms/screenshots/console output the creator supplied, not directly
+observed. That's a real risk of a fix being wrong in a way only the
+Editor can catch (see rows 6→7 below, where fixing one bug's root cause
+directly caused the next one). Full blow-by-blow reasoning for each row
+lives in the docs/12 decision log (search "docs/28"); this table is the
+condensed, current-state version.
+
+| # | Symptom reported | Root cause | Fix | Status |
+| --- | --- | --- | --- | --- |
+| 1 | "some effect but even set to 0 way too large" (bloom) | `nightBloom` was blended TOWARD (weighted by `nightAmount`, which decays through the back half of the night phase) instead of being a real multiplier | Renamed to `bloomScale`, true always-on multiplier on the whole curve, same model as `emissiveScale` | **Confirmed fixed** — creator verified bloom size responds correctly |
+| 2 | "it's the real lights under market-stall-canopy, ornate-lamppost-pole" too large | Checked geometry first (hex spacing 20m, furniture offset ±3m — ruled out cross-prop bleed); real cause: `DynamicLightBudget.range` (7m) is a Point light illuminating any nearby geometry, not just the registered prop | Tightened range 7f→3f | **Was WRONG** — see #3 |
+| 3 | "light is not pooling on the ground" (regression from #2) | The ornate lamppost's globes mount 5.9m up; 3m of range can't physically reach the ground from there. `range` is a straight-line radius, not a ground-projected size | Reverted range to 8f (clears the mount height with margin) | **Confirmed fixed** |
+| 4 | "still not working" / crash on toggling `enableRealLights` off | Two bugs: (a) `Refresh()` threw `ArgumentOutOfRangeException` when `activeBudget == 0` (empty-list fallback path); (b) fresh pooled `Light`s defaulted to Mixed bake mode, causing a GI console warning | (a) Guarded the fallback branch; (b) explicit `lightmapBakeType = Realtime` | **Confirmed fixed** — no more crash/warning |
+| 5 | "objects still black, no light I can see" | Both URP Pipeline Assets had Additional Lights set to **Per Vertex**; this city is built entirely from low-poly primitives (a ground quad can have 4-8 vertices), so a point light's contribution can vanish between vertices even when perfectly configured | Set both `PC_RPAsset`/`Mobile_RPAsset` to Per Pixel (flagged mobile perf trade-off, not silently taken) | **Confirmed fixed** (ground pools now visible) |
+| 5b | (same report, second cause) | `RenderSettings.ambientMode` was never set anywhere — Unity only reads `ambientLight` in `Flat` mode; scenes default to `Skybox`, so every ambient value this controller ever computed was silently discarded | `LumenCycleController.Start()` now sets `ambientMode = Flat` once | **Confirmed fixed** |
+| 6 | ornate-lamppost-pole / market-stall-canopy rendered **pure black** even sitting inside a correctly-working light pool | `ProceduralMeshKit` emitted every face in both windings (deliberate anti-mistake guard) — `RecalculateNormals` averages face normals per vertex, so +N and -N cancelled to exactly zero, and a zero normal makes `dot(N,L)` zero for *any* light | Single winding + `FaceOutward()` (re-winds any triangle facing the mesh centroid). Verified numerically in the flightcheck harness (22/22 zero normals → 0/0) since there's no Editor to look at | **Was INCOMPLETE** — see #7 |
+| 7 | Same two props **vanished entirely** (regression from #6) | Fixing #6 reintroduced exactly the risk double-winding existed to prevent: whether Unity's front-face culling agrees with `FaceOutward()`'s notion of "outward" can't be verified without an Editor — it disagreed, so the correctly-wound faces got back-face culled | `PropLibrary.Spawn` clones the material and sets `_Cull = Off`, but ONLY for registered-builder (ProceduralMeshKit) meshes, never the primitive fallback | **Reasoned fix, awaiting creator re-verification** — robust to either winding direction by construction, but not yet confirmed against a real render |
+| — | (side finding, not a symptom report) | Ornate lamppost registered a real light per globe (3, half a metre apart) — ~3x stacked intensity on one pavement patch, 3 of 24 budget slots on one fixture | Register one real light per fixture; all 3 globes still glow (emissive, unaffected) | Bundled into the #6/#7 commits, not separately re-verified |
+| — | "I believe you put the lights in the wall" | Not yet root-caused — raised while the props were invisible (row 7's bug), so hard to judge whether it was a real position bug or just confusing to evaluate against invisible geometry | Not yet attempted | **Open** — re-check after #7 is confirmed |
+
+**As of the last commit (`5fd5a4f`): rows 1, 3, 4, 5, 5b, 6 are creator-
+confirmed working. Row 7 (culling fix) and the "lights in the wall"
+report are NOT YET re-verified against a real render — that's the
+active open thread, not a settled state.**
 
 ## 0. The core problem with "just add more Lights"
 
@@ -81,7 +116,8 @@ nothing is overwritten.
 
 ### Why "altering the DynamicLight" specifically did nothing
 
-Two independent reasons, both now fixed:
+Two independent reasons up front, both fixed early — see §0.5 for the
+FULL list, including several found only after these two:
 
 1. **The glowing balls are not the dynamic lights.** They are the
    emissive bulb *geometry* (small spheres with an emissive material),
@@ -160,7 +196,7 @@ otherwise ignores the day/night cycle entirely.
 | Light kind | Tier 1 (glow) | Tier 2 (real light) | Behavior |
 | --- | --- | --- | --- |
 | Streetlamp bulb | `RoadDresser.Bulb()`, profile-driven brightness | Yes, registered | Steady |
-| Ornate multi-globe lamppost | same `Bulb()` material, 3 globes | Yes, all 3 registered | Steady |
+| Ornate multi-globe lamppost | same `Bulb()` material, 3 globes | Yes, ONE registered per fixture (2026-07: was all 3, ~0.5m apart — stacked to ~3x intensity on one patch of pavement and burned 3 budget slots on a single fixture) | Steady |
 | Apartment windows | new `BuildingDresser.WindowGlow()`, ~2-in-5 floors lit | Yes, registered | **Flicker** |
 | Movie palace neon (underglow/blade/letters) | existing `NeonTeal`/`SignWhite`/`NeonRed` | No (decorative, not budgeted) | **Buzz** |
 | Movie palace marquee chaser row | new small bulb row | No (decorative, not budgeted) | **Chase** |
@@ -197,12 +233,15 @@ silently skipped):
 
 ## Verification
 
-`flightcheck` compiles clean (added `MaterialPropertyBlock`/
-`Renderer.Get/SetPropertyBlock`, `Mathf.Floor`/`SmoothStep`, and
-`[Range]`/`[Header]`/`[Tooltip]` attribute stubs — all already covered
-except the new ones this system needed). **Not visually verified** — no
-Unity Editor exists in this session; the specific brightness numbers in
-`CityLightingProfile`'s defaults are best-effort corrections based on
-the reported symptom, not a confirmed-good result. The whole point of
-Phase 1 (the ScriptableObject) is that the next round of tuning doesn't
-require another code round-trip.
+`flightcheck` compiles clean after every change in this doc (stubs have
+been extended repeatedly along the way — real `Vector3`/`Mathf`
+trig/`RecalculateNormals`/etc, not just enough to compile; see §0.5 row
+6, where a stub that was a `{ }` no-op would have made the regression
+test pass vacuously). Compiling clean is necessary, not sufficient —
+this session has no Unity Editor, so nothing here is visually confirmed
+by *this* session; every fix past the first two rows in §0.5 was
+reasoned from creator-supplied screenshots/console output/live Inspector
+values, iterating in real time against their actual Editor. That process
+found real regressions this session's own reasoning introduced (rows 3
+and 7) — read §0.5's status column before assuming anything below Phase
+1 is settled, and check whether a newer docs/12 entry supersedes it.
