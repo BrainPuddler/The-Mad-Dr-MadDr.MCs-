@@ -40,6 +40,15 @@ namespace MadDr.MatchCore
 
         private int _ticksUntilComplete;
 
+        /// <summary>Ticks left in <see cref="BuildingState.UnderConstruction"/>,
+        /// 0 once Complete/Destroyed. For a construction-progress visual
+        /// (docs/23 §2's own "ghost -> under-construction (scaffold %) ->
+        /// complete" lifecycle) -- combine with the same kind's
+        /// <see cref="BuildingDef.BuildTimeTicks"/> for a 0-1 fraction;
+        /// not stored here itself since it's already public data on the
+        /// def, not per-instance state worth duplicating.</summary>
+        public int TicksUntilComplete => _ticksUntilComplete;
+
         /// <summary>docs/18 §3: ≤50% HP reads as Damaged -- a pure
         /// function of current HP, not its own state, and only
         /// meaningful once actually built (a building under construction

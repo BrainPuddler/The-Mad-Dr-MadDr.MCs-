@@ -1000,40 +1000,56 @@ namespace MadDr.MatchCore
             unit.SetPath(path);
         }
 
+        /// <summary>Pure, read-only validity check for a prospective
+        /// <see cref="CommandKind.BuildStructure"/> command -- the EXACT
+        /// same rules <see cref="ApplyBuildStructure"/> enforces (a real
+        /// buildable kind, an on-map and currently-unblocked hex, full
+        /// affordability of every cost line), sharing this one method
+        /// rather than a hand-duplicated copy so a Unity ghost-placement
+        /// cursor's red/green preview can never disagree with what
+        /// actually happens when the command is issued. Never mutates
+        /// anything (no spend, no allocation) -- safe to call every
+        /// frame from a UI.</summary>
+        public bool CanPlaceBuilding(int playerIndex, BuildingKind kind, HexCoord hex)
+        {
+            if (_city == null || _blockedToGround == null) return false;
+            if (kind == BuildingKind.Hq || (int)kind < 0 || (int)kind >= BuildingDef.AllDefs.Count) return false;
+            if (playerIndex < 0 || playerIndex >= _players.Length) return false;
+            if (!_city.Contains(hex) || _blockedToGround.Contains(hex)) return false;
+
+            var def = BuildingDef.Get(kind);
+            var player = _players[playerIndex];
+            foreach (var (resource, amount) in def.Cost)
+                if (player.Wallet(resource) < amount) return false;
+
+            return true;
+        }
+
         /// <summary>docs/23 §2 Phase 2: place a new building at hex
         /// (ArgA, ArgB), building kind decoded from TargetEntity (see
         /// <see cref="CommandKind.BuildStructure"/>'s own doc comment for
-        /// why that slot is repurposed here). Validates, in order: a real
-        /// buildable kind (never <see cref="BuildingKind.Hq"/>), an
-        /// on-map and currently-unblocked hex, and full affordability of
-        /// EVERY resource line in the building's cost -- checked BEFORE
-        /// debiting any of them, so a multi-resource cost is all-or-
-        /// nothing (never a partial spend on an unaffordable build).
-        /// Silent no-op on any failure, matching every other command's
-        /// bad-input contract.</summary>
+        /// why that slot is repurposed here). Validated by
+        /// <see cref="CanPlaceBuilding"/> (checked BEFORE debiting any
+        /// cost line, so a multi-resource cost is all-or-nothing -- never
+        /// a partial spend on an unaffordable build). Silent no-op on any
+        /// failure, matching every other command's bad-input contract.</summary>
         private void ApplyBuildStructure(Command cmd)
         {
-            if (_city == null || _blockedToGround == null) return;
-
             var kind = (BuildingKind)cmd.TargetEntity;
-            if (kind == BuildingKind.Hq || (int)kind < 0 || (int)kind >= BuildingDef.AllDefs.Count) return;
-            if (cmd.PlayerIndex < 0 || cmd.PlayerIndex >= _players.Length) return;
-
             var hex = new HexCoord(cmd.ArgA, cmd.ArgB);
-            if (!_city.Contains(hex) || _blockedToGround.Contains(hex)) return;
+            if (!CanPlaceBuilding(cmd.PlayerIndex, kind, hex)) return;
 
             var def = BuildingDef.Get(kind);
             var player = _players[cmd.PlayerIndex];
-            foreach (var (resource, amount) in def.Cost)
-                if (player.Wallet(resource) < amount) return;   // unaffordable -- reject before spending anything
-
             foreach (var (resource, amount) in def.Cost) player.TrySpend(resource, amount);
 
             var id = AllocateEntityId();
             var building = new SimBuilding(id, cmd.PlayerIndex, kind, hex, def.MaxHp, def.BuildTimeTicks, completeImmediately: false);
             _buildingsInOrder.Add(building);
             _buildingsById[id] = building;
-            _blockedToGround.Add(hex);
+            // non-null: CanPlaceBuilding above already returned false (and
+            // we'd have returned) if _blockedToGround were null.
+            _blockedToGround!.Add(hex);
         }
 
         /// <summary>docs/23 §5 / docs/27 Phase C: one tick's separation

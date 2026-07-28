@@ -127,6 +127,43 @@ public class SimBridge : MonoBehaviour
     /// contract as <see cref="SpawnUnit"/>.</summary>
     public SimEmitter EmitterAt(int index) => _match.EmitterAt(index);
 
+    /// <summary>docs/23 §2 Phase 2's Unity half: queue a BuildStructure
+    /// command for the NEXT tick boundary (same one-tick-latency contract
+    /// as <see cref="QueueMoveCommand"/>). This method itself never
+    /// validates -- callers should check <see cref="CanPlaceBuilding"/>
+    /// first for a live ghost-cursor preview; an invalid placement is a
+    /// silent sim-side no-op either way, never an exception.</summary>
+    public void QueueBuildCommand(int playerIndex, BuildingKind kind, HexCoord hex)
+    {
+        _pending.Add(new Command(playerIndex, CommandKind.BuildStructure, targetEntity: (uint)kind, argA: hex.Q, argB: hex.R));
+    }
+
+    /// <summary>Read-only placement-validity preview, false if no match
+    /// is running. Wraps <see cref="MatchState.CanPlaceBuilding"/> --
+    /// the EXACT check the sim applies when a queued command actually
+    /// lands, so a ghost cursor can never show green for a placement
+    /// that then silently fails.</summary>
+    public bool CanPlaceBuilding(int playerIndex, BuildingKind kind, HexCoord hex)
+        => _match != null && _match.CanPlaceBuilding(playerIndex, kind, hex);
+
+    /// <summary>Live building count, 0 if no match is running -- iterate
+    /// with <see cref="BuildingAt"/> for a BaseDresser to sync visuals.</summary>
+    public int BuildingCount => _match?.BuildingCount ?? 0;
+
+    /// <summary>Live building state by index. Only valid when
+    /// <paramref name="index"/> &lt; <see cref="BuildingCount"/> (i.e. a
+    /// match is running) -- same "caller already knows a match exists"
+    /// contract as <see cref="EmitterAt"/>.</summary>
+    public SimBuilding BuildingAt(int index) => _match.BuildingAt(index);
+
+    /// <summary>A player's current balance of one resource, 0 if no match
+    /// is running -- for a build menu to gray out unaffordable options.</summary>
+    public int PlayerWallet(int playerIndex, ResourceKind kind)
+    {
+        var p = _match?.Player(playerIndex);
+        return p?.Wallet(kind) ?? 0;
+    }
+
     private void Update() => Pump(Time.deltaTime);
 
     /// <summary>The actual fixed-timestep accumulator logic, taking `dt`

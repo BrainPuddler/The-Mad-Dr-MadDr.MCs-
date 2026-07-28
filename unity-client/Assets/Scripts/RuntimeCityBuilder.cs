@@ -1716,6 +1716,27 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                     _simBridge = gameObject.AddComponent<SimBridge>();
                     _simBridge.StartMatch(unchecked((uint)seed), new List<FactionId> { FactionId.MadDoctor, FactionId.HumanArmy }, _city);
                     Debug.Log("docs/27: sim-driven demo active on " + root.name + " -- left-click it, right-click to move it.");
+
+                    // the moon-dial/mana/capture-progress HUD and the
+                    // build-menu/ghost-cursor/BaseDresser trio all read
+                    // live match-core state through THIS SimBridge -- this
+                    // is the one place in any scene a real match exists
+                    // today, so it's also the one place they get wired.
+                    var lumenHud = gameObject.GetComponent<LumenHud>();
+                    if (lumenHud == null) lumenHud = gameObject.AddComponent<LumenHud>();
+                    lumenHud.Init(_simBridge, playerIndex: 0);
+
+                    var buildMenu = gameObject.GetComponent<BuildMenuHud>();
+                    if (buildMenu == null) buildMenu = gameObject.AddComponent<BuildMenuHud>();
+                    buildMenu.Init(_simBridge, playerIndex: 0);
+
+                    var ghostCursor = gameObject.GetComponent<BuildGhostCursor>();
+                    if (ghostCursor == null) ghostCursor = gameObject.AddComponent<BuildGhostCursor>();
+                    ghostCursor.Init(_simBridge, this, buildMenu, playerIndex: 0);
+
+                    var baseDresser = gameObject.GetComponent<BaseDresser>();
+                    if (baseDresser == null) baseDresser = gameObject.AddComponent<BaseDresser>();
+                    baseDresser.Init(_simBridge, this);
                 }
                 agent.EnableSimDriven(_simBridge, playerIndex: 0, atHex: home, speed: 6.0);
             }

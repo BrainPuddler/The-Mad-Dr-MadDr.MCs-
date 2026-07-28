@@ -4988,3 +4988,114 @@ Remaining from the deferred trio: world-space capture markers, and the
 region picker (a separate docs/23 Phase 8 item) are still not started.
 The Phase 2 build-menu/ghost-placement cursor is also still open --
 next candidate for this same UI/UX push.
+
+## 2026-07: docs/23 Phase 2's Unity half, shipped -- build menu, ghost cursor, BaseDresser
+
+Direct follow-up to the HUD trio above, same UI/UX push. Phase 2's
+sim-side (`BuildingDef`/`SimBuilding`/`CommandKind.BuildStructure`) has
+been done and tested since the original Phase 2 pass, but nothing in
+Unity could ever actually place, preview, or SEE a building -- a player
+could not build anything, full stop, despite the mechanic being real
+underneath.
+
+**New match-core surface** (both additive, both real refactors rather
+than duplicated logic):
+- `MatchState.CanPlaceBuilding(playerIndex, kind, hex)` -- pulled the
+  exact validation `ApplyBuildStructure` already ran (real kind, on-map
+  + unblocked hex, full affordability) into its own public method, which
+  `ApplyBuildStructure` now calls too. This was a deliberate refactor,
+  not a hand-copied duplicate check: a ghost cursor's live preview and
+  the sim's actual outcome share one code path, so they cannot drift
+  apart the way two independently-maintained copies eventually would.
+  (Fixed a CS8602 nullable-warning regression this refactor introduced
+  at the `_blockedToGround.Add(hex)` call site -- the null-check moved
+  into the new shared method, so the compiler's flow analysis can no
+  longer see it from `ApplyBuildStructure` alone; a documented
+  null-forgiving `!` closes it, since `CanPlaceBuilding` having already
+  returned true is what guarantees non-null there.)
+- `SimBuilding.TicksUntilComplete` -- exposes the previously-private
+  construction countdown, for a scaffold-percent visual (combine with
+  the same kind's `BuildingDef.BuildTimeTicks` for a 0-1 fraction; not
+  worth duplicating that number onto the instance itself).
+
+246 match-core tests total (up from 239): `CanPlaceBuilding` covered for
+affordable/unaffordable/blocked/off-map/Hq-kind cases, PLUS a test that
+building on a hex flips a live `CanPlaceBuilding` read from true to false
+(the exact "does the live preview track the SAME blocked set the sim
+mutates" property a ghost cursor depends on); `TicksUntilComplete`
+covered counting down to exactly 0 and staying 0 for both a normal build
+and an immediately-complete HQ spawn.
+
+**New `SimBridge` surface** (six more narrow pass-throughs, same
+defensive-default style as the emitter/mana trio): `QueueBuildCommand`,
+`CanPlaceBuilding`, `BuildingCount`, `BuildingAt`, `PlayerWallet`.
+
+**New Unity scripts**, all in `unity-client/Assets/Scripts/`:
+- `BuildMenuHud.cs` -- `BuildingDef.AllDefs` (minus `Hq`) as a hotkeyed
+  1-9 list, cost-per-`ResourceKind` labels, unaffordable rows grayed
+  (still clickable) via the new `PlayerWallet`. Owns ONLY selection
+  state (`SelectedKind`) -- placement itself is `BuildGhostCursor`'s
+  job, the same selection/order split `WaypointCommander` already keeps
+  for units. Exposes `PointerOverPanel` (mirroring `Minimap.PointerOver`
+  exactly) so a menu-row click can't also register as a world-space
+  placement click underneath it.
+- `BuildGhostCursor.cs` -- while a kind is selected, raycasts the mouse
+  the same way `WaypointCommander.RaycastCursor` does (duplicated
+  locally rather than exposing that private helper, since the two
+  scripts have no other coupling), resolves the hex via the existing
+  `RuntimeCityBuilder.HexAt`, previews red/green from a live
+  `CanPlaceBuilding` call every frame, and left-click-confirms via
+  `QueueBuildCommand`. Right-click or Escape cancels. Ground elevation
+  follows the existing `RuntimeCityBuilder.GroundHeightAt` -- the ghost
+  sits on sculpted terrain, not floating at a flat y=0.
+- `BaseDresser.cs` -- the actual construction-lifecycle visual docs/23
+  §2 asks for (Ghost is Unity-only by design, never a sim state --
+  that's `BuildGhostCursor`'s job; this owns UnderConstruction onward).
+  Walks `SimBridge.BuildingCount`/`BuildingAt` every frame (match-core's
+  own building list only grows -- destroyed buildings stay in it with
+  `State == Destroyed` instead of being removed, so this is the one
+  place that gets turned into/out of GameObject existence): spawns a
+  primitive cube per new `EntityId`, scales it up translucent as
+  `TicksUntilComplete` counts down, swaps to a solid per-`BuildingKind`
+  hue at `Complete`, darkens that same material when `IsDamaged`
+  (docs/18 §3's derived-from-HP visual state, not its own persisted
+  one), and destroys the GameObject outright once `Destroyed` (no
+  rubble/wreck FX yet -- a real follow-up reusing the existing `DamageFx`
+  system, not attempted here).
+
+**Explicitly out of scope, flagged rather than attempted** (docs/23 §2's
+own "HQ dressing per faction" phrase only gets the generic-hue,
+Landmark-tier-sized treatment here -- real per-faction skin variety is
+separate scope); every kind shares one placeholder cube shape (no
+per-kind silhouette yet); multi-hex footprints (still `SimBuilding`'s
+own single-hex-only v1, unchanged); attacking a player-built structure
+(`SpawnPrim` strips the collider the same way every other cosmetic
+dressing object does, so these aren't even raycast-hittable yet -- moot
+anyway, since match-core has no `AttackBuilding` command at all).
+
+**Wiring gap closed in passing**: `LumenHud` (the previous entry's HUD
+trio) had been built and flightchecked but never actually instantiated
+in any scene -- true of `BuildMenuHud`/`BuildGhostCursor`/`BaseDresser`
+too until now. All four are wired together in
+`RuntimeCityBuilder.HandleRosterReady`'s `simDrivenDemo` block, the one
+place in any scene a real `SimBridge`/`MatchState` gets created today.
+
+Verified three ways, no Unity Editor available in this environment: (1)
+the real `dotnet test` match-core suite, 246/246 green, plus a
+`dotnet build` of just `MatchCore.csproj` confirming 0 warnings after
+the null-forgiving fix; (2) a stub-compile of the three real new script
+files (not copies) against a minimal UnityEngine(.InputSystem) stub plus
+signature-matched shape stubs for `SimBridge`/`RuntimeCityBuilder`/
+`Minimap`/`LabMeshBuilder`/`ShaderUtil` -- compiled clean, 0 warnings,
+`ImplicitUsings` deliberately DISABLED to match real Unity's compilation
+model exactly (a first pass with it left on produced a false-positive
+`Object` ambiguity between `System.Object` and `UnityEngine.Object` that
+would never occur in the real project, since these files carry no
+`using System;`); (3) manual re-read of the `SimBridge.cs` diff itself
+(not stub-compiled directly, to avoid pulling in its real `SimUnitView`
+dependency chain just for six one-line pass-throughs) -- same posture as
+the previous HUD-trio entry. Not seen in a real render.
+
+Remaining UI/UX candidates: a capture bar/moon dial upgrade to
+world-space markers, the region picker, and per-faction/per-kind real
+building art are all still open.

@@ -339,4 +339,106 @@ public class BuildingTests
         var second = Run();
         Assert.Equal(first, second);
     }
+
+    // ---- CanPlaceBuilding: the read-only preview query a Unity ghost-
+    // placement cursor calls every frame, sharing ApplyBuildStructure's
+    // own validation so the two can never disagree ----
+
+    [Fact]
+    public void CanPlaceBuilding_isTrueForAnAffordableOpenHex()
+    {
+        var city = SmallCity();
+        var m = MatchState.Create(11u, TwoPlayers(), city);
+        var hex = FindOpenHex(city, city.CenterHex);
+        m.Player(0).Grant(ResourceKind.Bones, 20);
+        m.Player(0).Grant(ResourceKind.Blood, 10);
+
+        Assert.True(m.CanPlaceBuilding(0, BuildingKind.BloodStorage, hex));
+    }
+
+    [Fact]
+    public void CanPlaceBuilding_isFalseWhenUnaffordable()
+    {
+        var city = SmallCity();
+        var m = MatchState.Create(12u, TwoPlayers(), city);
+        var hex = FindOpenHex(city, city.CenterHex);
+        m.Player(0).Grant(ResourceKind.Bones, 5);   // BloodStorage needs 20
+
+        Assert.False(m.CanPlaceBuilding(0, BuildingKind.BloodStorage, hex));
+    }
+
+    [Fact]
+    public void CanPlaceBuilding_isFalseOnABlockedHex()
+    {
+        var city = SmallCity();
+        var m = MatchState.Create(13u, TwoPlayers(), city);
+        var blockedHex = FindBlockedHex(city, city.CenterHex);
+        m.Player(0).Grant(ResourceKind.Bones, 1000);
+        m.Player(0).Grant(ResourceKind.Blood, 1000);
+
+        Assert.False(m.CanPlaceBuilding(0, BuildingKind.BloodStorage, blockedHex));
+    }
+
+    [Fact]
+    public void CanPlaceBuilding_isFalseOffMapAndForHqKind()
+    {
+        var city = SmallCity();
+        var m = MatchState.Create(14u, TwoPlayers(), city);
+        var hex = FindOpenHex(city, city.CenterHex);
+        m.Player(0).Grant(ResourceKind.Bones, 1000);
+        m.Player(0).Grant(ResourceKind.Blood, 1000);
+
+        Assert.False(m.CanPlaceBuilding(0, BuildingKind.BloodStorage, new HexCoord(99999, 99999)));
+        Assert.False(m.CanPlaceBuilding(0, BuildingKind.Hq, hex));
+    }
+
+    [Fact]
+    public void CanPlaceBuilding_reflectsAHexBecomingOccupiedAfterAPriorBuild()
+    {
+        // the exact "preview before AND after another build lands" case a
+        // live ghost cursor depends on: CanPlaceBuilding must track the
+        // SAME _blockedToGround set ApplyBuildStructure itself mutates.
+        var city = SmallCity();
+        var m = MatchState.Create(15u, TwoPlayers(), city);
+        var hex = FindOpenHex(city, city.CenterHex);
+        m.Player(0).Grant(ResourceKind.Bones, 1000);
+        m.Player(0).Grant(ResourceKind.Blood, 1000);
+
+        Assert.True(m.CanPlaceBuilding(0, BuildingKind.FuelStorage, hex));
+        m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: hex.Q, argB: hex.R) });
+        Assert.False(m.CanPlaceBuilding(0, BuildingKind.FuelStorage, hex));   // now occupied
+    }
+
+    // ---- TicksUntilComplete: the construction-progress readout a
+    // BaseDresser scaffold-percent visual reads ----
+
+    [Fact]
+    public void TicksUntilComplete_countsDownToZeroAndStaysZeroOnceComplete()
+    {
+        var city = SmallCity();
+        var m = MatchState.Create(16u, TwoPlayers(), city);
+        var hex = FindOpenHex(city, city.CenterHex);
+        m.Player(0).Grant(ResourceKind.Bones, 100);
+        m.Player(0).Grant(ResourceKind.Blood, 100);
+        m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: hex.Q, argB: hex.R) });
+
+        var buildTime = BuildingDef.Get(BuildingKind.BloodStorage).BuildTimeTicks;
+        var b = m.BuildingAt(0);
+        Assert.Equal(buildTime - 1, b.TicksUntilComplete);   // this Tick() already ran the building's own first Tick()
+
+        for (var i = 0; i < buildTime - 1; i++) m.Tick(null);
+        Assert.Equal(BuildingState.Complete, b.State);
+        Assert.Equal(0, b.TicksUntilComplete);
+    }
+
+    [Fact]
+    public void TicksUntilComplete_isZeroForAnHqCompletedImmediately()
+    {
+        var city = SmallCity();
+        var m = MatchState.Create(17u, TwoPlayers(), city);
+        var hqHex = FindOpenHex(city, city.CenterHex);
+        var id = m.SpawnHqForPlayer(0, hqHex);
+
+        Assert.Equal(0, m.FindBuilding(id)!.TicksUntilComplete);
+    }
 }
