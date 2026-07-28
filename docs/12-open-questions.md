@@ -4882,3 +4882,36 @@ shows up at all even now, that would point back toward
 `GetScreenRect`/component lifecycle instead of contrast. flightcheck
 compiles clean; the angle math itself was untouched this round (already
 verified in the prior entry) so wasn't re-checked.
+
+## 2026-07: lights now start turning on at the clock's 5:00 position
+
+Creator: "The lights should start turning on by 5:00 pm on the clock."
+
+This ties two systems built earlier this session together directly:
+`AnalogClockHud.HourHandDeg` maps one full Lumen cycle to one 12-hour
+dial revolution (`cycleProgress * 360`), so dial position 5:00 is 5/12
+of a full revolution -- cycle tick `2400 * 5/12 = 1000` exactly. That
+lands solidly inside DAY (ticks 300-1200), well before Dusk even starts
+(1200) -- interesting side note, Dusk's own start lands EXACTLY on the
+dial's 6:00 (`2400 * 0.5 = 1200`, `0.5 * 360 = 180deg = 6:00`), a clean
+coincidence in how the phase proportions were set up, but not itself
+what was asked for.
+
+`LumenCycleController.ComputeNightIntensity`'s ease-in previously
+started 25% into Dusk (tick 1275ish); moved the trigger to tick 1000
+(the dial's 5:00) instead, keeping the same fast ~75-tick (7.5s) ramp
+duration as before -- just detached from being expressed as "a fraction
+of Dusk" now that it starts earlier, inside Day. Lights are fully on by
+dial ~5:22, comfortably ahead of Dusk. Everything else (the Dawn
+fade-out, the flat hold through the rest of Day/Dusk/Night) is
+unchanged.
+
+Verified via reflection against the compiled `ComputeNightIntensity`
+(temporary harness, removed after verifying), including a cross-check
+against the actual compiled `AnalogClockHud.HourHandDeg` to confirm
+tick 1000 really does read as 150 degrees (5:00) on the dial, not just
+asserted by hand-derivation: intensity is 0 everywhere from Dawn's end
+through tick 999, starts ramping at exactly 1000, is strictly between 0
+and 1 mid-ramp, reaches exactly 1 at 1075, and stays 1 through the rest
+of Day, all of Dusk, all of Night, with the existing Dawn fade-out
+(unrelated to this request) unchanged. Not yet seen in a real render.

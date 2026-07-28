@@ -433,13 +433,14 @@ public class LumenCycleController : MonoBehaviour
         // Day, which wasn't what "shortly after dawn" meant. The fade-off
         // now happens WITHIN Dawn itself (fast, not lingering into Day at
         // all), and Day is a flat, hard 0 -- not the old 0.02-floor
-        // near-zero. ComputeNightIntensity: fast ease-in early in Dusk,
-        // flat hold through the rest of Dusk + all of Night, a fade-out
-        // over the first part of Dawn, flat 0 for the rest of Dawn + all
-        // of Day. Independent of the phase-blend mood-grading above --
-        // sun color/fog/vignette/etc keep their previous 4-stop
-        // continuous cross-fade, since this request is about "the
-        // lights," not the whole day/night mood.
+        // near-zero. Round 3: "the lights should start turning on by
+        // 5:00 pm on the clock" -- moved the ease-in from early Dusk to
+        // the AnalogClockHud dial's 5:00 position (which lands inside
+        // Day, ahead of Dusk), see ComputeNightIntensity's own header for
+        // the exact tick derivation. Independent of the phase-blend
+        // mood-grading above -- sun color/fog/vignette/etc keep their
+        // previous 4-stop continuous cross-fade, since this request is
+        // about "the lights," not the whole day/night mood.
         var nightAmount = ComputeNightIntensity(cycleT);
         DayNightState.CycleProgress = cycleT / (float)LumenClock.CycleTicks;
 
@@ -506,10 +507,6 @@ public class LumenCycleController : MonoBehaviour
         _filmGrain.intensity.value = Mathf.Lerp(a.FilmGrainIntensity, b.FilmGrainIntensity, blend);
     }
 
-    // Fraction of Dusk's duration spent easing 0->1 ("a lot faster" per
-    // the creator's own words -- Dusk is 30s/300 ticks, so 0.25 is a
-    // 7.5s fade-in, roughly 4x quicker than the old full-phase ramp).
-    private const float FadeInFraction = 0.25f;
     // 2026-07 correction: this used to be "fraction of DAY spent easing
     // out," at 0.5 (a leisurely 45s). Creator: "turn shortly after dawn"
     // -- the fade-off belongs in Dawn, not lingering into Day, and
@@ -518,21 +515,34 @@ public class LumenCycleController : MonoBehaviour
     // right at the Dawn boundary where Night's hold ends).
     private const float FadeOutFraction = 0.35f;
 
-    /// <summary>"The lights" trapezoid: fast ease-in early in Dusk, flat
-    /// 1.0 through the rest of Dusk + all of Night, an eased fade-out
-    /// over the first part of Dawn, flat 0.0 for the rest of Dawn + all
-    /// of Day. Independent of the continuous per-phase cross-fade
-    /// `ApplyBlend` still uses for sun/fog/color-grading -- this is
-    /// specifically the curve for "the lights holding through the
-    /// night, fading off shortly after dawn, off all day" (2026-07
-    /// creator direction, corrected in a second round -- see this
-    /// method's git history / docs/12 for the shape round 1 actually
-    /// had), not a general mood blend.</summary>
+    // 2026-07 creator: "The lights should start turning on by 5:00 pm
+    // on the clock." Ties directly to AnalogClockHud's own dial mapping
+    // (one full Lumen cycle = one 12-hour dial revolution --
+    // HourHandDeg = cycleProgress * 360) -- dial position 5:00 is 5/12
+    // of a full revolution, i.e. cycle tick 2400 * 5/12 = 1000 exactly.
+    // That lands solidly inside DAY (300-1200), well before Dusk even
+    // starts (1200 -- which happens to land EXACTLY on the dial's 6:00,
+    // a clean coincidence worth noting, but not what was asked for).
+    // Ramp duration itself is unchanged from the old Dusk-relative fast
+    // fade-in (25% of Dusk's 300 ticks = 75 ticks, ~7.5s) -- just
+    // detached from Dusk's own length now that the ramp starts earlier,
+    // so lights are fully on by dial ~5:22, comfortably ahead of Dusk.
+    private const int LightsOnStartTick = 1000;   // dial 5:00 (CycleTicks * 5/12)
+    private const float LightsOnRampTicks = 75f;
+
+    /// <summary>"The lights" trapezoid: off through Dawn + most of Day,
+    /// a fast ease-in starting at the dial's 5:00 (well before Dusk),
+    /// flat 1.0 from there through the rest of Day + all of Dusk + all
+    /// of Night, an eased fade-out over the first part of Dawn. Independent
+    /// of the continuous per-phase cross-fade `ApplyBlend` still uses for
+    /// sun/fog/color-grading -- this is specifically the curve for "the
+    /// lights holding through the night, fading off shortly after dawn,
+    /// starting by 5pm on the dial" (2026-07 creator direction, refined
+    /// across several rounds -- see docs/12 for the earlier shapes this
+    /// went through), not a general mood blend.</summary>
     private static float ComputeNightIntensity(int cycleT)
     {
         var dawnEnd = LumenClock.DawnTicks;
-        var dayEnd = dawnEnd + LumenClock.DayTicks;
-        var duskEnd = dayEnd + LumenClock.DuskTicks;
 
         if (cycleT < dawnEnd)                // Dawn: fade out promptly, then hold off
         {
@@ -541,17 +551,13 @@ public class LumenCycleController : MonoBehaviour
             return 1f - Mathf.SmoothStep(0f, 1f, cycleT / fadeTicks);
         }
 
-        if (cycleT < dayEnd) return 0f;      // Day: held fully off, no exceptions
+        if (cycleT < LightsOnStartTick) return 0f;   // rest of Dawn + most of Day: off
 
-        if (cycleT < duskEnd)                // Dusk: fast fade in, then hold on
-        {
-            var duskT = cycleT - dayEnd;
-            var fadeTicks = LumenClock.DuskTicks * FadeInFraction;
-            if (duskT >= fadeTicks) return 1f;
-            return Mathf.SmoothStep(0f, 1f, duskT / fadeTicks);
-        }
+        var rampT = cycleT - LightsOnStartTick;
+        if (rampT < LightsOnRampTicks)               // dial 5:00 -> ~5:22: fast fade in
+            return Mathf.SmoothStep(0f, 1f, rampT / LightsOnRampTicks);
 
-        return 1f;   // Night: fully on the whole phase
+        return 1f;   // rest of Day, all of Dusk, all of Night: fully on
     }
 
     /// <summary>Sun elevation as one continuous arc across the whole
