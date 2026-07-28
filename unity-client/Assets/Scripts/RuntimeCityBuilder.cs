@@ -16,7 +16,7 @@ using UnityEngine;
 /// </summary>
 public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 {
-    public enum PresetChoice { Village, SmallTown, BigCity }
+    public enum PresetChoice { Village, SmallTown, BigCity, NewYork, Paris, Montreal }
 
     [Header("City")]
     [Tooltip("City seed: same seed + preset = identical city, every time (docs/18 determinism contract). Ignored if a CityGizmo also sits on this GameObject -- its seed becomes the source of truth, so tuning the Scene-view preview and hitting Play build the same city without retyping.")]
@@ -48,6 +48,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     [Header("Lighting (docs/28)")]
     [Tooltip("Every tunable number for streetlamps/windows/neon/marquee lights -- brightness, real-light budget, flicker/buzz/chase timing. Create one via Assets > Create > MadDr > City Lighting Profile. Left unassigned, everything falls back to CityLightingProfile.Default's own safe values.")]
     public CityLightingProfile lightingProfile;
+
+    [Header("Region picker (off by default -- unchanged behavior)")]
+    [Tooltip("Shows an in-game 'choose your city' screen before generation instead of using the Inspector's preset field directly. Off by default so every existing scene/workflow (Inspector preset, CityGizmo sync) keeps working byte-for-byte unchanged -- this only changes anything when explicitly turned on.")]
+    public bool showRegionPicker = false;
 
     [Header("docs/27 Phase A dev check (off by default)")]
     [Tooltip("Wires the FIRST spawned monster to docs/27's SimBridge/interpolated-view pipeline instead of its normal Time.deltaTime movement, so a Move order on it is decided by match-core and rendered by interpolation -- the actual Editor smoke test docs/27 Phase A has been waiting on (nothing else in this environment can check it). Left-click that monster, right-click to move it, same as always. Every other monster (and every other order kind on this one) is completely unaffected.")]
@@ -137,6 +141,32 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             preset = ConvertPreset(gizmo.preset);
         }
 
+        // docs/23 Phase 8's own still-open "region picker" item: off by
+        // default (BeginMatch runs immediately, identical to every prior
+        // session's behavior) -- opting in defers generation until
+        // RegionPickerHud reports a choice, the same "opt-in, no-op until
+        // a scene explicitly turns it on" discipline simDrivenDemo already
+        // established for SimBridge.
+        if (showRegionPicker)
+        {
+            var picker = gameObject.GetComponent<RegionPickerHud>();
+            if (picker == null) picker = gameObject.AddComponent<RegionPickerHud>();
+            picker.Init(this);
+            return;
+        }
+
+        BeginMatch();
+    }
+
+    /// <summary>Everything Start() used to do unconditionally, from city
+    /// generation through the roster fetch -- extracted so
+    /// <see cref="RegionPickerHud"/> can call it once a player picks a
+    /// region, without duplicating any of it. Called immediately from
+    /// Start() when <see cref="showRegionPicker"/> is off (today's exact
+    /// behavior, unchanged) or once from the picker's own confirm click
+    /// otherwise -- never both.</summary>
+    public void BeginMatch()
+    {
         _city = CityGenerator.Generate(unchecked((uint)seed), ResolvePreset());
         _battlefield = BattlefieldState.FreshFrom(_city);
         _terrain = new TerrainField(_city, _origin, unchecked((uint)seed));
@@ -441,6 +471,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         {
             case PresetChoice.SmallTown: return CityPreset.SmallTown();
             case PresetChoice.BigCity: return CityPreset.BigCity();
+            // docs/23 Phase 8: region presets (citygen-core-only when that
+            // phase shipped -- this is the first Unity-side consumer of
+            // any of the three).
+            case PresetChoice.NewYork: return CityPreset.NewYork();
+            case PresetChoice.Paris: return CityPreset.Paris();
+            case PresetChoice.Montreal: return CityPreset.Montreal();
             default: return CityPreset.Village();
         }
     }
@@ -1724,7 +1760,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                     // today, so it's also the one place they get wired.
                     var lumenHud = gameObject.GetComponent<LumenHud>();
                     if (lumenHud == null) lumenHud = gameObject.AddComponent<LumenHud>();
-                    lumenHud.Init(_simBridge, playerIndex: 0);
+                    lumenHud.Init(_simBridge, this, playerIndex: 0);
 
                     var buildMenu = gameObject.GetComponent<BuildMenuHud>();
                     if (buildMenu == null) buildMenu = gameObject.AddComponent<BuildMenuHud>();

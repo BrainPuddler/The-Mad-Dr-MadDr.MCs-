@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-using MadDr.CityGen;
 using MadDr.MatchCore;
 using UnityEngine;
 
@@ -36,12 +34,13 @@ using UnityEngine;
 /// developer-repositionable via the same corner/margin/useCustomPosition
 /// fields those two already use.
 ///
-/// A capture bar's world position (hovering over the actual emitter hex
-/// in 3D space) is explicitly NOT attempted here -- that needs a hex-
-/// to-screen projection this HUD doesn't have a precedent for building.
-/// This first slice lists contested emitters as a fixed on-screen panel
-/// instead (still satisfies "visible to both players"); upgrading to a
-/// world-space marker is a separate, larger follow-up.
+/// 2026-07 follow-up: capture bars now hover directly over the actual
+/// emitter hex in 3D space (<see cref="Camera.WorldToScreenPoint"/> +
+/// the top-left/Y-down flip OnGUI's own coordinate space needs), instead
+/// of a fixed on-screen list -- the literal reading of docs/03's
+/// "progress bar visible to both players," not just a same-information
+/// substitute. The fixed panel below now only ever holds the phase/mana
+/// pair (fixed height -- it no longer grows with capture count).
 ///
 /// Honesty note (2026-07, no Unity Editor in this environment): the
 /// panel's pure formatting/threshold logic below (<see cref="PhaseLabel"/>,
@@ -62,7 +61,13 @@ public class LumenHud : MonoBehaviour
 
     [Header("Data source")]
     public SimBridge bridge;
+    public RuntimeCityBuilder builder;
     public int localPlayerIndex = 0;
+
+    [Header("World-space capture marker")]
+    [Tooltip("How far above ground level a capture marker floats, in meters.")]
+    public float captureMarkerHeight = 12f;
+    public float captureMarkerWidth = 150f;
 
     [Header("Placement (default bottom-right; developer-tunable anywhere)")]
     public ScreenCorner corner = ScreenCorner.BottomRight;
@@ -139,9 +144,10 @@ public class LumenHud : MonoBehaviour
 
     // ---- wiring ----
 
-    public void Init(SimBridge simBridge, int playerIndex)
+    public void Init(SimBridge simBridge, RuntimeCityBuilder cityBuilder, int playerIndex)
     {
         bridge = simBridge;
+        builder = cityBuilder;
         localPlayerIndex = playerIndex;
     }
 
@@ -151,21 +157,18 @@ public class LumenHud : MonoBehaviour
     {
         if (bridge == null || !bridge.HasMatch) return;
 
+        DrawPhaseManaPanel();
+        DrawCaptureMarkers();
+    }
+
+    private void DrawPhaseManaPanel()
+    {
         var phase = bridge.CurrentLumenPhase;
         var ticksRemaining = bridge.TicksUntilNextLumenPhase;
         var warning = IsTransitionWarning(ticksRemaining, MatchState.TicksPerSecond);
         var mana = bridge.PlayerMana(localPlayerIndex);
 
-        var capturing = new List<(HexCoord hex, int player, float frac)>();
-        for (var i = 0; i < bridge.EmitterCount; i++)
-        {
-            var e = bridge.EmitterAt(i);
-            if (e.CapturingPlayer != null)
-                capturing.Add((e.Hex, e.CapturingPlayer.Value, Fraction(e.CaptureProgressTicks, SimEmitter.CaptureChannelTicks)));
-        }
-
-        var height = Padding * 2f + PhaseLineHeight + (LineHeight + BarHeight + RowGap)
-            + capturing.Count * (LineHeight + BarHeight + RowGap);
+        var height = Padding * 2f + PhaseLineHeight + (LineHeight + BarHeight + RowGap);
         var rect = GetPanelRect(height);
         if (rect.width <= 0f) return;
 
@@ -185,15 +188,53 @@ public class LumenHud : MonoBehaviour
         DrawShadowedLabel(new Rect(x, y, innerWidth, LineHeight), "Mana " + mana + "/" + PlayerState.ManaCap, manaTextColor);
         y += LineHeight;
         DrawBar(new Rect(x, y, innerWidth, BarHeight), Fraction(mana, PlayerState.ManaCap), barBackgroundColor, manaFillColor);
-        y += BarHeight + RowGap;
+    }
 
-        foreach (var row in capturing)
+    /// <summary>docs/03's "progress bar visible to both players," drawn
+    /// where it actually reads best: floating over the emitter itself.
+    /// Skips silently (no fixed-panel fallback) when there's no camera or
+    /// city to project against yet, or when an emitter's marker point
+    /// falls behind the camera -- exactly the same "just don't draw it"
+    /// contract every other screen-space overlay in this project already
+    /// follows for an off-screen/undefined case.</summary>
+    private void DrawCaptureMarkers()
+    {
+        var cam = Camera.main;
+        if (cam == null || builder == null) return;
+
+        for (var i = 0; i < bridge.EmitterCount; i++)
         {
-            DrawShadowedLabel(new Rect(x, y, innerWidth, LineHeight), "Capturing (" + row.hex.Q + "," + row.hex.R + ") — P" + row.player, captureTextColor);
-            y += LineHeight;
-            DrawBar(new Rect(x, y, innerWidth, BarHeight), row.frac, barBackgroundColor, captureFillColor);
-            y += BarHeight + RowGap;
+            var e = bridge.EmitterAt(i);
+            if (e.CapturingPlayer == null) continue;
+
+            var hexWorld = builder.WorldOf(e.Hex);
+            var groundY = builder.GroundHeightAt(hexWorld);
+            var markerWorld = new Vector3(hexWorld.x, groundY + captureMarkerHeight, hexWorld.z);
+            if (!TryWorldToGui(cam, markerWorld, out var gp)) continue;
+
+            var frac = Fraction(e.CaptureProgressTicks, SimEmitter.CaptureChannelTicks);
+            var h = LineHeight + BarHeight + 2f;
+            var markerRect = new Rect(gp.x - captureMarkerWidth * 0.5f, gp.y - h, captureMarkerWidth, h);
+
+            DrawShadowedLabel(new Rect(markerRect.x, markerRect.y, markerRect.width, LineHeight), "P" + e.CapturingPlayer.Value + " capturing", captureTextColor);
+            DrawBar(new Rect(markerRect.x, markerRect.y + LineHeight, markerRect.width, BarHeight), frac, barBackgroundColor, captureFillColor);
         }
+    }
+
+    /// <summary>Camera.WorldToScreenPoint's own space is bottom-left
+    /// origin, Y-up, with z = distance-in-front-of-camera (negative/zero
+    /// means behind it -- must not draw, or the marker would appear to
+    /// mirror to the wrong side of the screen). OnGUI's Rect space is
+    /// top-left origin, Y-down -- the same flip AnalogClockHud/Minimap's
+    /// own screen-corner math already accounts for, just via a different
+    /// route (theirs never projects a 3D point, this is the first HUD
+    /// element in this project that does).</summary>
+    private static bool TryWorldToGui(Camera cam, Vector3 world, out Vector2 guiPoint)
+    {
+        var sp = cam.WorldToScreenPoint(world);
+        if (sp.z <= 0f) { guiPoint = default; return false; }
+        guiPoint = new Vector2(sp.x, Screen.height - sp.y);
+        return true;
     }
 
     private static void DrawShadowedLabel(Rect rect, string text, Color color)

@@ -5099,3 +5099,76 @@ the previous HUD-trio entry. Not seen in a real render.
 Remaining UI/UX candidates: a capture bar/moon dial upgrade to
 world-space markers, the region picker, and per-faction/per-kind real
 building art are all still open.
+
+## 2026-07: world-space capture markers + region picker
+
+Two more items off the running UI/UX list, both direct follow-ups to the
+two entries above.
+
+**Capture bars, upgraded to world-space.** The previous entry's
+`LumenHud` capture-progress rows lived in the fixed bottom-right panel
+as a text list. This upgrade moves them to float directly over the
+actual emitter hex in 3D space, matching docs/03's own phrasing
+("progress bar visible to both players") literally rather than just
+functionally. New `LumenHud.TryWorldToGui(Camera, Vector3)`: wraps
+`Camera.WorldToScreenPoint` (bottom-left origin, Y-up, z <= 0 meaning
+behind the camera -- must skip drawing, not mirror to the wrong side of
+the screen) and flips into OnGUI's own Rect space (top-left origin,
+Y-down) via `Screen.height - screenPoint.y` -- the first HUD element in
+this project to project a 3D point onto the 2D overlay at all (every
+prior one -- Minimap, AnalogClockHud, the fixed panels -- only ever
+positioned themselves by screen corner, never by a world position). New
+`LumenHud.builder` field (a `RuntimeCityBuilder` reference, for
+`WorldOf`/`GroundHeightAt`) and a matching `Init` signature change,
+propagated to its one real call site in `RuntimeCityBuilder`'s
+`simDrivenDemo` wiring block. The fixed panel is now phase+mana only --
+fixed height, since it no longer needs to grow with capture count.
+Markers simply don't draw when off-screen or behind the camera (no
+fallback list) -- the same "just skip it" contract every other
+screen-space overlay here already follows for an undefined case.
+
+**Region picker.** docs/23 Phase 8 shipped real `CityPreset.NewYork()`/
+`.Paris()`/`.Montreal()` factories in citygen-core, but nothing in Unity
+could ever choose one -- `RuntimeCityBuilder.preset` was (and largely
+still is) an Inspector-only field a developer sets before hitting Play,
+never a runtime choice. `RuntimeCityBuilder.PresetChoice` gained the
+three region values; `ResolvePreset()` routes them to citygen-core's own
+factories -- their first Unity-side consumer since Phase 8 shipped.
+
+The real work was `Start()` itself: it used to run city generation,
+lighting, camera framing, every HUD's `Init`, and the roster fetch
+unconditionally, in one block. Extracted everything from `_city =
+CityGenerator.Generate(...)` onward into a new public `BeginMatch()`,
+leaving `Start()` with just the CityGizmo seed/preset sync plus a
+branch: a new opt-in `showRegionPicker` field (**default false**) calls
+`BeginMatch()` immediately, byte-for-byte the same call `Start()` always
+made -- every existing scene, the Inspector preset field, CityGizmo sync,
+all of it, completely unchanged. Turning it on instead adds a new
+`RegionPickerHud` component and returns, deferring `BeginMatch()` until
+that screen's own confirm click sets `preset` and calls it directly --
+the exact same generation path, not a second one.
+
+New `RegionPickerHud.cs`: a centered IMGUI panel, six buttons (the three
+existing local presets plus the three new regions, each with a one-line
+blurb), `GUI.Button` confirms and self-destroys
+(`Object.Destroy(this)`). The one HUD element in this project centered
+on screen rather than corner-anchored, since there's no city/camera/
+gameplay yet for a corner to avoid overlapping.
+
+Verified two ways, no Unity Editor available in this environment: (1) a
+stub-compile of all five HUD/build scripts together (the three from the
+prior two entries plus the changed `LumenHud.cs` and new
+`RegionPickerHud.cs`) against real match-core/citygen-core types and
+signature-matched `SimBridge`/`RuntimeCityBuilder`/etc. shape stubs --
+`RuntimeCityBuilder`'s stub gained the new `PresetChoice` values,
+`preset` field, and `BeginMatch()` to keep `RegionPickerHud.cs`'s calls
+checked against the real signatures -- compiled clean, 0 errors/
+warnings; (2) manual re-read of every edited line in the real
+`RuntimeCityBuilder.cs` (too large a file to stub-compile whole, same
+posture every prior entry in this log has taken) confirming the
+`Start()`/`BeginMatch()` split changes nothing about call order or
+arguments -- only where the code lives. Not seen in a real render.
+
+Remaining: per-faction/per-kind real building art, and giving the
+region picker a live preview (currently just labeled buttons, no
+thumbnail/gizmo-style rendering of each preset) are still open.
