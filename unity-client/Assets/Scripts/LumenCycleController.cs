@@ -142,6 +142,25 @@ public class LumenCycleController : MonoBehaviour
     [Range(0f, 0.3f)]
     public float nightAmbient = 0.02f;
 
+    // 2026-07 creator: "the night is too dark, what we need is a hdr like
+    // fill so everything isn't so dark." Raising nightAmbient itself was
+    // the OTHER available knob, but it's a flat additive light -- pushing
+    // it up brightens the unlit gaps AND the already-bright lamp pools by
+    // the same amount, which is exactly the "lamps read as distinct pools
+    // of light" look nightAmbient was deliberately dropped near-zero to
+    // protect a few rounds back. An HDR-style shadow lift is a different
+    // tool: it raises the floor specifically on near-black PIXELS (via
+    // URP's ShadowsMidtonesHighlights grader, which is the standard "lift
+    // shadow detail without touching highlights" post-processing tool --
+    // same family as Lift/Gamma/Gain, just tonal-range-based instead of
+    // exposure-based) so unlit streets/building faces stop reading as pure
+    // crushed black while a lit lamp or window stays comparatively brighter
+    // than its surroundings, preserving the pool-of-light contrast instead
+    // of flattening it.
+    [Tooltip("HDR-style shadow lift at night: raises the floor of near-black areas (unlit streets, building shadows) without touching bright areas, so the picture doesn't read as crushed black -- unlike nightAmbient, which brightens EVERYTHING uniformly and can wash out the lamp 'pools of light' look. 0 = no lift (old behavior).")]
+    [Range(0f, 1f)]
+    public float nightFillLift = 0.35f;
+
     private const float TimeLapseMultiplier = 20f;
     private static readonly double TickInterval = 1.0 / MatchState.TicksPerSecond;
 
@@ -156,6 +175,7 @@ public class LumenCycleController : MonoBehaviour
     private Bloom _bloom;
     private FilmGrain _filmGrain;
     private Tonemapping _tonemapping;
+    private ShadowsMidtonesHighlights _shadowsMidtonesHighlights;
 
     /// <summary>Call once, right after AddComponent -- region is known to
     /// the caller (RuntimeCityBuilder already generated the CityModel) but
@@ -179,6 +199,7 @@ public class LumenCycleController : MonoBehaviour
         fogDiffusionBoost = profile.FogDiffusionBoost;
         bloomThreshold = profile.BloomThreshold;
         nightAmbient = profile.NightAmbientBrightness;
+        nightFillLift = profile.NightFillLift;
     }
 
     private void Start()
@@ -231,6 +252,7 @@ public class LumenCycleController : MonoBehaviour
         _bloom = profile.Add<Bloom>(true);
         _filmGrain = profile.Add<FilmGrain>(true);
         _tonemapping = profile.Add<Tonemapping>(true);
+        _shadowsMidtonesHighlights = profile.Add<ShadowsMidtonesHighlights>(true);
 
         _colorAdjustments.postExposure.overrideState = true;
         _colorAdjustments.saturation.overrideState = true;
@@ -243,6 +265,10 @@ public class LumenCycleController : MonoBehaviour
         _filmGrain.intensity.overrideState = true;
         _tonemapping.mode.overrideState = true;
         _tonemapping.mode.value = TonemappingMode.ACES;   // filmic tonemapping, per §10's own target look
+        // only the shadows wheel is ever driven -- midtones/highlights stay
+        // at their neutral (1,1,1,0) default, i.e. this ONLY lifts dark
+        // pixels, never touches mid/bright ones.
+        _shadowsMidtonesHighlights.shadows.overrideState = true;
 
         // 2026-07 correction: the previous commit added a
         // `UnityEngine.Rendering.Universal.Exposure` VolumeComponent
@@ -421,6 +447,16 @@ public class LumenCycleController : MonoBehaviour
         NeonRegistry.SetBoost(neonBoost);
         DayNightState.NeonBoost = neonBoost;
         DayNightState.NightAmount = nightAmount;
+
+        // HDR-style shadow lift, weighted by nightAmount the same way
+        // neonBoost/lamp intensity already are -- 0 lift all through Day
+        // (nightAmount==0, untouched daytime image), ramping to
+        // nightFillLift's full value for the held Dusk/Night stretch. Only
+        // the W component moves (a luminance-only offset on near-black
+        // pixels); X/Y/Z stay at 1 so this never recolors anything, just
+        // raises the floor.
+        var shadowLift = Mathf.Lerp(0f, nightFillLift, nightAmount);
+        _shadowsMidtonesHighlights.shadows.value = new Vector4(1f, 1f, 1f, shadowLift);
 
         _colorAdjustments.postExposure.value = Mathf.Lerp(a.PostExposure, b.PostExposure, blend);
         _colorAdjustments.saturation.value = Mathf.Lerp(a.Saturation, b.Saturation, blend);

@@ -26,6 +26,7 @@ using UnityEngine;
 ///   * too BRIGHT a glowing ball  -> LumenCycleController.emissiveScale
 ///   * too LARGE a glowing ball   -> LumenCycleController.bloomScale
 ///   * washed-out scene overall   -> LumenCycleController.nightAmbient
+///   * night too crushed-black    -> LumenCycleController.nightFillLift
 ///   * lit ground area too strong -> DynamicLightBudget.pointIntensityMax/spotIntensityMax
 ///   * lit ground area too wide   -> DynamicLightBudget.range
 ///   * lights don't dim in fog    -> DynamicLightBudget.fogDimReferenceDensity
@@ -104,6 +105,10 @@ public class CityLightingProfile : ScriptableObject
     [Tooltip("Ambient light brightness at full Night -- near 0 for a genuinely dark night the lamps/windows/signs can stand out against.")]
     [Range(0f, 1f)]
     public float NightAmbientBrightness = 0.02f;
+
+    [Tooltip("HDR-style shadow lift at full Night -- raises the floor of near-black areas without touching bright ones (unlike NightAmbientBrightness, which is a flat uniform light). See LumenCycleController.nightFillLift.")]
+    [Range(0f, 1f)]
+    public float NightFillLift = 0.35f;
 
     [Header("Flicker (windows, occasional neon dropout)")]
     [Tooltip("Per-instance flicker cycle speed range (Hz-ish) -- each registered light picks its own speed in this range so hundreds of windows don't flicker in lockstep.")]

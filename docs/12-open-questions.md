@@ -4569,3 +4569,110 @@ vs. average rate across Day's climb half -- went from the old code's
 exact 3.0x mismatch to 0.81x (i.e. now roughly comparable, no longer a
 one-phase-crawls-the-other-doesn't split). Not yet seen in a real
 render.
+
+## 2026-07: Stray scene Directional Light + HDR-style night fill (docs/28 row 25)
+
+Creator, after row 24's elevation fix: "Works now if I change the the
+Directional to a point light or area light, but now the night is too
+dark what we need is a hdr like fill. So everything isn't so dark."
+Rather than guess what "change the Directional to a point/area light"
+meant or whether to make that permanent, asked directly via
+AskUserQuestion. Answer: "The scene had a directional built into it.
+So there are 2, thus the shadows appear fixed, never animating."
+
+That's the real explanation, and it's a much better one than anything
+I'd been chasing in rows 20-24. Checked `SampleScene.unity` directly:
+it ships Unity's own stock default "Directional Light" GameObject --
+`m_Intensity: 2`, soft shadows enabled (`m_Shadows.m_Type: 2`), fixed
+rotation `m_LocalEulerAnglesHint: {x: 50, y: -30, z: 0}` (the literal
+Unity new-scene default, confirmed by the exact numbers matching what
+every fresh empty scene ships with) -- sitting there, enabled, the
+entire time, completely untouched by any script in this project.
+`LumenCycleController.Start()` creates its OWN separate "(auto) Sun"
+GameObject every session and never looks for or reuses this one, so
+the scene ended up with two enabled Directional lights simultaneously.
+URP only gives ONE directional light the full Main Light / shadow-
+casting treatment, and it was evidently picking the static stock one,
+not the procedurally animated one -- which means every rotation fix in
+rows 20 (yaw sweep) and 24 (elevation arc), BOTH independently verified
+correct via reflection against the compiled math, was animating a
+light that was never the one actually casting shadows on screen. The
+creator's manual workaround (retyping the STRAY light to Point/Area in
+the Inspector) worked by accident, for the right underlying reason:
+it stopped competing as a second Directional light. It also explains
+the new "too dark" symptom as a side effect, not a separate design
+regression -- that stray light's constant, always-on intensity-2
+contribution (never tied to day/night at all) had apparently been
+propping up the overall brightness the whole time; removing it as a
+Directional light removes that contribution too.
+
+Verified via `grep -n "^Light:$"` against the whole scene file: exactly
+one match, confirming there's no OTHER duplicate light lurking
+somewhere else. Disabled the stray GameObject directly in
+`SampleScene.unity` (`m_IsActive: 0`, renamed to
+"Directional Light (disabled -- stray Unity default, see docs/28 row
+25)" so it reads as intentional if the creator opens the Hierarchy)
+rather than leaving the creator's manual per-session Inspector edit as
+the only fix -- that edit doesn't persist across scene reloads/version
+control, a real scene-file edit does. This is a genuinely different
+class of fix than everything else in this file so far: every other row
+is a C# script change; this is the first one where the SCENE ASSET
+ITSELF had a latent bug niether script reasoning nor the reflection
+harness could ever have caught (the harness has no concept of a .unity
+scene file's object graph at all).
+
+Second half of the request: since disabling the stray light removes
+the same always-on brightness contribution the creator's workaround
+already showed vanishes ("now the night is too dark"), that half of
+the ask still needs a real answer, not just "the scene edit undoes
+your workaround's side effect too." "HDR like fill... so everything
+isn't so dark" was interpreted specifically: NOT a flat ambient-light
+bump (that knob already exists as `nightAmbient`, and was deliberately
+dropped near-zero a few rounds back specifically so the street lamps
+would read as distinct "pools of light" against genuine darkness --
+raising it again would undo that on purpose). What "HDR-like" actually
+names is the standard photography/color-grading technique of lifting
+shadow DETAIL without touching highlights, preserving local contrast
+instead of flattening it. URP ships exactly this as a Volume override:
+`ShadowsMidtonesHighlights`, the same three-wheel-grader family as
+Lift/Gamma/Gain, but tonal-range-based (shadows/midtones/highlights)
+rather than exposure-based. New `LumenCycleController.nightFillLift`
+([Range(0,1)], default 0.35, mirrored onto `CityLightingProfile` as
+`NightFillLift`) drives only the `shadows` wheel's W (luminance-offset)
+component, leaving X/Y/Z at the neutral 1/1/1 (never recolors) and
+midtones/highlights untouched at their own neutral defaults (never
+touches already-bright pixels) -- blended by `nightAmount` exactly like
+every other night-only effect in this file (0 through Day, ramping to
+the full value across the Dusk/Night hold).
+
+Honesty note distinct from every other row: `ShadowsMidtonesHighlights`
+could NOT be checked against the live Unity manual this session --
+every WebFetch attempt at docs.unity3d.com returned a 403 from the
+destination itself (confirmed NOT an org egress policy block: the
+agent proxy's own status endpoint showed zero recentRelayFailures, so
+the request reached Unity's server and Unity's own bot-blocking turned
+it away). Existence and field names (`shadows`/`midtones`/`highlights`
+as Vector4, `shadowsStart`/`shadowsEnd`/`highlightsStart`/
+`highlightsEnd` as floats) are corroborated a different way instead:
+WebSearch surfaced distinct "Shadows Midtones Highlights | Universal
+RP" manual page titles spanning URP 7.1 through 6000.0 (i.e. stable
+across nearly the package's entire history, not a one-off), plus a
+real Unity Discussions thread with working code calling
+`TryGet<ShadowsMidtonesHighlights>()` and reading `shadowsStart`/
+`shadowsEnd`. That's meaningfully stronger evidence than existed for
+the fictional `Exposure` mistake earlier in this file (which had no
+such trail at all) but is still not the same as reading the real docs
+or an Editor session -- flagged as provisional in both the flightcheck
+stub's own comment and docs/28's row 25 status column.
+
+Verified via reflection against the compiled `ApplyBlend()` (temporary
+harness, removed after verifying): `shadows.value.w` is exactly 0 at
+every sampled point in Day (matches nightAmount's own hard-0 floor,
+confirmed the daytime image is untouched), exactly `nightFillLift`'s
+value (0.35 default) deep into the Night hold, and the color channels
+(x/y/z) stay pinned at 1 in both cases -- confirming the mechanism only
+ever lifts luminance, never recolors. Not yet seen in a real render,
+and additionally gated on `ShadowsMidtonesHighlights` actually
+compiling against the real URP package the way it did against this
+session's own hand-written (and, on this specific type, not fully
+docs-verified) stub.
