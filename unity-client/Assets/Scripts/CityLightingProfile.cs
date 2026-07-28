@@ -102,9 +102,9 @@ public class CityLightingProfile : ScriptableObject
     [Range(0f, 2f)]
     public float BloomThreshold = 0.6f;
 
-    [Tooltip("Ambient light brightness at full Night -- near 0 for a genuinely dark night the lamps/windows/signs can stand out against.")]
+    [Tooltip("Ambient light brightness at full Night -- 0.02 (near-black) was too dark to see the unlit parts of the city at all; 0.08 keeps a real but subdued floor so the lamp 'pools of light' still stand out.")]
     [Range(0f, 1f)]
-    public float NightAmbientBrightness = 0.02f;
+    public float NightAmbientBrightness = 0.08f;
 
     [Tooltip("HDR-style shadow lift at full Night -- raises the floor of near-black areas without touching bright ones (unlike NightAmbientBrightness, which is a flat uniform light). See LumenCycleController.nightFillLift.")]
     [Range(0f, 1f)]

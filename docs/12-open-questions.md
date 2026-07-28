@@ -4676,3 +4676,39 @@ and additionally gated on `ShadowsMidtonesHighlights` actually
 compiling against the real URP package the way it did against this
 session's own hand-written (and, on this specific type, not fully
 docs-verified) stub.
+
+## 2026-07: nightAmbient raised 0.02 -> 0.08 (docs/28 row 26)
+
+Creator, immediately after row 25's ShadowsMidtonesHighlights fill
+shipped: "still need an ambient light so we can see in the darkest
+part of the night."
+
+Row 25's `nightFillLift` is a post-processing color grade -- it only
+adjusts the FINAL rendered pixel's luminance, after lighting is
+already done. It can lift a crushed-black pixel toward gray, but it
+can't make an unlit wall or the far side of a building actually
+readable as a SHAPE, because nothing about how that surface was lit
+changed -- there's no real light hitting it to reveal its form either
+way. "An ambient light" is a more literal, specific ask than the
+previous "hdr like fill" framing: real scene ambient (`RenderSettings.
+ambientLight`, driven by `LumenCycleController.nightAmbient`) is what
+actually lights unlit-otherwise surfaces, and it was still sitting at
+0.02 -- deliberately crushed near-black several rounds back so the
+street lamps would read as distinct "pools of light" against real
+darkness, but too dark on its own for the creator to see anything in
+the gaps between lamps.
+
+Raised the default 0.02 -> 0.08 on both `LumenCycleController.
+nightAmbient` and the mirrored `CityLightingProfile.
+NightAmbientBrightness`. Chosen as a real, visible floor without
+fully undoing the lamp-pool-contrast design goal -- still well under
+Dawn/Dusk's own ambient values (0.3-0.55 range on those Color
+channels), so full night stays the darkest point in the cycle, just no
+longer literally near-zero. This is a plain default-value change, not
+new logic -- flightcheck compiles clean, nothing to numerically verify
+beyond that. Complements row 25 rather than replacing it: nightAmbient
+fixes actual scene lighting (can I make out shapes at all), nightFillLift
+fixes the final image's tonal floor (does the darkest pixel read as
+crushed pure black or a readable near-black) -- both were asked for by
+name, in two back-to-back messages, and address genuinely different
+mechanisms.

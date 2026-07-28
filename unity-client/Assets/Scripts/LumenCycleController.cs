@@ -138,9 +138,19 @@ public class LumenCycleController : MonoBehaviour
     [Range(0f, 2f)]
     public float bloomThreshold = 0.6f;
 
-    [Tooltip("Ambient light at full night. Near 0 gives a genuinely dark night the lamps can pool against.")]
+    // 2026-07 creator, after the shadow-lift addition below: "still need
+    // an ambient light so we can see in the darkest part of the night."
+    // nightFillLift only touches the FINAL rendered pixel's color (a
+    // post-process grade) -- it never changes how anything is actually
+    // LIT, so it can't help depth/silhouette read the way real ambient
+    // light does. Raised from the near-black 0.02 a few rounds back
+    // (deliberately crushed so lamps would read as distinct pools) to a
+    // genuine floor -- still noticeably darker than Dawn/Dusk's own
+    // ambient, so the lamp-pool contrast isn't gone, just no longer
+    // pitch black in between them.
+    [Tooltip("Ambient light at full night. 0.02 (the old default) was near-black, deliberately, so the lamps would pool against real darkness -- raise this if the UNLIT parts of the night are too dark to read at all; lower it if the lamp 'pools of light' look gets washed out. Distinct from nightFillLift below (a post-process grade, doesn't affect actual scene lighting).")]
     [Range(0f, 0.3f)]
-    public float nightAmbient = 0.02f;
+    public float nightAmbient = 0.08f;
 
     // 2026-07 creator: "the night is too dark, what we need is a hdr like
     // fill so everything isn't so dark." Raising nightAmbient itself was
