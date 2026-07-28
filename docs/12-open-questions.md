@@ -4915,3 +4915,76 @@ through tick 999, starts ramping at exactly 1000, is strictly between 0
 and 1 mid-ramp, reaches exactly 1 at 1075, and stays 1 through the rest
 of Day, all of Dusk, all of Night, with the existing Dawn fade-out
 (unrelated to this request) unchanged. Not yet seen in a real render.
+
+## 2026-07: docs/23 Phase 3.5's deferred moon-dial/capture-bar/mana HUD, shipped
+
+Creator direction: pivot from world/lighting polish to gameplay
+mechanics and UI/UX; this is the first UI slice. Phase 3.5 (emitters +
+Lumen mana) shipped its sim-side math back when 84 match-core tests
+existed, but explicitly deferred "the Unity moon-dial/capture-bar/mana
+HUD" (see 00-index's Phase 3.5 status note) because nothing displayed
+any of it. All three data sources (`LumenClock`, `SimEmitter`, `PlayerState.Mana`)
+were already real and tested; this closes the display gap, not a sim
+gap.
+
+New `unity-client/Assets/Scripts/LumenHud.cs` (IMGUI, same layer as
+`HudStatus`/`Minimap`/`AnalogClockHud`): a fixed bottom-right panel (the
+one corner none of the other three HUD elements already default to)
+showing the current Lumen phase name with a countdown, switching to a
+warning color + a discrete flash once <=10s remain (the glossary's own
+"moon dial" definition: "the always-public HUD clock showing the
+current Lumen phase and the 10-second transition warning"); the local
+player's mana bar against `PlayerState.ManaCap` (100); and one text
+label + progress bar per emitter currently mid-capture
+(`SimEmitter.CapturingPlayer != null`), reusing `CaptureProgressTicks`
+over `SimEmitter.CaptureChannelTicks` for the fraction -- exactly the
+use that field's own doc comment named ("exposed for a future
+capture-progress HUD bar ... and for tests").
+
+Scoped down from the ideal on purpose: this panel is a fixed on-screen
+list, NOT a world-space marker hovering over the actual emitter hex --
+building a hex-to-screen projection has no precedent in this codebase
+and is a real, separate follow-up. Also deliberately does NOT share
+`Minimap.ScreenCorner` (unlike `AnalogClockHud`, which does) -- `LumenHud`
+declares its own identical-shaped enum instead, keeping Minimap's much
+larger camera/input/fog-of-war dependency chain out of this file's
+compile graph entirely.
+
+New match-core primitive: `LumenClock.TicksUntilNextPhase(frame)` --
+walks the exact same cascade `PhaseAt` already does so the two can never
+disagree about which phase owns a given frame; at a boundary tick it
+returns the FULL next-phase duration, not 0 (the specific off-by-one a
+naive "ticks since last boundary" reading would get backwards for a
+countdown). Six new narrow `SimBridge` pass-throughs
+(`CurrentFrame`/`CurrentLumenPhase`/`TicksUntilNextLumenPhase`/
+`PlayerMana`/`EmitterCount`/`EmitterAt`), same defensive-default style
+as the pre-existing `OrderOf` (0/Dawn/false-shaped answers when no match
+is running, never a throw). 239 match-core tests total (up from 220):
+boundary-exact `TicksUntilNextPhase` values at every phase edge
+(including the cycle-2 wraparound) plus a consistency check that
+`PhaseAt(frame)` and `PhaseAt(frame + TicksUntilNextPhase(frame))`
+always disagree by exactly one phase, for a spread of arbitrary frames
+including 2400's wraparound.
+
+Verified three ways, no Unity Editor available in this environment:
+(1) the real `dotnet test` match-core suite, 239/239 green; (2) `LumenHud`'s
+pure formatting/threshold statics (`PhaseLabel`/`IsTransitionWarning`/
+`FormatCountdown`/`Fraction`/`FlashOn` -- none touch a UnityEngine type)
+copied into a throwaway console app and run for real against match-core's
+actual built DLL, including a real `MatchState`/`CityGenerator` capture
+sequence, not just isolated unit inputs -- a genuine step up from earlier
+HUD work's "verified by reflection," since this is an actual compile-and-run,
+not reflection into a stub; (3) a stub-compile of the REAL `LumenHud.cs`
+file (not a copy) against a minimal UnityEngine stub plus a
+signature-matched `SimBridge` shape stub (exposing exactly the six new
+members, to catch a mismatch between what `LumenHud.cs` calls and what
+the real `SimBridge.cs` diff actually added) -- compiled clean, 0
+warnings, referencing the real built `MadDr.MatchCore.dll`/`MadDr.CityGen.dll`.
+This flightcheck caught one real bug before it shipped: `LumenHud.cs`
+used `HexCoord` (from `SimEmitter.Hex`) without a `using MadDr.CityGen;`
+line -- fixed. Not seen in a real render.
+
+Remaining from the deferred trio: world-space capture markers, and the
+region picker (a separate docs/23 Phase 8 item) are still not started.
+The Phase 2 build-menu/ghost-placement cursor is also still open --
+next candidate for this same UI/UX push.

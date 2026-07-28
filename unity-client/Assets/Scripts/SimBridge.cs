@@ -96,6 +96,37 @@ public class SimBridge : MonoBehaviour
         return u?.Order ?? UnitOrderKind.Idle;
     }
 
+    /// <summary>Current sim frame, or 0 if no match is running yet.
+    /// Callers that care about the distinction should check
+    /// <see cref="HasMatch"/> rather than treat 0 as meaningful.</summary>
+    public int CurrentFrame => _match?.Frame ?? 0;
+
+    /// <summary>The live Lumen phase (docs/03), or Dawn -- the match's own
+    /// start phase -- if no match is running yet.</summary>
+    public LumenPhase CurrentLumenPhase => _match?.CurrentLumenPhase ?? LumenPhase.Dawn;
+
+    /// <summary>Ticks remaining before the Lumen phase changes, 0 if no
+    /// match is running. For a moon-dial HUD's pre-transition warning.</summary>
+    public int TicksUntilNextLumenPhase => _match != null ? LumenClock.TicksUntilNextPhase(_match.Frame) : 0;
+
+    /// <summary>A player's current mana balance (docs/03/23 Phase 3.5), 0
+    /// if no match is running.</summary>
+    public int PlayerMana(int playerIndex)
+    {
+        var p = _match?.Player(playerIndex);
+        return p?.Mana ?? 0;
+    }
+
+    /// <summary>Live emitter count, 0 if no match is running -- iterate
+    /// with <see cref="EmitterAt"/> for a capture-progress HUD.</summary>
+    public int EmitterCount => _match?.EmitterCount ?? 0;
+
+    /// <summary>Live emitter state by index. Only valid when
+    /// <paramref name="index"/> &lt; <see cref="EmitterCount"/> (i.e. a
+    /// match is running) -- same "caller already knows a match exists"
+    /// contract as <see cref="SpawnUnit"/>.</summary>
+    public SimEmitter EmitterAt(int index) => _match.EmitterAt(index);
+
     private void Update() => Pump(Time.deltaTime);
 
     /// <summary>The actual fixed-timestep accumulator logic, taking `dt`

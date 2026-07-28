@@ -49,5 +49,25 @@ namespace MadDr.MatchCore
             if (t < DuskTicks) return LumenPhase.Dusk;
             return LumenPhase.Night;
         }
+
+        /// <summary>Ticks remaining in the phase <see cref="PhaseAt"/> reports
+        /// for this same frame -- e.g. one tick before a boundary this
+        /// returns 1; exactly ON the boundary (the new phase's first frame)
+        /// it returns the new phase's full duration, not 0. Walks the same
+        /// cascade as <see cref="PhaseAt"/> so the two can never disagree
+        /// about which phase owns a given frame. For a moon-dial HUD's
+        /// pre-transition warning (docs/03's "10-second transition
+        /// warning").</summary>
+        public static int TicksUntilNextPhase(int frame)
+        {
+            var t = frame % CycleTicks;
+            if (t < DawnTicks) return DawnTicks - t;
+            t -= DawnTicks;
+            if (t < DayTicks) return DayTicks - t;
+            t -= DayTicks;
+            if (t < DuskTicks) return DuskTicks - t;
+            t -= DuskTicks;
+            return NightTicks - t;
+        }
     }
 }

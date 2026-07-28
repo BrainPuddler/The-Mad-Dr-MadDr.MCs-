@@ -47,6 +47,41 @@ public class EmitterTests
         Assert.Equal(900, LumenClock.NightTicks);
     }
 
+    [Theory]
+    [InlineData(0, 300)]      // frame 0: full Dawn duration remaining
+    [InlineData(299, 1)]      // last tick of Dawn
+    [InlineData(300, 900)]    // first tick of Day: full Day duration remaining
+    [InlineData(1199, 1)]     // last tick of Day
+    [InlineData(1200, 300)]   // first tick of Dusk
+    [InlineData(1499, 1)]     // last tick of Dusk
+    [InlineData(1500, 900)]   // first tick of Night
+    [InlineData(2399, 1)]     // last tick of Night, cycle 1
+    [InlineData(2400, 300)]   // wraps: first tick of Dawn, cycle 2
+    public void LumenClock_TicksUntilNextPhase_matches_PhaseAt_boundaries(int frame, int expectedTicksRemaining)
+    {
+        Assert.Equal(expectedTicksRemaining, LumenClock.TicksUntilNextPhase(frame));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(299)]
+    [InlineData(300)]
+    [InlineData(1199)]
+    [InlineData(1200)]
+    [InlineData(1499)]
+    [InlineData(1500)]
+    [InlineData(2399)]
+    [InlineData(2400)]
+    [InlineData(5137)]
+    public void LumenClock_TicksUntilNextPhase_lands_exactly_on_the_next_PhaseAt_transition(int frame)
+    {
+        var currentPhase = LumenClock.PhaseAt(frame);
+        var ticksToNext = LumenClock.TicksUntilNextPhase(frame);
+        Assert.True(ticksToNext > 0);
+        Assert.Equal(currentPhase, LumenClock.PhaseAt(frame + ticksToNext - 1));
+        Assert.NotEqual(currentPhase, LumenClock.PhaseAt(frame + ticksToNext));
+    }
+
     // ---- Emitter seeding ----
 
     [Fact]
