@@ -47,6 +47,24 @@ using UnityEngine;
 /// rendering feedback of any kind (the lighting fixes at least had
 /// creator screenshots to reason from) -- expect this to need visual
 /// tuning once it's actually on screen.
+///
+/// 2026-07 follow-up: "I don't see the clock" -- ruled out a crash
+/// (no compile or runtime errors) and ruled out OnGUI being broken
+/// project-wide (HudStatus's own top-left text confirmed working), so
+/// the most likely remaining cause was plain low contrast: the original
+/// palette was a near-black face with a 3-PIXEL rim (out of a 128px
+/// bake -- a handful of SCREEN pixels once stretched down to ~1/10th
+/// of a real screen), easy to lose entirely against a varied city
+/// backdrop. Rebuilt with an opaque backing halo (the same trick
+/// Minimap's own frame uses) and a light ivory face with dark hands --
+/// the actual high-contrast convention a real clock uses, which the
+/// original dark-on-dark palette wasn't. If this STILL doesn't show up,
+/// that isolates the problem away from contrast and toward
+/// GetScreenRect/GUIUtility.RotateAroundPivot instead (see the
+/// Placement section) -- worth knowing either way, since
+/// RotateAroundPivot has no other confirmed-working caller in this
+/// codebase (Minimap's own use of it is gated behind `rotateWithCamera`,
+/// which defaults off).
 /// </summary>
 public class AnalogClockHud : MonoBehaviour
 {
@@ -68,12 +86,29 @@ public class AnalogClockHud : MonoBehaviour
     [Range(0.2f, 3f)]
     public float tickIntervalSeconds = 1f;
 
-    [Header("Colors")]
-    public Color faceColor = new Color(0.08f, 0.07f, 0.05f, 0.92f);
-    public Color rimColor = new Color(0.78f, 0.67f, 0.43f, 1f);
-    public Color hourHandColor = new Color(0.85f, 0.8f, 0.7f, 0.95f);
-    public Color minuteHandColor = new Color(0.95f, 0.9f, 0.8f, 0.95f);
-    public Color pendulumColor = new Color(0.75f, 0.7f, 0.6f, 0.9f);
+    // 2026-07 creator: "I don't see the clock." No compile or runtime
+    // errors, other OnGUI HUD elements (HudStatus's own top-left text)
+    // confirmed working -- ruling out a crash or the component simply
+    // not running. The remaining, much more mundane explanation: the
+    // original palette was a near-black face (0.08/0.07/0.05) with only
+    // a 3-PIXEL-wide rim (out of a 128px bake, meaning a few SCREEN
+    // pixels once stretched down to ~1/10th of a real screen) -- easy to
+    // lose entirely against a varied 3D city backdrop, especially at
+    // night. Rebuilt around the opposite, higher-contrast convention a
+    // real clock actually uses (light face, dark hands) plus an opaque
+    // backing disc -- same "translucent dark frame so a HUD element
+    // reads against ANY background" trick Minimap already uses for its
+    // own map -- and every stroke (rim/ticks/hands) thickened
+    // substantially. If this still doesn't show up, the problem isn't
+    // contrast and points at GetScreenRect/GUIUtility.RotateAroundPivot
+    // instead (see the class header).
+    [Header("Colors (light ivory face + dark hands -- classic high-contrast convention, not the original dark-on-dark)")]
+    public Color backingColor = new Color(0.02f, 0.02f, 0.02f, 0.6f);
+    public Color faceColor = new Color(0.88f, 0.83f, 0.68f, 1f);
+    public Color rimColor = new Color(0.22f, 0.14f, 0.07f, 1f);
+    public Color hourHandColor = new Color(0.05f, 0.05f, 0.05f, 1f);
+    public Color minuteHandColor = new Color(0.05f, 0.05f, 0.05f, 1f);
+    public Color pendulumColor = new Color(0.22f, 0.14f, 0.07f, 1f);
 
     private const int FaceTexRes = 128;
     private Texture2D _faceTex;
@@ -128,7 +163,7 @@ public class AnalogClockHud : MonoBehaviour
         var pixels = new Color32[FaceTexRes * FaceTexRes];
         var center = (FaceTexRes - 1) * 0.5f;
         var outerR = center - 1f;
-        var rimR = outerR - 3f;
+        var rimR = outerR - 9f;   // was -3f: a 3px rim (out of a 128px bake) was nearly invisible once stretched down to on-screen size
         var faceC = (Color32)faceColor;
         var rimC = (Color32)rimColor;
         var clear = new Color32(0, 0, 0, 0);
@@ -151,8 +186,8 @@ public class AnalogClockHud : MonoBehaviour
         {
             var ang = i * 30f * Mathf.Deg2Rad;
             var thick = i % 3 == 0;
-            var len = thick ? 12f : 7f;
-            var w = thick ? 1.6f : 0.9f;
+            var len = thick ? 16f : 9f;
+            var w = thick ? 4f : 2.2f;
             for (var t = 0f; t < len; t += 0.5f)
             {
                 var r = rimR - 2f - t;
@@ -189,17 +224,31 @@ public class AnalogClockHud : MonoBehaviour
     // fraction of the shorter screen dimension instead of a fixed pixel
     // count) ------------------------------------------------------------
 
+    private bool _loggedZeroScreen;
+
     private Rect GetScreenRect()
     {
-        var size = Mathf.Min(Screen.width, Screen.height) * sizeFraction;
+        var screenW = Screen.width;
+        var screenH = Screen.height;
+        // Defensive only -- Screen.width/height should never be 0 once a
+        // real Game view exists, but a 0-size rect would silently draw
+        // nothing (no exception), which is indistinguishable from "the
+        // component isn't running at all" from the creator's side. Log
+        // once so THAT specific cause is distinguishable if it recurs.
+        if (screenW <= 0 || screenH <= 0)
+        {
+            if (!_loggedZeroScreen) { Debug.LogWarning("AnalogClockHud: Screen.width/height reported 0 -- falling back to 1920x1080 for sizing until it recovers."); _loggedZeroScreen = true; }
+            screenW = 1920; screenH = 1080;
+        }
+        var size = Mathf.Min(screenW, screenH) * sizeFraction;
         if (useCustomPosition) return new Rect(customTopLeftPixels.x, customTopLeftPixels.y, size, size);
         float x, y;
         switch (corner)
         {
-            case Minimap.ScreenCorner.BottomLeft: x = marginPixels.x; y = Screen.height - marginPixels.y - size; break;
-            case Minimap.ScreenCorner.BottomRight: x = Screen.width - marginPixels.x - size; y = Screen.height - marginPixels.y - size; break;
+            case Minimap.ScreenCorner.BottomLeft: x = marginPixels.x; y = screenH - marginPixels.y - size; break;
+            case Minimap.ScreenCorner.BottomRight: x = screenW - marginPixels.x - size; y = screenH - marginPixels.y - size; break;
             case Minimap.ScreenCorner.TopLeft: x = marginPixels.x; y = marginPixels.y; break;
-            default: x = Screen.width - marginPixels.x - size; y = marginPixels.y; break;   // TopRight
+            default: x = screenW - marginPixels.x - size; y = marginPixels.y; break;   // TopRight
         }
         return new Rect(x, y, size, size);
     }
@@ -213,13 +262,20 @@ public class AnalogClockHud : MonoBehaviour
         if (rect.width <= 0f) return;
         var center = new Vector2(rect.x + rect.width * 0.5f, rect.y + rect.height * 0.5f);
 
+        // opaque-ish backing so the widget reads against ANY city
+        // backdrop behind it (same trick Minimap's own frame uses) --
+        // drawn a bit larger than the face itself so it shows as a halo
+        var pad = rect.width * 0.06f;
+        GUI.color = backingColor;
+        GUI.DrawTexture(new Rect(rect.x - pad, rect.y - pad, rect.width + pad * 2f, rect.height + pad * 2f), Texture2D.whiteTexture);
+
         GUI.color = Color.white;
         GUI.DrawTexture(rect, _faceTex);
 
         DrawPendulum(rect);   // behind the hands, same as a real clock case
 
-        DrawHand(center, rect.width, HourHandDeg(DayNightState.CycleProgress), 0.5f, Mathf.Max(1f, rect.width * 0.045f), hourHandColor);
-        DrawHand(center, rect.width, MinuteHandDeg(DayNightState.CycleProgress), 0.74f, Mathf.Max(1f, rect.width * 0.03f), minuteHandColor);
+        DrawHand(center, rect.width, HourHandDeg(DayNightState.CycleProgress), 0.5f, Mathf.Max(2f, rect.width * 0.07f), hourHandColor);
+        DrawHand(center, rect.width, MinuteHandDeg(DayNightState.CycleProgress), 0.74f, Mathf.Max(1.5f, rect.width * 0.05f), minuteHandColor);
     }
 
     private void DrawHand(Vector2 center, float faceSize, float angleDeg, float lengthFraction, float widthPx, Color color)
@@ -247,9 +303,9 @@ public class AnalogClockHud : MonoBehaviour
         var oldMatrix = GUI.matrix;
         GUIUtility.RotateAroundPivot(angle, pivot);
         GUI.color = pendulumColor;
-        var rodWidth = Mathf.Max(1f, faceRect.width * 0.018f);
+        var rodWidth = Mathf.Max(1.5f, faceRect.width * 0.03f);
         GUI.DrawTexture(new Rect(pivot.x - rodWidth * 0.5f, pivot.y, rodWidth, rodLength), Texture2D.whiteTexture);
-        var bobSize = faceRect.width * 0.08f;
+        var bobSize = faceRect.width * 0.1f;
         GUI.DrawTexture(new Rect(pivot.x - bobSize * 0.5f, pivot.y + rodLength - bobSize * 0.5f, bobSize, bobSize), Texture2D.whiteTexture);
         GUI.color = Color.white;
         GUI.matrix = oldMatrix;

@@ -4832,3 +4832,53 @@ symptom to reason from; this is the first visual feature built with
 zero rendering feedback of any kind. Flagged prominently in the file's
 own header comment -- expect this to need real visual tuning once it's
 actually on screen, more so than anything else shipped this session.
+
+## 2026-07: analog clock invisible -- contrast, not a crash
+
+Creator: "I don't see the clock." Two follow-up rounds of diagnosis
+before touching code, matching this session's "don't guess blindly"
+lesson from earlier: (1) asked whether there were compile/runtime
+errors and whether other HUD elements (top-left status text) were
+showing -- answer: no compile errors, other HUD text visible; (2) asked
+specifically about RUNTIME (red) console errors and whether there was
+even a faint shape in the top-right corner -- answer: "no red at all."
+
+That combination (clean compile, other OnGUI elements confirmed
+working, zero runtime errors) rules out a crash or the component
+simply not running, and points at the much more mundane remaining
+explanation: contrast. The original palette was a near-black face
+(0.08/0.07/0.05) with only a 3-pixel-wide rim baked into a 128px
+texture -- once stretched down to ~1/10th of a real screen (roughly
+100-150px on a typical display), that rim is a handful of SCREEN
+pixels, easy to lose entirely against a varied, often-dark 3D city
+backdrop.
+
+Rebuilt around three changes, all in `AnalogClockHud.cs`:
+1. An opaque-ish backing halo drawn behind the whole widget (same
+   "translucent dark frame so a HUD element reads against ANY
+   background" trick `Minimap` already uses for its own map).
+2. Palette flipped to the actual high-contrast convention a real clock
+   uses -- light ivory face, dark hands -- rather than the original
+   dark-on-dark.
+3. Every stroke substantially thickened: rim 3px -> 9px (of the 128px
+   bake), main/minor ticks 1.6/0.9px -> 4/2.2px, hour/minute hand width
+   fractions 0.045/0.03 -> 0.07/0.05 of the clock's on-screen size,
+   pendulum rod/bob similarly thickened.
+
+Also added a defensive guard + one-time `Debug.LogWarning` in
+`GetScreenRect()` for `Screen.width`/`height` reporting 0 (would
+silently produce a zero-size, invisible rect with no exception --
+indistinguishable from "not running" from the creator's side without a
+log line to point at it specifically).
+
+Explicitly flagged to the creator (and in the script's own header
+comment) what this fix does and doesn't rule out: if the face is now
+visible but the hands/pendulum aren't moving or aren't visible, that
+isolates the problem to `GUIUtility.RotateAroundPivot` specifically --
+worth calling out because `Minimap`'s own use of that same API is
+gated behind `rotateWithCamera`, which defaults OFF, meaning it has no
+other CONFIRMED-working caller in this codebase to lean on. If nothing
+shows up at all even now, that would point back toward
+`GetScreenRect`/component lifecycle instead of contrast. flightcheck
+compiles clean; the angle math itself was untouched this round (already
+verified in the prior entry) so wasn't re-checked.
