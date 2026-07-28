@@ -4726,3 +4726,109 @@ already-wider 0-1 range) -- 0.24 was already most of the way to the old
 0.3 cap, and this is the second "still too dark" correction in a row,
 so leaving headroom for a third seemed better than assuming 0.24 is
 final. Plain arithmetic, no new logic -- flightcheck compiles clean.
+
+## 2026-07: nightAmbient hard floor at 0.12 (docs/28 row 28)
+
+Creator, alongside the clock request below: "the minimum nightAmbient
+should be at least 0.12."
+
+Distinguished this from row 27's plain default bump: a `[Range]`
+attribute's minimum only guards direct Inspector slider drags, it does
+NOT stop `ApplyProfile()` copying in a lower value from a
+`CityLightingProfile` asset, nor a future default edit from silently
+regressing back toward the near-black 0.02 this whole back-and-forth
+has been about escaping. Implemented as a genuine runtime floor instead:
+new `LumenCycleController.MinNightAmbient` const (0.12f), applied via
+`Mathf.Max(nightAmbient, MinNightAmbient)` at the actual point of use in
+`ApplyBlend()`, not just as the `[Range]` slider's lower bound (which
+was ALSO raised to 0.12, for Inspector-level consistency, but is now
+the belt to the code-level floor's suspenders). Mirrored the `[Range]`
+floor onto `CityLightingProfile.NightAmbientBrightness` too.
+
+Verified via reflection against the compiled `ApplyBlend()` (temporary
+harness, removed after verifying) -- while writing this check, found
+and fixed a REAL gap in the flightcheck stub itself: `Color.Lerp` had
+been a `default(Color)` no-op this entire session (along with
+`Color.white`/`black`/`gray`, the `*` operator, and the
+`Color`->`Color32` implicit conversion), which made the floor check
+read back a flat 0 regardless of the actual computed value -- the exact
+"stub that passes vacuously" risk this file's own comments already
+flag for other types. None of THIS session's earlier checks happened
+to assert on a `Color.Lerp`-derived value (the elevation/yaw checks
+used raw `Mathf.Lerp` floats, not `Color.Lerp`), so nothing already
+verified this session was actually compromised by it -- but it was a
+live landmine for any future one. Fixed to real arithmetic; re-ran the
+floor check afterward and confirmed: `nightAmbient` forced to 0.05
+(simulating a mistuned/old profile) still reads back exactly 0.12 in
+`RenderSettings.ambientLight` at full Night; `nightAmbient` at the
+current 0.24 default passes through unmodified.
+
+## 2026-07: analog clock HUD with sweeping hands + ticking pendulum
+
+Creator: "Give me a analog clock in the top right corner of the screen
+for the time of day, the arms should sweep, and there should be a
+ticking granfather clock swinging arm. but it should only take up
+1/10th of the screen." Then, mid-turn: "and the clock should be editor
+resizable and repositionable."
+
+New `AnalogClockHud.cs`, following this project's established HUD
+conventions to the letter rather than introducing a new UI paradigm:
+IMGUI (`OnGUI`), same as `Minimap`/`HudStatus` (this project's ONLY UI
+layer -- see `HudStatus`'s own header for why that's fine alongside the
+New Input System), and the exact same "bake a small texture once, then
+stretch/rotate it at draw time" technique `Minimap` already uses for
+its own terrain bake and camera-relative rotation
+(`GUIUtility.RotateAroundPivot`).
+
+Time source: `DayNightState.CycleProgress` (already published every
+frame by `LumenCycleController`, 0..1 raw position through the whole
+Lumen day/night cycle -- exactly what `EmissiveAnimator`'s window-
+occupancy scheduling already reads). One full Lumen cycle (Dawn->Day->
+Dusk->Night->Dawn) = one 12-hour dial revolution for the hour hand,
+with the minute hand doing the usual 12 revolutions per hour-hand
+revolution (the real analog-clock gear ratio) -- a stylized "how far
+through today's cycle" reading, not meant to line up with any specific
+real hour, since there's no natural 1:1 mapping between a 240-second
+game cycle and a 12/24-hour clock face anyway.
+
+"The arms should sweep" vs. "a TICKING grandfather clock" was read as
+two deliberately different motions, not the same thing applied twice:
+the hour/minute hands are a pure, continuous function of
+`CycleProgress` (genuinely smooth, no stepping); the pendulum instead
+snaps between two fixed angles once per `tickIntervalSeconds` (default
+1s) -- a real mechanical tick-tock, distinct from the hands' sweep.
+
+"1/10th of the screen": implemented as a `sizeFraction` field (default
+0.1) applied to the SHORTER screen dimension, not a fixed pixel count
+-- a fixed pixel size would be a different fraction of the screen on
+every resolution/window size, so fraction-based is what actually keeps
+the stated constraint true. "Editor resizable and repositionable":
+mirrors `Minimap`'s own established pattern exactly -- `corner` (4-way
+preset, default TopRight) + `marginPixels`, `sizeFraction` as a
+`[Range]` slider, and `useCustomPosition`/`customTopLeftPixels` to
+bypass the presets for pixel-exact placement -- all public Inspector
+fields, all live-tunable in Play mode as this project's other HUD knobs
+already are. Wired into `RuntimeCityBuilder.Build()` alongside
+`Minimap`/`HudStatus`, no `Init()` needed since it only reads the
+already-public static `DayNightState.CycleProgress`.
+
+Verification, and an explicit limit on what could be verified: the pure
+angle math (`HourHandDeg`, `MinuteHandDeg`, `PendulumDeg` -- deliberately
+kept free of any GUI/Texture call so they're checkable without a real
+render) was confirmed via direct calls in a temporary flightcheck
+harness: hour hand at exactly 0/90/180/270 degrees at cycle progress
+0/0.25/0.5/0.75; minute hand wraps exactly at 1/12 of the cycle;
+summing the minute hand's unwrapped delta across 2400 samples of one
+full cycle comes out to exactly 4320 degrees (12 x 360, confirming
+precisely 12 revolutions, no drift); the pendulum only ever produces
+the two extreme +/-swing values, snapping (never an intermediate lerp
+value) at exactly the tick boundary. What could NOT be verified, and is
+a first for this session: the actual IMGUI DRAWING -- does the baked
+face texture read as a clock face, do the rotated rects read as hands,
+does the pendulum look like it's hanging below the case -- since
+`flightcheck` has no rendering at all, only compiled logic. Every prior
+fix this session at least had a creator screenshot or console-log
+symptom to reason from; this is the first visual feature built with
+zero rendering feedback of any kind. Flagged prominently in the file's
+own header comment -- expect this to need real visual tuning once it's
+actually on screen, more so than anything else shipped this session.

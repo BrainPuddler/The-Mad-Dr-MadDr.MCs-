@@ -206,6 +206,9 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (minimap == null) minimap = gameObject.AddComponent<Minimap>();
         minimap.Init(this, commander, fog);
 
+        var clock = gameObject.GetComponent<AnalogClockHud>();
+        if (clock == null) gameObject.AddComponent<AnalogClockHud>();
+
         _roster = gameObject.GetComponent<RosterFetcher>();
         if (_roster == null) _roster = gameObject.AddComponent<RosterFetcher>();
         _roster.baseUrl = baseUrl;

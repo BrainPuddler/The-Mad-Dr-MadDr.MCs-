@@ -145,14 +145,21 @@ public class LumenCycleController : MonoBehaviour
     // LIT, so it can't help depth/silhouette read the way real ambient
     // light does. Raised from the near-black 0.02 a few rounds back
     // (deliberately crushed so lamps would read as distinct pools) to
-    // 0.08, then immediately: "still way too dark. triple it." ->
-    // 0.24. The OLD [Range(0, 0.3)] ceiling left almost no headroom
-    // above 0.24 for the next round if this still isn't enough --
-    // widened to match CityLightingProfile's own 0-1 range instead of
-    // guessing this is the last increase needed.
-    [Tooltip("Ambient light at full night. 0.02 (the original default) was near-black, deliberately, so the lamps would pool against real darkness -- raise this if the UNLIT parts of the night are too dark to read at all; lower it if the lamp 'pools of light' look gets washed out. Distinct from nightFillLift below (a post-process grade, doesn't affect actual scene lighting).")]
-    [Range(0f, 1f)]
+    // 0.08, then "still way too dark. triple it." -> 0.24, then "the
+    // minimum nightAmbient should be at least 0.12" -- a durable floor,
+    // not just another one-off bump, so a future profile asset or
+    // Inspector edit can't silently regress back toward the original
+    // near-black value this whole back-and-forth was about escaping.
+    // MinNightAmbient below is enforced in ApplyBlend at the point of
+    // use (Mathf.Max), not just this field's [Range] slider -- a
+    // slider's min only guards direct Inspector drags, not
+    // ApplyProfile() copying in a lower value from a CityLightingProfile
+    // asset.
+    [Tooltip("Ambient light at full night. 0.02 (the original default) was near-black, deliberately, so the lamps would pool against real darkness -- raise this if the UNLIT parts of the night are too dark to read at all; lower it if the lamp 'pools of light' look gets washed out. Hard-floored at MinNightAmbient regardless of what's set here. Distinct from nightFillLift below (a post-process grade, doesn't affect actual scene lighting).")]
+    [Range(0.12f, 1f)]
     public float nightAmbient = 0.24f;
+
+    private const float MinNightAmbient = 0.12f;
 
     // 2026-07 creator: "the night is too dark, what we need is a hdr like
     // fill so everything isn't so dark." Raising nightAmbient itself was
@@ -437,7 +444,8 @@ public class LumenCycleController : MonoBehaviour
         DayNightState.CycleProgress = cycleT / (float)LumenClock.CycleTicks;
 
         var ambient = Color.Lerp(a.Ambient, b.Ambient, blend);
-        var nightAmbientColor = new Color(nightAmbient, nightAmbient, nightAmbient * 2f);
+        var flooredNightAmbient = Mathf.Max(nightAmbient, MinNightAmbient);
+        var nightAmbientColor = new Color(flooredNightAmbient, flooredNightAmbient, flooredNightAmbient * 2f);
         RenderSettings.ambientLight = Color.Lerp(ambient, nightAmbientColor, nightAmount);
         var fogDensity = Mathf.Lerp(a.FogDensity, b.FogDensity, blend);
         RenderSettings.fog = fogDensity > 0.0005f;
