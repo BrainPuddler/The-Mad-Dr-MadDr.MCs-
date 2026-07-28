@@ -4712,3 +4712,17 @@ fixes the final image's tonal floor (does the darkest pixel read as
 crushed pure black or a readable near-black) -- both were asked for by
 name, in two back-to-back messages, and address genuinely different
 mechanisms.
+
+## 2026-07: nightAmbient tripled 0.08 -> 0.24 (docs/28 row 27)
+
+Creator, immediately after row 26 shipped: "still way too dark. triple
+it."
+
+Straightforward: `nightAmbient` 0.08 -> 0.24 on both
+`LumenCycleController` and `CityLightingProfile.NightAmbientBrightness`,
+exactly the tripling asked for. Also widened `nightAmbient`'s own
+`[Range]` ceiling from 0.3 to 1.0 (matching the profile asset's
+already-wider 0-1 range) -- 0.24 was already most of the way to the old
+0.3 cap, and this is the second "still too dark" correction in a row,
+so leaving headroom for a third seemed better than assuming 0.24 is
+final. Plain arithmetic, no new logic -- flightcheck compiles clean.

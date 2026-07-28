@@ -144,13 +144,15 @@ public class LumenCycleController : MonoBehaviour
     // post-process grade) -- it never changes how anything is actually
     // LIT, so it can't help depth/silhouette read the way real ambient
     // light does. Raised from the near-black 0.02 a few rounds back
-    // (deliberately crushed so lamps would read as distinct pools) to a
-    // genuine floor -- still noticeably darker than Dawn/Dusk's own
-    // ambient, so the lamp-pool contrast isn't gone, just no longer
-    // pitch black in between them.
-    [Tooltip("Ambient light at full night. 0.02 (the old default) was near-black, deliberately, so the lamps would pool against real darkness -- raise this if the UNLIT parts of the night are too dark to read at all; lower it if the lamp 'pools of light' look gets washed out. Distinct from nightFillLift below (a post-process grade, doesn't affect actual scene lighting).")]
-    [Range(0f, 0.3f)]
-    public float nightAmbient = 0.08f;
+    // (deliberately crushed so lamps would read as distinct pools) to
+    // 0.08, then immediately: "still way too dark. triple it." ->
+    // 0.24. The OLD [Range(0, 0.3)] ceiling left almost no headroom
+    // above 0.24 for the next round if this still isn't enough --
+    // widened to match CityLightingProfile's own 0-1 range instead of
+    // guessing this is the last increase needed.
+    [Tooltip("Ambient light at full night. 0.02 (the original default) was near-black, deliberately, so the lamps would pool against real darkness -- raise this if the UNLIT parts of the night are too dark to read at all; lower it if the lamp 'pools of light' look gets washed out. Distinct from nightFillLift below (a post-process grade, doesn't affect actual scene lighting).")]
+    [Range(0f, 1f)]
+    public float nightAmbient = 0.24f;
 
     // 2026-07 creator: "the night is too dark, what we need is a hdr like
     // fill so everything isn't so dark." Raising nightAmbient itself was
