@@ -5465,3 +5465,47 @@ actual rendered scene.
 
 This closes the LAST item docs/00-index's Phase 10 status line still
 listed as deferred from the original daytime mood-board pass.
+
+## 2026-07: ResourceHud -- the last obvious gap in the UI/UX push
+
+Creator direction: "continue with the UI/UX implementation." Most of
+the original UI/UX punch list from earlier this session was already
+done (build menu, ghost cursor, BaseDresser, moon-dial/mana/capture-bar
+HUD, region picker + thumbnails) -- checked docs/00-index for what was
+still genuinely missing rather than picking something arbitrary.
+
+Found it by checking what `SimBridge` exposes versus what
+`PlayerState` actually carries: `PlayerWallet` (a single resource's
+balance) existed, added for the build menu's cost previews, but nothing
+showed the STANDING balance across all six docs/05 currencies, and
+nothing showed supply at all -- both real, tested sim state since Phase
+1 (`SupplyUsed`/`SupplyCap`) and Phase 3 (`WalletCap`), completely
+invisible in Unity. The exact same "sim ready, display missing" shape
+every other HUD this session closed for its own system.
+
+New `SimBridge.PlayerWalletCap`/`PlayerSupplyUsed`/`PlayerSupplyCap`
+(three narrow pass-throughs, same defensive-default style as every
+other accessor -- `PlayerWalletCap` returns `PlayerState`'s own
+`int.MaxValue` "uncapped" sentinel when no match is running, so a HUD
+reads "no cap yet" the same way a live match itself would rather than a
+misleading 0). New `ResourceHud.cs`: Supply used/cap plus all six
+`ResourceKind` wallets (icon + amount, `/cap` suffix only when finite),
+tinting a line orange when a wallet is sitting AT its cap. Deliberately
+its OWN panel, not folded into `LumenHud` -- docs/03 is explicit that
+mana and components are never-interchangeable currencies, and every
+other system already keeps them structurally separate (`PlayerState.
+Wallet` vs `.Mana`, different grant/spend methods); merging them into
+one glance-panel would blur a distinction the sim itself is careful to
+keep. Default placement is top-right, below `AnalogClockHud` -- same
+"developer nudges the final layout live, no Editor here to check it
+against" honesty every other HUD element in this project already
+carries.
+
+Verified the same way as every HUD/build entry above: a `dotnet build`
+stub-compile of the six real HUD/build scripts together (this one
+included), extended with the three new `SimBridge` members -- 0
+errors/warnings. Not seen in a real render.
+
+With this, the original UI/UX list from earlier in the session has no
+further open items; per-faction/per-kind building art (visual, not
+UI/UX) remains the one thing still flagged open overall.

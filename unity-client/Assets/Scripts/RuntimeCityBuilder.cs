@@ -1761,11 +1761,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                     _simBridge.StartMatch(unchecked((uint)seed), new List<FactionId> { FactionId.MadDoctor, FactionId.HumanArmy }, _city);
                     Debug.Log("docs/27: sim-driven demo active on " + root.name + " -- left-click it, right-click to move it.");
 
-                    // the moon-dial/mana/capture-progress HUD and the
-                    // build-menu/ghost-cursor/BaseDresser trio all read
-                    // live match-core state through THIS SimBridge -- this
-                    // is the one place in any scene a real match exists
-                    // today, so it's also the one place they get wired.
+                    // the moon-dial/mana/capture-progress HUD, the
+                    // build-menu/ghost-cursor/BaseDresser trio, and the
+                    // component-wallet/supply HUD all read live match-core
+                    // state through THIS SimBridge -- this is the one
+                    // place in any scene a real match exists today, so
+                    // it's also the one place they get wired.
                     var lumenHud = gameObject.GetComponent<LumenHud>();
                     if (lumenHud == null) lumenHud = gameObject.AddComponent<LumenHud>();
                     lumenHud.Init(_simBridge, this, playerIndex: 0);
@@ -1781,6 +1782,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                     var baseDresser = gameObject.GetComponent<BaseDresser>();
                     if (baseDresser == null) baseDresser = gameObject.AddComponent<BaseDresser>();
                     baseDresser.Init(_simBridge, this);
+
+                    var resourceHud = gameObject.GetComponent<ResourceHud>();
+                    if (resourceHud == null) resourceHud = gameObject.AddComponent<ResourceHud>();
+                    resourceHud.Init(_simBridge, playerIndex: 0);
                 }
                 agent.EnableSimDriven(_simBridge, playerIndex: 0, atHex: home, speed: 6.0);
             }

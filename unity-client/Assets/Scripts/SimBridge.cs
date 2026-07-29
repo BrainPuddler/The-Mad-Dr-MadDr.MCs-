@@ -164,6 +164,31 @@ public class SimBridge : MonoBehaviour
         return p?.Wallet(kind) ?? 0;
     }
 
+    /// <summary>A player's current cap for one resource, or
+    /// <see cref="int.MaxValue"/> (PlayerState's own "uncapped" sentinel,
+    /// unchanged) if no match is running -- for a HUD to render "no cap
+    /// yet" the same way a running match itself would, rather than
+    /// reading as a real cap of 0.</summary>
+    public int PlayerWalletCap(int playerIndex, ResourceKind kind)
+    {
+        var p = _match?.Player(playerIndex);
+        return p?.WalletCap(kind) ?? int.MaxValue;
+    }
+
+    /// <summary>A player's current supply used/cap, 0 if no match is
+    /// running.</summary>
+    public int PlayerSupplyUsed(int playerIndex)
+    {
+        var p = _match?.Player(playerIndex);
+        return p?.SupplyUsed ?? 0;
+    }
+
+    public int PlayerSupplyCap(int playerIndex)
+    {
+        var p = _match?.Player(playerIndex);
+        return p?.SupplyCap ?? 0;
+    }
+
     private void Update() => Pump(Time.deltaTime);
 
     /// <summary>The actual fixed-timestep accumulator logic, taking `dt`
