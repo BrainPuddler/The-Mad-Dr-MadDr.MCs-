@@ -72,6 +72,27 @@ public class TrafficCar : MonoBehaviour
     // caught by that harness, not just asserted).
     private const float CameraBiasWeight = 250f;
 
+    // 2026-07 creator direction ("verify naturalistic driving. Speed up
+    // and some aggressive passing to slow cars"): real 1950s traffic
+    // isn't a single uniform cruise speed -- some cars are naturally
+    // faster/slower (PersonalSpeedMult), which is what actually creates
+    // situations where a car catches up to one ahead of it in the first
+    // place. When following gets sustained and tight, a car commits to
+    // an overtake: swerves into the opposite side of the road (a real
+    // lane doesn't exist per hex today, so "opposite side" is the
+    // mirror of its own LaneOffset), speeds up aggressively, and merges
+    // back once past -- re-checking the passing side stays clear every
+    // frame it's committed, so it's aggressive, not suicidal.
+    private const float PersonalSpeedMultMin = 0.8f;
+    private const float PersonalSpeedMultMax = 1.35f;
+    private const float PassBlockedTriggerTime = 1.0f;      // how long a car tolerates tight following before committing to pass
+    private const float PassTriggerClearFraction = 0.55f;   // only bother passing a genuinely SLOW car, not a merely-close one
+    private const float PassLaneOffset = LaneOffset * 2f;   // swerve fully across to the opposite side, clear of the own-lane check width
+    private const float PassLookahead = 6f;                 // aim this far ahead of the CURRENT position while passing, not the far-off next-hex target -- a steep commit angle instead of a shallow drift
+    private const float PassLaneCheckRange = FollowRange * 1.4f; // look further than a normal following check -- committing to a pass needs more runway
+    private const float PassSpeedBoost = 1.45f;             // "aggressive" -- a real burst of acceleration to get the maneuver over with quickly
+    private const float PassMaxDuration = 4f;               // safety cap so a pass can't get stuck open-ended if something keeps re-blocking the merge check
+
     private enum State { Driving, Parked }
 
     private RuntimeCityBuilder _builder;
@@ -87,6 +108,12 @@ public class TrafficCar : MonoBehaviour
     private float _parkDurationBase; // 0 when movingPercent is ~1 (never park)
     private int _tripSalt;
     private int _hopCounter; // rotates the wander hash every pick -- see PickNext
+
+    // naturalistic-driving state (see the constants above for the "why")
+    private float _personalSpeedMult;
+    private float _blockedTimer;
+    private bool _passing;
+    private float _passTimer;
 
     // roundabout circulation state (creator direction, 2026-07: "Cars
     // must follow the curve proper curves of the road")
@@ -144,7 +171,15 @@ public class TrafficCar : MonoBehaviour
         _target = transform.position;
         BuildBody(body, Hash(start, 7) % 4 == 0);
         BuildLights();
-        _lastSpeed = CruiseSpeed;   // avoids a false "braking" flash on the very first driving frame
+
+        // naturalistic speed variance: real traffic isn't one uniform
+        // cruise speed -- this is also what actually CREATES situations
+        // where a car catches up to a slower one ahead of it, the
+        // precondition the passing logic below reacts to.
+        var speedRoll = (Hash(start, GetInstanceID() + 61) & 0xFFFF) / 65535f;
+        _personalSpeedMult = Mathf.Lerp(PersonalSpeedMultMin, PersonalSpeedMultMax, speedRoll);
+
+        _lastSpeed = CruiseSpeed * _personalSpeedMult;   // avoids a false "braking" flash on the very first driving frame
 
         var pct = Mathf.Clamp(movingPercent, 0.05f, 1f);
         var avgHops = (MinTripHops + MaxTripHops) / 2f;
@@ -540,13 +575,18 @@ public class TrafficCar : MonoBehaviour
         }
 
         var threat = _builder.NearestMonsterTo(transform.position, FleeRadius);
-        var speed = CruiseSpeed;
+        var speed = CruiseSpeed * _personalSpeedMult;
 
         if (threat != null)
         {
             // fleeing overrides everything, including roundabout etiquette
-            // (creator: "unless fleeing from monster") -- drive straight out
+            // (creator: "unless fleeing from monster") and any in-progress
+            // passing maneuver -- a clean slate to resume normal driving
+            // from once the threat clears, rather than picking back up
+            // mid-swerve.
             _circling = false;
+            _passing = false;
+            _blockedTimer = 0f;
             speed = FleeSpeed;
             if (!_fleeing) PickNext(threat.transform.position); // threat just appeared: redirect now
             _fleeing = true;
@@ -592,6 +632,48 @@ public class TrafficCar : MonoBehaviour
         if (travelDir.sqrMagnitude > 0.01f)
         {
             var fwd = travelDir.normalized;
+            var right = new Vector3(fwd.z, 0f, -fwd.x);
+
+            if (_passing)
+            {
+                // committed to an overtake: swerve fully onto the
+                // opposite side of the road and push the throttle, but
+                // keep re-checking that side is still actually clear --
+                // aggressive, not reckless. Ends when the maneuver times
+                // out, the passing side stops being clear (abort, merge
+                // back and resume normal following), or the ORIGINAL
+                // lane has opened back up ahead (the whole point of a
+                // successful pass: the slow car is no longer in the way).
+                _passTimer -= dt;
+                var passSideClear = _builder.DistanceAhead(transform.position - right * PassLaneOffset, fwd, PassLaneCheckRange, LaneHalfWidth, this);
+                var ownLaneClear = _builder.DistanceAhead(transform.position, fwd, FollowRange, LaneHalfWidth, this);
+                if (_passTimer <= 0f || passSideClear < FollowGap || ownLaneClear >= FollowRange)
+                {
+                    _passing = false;
+                    _blockedTimer = 0f;
+                }
+                else
+                {
+                    // aim at a LOOKAHEAD point just ahead of the car's
+                    // CURRENT position, not the far-off next-hex target
+                    // -- offsetting the distant hex target sideways by a
+                    // fixed PassLaneOffset produces only a shallow-angle
+                    // drift over the whole remaining hex distance (a real
+                    // v0.1 attempt at this measured just ~1-2m of actual
+                    // lateral clearance before the maneuver concluded,
+                    // nowhere near a real "crossed to the opposite side"
+                    // look -- caught by the verification harness, not
+                    // just assumed). A close lookahead point gives a much
+                    // steeper commit angle, so the car visibly swings
+                    // wide fast, then re-aims at the real target as it
+                    // straightens out.
+                    steerTarget = transform.position + fwd * PassLookahead - right * PassLaneOffset + SwerveOffset(fwd);
+                    speed *= PassSpeedBoost;
+                    MoveToward(steerTarget, speed, dt);
+                    return;
+                }
+            }
+
             steerTarget += SwerveOffset(fwd);
 
             // follow the traffic ahead: slow (down to a full stop) when a
@@ -602,7 +684,30 @@ public class TrafficCar : MonoBehaviour
             // proper space between them").
             var clear = _builder.DistanceAhead(transform.position, fwd, FollowRange, LaneHalfWidth, this);
             if (clear < FollowRange)
+            {
+                _blockedTimer += dt;
                 speed *= Mathf.Clamp01((clear - FollowGap) / (FollowRange - FollowGap));
+
+                // naturalistic passing (creator direction, 2026-07: "some
+                // aggressive passing to slow cars"): sustained close
+                // following, of something genuinely slow (not just a
+                // momentary gap), commits to an overtake IF the opposite
+                // side of the road is clear far enough ahead to actually
+                // complete one.
+                if (!_passing && _blockedTimer > PassBlockedTriggerTime && clear < FollowRange * PassTriggerClearFraction)
+                {
+                    var passSideClear = _builder.DistanceAhead(transform.position - right * PassLaneOffset, fwd, PassLaneCheckRange, LaneHalfWidth, this);
+                    if (passSideClear >= PassLaneCheckRange)
+                    {
+                        _passing = true;
+                        _passTimer = PassMaxDuration;
+                    }
+                }
+            }
+            else
+            {
+                _blockedTimer = 0f;
+            }
         }
 
         MoveToward(steerTarget, speed, dt);

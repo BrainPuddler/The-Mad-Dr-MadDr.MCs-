@@ -6104,3 +6104,103 @@ project has used):
 Not seen in a real render (no Unity Editor in this environment) --
 the 130m active radius and 250 bias weight are both reasoned
 estimates, not measured against an actual camera/city at real scale.
+
+## 2026-07: naturalistic driving -- speed variance + aggressive passing
+
+Creator direction, verbatim across two messages: "Verify naturalistic
+driving. Speed up and some aggressive passing to slow cars. try
+again." Two changes to `TrafficCar.cs`:
+
+1. **Personal speed variance.** `_personalSpeedMult` (0.8x-1.35x of
+   the base `CruiseSpeed`), hash-rolled once at `Init` off the car's
+   start hex + `GetInstanceID()`, same deterministic-per-car-variance
+   idiom every other roll in this file already uses (park-timer
+   stagger, body truck/sedan pick, curb-side sign, etc.). This isn't
+   just flavor -- it's the actual PRECONDITION that creates a
+   genuinely slow car for a faster one to catch up to and want to pass
+   in the first place. Applied to the car's own cruise/follow speed;
+   deliberately NOT applied to `FleeSpeed` (panic is uniform -- every
+   car floors it the same when scared, a deliberate scope limit, not
+   an oversight).
+
+2. **Passing maneuver.** New `_blockedTimer`/`_passing`/`_passTimer`
+   state. Sustained close following (`_blockedTimer >
+   PassBlockedTriggerTime`, ~1s) behind something reading as
+   genuinely slow (`clear < FollowRange * PassTriggerClearFraction`,
+   not just momentarily close) checks whether the OPPOSITE side of the
+   road is clear far enough ahead (`DistanceAhead` queried from a
+   laterally-offset position, `PassLaneCheckRange` -- longer than the
+   normal following check, since committing to a pass needs more
+   runway than just keeping a gap does) and, if so, commits: steers
+   toward a close lookahead point offset to that side, at
+   `PassSpeedBoost` (1.45x) speed, re-validating the passing side is
+   still clear EVERY frame it's committed (real-time abort back to
+   normal following if something appears there, not a one-time check),
+   with a `PassMaxDuration` safety cap. Ends successfully once the
+   car's own original lane reads clear ahead again -- the whole point
+   of the maneuver.
+
+**Two real issues surfaced and fixed before this landed, both worth
+recording distinctly (one product, one nothing-to-do-with-testing):**
+
+- **Sign error, caught by re-reading the code, not by testing.**
+  `RoadPoint`'s own `right` vector convention (`(dir.z, 0, -dir.x)`,
+  the SAME direction a car's own lane offset already sits at, per its
+  own doc comment: "to the RIGHT of travel") means a car's current
+  position already sits at roughly `+right*LaneOffset` from the road
+  centerline. The first draft of the passing offset ADDED more
+  `+right*PassLaneOffset` on top of that -- pushing the car FURTHER
+  into its own existing side, not across to the opposite one. Fixed
+  by negating it (`-right*PassLaneOffset`), confirmed by re-deriving
+  `RoadPoint`'s own geometry directly rather than guessing which sign
+  "felt right."
+- **Shallow-angle geometry, caught by the verification harness.** The
+  fixed-sign version still under-delivered: steering toward the
+  far-off next-hex ROAD TARGET (`_target`, typically ~`HexMeters`
+  =20m away) offset sideways by a fixed `PassLaneOffset` produces only
+  a SHALLOW angle relative to the remaining travel distance -- the
+  harness measured out real, honest numbers here (a first attempt hit
+  only ~1.0m, then ~1.9m of actual lateral clearance after retuning
+  the test's own obstacle placement) before the maneuver concluded,
+  nowhere near a visually convincing "crossed to the opposite side"
+  read. Root cause diagnosed by working through the actual swerve
+  trajectory's trigonometry (angle = atan(offset / remaining
+  distance) -- shrinks as remaining distance grows), not by trial and
+  error. Fixed by aiming at a close, continuously-recomputed
+  LOOKAHEAD point (`PassLookahead`, 6m ahead of the car's CURRENT
+  position each frame) instead of the far-off hex target -- a real
+  product change, verified to produce a genuine ~3.3m swerve (clear
+  of the own-lane check's own `LaneHalfWidth`=2.4m filter, so it
+  actually reads as a lane change to anything else's own following
+  check, not just a wobble).
+
+**Verification.** The existing `driving-verify` flightcheck's own
+`RuntimeCityBuilder` stub had `DistanceAhead` hardcoded to always
+report "clear" (a deliberate simplification when that harness was
+first built, since nothing in its scope needed real blocking) -- with
+nothing for the new follow/pass logic to react to, this feature
+couldn't be verified at all as-is. Extended the stub with a real (if
+simplified) `DistanceAhead`: a verbatim port of the actual method's
+dot-product-projection + lateral-filter logic (confirmed line-for-line
+against `RuntimeCityBuilder.cs`, not reimplemented from memory),
+scanning a simple injected `Obstacles` list instead of the real
+`_trafficCars`/`_tanks`/`_citizens` collections -- sufficient for a
+synthetic "something is blocking this lane" test without pulling in
+those other systems. Every pre-existing check in that harness
+(movement, camera-proximity gating/bias) never populates `Obstacles`,
+so their behavior is provably unchanged. New checks added: (1) 8 cars
+run unblocked for 20s show a real >1.35x spread in distance covered,
+confirming actual speed variance, not just a per-car field that's
+never read meaningfully; (2) a car blocked by a stationary obstacle
+placed at a realistic following distance (not spawned already on top
+of it -- an early version of this check placed it too close, which is
+what surfaced the shallow-angle issue above) genuinely enters the
+passing state, swerves a real, measured distance wide of its own lane,
+and clears the obstacle within the simulated window rather than idling
+behind it forever.
+
+Not seen in a real render (no Unity Editor in this environment) -- the
+speed-variance range, the passing trigger thresholds, and the
+lookahead/offset distances are all reasoned v0.1 placeholders tuned
+against the flightcheck's own numeric output, not an actual Editor
+session's visual read.
