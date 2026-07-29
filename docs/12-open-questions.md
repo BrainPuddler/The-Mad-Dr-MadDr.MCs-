@@ -6205,6 +6205,28 @@ lookahead/offset distances are all reasoned v0.1 placeholders tuned
 against the flightcheck's own numeric output, not an actual Editor
 session's visual read.
 
+## 2026-07: safety net -- nearest-K traffic cars always stay active
+
+Added alongside the camera-focus fix below, before the ACTUAL root
+cause (the entry two below this one) was found: a new
+`trafficActiveMinimumCount` (default 12) guarantees the fleet's own
+nearest N cars stay active regardless of what the radius/focus-point
+calculation says -- the same "always promote the closest N, don't rely
+on a single absolute threshold" principle `DynamicLightBudget` already
+uses for real lights. Even if a future camera-geometry miscalculation
+(this one, or one this project hasn't hit yet) makes the radius check
+wrong again, it becomes structurally impossible for that alone to
+freeze 100% of visible traffic -- whatever's nearest the camera keeps
+driving no matter what the rest of the math says. Default (12) is
+deliberately just above the default `trafficCarCount` (10), so this
+entire feature is a genuine no-op for the out-of-the-box scene --
+every car always qualifies as one of the "nearest 12" out of only 10.
+Verified with a pure-algorithm test (`camera-focus-verify`, no Unity
+dependency needed): confirms the nearest N are correctly selected even
+when the radius check finds zero cars in range, and confirms a
+smaller-than-floor fleet is unconditionally 100% active regardless of
+distance.
+
 ## 2026-07: FIX -- traffic freeze regression (wrong camera ground-focus point)
 
 Creator report, verbatim: "still non of the cars are moving, in the
@@ -6300,3 +6322,114 @@ show at a glance. Worth remembering for the next camera-relative
 feature this project adds: `Camera.main.transform.position` is NEVER
 automatically "where the player is looking" for an offset/angled rig
 like this one -- always resolve the actual look-at point first.
+
+## 2026-07: FIX -- the ACTUAL root cause ("cars are just parked... no lights either")
+
+The camera-focus fix directly above was a REAL bug, correctly diagnosed
+and correctly fixed -- but it was NOT the cause of the reported "cars
+not moving." The creator confirmed as much directly: "this was
+happening before the camera addition," ruling that whole feature (both
+its buggy and its fixed form) out as the cause of THIS symptom. Two
+follow-up clarifying questions (`AskUserQuestion`) were explicitly
+dismissed as "stupid" -- the creator wanted the actual bug found by
+digging into the code, not more diagnostic small talk, and gave the
+one clue that actually cracked it directly: "The cars are just parked
+... a clue is that I don't see an cars with light on either."
+
+**Root cause, reproduced (not guessed) via a real fault-injection
+flightcheck.** `TrafficCar.Init()`'s call order was:
+
+```
+transform.position = RoadPoint(start, start);
+_target = transform.position;
+BuildBody(body, ...);     // <-- new Material(ShaderUtil.FindRenderableShader()) is its FIRST line
+BuildLights();
+... (personal speed roll, _parkDurationBase, THEN the _state/_hopsRemaining/PickNext() setup)
+```
+
+Real `UnityEngine.Material`'s constructor throws if handed a null
+`Shader`. `ShaderUtil.FindRenderableShader()` tries three candidate
+shader names and returns null if none resolve -- a real, if unconfirmed
+-in-THIS-environment (no Unity Editor here to determine WHY it might
+fail), code path. If it ever does, `BuildBody()` throws, and since
+that's called BEFORE any of `_state`/`_hopsRemaining`/`PickNext()` are
+set, `Init()` aborts right there. `_state` is then left at its C#
+default (`Driving`, enum value 0 -- the first entry in `private enum
+State { Driving, Parked }`) with `_target` still equal to the car's own
+just-assigned spawn position and `_hopsRemaining` still 0. The very
+FIRST `Update()` call reads `toTarget.magnitude < ArriveRadius` as true
+(distance is exactly 0) and `_hopsRemaining <= 0` as true, and calls
+`ParkHere()` immediately -- and because `BuildLights()` never ran
+either (never reached), the bulb arrays stay null forever too. The car
+ends up BOTH permanently parked (with no real trip ever having been
+set up to redepart from) AND with no working lights -- the EXACT two
+symptoms reported, together, from one single root cause.
+
+This was diagnosed by reading `TrafficCar.Init()`'s actual call order
+line by line (not assumed), forming the hypothesis that a lighting-
+related exception could be blocking movement (directly per the
+creator's own clue), and then PROVING it with a real fault-injection
+test rather than just patching blind:
+
+1. Grepped `GlowPointRegistry.Register`/`NeonRegistry.Register`'s real
+   implementations directly -- both are trivial `List.Add` calls that
+   cannot throw, ruling out the lighting REGISTRY code as a plausible
+   fault site (an earlier, weaker hypothesis).
+2. Identified `new Material(ShaderUtil.FindRenderableShader())` as the
+   ONE real, plausible throw site in the whole chain (Unity's own
+   documented `Material` constructor contract).
+3. Extended the `driving-verify` flightcheck's own `Material`/`Shader`
+   stubs to reproduce that EXACT real contract (throws on a null
+   Shader) plus a `Shader.SimulateUnavailable` toggle to force the
+   failure on demand, then ran `TrafficCar.Init()` through it for
+   real. The unhandled exception's own stack trace named the exact
+   line and method (`BuildBody`, not `BuildLights` -- an assumption
+   from the first hardening pass that the trace itself corrected)
+   confirming the hypothesis precisely rather than approximately.
+
+**Fix:** wrapped both `BuildBody()` and `BuildLights()` in `Init()`
+independently (each logs a warning and degrades gracefully rather than
+aborting the rest of setup), made `SetBulbsActive` null-safe, and
+wrapped `UpdateLights()` itself defensively too (it's called from the
+very TOP of the Parked branch, before the park-timer/redeparture
+check -- any future fault reachable from there would reproduce this
+exact failure mode by a different path, regardless of whether THIS
+particular shader-lookup theory is the literal, complete explanation).
+The same defensive wrapping was added to `TramCar.Init()`'s equivalent
+`BuildBody()` call for consistency -- though `TramCar` was confirmed
+structurally SAFE already (its own critical state -- `_builder`/
+`_path`/`_index` -- is assigned before `BuildBody()` runs, so a
+`BuildBody()` fault there was never able to block its `Update()` logic
+the way `TrafficCar`'s ordering could). This is deliberate,
+demonstrated extra insurance on a working script, not a claim that
+`TramCar` had the same bug.
+
+**Verification:** the fault-injection flightcheck (`driving-verify`)
+extension, run for real: with `Shader.SimulateUnavailable = true`
+(forcing every shader lookup to fail, so `BuildBody()` genuinely throws
+inside `Init()` exactly as it would in the hypothesized real-Editor
+scenario), a fresh `TrafficCar` still ends up correctly `IsDriving`
+with a real, non-degenerate `PickNext()` target (not stuck aimed at its
+own spawn point), still visibly drives over 20 simulated seconds (79m
+covered, not frozen), and -- forced into `Parked` state directly via
+reflection to specifically re-exercise that exact branch -- still
+redeparts on schedule despite the SAME fault firing on every single
+frame it stays parked. All prior checks in that same harness (movement,
+camera-proximity gating/bias, speed variance, passing) still pass
+unchanged.
+
+**Honest limits, stated plainly rather than overclaimed:** this
+environment has no real Unity Editor, so there is no way to confirm
+`ShaderUtil.FindRenderableShader()` was ACTUALLY the specific thing
+failing in the creator's own session -- only that (a) it is a real,
+live, documented-behavior throw site that (b) sits at EXACTLY the
+right place in the EXACT right call order to produce EXACTLY the two
+symptoms reported together, and (c) the fix makes an entire CLASS of
+failure at that call order structurally impossible going forward,
+regardless of the precise trigger. If cars still don't drive after
+this fix, the Console window's actual error text (if the underlying
+fault is something this fix's `Debug.LogWarning` calls would now
+surface) is the one piece of ground truth this project has no way to
+obtain except by asking directly -- and per the creator's own stated
+preference this round, that should be a last resort after digging
+through the code first, not a first move.

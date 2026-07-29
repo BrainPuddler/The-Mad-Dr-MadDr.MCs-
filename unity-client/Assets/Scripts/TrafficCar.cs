@@ -169,8 +169,50 @@ public class TrafficCar : MonoBehaviour
         _to = start;
         transform.position = RoadPoint(start, start);
         _target = transform.position;
-        BuildBody(body, Hash(start, 7) % 4 == 0);
-        BuildLights();
+
+        // 2026-07 hardening (creator report: "the cars are just parked...
+        // I don't see any cars with light on either" -- both symptoms
+        // together, confirmed by a real fault-injection flightcheck, are
+        // the exact signature of THIS bug): BuildBody/BuildLights are
+        // both purely cosmetic (chassis material/shape, headlight/brake-
+        // light bulbs) and have no business being able to prevent the
+        // state/route setup below -- what actually makes this car drive
+        // at all -- from ever running. BuildBody in particular calls
+        // `new Material(ShaderUtil.FindRenderableShader())` as its very
+        // FIRST line; if that shader lookup ever comes back empty (this
+        // environment has no real Unity Editor to confirm WHY it would,
+        // but the flightcheck below proves the crash site and its
+        // consequence precisely), the exception used to aborts Init()
+        // before PickNext() -- or even the state assignment -- ever ran,
+        // leaving `_state` at its C# default (Driving, enum value 0) with
+        // `_target` still equal to the car's own spawn position and
+        // `_hopsRemaining` still 0. The very first Update() would then
+        // read that as "arrived, no hops left" and immediately call
+        // ParkHere() -- and since BuildLights() (which sets up the bulb
+        // arrays) never ran either, the car is left both permanently
+        // parked-with-no-real-redeparture-context AND with no working
+        // lights, in one single failure. Each cosmetic call is now
+        // isolated so a failure in either one is a real degraded mode
+        // (drives without a chassis material / without working lights),
+        // never a silent total failure of movement. Logged so a real
+        // fault here is visible, not swallowed invisibly.
+        try
+        {
+            BuildBody(body, Hash(start, 7) % 4 == 0);
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("TrafficCar.BuildBody faulted during Init (car will drive without a proper chassis): " + ex);
+        }
+
+        try
+        {
+            BuildLights();
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("TrafficCar.BuildLights faulted during Init (car will drive without working lights): " + ex);
+        }
 
         // naturalistic speed variance: real traffic isn't one uniform
         // cruise speed -- this is also what actually CREATES situations
@@ -372,6 +414,12 @@ public class TrafficCar : MonoBehaviour
 
     private static void SetBulbsActive(Renderer[] bulbs, bool active)
     {
+        // 2026-07: null-safe on purpose, not just tidy defensiveness --
+        // see UpdateLights' own doc comment for the real bug this closes
+        // off (a lighting-subsystem failure during BuildLights() could
+        // leave one of these arrays null forever, and an unguarded
+        // bulbs.Length here would then throw EVERY subsequent frame).
+        if (bulbs == null) return;
         for (var i = 0; i < bulbs.Length; i++) if (bulbs[i] != null) bulbs[i].enabled = active;
     }
 
@@ -385,12 +433,46 @@ public class TrafficCar : MonoBehaviour
     /// primary real-world trigger this covers; the abrupt stop-to-park
     /// transition has no gradual deceleration modeled today, so it isn't
     /// covered by this signal -- a real, deliberate scope limit, not an
-    /// oversight).</summary>
+    /// oversight).
+    ///
+    /// 2026-07 hardening (creator report: "the cars are just parked...
+    /// I don't see any cars with light on either" -- both symptoms
+    /// together are the exact signature of this exact bug class): this
+    /// is called from the TOP of the Parked branch in Update(), BEFORE
+    /// the park-timer/re-departure logic runs. If anything in here ever
+    /// throws (a lighting-subsystem issue this environment has no way to
+    /// reproduce/verify, since there's no real Unity Editor available
+    /// here), the exception would propagate up and abort Update() before
+    /// _parkTimer ever gets decremented or BeginTrip() ever gets called
+    /// -- permanently stranding that car in Parked. Worse, since every
+    /// Driving car eventually finishes its trip and calls ParkHere() too,
+    /// the ENTIRE fleet would converge into this same stuck state over
+    /// time even if only a FEW cars ever hit the underlying fault first
+    /// -- exactly "the cars are just parked," not immediately, but
+    /// eventually. This cosmetic method has no business being able to
+    /// break movement/state logic at all, regardless of what specifically
+    /// might go wrong inside it (now or in some future change) -- so it's
+    /// wrapped defensively: a caller can trust this NEVER throws, full
+    /// stop. Logged once (not every frame) if it ever actually fires, so
+    /// a real fault here becomes visible in the Console instead of a
+    /// silent, catastrophic Update() abort.</summary>
+    private bool _loggedLightsFault;
     private void UpdateLights(bool driving, bool braking)
     {
-        var on = driving && DayNightState.NightAmount > NightEligibleThreshold;
-        SetBulbsActive(_headlightBulbs, on);
-        SetBulbsActive(_brakeLightBulbs, on && braking);
+        try
+        {
+            var on = driving && DayNightState.NightAmount > NightEligibleThreshold;
+            SetBulbsActive(_headlightBulbs, on);
+            SetBulbsActive(_brakeLightBulbs, on && braking);
+        }
+        catch (System.Exception ex)
+        {
+            if (!_loggedLightsFault)
+            {
+                _loggedLightsFault = true;
+                Debug.LogWarning("TrafficCar.UpdateLights faulted (suppressing further logs for this car): " + ex);
+            }
+        }
     }
 
     /// <summary>Pick the next network hex from `_to`. ALWAYS excludes

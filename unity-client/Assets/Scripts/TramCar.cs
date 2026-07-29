@@ -29,7 +29,24 @@ public class TramCar : MonoBehaviour
         _path = path;
         _index = Mathf.Clamp(startIndex, 0, path.Count - 1);
         transform.position = path[_index];
-        BuildBody();
+
+        // 2026-07: same defensive posture as TrafficCar.Init -- BuildBody
+        // is purely cosmetic, and unlike TrafficCar's own equivalent call
+        // (see that file's own hardening note for the real bug this
+        // closes off there), _builder/_path/_index are ALREADY assigned
+        // above, so Update()'s own logic doesn't actually depend on this
+        // succeeding -- a tram would still run its fixed path even
+        // without this guard. Added anyway for consistency: a cosmetic
+        // failure should never even risk taking down movement, on either
+        // vehicle type.
+        try
+        {
+            BuildBody();
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("TramCar.BuildBody faulted during Init (tram will run without a proper body): " + ex);
+        }
     }
 
     private void BuildBody()

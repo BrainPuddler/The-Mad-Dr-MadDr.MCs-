@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using MadDr.CityGen;
 using MadDr.MatchCore;
@@ -71,6 +72,9 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
     [Tooltip("Same cap philosophy as SimpleCameraRig.shadowDistanceCap -- don't let the active-traffic zone keep growing at extreme zoom-out, where the perf savings matter most and individual cars are visually tiny anyway.")]
     public float trafficActiveRadiusCap = 320f;
+
+    [Tooltip("2026-07 SAFETY NET, added after a SECOND \"still none of the cars are moving\" report even after fixing the camera ground-focus math above: never trust an absolute distance/radius check alone to decide whether ANY traffic is visible -- always keep the fleet's own nearest N cars active regardless of what the radius calculation says, the same \"always promote the closest N, don't rely on a single absolute threshold\" principle DynamicLightBudget already uses for real lights. This makes it structurally impossible for a camera-geometry miscalculation (this one, or a future one this project hasn't hit yet) to ever freeze 100% of visible traffic again -- whatever's actually nearest the camera keeps driving no matter what. Default (12) is deliberately just above the default trafficCarCount (10), so the out-of-the-box scene is entirely unaffected by this whole feature (every car always qualifies as one of the \"nearest 12\" out of only 10) -- the radius-based freeze only ever starts doing anything once a fleet is larger than this floor.")]
+    public int trafficActiveMinimumCount = 12;
 
     [Tooltip("How much clear space (meters) stays between two units' bodies once a group has settled around a shared destination waypoint -- how tightly they pack in around the click point. Added to the pair's own combined body radii (ApplySeparation), so this is extra daylight on top of however big the units themselves are, not the whole gap.")]
     [Range(0f, 5f)]
@@ -429,13 +433,39 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var camHeight = cam.transform.position.y;
         var activeRadius = Mathf.Min(camHeight * trafficActiveRadiusPerCameraHeight + trafficActiveRadiusFloor, trafficActiveRadiusCap);
         var activeSq = activeRadius * activeRadius;
-        for (var i = 0; i < _trafficCars.Count; i++)
+
+        var count = _trafficCars.Count;
+        var sqDistances = new float[count];
+        for (var i = 0; i < count; i++)
+        {
+            var car = _trafficCars[i];
+            if (car == null) { sqDistances[i] = float.MaxValue; continue; }
+            var p = car.transform.position;
+            p.y = 0f;
+            sqDistances[i] = (p - _cameraGroundFocus).sqrMagnitude;
+        }
+
+        // SAFETY NET (see trafficActiveMinimumCount's own doc comment):
+        // never rely on the radius/focus calculation ALONE to decide
+        // whether any traffic is visible -- always keep the nearest N
+        // cars active regardless of what that calculation says. An O(n^2)
+        // partial selection is plenty fast at the fleet sizes this
+        // project actually has (tens, not thousands); not worth pulling
+        // in a full sort for a single threshold value.
+        var minCount = Math.Min(trafficActiveMinimumCount, count);
+        var thresholdSq = float.MaxValue;
+        if (minCount > 0 && minCount < count)
+        {
+            var sorted = (float[])sqDistances.Clone();
+            Array.Sort(sorted);
+            thresholdSq = sorted[minCount - 1];
+        }
+
+        for (var i = 0; i < count; i++)
         {
             var car = _trafficCars[i];
             if (car == null) continue;
-            var p = car.transform.position;
-            p.y = 0f;
-            car.SetNearCamera((p - _cameraGroundFocus).sqrMagnitude <= activeSq);
+            car.SetNearCamera(sqDistances[i] <= activeSq || sqDistances[i] <= thresholdSq);
         }
     }
 
