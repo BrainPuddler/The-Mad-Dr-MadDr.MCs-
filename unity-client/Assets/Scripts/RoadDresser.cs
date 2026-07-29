@@ -245,7 +245,10 @@ public static class RoadDresser
         return c;
     }
 
-    private static Material RailSteel() { return M(0.32f, 0.33f, 0.35f); }
+    // public: TramDresser (embedded street tram track, a distinct
+    // concept from this freight siding) reuses the same rail color for
+    // a consistent "rail" material across both.
+    public static Material RailSteel() { return M(0.32f, 0.33f, 0.35f); }
     private static Material Tie() { return M(0.28f, 0.2f, 0.13f); }
 
     private static void DressRailSiding(RuntimeCityBuilder b, Vector3 center, Vector3 dir, Transform host)

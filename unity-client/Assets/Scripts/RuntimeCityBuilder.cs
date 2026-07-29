@@ -188,6 +188,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         SpawnCitizens();
         SpawnTanks();
         SpawnTraffic();
+        SpawnTram();
 
         // docs/23 Phase 10: supersedes the old NightMode binary day/dusk
         // toggle with a continuous Lumen-clock-driven cycle + post stack.
@@ -1877,6 +1878,38 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             var hue = (i * 53 % 100) / 100f;
             car.Init(this, network, start, Color.HSVToRGB(hue, 0.4f, 0.75f), trafficMovingPercent);
             _trafficCars.Add(car);
+        }
+    }
+
+    private const int TramCarCount = 2;
+
+    /// <summary>docs/23's mood-board streetcar (see TramDresser's own
+    /// header for the full "why"), New-York-only per that same mood-
+    /// board's own hedge -- a no-op for every other region/preset,
+    /// exactly like every other call in this method that's gated behind
+    /// its own real prerequisite.</summary>
+    private void SpawnTram()
+    {
+        if (_city.Region != CityRegion.NewYork) return;
+
+        var line = TramDresser.TraceLine(_city);
+        if (line.Count < 2) return;
+        var path = TramDresser.Build(this, _city, line, transform);
+        if (path.Count < 2) return;
+
+        var host = new GameObject("Trams").transform;
+        host.SetParent(transform, false);
+        for (var i = 0; i < TramCarCount; i++)
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = "TramCar_" + i;
+            go.transform.SetParent(host, false);
+            var collider = go.GetComponent<Collider>();
+            if (collider != null) Object.Destroy(collider);
+            var tram = go.AddComponent<TramCar>();
+            // spread cars evenly along the line rather than bunched at one end
+            var startIndex = (path.Count * (i + 1)) / (TramCarCount + 1);
+            tram.Init(this, path, startIndex);
         }
     }
 

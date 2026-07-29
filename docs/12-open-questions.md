@@ -5355,3 +5355,113 @@ restructuring the existing movement logic for. Not seen in a real render
 -- bulb position/scale/tilt numbers are reasoned from the same
 fractional-offset convention `BuildBody`'s existing cabin/windshield
 already use, not confirmed against an actual rendered car.
+
+## 2026-07: streetcar/tram-rail, the docs/23 mood-board's last open item
+
+Creator direction: "add streetcars/tram-rail props next." This is the
+Phase 10 daytime mood-board's own deferred item (`docs/00-index.md`'s
+Phase 10 status line: "the mood-board's streetcar/tram-rail prop is
+explicitly deferred -- a materially bigger vehicle+region-gating system,
+not a static prop"). Researched before writing anything: the mood-board
+language (`docs/23-rts-master-build-plan.md` §10/§8, echoed in an
+earlier `docs/12` entry) consistently hedges with "likely" every time it
+names a region, but always the SAME region -- New York, tied to that
+region's own real-world "elevated-rail segments" callout. No per-hex
+district/region classification exists anywhere in citygen-core or any
+Unity dresser (confirmed before writing this) -- the closest precedent,
+`RoadDresser.DressRailSiding`, is a FREIGHT rail siding beside a road
+near the cargo `rail_depot` landmark, a distinct concept from embedded
+passenger tram track down a street. New York's own `Grid` road pattern
+has no distinguished-arterial subset either (`CityModel.ArterialRoads`
+is empty for `Grid`) -- so there was no existing per-hex "this road is
+special" tag to key a tram line off of at all.
+
+**The route itself had to be computed, not looked up.** New
+`TramDresser.TraceLine(CityModel)`: starting from the nearest road hex
+to `CityModel.CenterHex`, walks outward in each of the four world-
+cardinal directions one offset-column/row step at a time (the exact
+same stepping the 2026-07 cardinal-road rewrite already established,
+`RoadDresser.Offset`) for as long as the road network keeps going,
+including straight through a busy junction hex (correct -- a real
+streetcar runs through an intersection, it doesn't stop tracing there).
+Keeps whichever opposing pair (East+West or North+South) combines into
+the longer total run -- the same "trace a fixed hex-direction walk"
+technique Paris's own diagonal boulevards already use
+(`CityPreset.Paris`), applied to find a route instead of generate one.
+Below a minimum length (8 hexes), returns empty rather than drawing an
+embarrassing two-block stub.
+
+**A real design problem, found only by verifying against actual
+generated cities, not assumed correct from reading the code.** The
+first version had no upper bound. Running the real trace against a real
+generated New York model (via a standalone console check, the real
+citygen-core DLL) found it: a downtown grid's own straight run doesn't
+naturally stop before the map edge -- **250+ hexes, ~5 km**. At
+`TramCar`'s cruise speed that's roughly an 18-minute one-way trip; with
+only two cars on a line that long, a player would essentially never see
+one complete a loop -- present in the world but functionally invisible.
+Added a `MaxLineLengthHexes` cap (40, split evenly across both arms and
+kept centered on the start hex rather than skewed to one end), verified
+down to a 39-hex/~780 m/~3-minute-one-way line. A second, smaller bug
+surfaced by the SAME verification pass: the first cap implementation
+(`MaxLineLengthHexes / 2` per arm) actually produced 41 hexes, not 40 --
+off by exactly the shared start hex, caught by a real `<=` assertion in
+the harness rather than eyeballing the arithmetic. Fixed by halving
+`MaxLineLengthHexes - 1` instead.
+
+**Track geometry** (`TramDresser.Build`, also new): two thin rail bars
+(`RoadDresser.RailSteel`, now `public` specifically for this reuse --
+same rail color as the existing freight siding, since they're visually
+the same MATERIAL even though they're a different concept) embedded
+barely proud of the road surface (0.03 m, vs. the freight siding's 0.12
+m trackside bars) along each hex's own travel direction, positioned at
+the SAME straightened centerline (`RoadDresser.CardinalAnchor`) every
+road hex's own strip already uses. `Build` returns those exact world
+points as `TramCar`'s path -- deliberately the same list the rails were
+drawn from, not a second independently-computed set that could drift
+out of alignment with what's visually on the ground.
+
+**`TramCar`** is deliberately a much simpler vehicle than `TrafficCar`:
+no wander, no park/depart cycle, no roundabout circulation -- a
+streetcar is rail-bound, none of those apply. It walks the fixed path
+back and forth forever (ping-pong on out-of-range index), at a slower,
+steadier 4.5 vs `TrafficCar`'s 6.5 cruise speed. Since it can't swerve
+around a threat the way road traffic does, it just pauses in place if a
+monster is within a short lookahead radius directly ahead, resuming on
+its own once clear -- a minimal safety check, not real flee/reroute
+logic, which wouldn't make sense for a vehicle that has no alternate
+route to take.
+
+**Wiring**: `RuntimeCityBuilder.SpawnTram()`, called right after
+`SpawnTraffic()` in `BeginMatch()`. Gated on `_city.Region ==
+CityRegion.NewYork` -- a no-op, same as every other real-prerequisite
+gate already in that method, for every other region/preset. Spawns 2
+`TramCar`s spread evenly along the traced line rather than bunched at
+one end.
+
+Verified three ways, no Unity Editor available in this environment: (1)
+a `dotnet build` stub-compile of the real `TramDresser.cs`/`TramCar.cs`/
+`ShaderUtil.cs` against the real citygen-core DLL plus shape stubs for
+`RuntimeCityBuilder`/`RoadDresser`/`MonsterAgent` -- caught one real
+compile error that turned out to be a HARNESS gap, not a code bug: the
+UnityEngine stub was missing `Mathf`'s `int` overloads of `Min`/`Max`
+(real Unity has both `float` and `int` overloads; the stub only had
+`float`), producing a false-positive `CS1503` on `Mathf.Max(0, i - 1)`
+-- fixed the stub, not the real code, per the lighting skill's own
+"always suspect the harness first" guidance; (2) a standalone console
+check duplicating `TraceLine`'s exact logic in plain C# (no UnityEngine
+types needed at all -- the pure hex-walk half doesn't touch any) run
+against all six REAL generated presets via the real citygen-core DLL --
+this is what found and confirmed both real problems above (the 5 km
+unbounded trace, the 41-vs-40 off-by-one), plus confirmed every traced
+hex is a genuine contiguous road hex, no duplicates, and determinism
+across two runs; (3) manual re-read of the `RuntimeCityBuilder.cs` wiring
+sites (too large a file to stub-compile whole, same posture as every
+prior entry in this log). Not seen in a real render -- rail bar
+thickness/gauge/height and the streetcar body's own proportions are
+reasoned from the same fractional-offset/primitive-kit conventions
+`RoadDresser`/`TrafficCar` already establish, not confirmed against an
+actual rendered scene.
+
+This closes the LAST item docs/00-index's Phase 10 status line still
+listed as deferred from the original daytime mood-board pass.
