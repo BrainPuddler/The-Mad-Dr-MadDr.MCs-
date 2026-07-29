@@ -5244,3 +5244,114 @@ in a real render.
 
 Remaining: per-faction/per-kind real building art is still open. The
 region picker itself has no further open items on this list.
+
+## 2026-07: traffic headlights + brake lights, docs/28's first moving light
+
+Creator direction: "let's add forward and slightly down facing lights
+and brake lights to driving cars at night. Make it performant by only
+rendering the ones in regions the user can see." Read `docs/28` §0.5
+(the bug-history table) before touching `DynamicLightBudget`/
+`GlowPointRegistry` at all, per the lighting skill's own standing
+advice.
+
+**The "performant, only in visible regions" half of the ask maps
+directly onto the existing two-tier model** -- it didn't need a new
+mechanism, just a new registrant. Headlights are Tier 1 (a small
+emissive bulb, always cheap) + Tier 2 (a real `Light`, spent from the
+SAME shared `DynamicLightBudget.budget` pool every streetlamp/window/
+neon/marquee already competes in, nearest-to-camera wins). A far-away
+or off-screen car's headlight simply never wins a budget slot and stays
+Tier-1-only -- exactly "only render the ones in regions the user can
+see," with zero new perf-management code. Brake lights don't need any
+of this: they're an indicator, not something that should ever cast
+light on its surroundings, so they're Tier 1 only, no budget
+competition at all.
+
+**Two real extensions were needed, though** -- the existing
+`GlowPointRegistry`/`DynamicLightBudget` was built for STATIC registrants
+(a streetlamp/window/neon prop registers once, forever, at dresser
+build time):
+
+1. **`spotAimsWithTransform`** (new optional param on `GlowPointRegistry.
+   Register`, default `false`): the one existing Spot use case (the
+   overhanging streetlight) always gets the SAME shared hardcoded
+   straight-down aim (`DynamicLightBudget.SpotDownRotation`) -- correct
+   for a fixture bolted to a pole, wrong for a car whose facing changes
+   every frame as it drives and turns. When true, the promoted Light's
+   rotation is instead copied from the registered Transform's own LIVE
+   world rotation every refresh. `TrafficCar` gives it a dedicated child
+   ("HeadlightAim") whose LOCAL rotation carries the fixed "slightly
+   down" tilt (14 degrees), so its WORLD rotation always combines that
+   tilt with wherever the car is currently facing.
+2. **`isEligible`** (new optional `Func<bool>` param, default `null` =
+   "always eligible," the exact behavior every EXISTING call site already
+   has): a car's headlight is only relevant while driving at night. Doing
+   this the "obvious" way (unregister when parked, re-register when
+   departing) would have added real add/remove lifecycle to an otherwise
+   append-only registry every other caller assumes never shrinks. Instead
+   a parked or daylight car's headlight is registered once, for the
+   car's whole lifetime, same as everything else -- but `Refresh()` now
+   skips a point whose `isEligible` predicate returns false BEFORE it's
+   even considered a budget candidate, so it never competes for or holds
+   a slot, and a real Light never ends up shining out of a car whose
+   headlights read as "off" to the player.
+
+Both defaults were chosen specifically so every existing streetlamp/
+window/neon/marquee call site is provably unaffected -- neither param
+changes behavior unless a caller opts in.
+
+**Materials**: one shared `Material` each for headlights (warm white)
+and brake lights (red) across the WHOLE fleet -- SRP-batcher-friendly,
+same caching idiom `BuildingDresser`/`RoadDresser`'s own `M()` helpers
+already use -- registered with the existing `NeonRegistry` boost
+pipeline exactly once, at first mint, so brightness tracks day/night
+through the SAME global boost every other emissive prop already rides,
+with no per-car per-frame color work. Per-car ON/OFF (driving vs
+parked, braking vs not) is necessarily a SEPARATE per-instance concern
+(a shared material's brightness is the same for every renderer using
+it) -- handled by toggling each car's own bulb `Renderer.enabled`,
+driven from `TrafficCar.UpdateLights`.
+
+**Braking signal**: `MoveToward` is the one function every driving
+`Update()` path (cruise, fleeing, roundabout circulation) already
+funnels through, so it's the one place that needed to notice a
+frame-to-frame drop in the `speed` value the caller asked for
+(`BrakeDecelEpsilon` = 0.2). This naturally covers the existing
+follow-traffic slowdown (a car easing off because something's ahead in
+its lane) -- the primary real-world brake-light trigger. It does NOT
+cover the abrupt stop-to-park transition (`ParkHere()` teleports
+straight to the curb spot with no gradual deceleration modeled at all
+today) -- a real, deliberate scope limit recorded here, not an
+oversight; adding braking dynamics to the park transition is a
+movement-behavior change, not a lighting one, and wasn't asked for.
+
+**A real bug caught by flightcheck, not by inspection**: the first draft
+of `MakeBulb` was `static` and never parented the spawned bulb
+GameObject to the car's own transform at all -- `localPosition`/
+`localScale` would have been interpreted as WORLD values on an unparented
+object, scattering bulbs at the origin instead of mounting them on each
+car. Made the method an instance method (needs `this.transform` as the
+parent) and added the missing `SetParent` call; caught while re-reading
+the diff before compiling, confirmed fixed by the stub-compile below
+actually succeeding against the real file.
+
+Verified two ways, no Unity Editor available in this environment: (1) a
+`dotnet build` stub-compile of the REAL `DynamicLightBudget.cs`,
+`TrafficCar.cs`, `ShaderUtil.cs`, `NeonRegistry.cs`, and `DayNightState.cs`
+(the last three included verbatim, not stubbed -- they're either
+self-contained or have no UnityEngine dependency at all) together
+against the real citygen-core DLL, plus shape stubs for
+`RuntimeCityBuilder`/`RoadDresser`/`MonsterAgent`/`CityLightingProfile`
+(the four types these files reference that weren't worth pulling in
+whole, same posture as every prior TrafficCar-adjacent entry in this
+log) -- compiled clean, 0 errors/warnings; (2) manual re-read of every
+`Update()`/`MoveToward` call path to confirm `UpdateLights` is reached
+from every branch that resolves a frame (Parked, fleeing, roundabout
+circulation, normal cruise) -- the one gap found (the `ParkHere(); return;`
+transition doesn't call `UpdateLights` that same frame) self-corrects
+within one frame via the Parked branch's own explicit `UpdateLights(false,
+false)`, judged an acceptable, imperceptible lag rather than a bug worth
+restructuring the existing movement logic for. Not seen in a real render
+-- bulb position/scale/tilt numbers are reasoned from the same
+fractional-offset convention `BuildBody`'s existing cabin/windshield
+already use, not confirmed against an actual rendered car.

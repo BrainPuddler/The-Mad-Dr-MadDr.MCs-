@@ -21,6 +21,8 @@ public static class GlowPointRegistry
         public Transform Transform;
         public Color Color;
         public LightType LightType;
+        public bool SpotAimsWithTransform;
+        public System.Func<bool> IsEligible;
     }
 
     private static readonly List<Point> Points = new List<Point>();
@@ -34,20 +36,50 @@ public static class GlowPointRegistry
     /// -- a bare bulb, a window, a sign). Pass `LightType.Spot` for a
     /// fixture that should read as directional (2026-07: the overhanging
     /// streetlight's bulb, aimed straight down at the road) --
-    /// DynamicLightBudget aims any Spot-type promoted light straight
-    /// down and applies its own shared cone angle; this registry only
-    /// carries WHICH kind, not a per-point direction/angle, since every
-    /// current spot use case wants the same "pointing down at the road"
-    /// aim.</summary>
-    public static void Register(Transform point, Color color, LightType lightType = LightType.Point)
+    /// DynamicLightBudget aims a Spot-type promoted light straight down
+    /// by default and applies its own shared cone angle.
+    ///
+    /// `spotAimsWithTransform` (2026-07, traffic headlights): a second
+    /// Spot use case that does NOT want the shared straight-down aim --
+    /// a moving car's beam needs to track wherever the car is currently
+    /// FACING, not the road below it. When true, the promoted Light's
+    /// rotation is copied from `point`'s own live world rotation every
+    /// refresh instead of the shared down-aim constant -- give `point` a
+    /// child transform whose LOCAL rotation already encodes the fixed
+    /// "slightly down" tilt, so its WORLD rotation combines that tilt
+    /// with wherever its parent (the car) is currently facing.
+    ///
+    /// `isEligible` (2026-07, traffic headlights): an optional per-point
+    /// predicate checked every refresh BEFORE this point is even
+    /// considered a budget candidate -- default null means "always
+    /// eligible," the exact behavior every prior call site (streetlamps,
+    /// windows, neon, marquee -- registered once for the city's whole
+    /// lifetime) already has. A car's headlight is only relevant while
+    /// driving at night; rather than adding true register/unregister
+    /// lifecycle to this otherwise append-only registry, an ineligible
+    /// point (parked, or daylight) simply never competes for or holds a
+    /// budget slot, so a real Light never ends up shining from a car
+    /// that (from the player's read of the scene) has its headlights
+    /// off.</summary>
+    public static void Register(Transform point, Color color, LightType lightType = LightType.Point,
+        bool spotAimsWithTransform = false, System.Func<bool> isEligible = null)
     {
-        Points.Add(new Point { Transform = point, Color = color, LightType = lightType });
+        Points.Add(new Point
+        {
+            Transform = point,
+            Color = color,
+            LightType = lightType,
+            SpotAimsWithTransform = spotAimsWithTransform,
+            IsEligible = isEligible,
+        });
     }
 
     public static int Count { get { return Points.Count; } }
     public static Transform TransformAt(int i) { return Points[i].Transform; }
     public static Color ColorAt(int i) { return Points[i].Color; }
     public static LightType LightTypeAt(int i) { return Points[i].LightType; }
+    public static bool SpotAimsWithTransformAt(int i) { return Points[i].SpotAimsWithTransform; }
+    public static bool IsEligibleAt(int i) { var f = Points[i].IsEligible; return f == null || f(); }
 }
 
 /// <summary>
@@ -225,6 +257,7 @@ public class DynamicLightBudget : MonoBehaviour
         {
             var t = GlowPointRegistry.TransformAt(i);
             if (t == null) continue;   // a knocked-over/destroyed prop simply drops out
+            if (!GlowPointRegistry.IsEligibleAt(i)) continue;   // e.g. a parked/daylight car's headlight
             var d = (t.position - camPos).sqrMagnitude;
             if (_picked.Count < activeBudget)
             {
@@ -317,7 +350,13 @@ public class DynamicLightBudget : MonoBehaviour
                 pooled.type = kind;
                 if (kind == LightType.Spot)
                 {
-                    pooled.transform.rotation = SpotDownRotation;
+                    // most Spot registrants (the overhanging streetlight)
+                    // want the shared straight-down aim; a car's headlight
+                    // instead tracks wherever it's currently facing --
+                    // see GlowPointRegistry.Register's own doc comment.
+                    pooled.transform.rotation = GlowPointRegistry.SpotAimsWithTransformAt(idx)
+                        ? GlowPointRegistry.TransformAt(idx).rotation
+                        : SpotDownRotation;
                     pooled.spotAngle = spotConeAngle;
                     pooled.intensity = spotIntensity;
                 }

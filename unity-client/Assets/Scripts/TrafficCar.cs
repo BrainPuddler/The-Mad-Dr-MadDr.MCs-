@@ -36,6 +36,23 @@ public class TrafficCar : MonoBehaviour
     private const int MinTripHops = 5;
     private const int MaxTripHops = 14;
 
+    // docs/28's two-tier lighting model, extended to traffic (creator
+    // direction, 2026-07: "forward and slightly down facing lights and
+    // brake lights... at night... only render[ing] the ones in regions
+    // the user can see"). The headlight's Tier 2 (a real, budgeted
+    // Light) competes in the SAME shared DynamicLightBudget pool every
+    // streetlamp/window/neon already does -- nearest-to-camera wins, so
+    // a far-away or off-screen car's headlight simply never costs a
+    // real light, exactly the ask, with zero new perf-management code
+    // of its own. Brake lights are Tier 1 (emissive material) only --
+    // an indicator, not something that should ever cast light on its
+    // surroundings, so there's no budget to compete for in the first
+    // place.
+    private const float HeadlightTiltDeg = 14f;          // "slightly down" from the car's own forward
+    private const float BulbWorldDiameter = 0.22f;       // roughly a real headlight/taillight lens, meters
+    private const float NightEligibleThreshold = 0.05f;  // DayNightState.NightAmount above this: headlight can compete for a real light
+    private const float BrakeDecelEpsilon = 0.2f;        // speed must drop by at least this much frame-to-frame to read as braking
+
     private enum State { Driving, Parked }
 
     private RuntimeCityBuilder _builder;
@@ -59,6 +76,12 @@ public class TrafficCar : MonoBehaviour
     private float _exitAngle;      // world angle of _roundExit from the island center
     private float _prevAngle;      // last frame's angle around the center (for sweep accumulation)
     private float _sweptDeg;       // total degrees circulated since entering
+
+    // lights (see the constants above for the "why")
+    private Transform _headlightAim;
+    private Renderer[] _headlightBulbs;
+    private Renderer[] _brakeLightBulbs;
+    private float _lastSpeed;
 
     public bool IsDriving { get { return _state == State.Driving; } }
 
@@ -90,6 +113,8 @@ public class TrafficCar : MonoBehaviour
         transform.position = RoadPoint(start, start);
         _target = transform.position;
         BuildBody(body, Hash(start, 7) % 4 == 0);
+        BuildLights();
+        _lastSpeed = CruiseSpeed;   // avoids a false "braking" flash on the very first driving frame
 
         var pct = Mathf.Clamp(movingPercent, 0.05f, 1f);
         var avgHops = (MinTripHops + MaxTripHops) / 2f;
@@ -168,6 +193,139 @@ public class TrafficCar : MonoBehaviour
         if (cabinRenderer != null) cabinRenderer.sharedMaterial = mat;
         var cabinCollider = cabin.GetComponent<Collider>();
         if (cabinCollider != null) Object.Destroy(cabinCollider);
+    }
+
+    // ---- lights ---------------------------------------------------------
+
+    // One shared Material PER KIND across the whole fleet (SRP-batcher
+    // friendly, same caching idiom BuildingDresser/RoadDresser's M()
+    // already uses) -- registered with NeonRegistry exactly once, at
+    // first mint, so every car's bulbs track day/night brightness
+    // through the SAME global boost pipeline every window/neon/marquee
+    // already rides, with no per-car per-frame color work of its own.
+    // Per-car ON/OFF (driving vs parked, braking vs not) is a SEPARATE
+    // concern handled by toggling each car's own Renderer.enabled --
+    // a shared material's brightness is necessarily the same for every
+    // renderer using it, so "is this specific car's headlight showing
+    // right now" can't live in the material at all.
+    private static Material _headlightMat;
+    private static Material _brakeLightMat;
+
+    private static Material HeadlightMat()
+    {
+        if (_headlightMat != null) return _headlightMat;
+        _headlightMat = new Material(ShaderUtil.FindRenderableShader());
+        var baseColor = new Color(1f, 0.95f, 0.82f);
+        var emission = baseColor * 3.2f;
+        _headlightMat.color = baseColor;
+        _headlightMat.EnableKeyword("_EMISSION");
+        _headlightMat.SetColor("_EmissionColor", emission);
+        NeonRegistry.Register(_headlightMat, emission);
+        return _headlightMat;
+    }
+
+    private static Material BrakeLightMat()
+    {
+        if (_brakeLightMat != null) return _brakeLightMat;
+        _brakeLightMat = new Material(ShaderUtil.FindRenderableShader());
+        var baseColor = new Color(0.95f, 0.08f, 0.05f);
+        var emission = baseColor * 3.5f;
+        _brakeLightMat.color = baseColor;
+        _brakeLightMat.EnableKeyword("_EMISSION");
+        _brakeLightMat.SetColor("_EmissionColor", emission);
+        NeonRegistry.Register(_brakeLightMat, emission);
+        return _brakeLightMat;
+    }
+
+    /// <summary>Two small bulbs each for head/brake lights (front/rear
+    /// corners) plus one otherwise-invisible "HeadlightAim" child that
+    /// carries the Tier-2 real-light registration -- its LOCAL rotation
+    /// is the fixed <see cref="HeadlightTiltDeg"/> down-tilt, so its
+    /// WORLD rotation (read live by DynamicLightBudget every refresh,
+    /// via <see cref="GlowPointRegistry.Register"/>'s `spotAimsWithTransform`)
+    /// always combines that tilt with wherever THIS car is currently
+    /// facing, not a fixed streetlamp-style straight-down aim. Bulb
+    /// positions/the aim point are fractional offsets of the chassis's
+    /// own 1x1x1 unit cube (same convention <see cref="BuildBody"/>'s
+    /// cabin/windshield already use -- Unity multiplies a child's local
+    /// position by the parent's scale automatically), so this one method
+    /// places lights correctly on both the sedan and the truck body
+    /// without needing to know which shape it's on. Bulb scale
+    /// explicitly counters the chassis's own non-uniform scale so a
+    /// bulb reads as a small round lens, not a squashed ellipsoid.</summary>
+    private void BuildLights()
+    {
+        var parentScale = transform.localScale;
+        var bulbScale = new Vector3(BulbWorldDiameter / parentScale.x, BulbWorldDiameter / parentScale.y, BulbWorldDiameter / parentScale.z);
+        var headMat = HeadlightMat();
+        var brakeMat = BrakeLightMat();
+
+        _headlightBulbs = new[]
+        {
+            MakeBulb("HeadlightL", new Vector3(-0.32f, -0.05f, 0.49f), bulbScale, headMat),
+            MakeBulb("HeadlightR", new Vector3(0.32f, -0.05f, 0.49f), bulbScale, headMat),
+        };
+        _brakeLightBulbs = new[]
+        {
+            MakeBulb("BrakeLightL", new Vector3(-0.32f, -0.05f, -0.49f), bulbScale, brakeMat),
+            MakeBulb("BrakeLightR", new Vector3(0.32f, -0.05f, -0.49f), bulbScale, brakeMat),
+        };
+
+        var aimGo = new GameObject("HeadlightAim");
+        aimGo.transform.SetParent(transform, false);
+        aimGo.transform.localPosition = new Vector3(0f, -0.05f, 0.5f);
+        aimGo.transform.localRotation = Quaternion.Euler(HeadlightTiltDeg, 0f, 0f);
+        _headlightAim = aimGo.transform;
+
+        // isEligible: only compete for a real Light while actually
+        // driving at night -- see GlowPointRegistry.Register's own doc
+        // comment for why this is the mechanism (not true register/
+        // unregister) that keeps a parked or daylight car's headlight
+        // from ever holding a budget slot.
+        GlowPointRegistry.Register(_headlightAim, new Color(1f, 0.95f, 0.85f), LightType.Spot,
+            spotAimsWithTransform: true,
+            isEligible: () => IsDriving && DayNightState.NightAmount > NightEligibleThreshold);
+
+        SetBulbsActive(_headlightBulbs, false);
+        SetBulbsActive(_brakeLightBulbs, false);
+    }
+
+    private Renderer MakeBulb(string name, Vector3 localPos, Vector3 localScale, Material mat)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        go.name = name;
+        var t = go.transform;
+        t.SetParent(transform, false);
+        t.localPosition = localPos;
+        t.localScale = localScale;
+        var renderer = go.GetComponent<Renderer>();
+        if (renderer != null) renderer.sharedMaterial = mat;
+        var collider = go.GetComponent<Collider>();
+        if (collider != null) Object.Destroy(collider);
+        return renderer;
+    }
+
+    private static void SetBulbsActive(Renderer[] bulbs, bool active)
+    {
+        for (var i = 0; i < bulbs.Length; i++) if (bulbs[i] != null) bulbs[i].enabled = active;
+    }
+
+    /// <summary>Driven from every real movement resolution
+    /// (<see cref="MoveToward"/>, the one function every driving Update()
+    /// path funnels through) plus explicitly from the Parked branch.
+    /// Headlights: on while driving, once it's dark enough to matter.
+    /// Brake lights: on while driving AND actively decelerating -- see
+    /// <see cref="BrakeDecelEpsilon"/>'s own comment for what "actively
+    /// decelerating" means here (the follow-traffic slowdown is the
+    /// primary real-world trigger this covers; the abrupt stop-to-park
+    /// transition has no gradual deceleration modeled today, so it isn't
+    /// covered by this signal -- a real, deliberate scope limit, not an
+    /// oversight).</summary>
+    private void UpdateLights(bool driving, bool braking)
+    {
+        var on = driving && DayNightState.NightAmount > NightEligibleThreshold;
+        SetBulbsActive(_headlightBulbs, on);
+        SetBulbsActive(_brakeLightBulbs, on && braking);
     }
 
     /// <summary>Pick the next network hex from `_to`. ALWAYS excludes
@@ -324,6 +482,7 @@ public class TrafficCar : MonoBehaviour
 
         if (_state == State.Parked)
         {
+            UpdateLights(driving: false, braking: false);
             // avoid monsters even at the curb -- a parked car peels out
             // the instant a threat closes in, same panic radius as driving
             var parkThreat = _builder.NearestMonsterTo(transform.position, FleeRadius);
@@ -502,12 +661,22 @@ public class TrafficCar : MonoBehaviour
         var to = target - transform.position;
         to.y = 0f;
         var dist = to.magnitude;
-        if (dist < 0.05f) return;
+        if (dist < 0.05f) { UpdateLights(driving: true, braking: false); return; }
         var dir = to / dist;
         transform.position += dir * Mathf.Min(speed * dt, dist);
         var p = transform.position;
         transform.position = new Vector3(p.x, _builder.GroundHeightAt(p) + 0.75f, p.z);
         transform.rotation = Quaternion.Slerp(transform.rotation,
             Quaternion.LookRotation(dir, Vector3.up), dt * 4f);
+
+        // this is the ONE point every driving Update() path funnels
+        // through (fleeing, roundabout circulation, normal cruise), so
+        // it's also the one place that needs to notice a frame-to-frame
+        // drop in the `speed` the caller actually asked for -- see
+        // BrakeDecelEpsilon's own comment for what this signal does and
+        // doesn't cover.
+        var braking = speed < _lastSpeed - BrakeDecelEpsilon;
+        _lastSpeed = speed;
+        UpdateLights(driving: true, braking: braking);
     }
 }
