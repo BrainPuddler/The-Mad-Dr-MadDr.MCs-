@@ -87,6 +87,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     private readonly List<Citizen> _citizens = new List<Citizen>();
     private readonly List<Tank> _tanks = new List<Tank>();
     private readonly List<UnitCombat> _combatants = new List<UnitCombat>();
+    // 2026-07 worker-economy epic: Collectors capture fleeing Citizens and
+    // possess them into Workers -- both new unit kinds, Tank.cs-pattern
+    // bespoke MonoBehaviours (non-genome, plain UnitCombat), tracked here
+    // the same way _tanks/_combatants are.
+    private readonly List<Collector> _collectors = new List<Collector>();
+    private readonly List<Worker> _workers = new List<Worker>();
     private readonly List<TrafficCar> _trafficCars = new List<TrafficCar>();
 
     // docs/25 Phase A: uniform-grid neighbour lookup behind ApplySeparation/
@@ -1737,6 +1743,58 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         }
         if (citizen != null) Object.Destroy(citizen.gameObject);
         Debug.Log("Citizen eaten. Wallet: " + WalletBlood + " blood / " + WalletBones + " bones / " + WalletBrains + " brains.");
+    }
+
+    /// <summary>Every spawned Collector -- for a future selection/order
+    /// UI, same accessor shape as <see cref="Monsters"/>/<see cref="TrafficCars"/>.</summary>
+    public IReadOnlyList<Collector> Collectors { get { return _collectors; } }
+
+    /// <summary>Every possessed-into-Worker unit (2026-07 epic) -- Phase 3
+    /// (worker-gated construction) queries this to check a player has an
+    /// available worker before letting a build command through.</summary>
+    public IReadOnlyList<Worker> Workers { get { return _workers; } }
+
+    /// <summary>2026-07 epic: a Collector's capture arriving -- POSSESSES
+    /// the citizen into a new Worker unit instead of eating it for
+    /// resources (<see cref="OnCitizenEaten"/>'s sibling arrival path,
+    /// same trigger site in <see cref="Citizen.Update"/>, different
+    /// outcome). No wallet credit -- a possessed worker IS the payoff,
+    /// not a resource transaction. Spawns the Worker at the citizen's own
+    /// position/facing, parented under the same host transform as every
+    /// other spawned-mid-match unit kind, then destroys the citizen
+    /// GameObject exactly like the eaten path does.</summary>
+    public void OnCitizenPossessed(Citizen citizen, UnitCombat collector)
+    {
+        if (citizen == null) return;
+        var pos = citizen.transform.position;
+        var go = new GameObject("Worker_" + _workers.Count);
+        go.transform.position = pos;
+        var worker = go.AddComponent<Worker>();
+        worker.Init(this);
+        _workers.Add(worker);
+        if (worker.Combat != null) _combatants.Add(worker.Combat);
+        _citizens.Remove(citizen);
+        Object.Destroy(citizen.gameObject);
+        Debug.Log("Citizen possessed into a Worker. Total workers: " + _workers.Count);
+    }
+
+    /// <summary>Manual test/dev entry point for spawning a Collector
+    /// (2026-07 epic) -- NOT yet wired into any match-start spawn flow.
+    /// The real way a player should field one ties into Phase 4's
+    /// Mad-Doctor production mechanic (the "Big Brain" control unit /
+    /// harvested-Brains cost), which doesn't exist yet -- flagged rather
+    /// than faked with an arbitrary auto-spawn count. Mirrors <see
+    /// cref="SpawnFleeingOccupant"/>'s own status as a real, tested,
+    /// not-yet-auto-triggered building block.</summary>
+    public Collector SpawnCollector(HexCoord hex)
+    {
+        var go = new GameObject("Collector_" + _collectors.Count);
+        go.transform.position = WorldOf(hex);
+        var collector = go.AddComponent<Collector>();
+        collector.Init(this);
+        _collectors.Add(collector);
+        if (collector.Combat != null) _combatants.Add(collector.Combat);
+        return collector;
     }
 
     public void SpawnWaypointMarker(Vector3 at)

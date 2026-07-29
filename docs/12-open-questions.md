@@ -5703,3 +5703,98 @@ and worker-gated construction; the shared `CommandKind.TrainUnit`
 production-queue plumbing and the three faction-specific mechanics on top
 of it (Mad Doctor Big Brain/Controlled-Human, Alien mind-control costed
 in captured-citizen energy, Human cheaper-but-multi-resource recruiting).
+
+## 2026-07: worker-economy epic, Phase 2 (Collector + possess-into-Worker)
+
+Second link in the same chain: "collector units that capture and possess
+those humans, who become worker units, like SCV in starcraft" (creator's
+own words). Resolved before implementing: the deferred question from
+Phase 1's entry above -- reuse the existing `CaptureState` pull mechanic
+rather than build a parallel one. Confirmed the right call by reading
+`WebAttackAbility.cs`/`UnitCombat.cs`/docs/26 directly: `Citizen.Capture`
+already IS the generic capture entry point (any `UnitCombat` can be a
+captor), and `UnitCombat.IsPossessed` already exists as a forward-
+compatible hook for a DIFFERENT possession concept (Mad Doctor mind-
+control on monster units, for friendly-fire immunity, docs/26 §5) --
+NOT unit-conversion, so it's a related but distinct mechanic, not
+something to overload.
+
+Also resolved: whether a Collector/Worker needs to be a match-core
+`SimUnit`. Grepped `packages/match-core/src/*.cs` for "Capture"/"Possess"
+-- zero hits. Confirmed via docs/26 §1's own framing: today's ENTIRE
+combat layer (`MonsterAgent`/`Tank`/`UnitCombat`/`Citizen`/`CaptureState`)
+is Unity-side only, client-cosmetic-to-fully-live depending on the unit;
+match-core's parallel sim-driven combat is still opt-in demo scope
+(`simDrivenDemo`), not the default live path. So a Collector/Worker
+following `Tank.cs`'s established pattern -- a bespoke, non-genome
+`MonoBehaviour` with a plain `UnitCombat`, same tier as Tank, not
+MonsterAgent's genome-driven tier -- is the consistent choice, not a
+shortcut.
+
+**Shipped:**
+
+- `Citizen.cs`: `Capture(UnitCombat captor, float speed, bool possess =
+  false)` -- the existing web-attack call site (`WebAttackAbility.cs`)
+  keeps compiling unchanged via the default. New `IsCaptured` public
+  getter (a Collector needs to skip a citizen someone else already has a
+  hook into). Arrival branch now checks `_possessOnArrival`: true routes
+  to a new `RuntimeCityBuilder.OnCitizenPossessed`, false (the existing
+  behavior, unchanged) still routes to `OnCitizenEaten`.
+- `RuntimeCityBuilder.cs`: new `OnCitizenPossessed(citizen, collector)`
+  -- spawns a `Worker` at the citizen's position, destroys the citizen,
+  no wallet credit (the worker IS the payoff). New `SpawnCollector(hex)`
+  -- a manual test/dev entry point, NOT wired into any match-start spawn
+  flow. Real reason, not laziness: the actual way a player should field
+  a Collector ties into Phase 4's still-unbuilt Mad-Doctor production
+  mechanic (the "Big Brain" control unit / 20-harvested-Brains cost) --
+  auto-spawning some arbitrary count now would be inventing a number
+  Phase 4 should own. `Collector`/`Worker` accessor lists added alongside
+  the existing `Monsters`/`TrafficCars`/`Citizens` pattern.
+- `Collector.cs` (new): seeks the nearest uncaptured Citizen within
+  45m, closes to 3.5m, then calls `Citizen.Capture(_combat, 5f, possess:
+  true)`. No weapon, no combat -- pure gatherer, closest in spirit to the
+  existing Ghoul's auto-scavenge role. Simple direct-seek movement, no
+  Tank-style road-preference steering (a lighter mover doesn't need it).
+  Violet-hulled boxy-cart-with-funnel silhouette -- distinct shape from
+  every other unit kind, reading as Mad Doctor apparatus.
+- `Worker.cs` (new): low-HP (40), no-weapon economic unit -- exists, has
+  a real `UnitCombat`, can be targeted/killed like anything else, stands
+  where it was possessed. No move orders or construction behavior yet;
+  Phase 3 of this epic is what puts it to work. Capsule-plus-hard-hat
+  silhouette, dull khaki -- distinct from a Citizen's random civilian hue
+  and from either faction's combat palette (aesthetic-preferences skill
+  §5: shape carries kind, color carries owner/state).
+
+**Verification:** a new flightcheck harness (`collector-worker-verify`)
+builds a real `MadDr.RosterClient.dll` (for the real `WeaponProfile`/
+`WeaponKind` types `UnitCombat.cs` needs) and compiles the REAL
+`UnitCombat.cs`/`CaptureState.cs`/`Citizen.cs`/`Collector.cs`/`Worker.cs`
+together (narrow stubs only for the special-attack FX/cooldown plumbing
+these two new units never actually reach, since both configure with
+`weapon: null`). Reflection-drives a real `Collector` chasing a real
+`Citizen` ~20m away over simulated time: confirms it closes the distance,
+captures, and the citizen becomes exactly one real `Worker` with its own
+live `UnitCombat`; a parallel regression citizen (default, non-possess
+`Capture()`) confirms the original eat-for-resources path is provably
+unchanged.
+
+**The harness caught a real bug -- in the harness, not the shipped
+code, and worth recording as its own lesson.** The stub's `Object.
+Destroy` was a no-op, so reflection-invoking `Citizen.Update()`
+unconditionally every simulated frame kept re-running the arrival
+branch on an already-"destroyed" citizen -- 529 Workers spawned instead
+of 1. Real Unity stops calling `Update()` on a destroyed `GameObject`
+starting the very frame `Destroy()` fires, so this can never reproduce
+in actual gameplay; confirmed by fixing the STUB (tracking a `Destroyed`
+flag, having the harness loop respect it) rather than the real code,
+and rerunning clean. Distinguishing "a real gameplay bug" from "a
+harness that doesn't model one specific piece of engine behavior" is
+exactly the judgment call this project's own verification discipline
+keeps asking for -- recorded here as a concrete example of getting that
+call right, not just the earlier Phase 1 entry's opposite case (a real
+bug the harness correctly caught).
+
+Not seen in a real render. **Deferred to Phase 3/4 of the same epic**:
+worker move orders/selection, worker-gated building construction, and
+the actual spawn trigger for Collectors (Phase 4's Mad-Doctor
+production mechanic).

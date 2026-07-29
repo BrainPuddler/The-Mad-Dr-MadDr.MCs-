@@ -7,7 +7,9 @@ using UnityEngine;
 /// entity -- exactly the doc's own scoping ("Citizens run client-side
 /// cosmetic/crowd AI, not server-synced"); edible. Eating one pays
 /// docs/20's per-citizen yield (Blood 2 / Bones 1 / Brains 1) into the
-/// session wallet.
+/// session wallet. A Collector's capture (2026-07 epic) is the other
+/// arrival outcome: possession into a Worker instead of consumption --
+/// see <see cref="Capture"/>'s `possess` parameter.
 ///
 /// Movement (creator direction, 2026-07): a citizen has a DESTINATION (a
 /// sidewalk hex somewhere across town) rather than aimless wander, and
@@ -36,6 +38,13 @@ public class Citizen : MonoBehaviour
     /// assumed), so it can't share UnitCombat's copy and owns one
     /// directly instead. Null until something calls Capture().</summary>
     private CaptureState _capture;
+    private bool _possessOnArrival;
+
+    /// <summary>True while this citizen is mid-capture (dragged toward a
+    /// captor, either to be eaten or possessed) -- lets a Collector (and
+    /// any future caller) skip a citizen someone else already has a hook
+    /// into rather than re-targeting/stacking captures.</summary>
+    public bool IsCaptured { get { return _capture != null && _capture.Active; } }
 
     // 2026-07 creator direction: buildings that get destroyed "disgorge
     // their human occupants that flee." A disgorged occupant should read
@@ -50,11 +59,16 @@ public class Citizen : MonoBehaviour
 
     /// <summary>Begin being dragged toward `captor`, overriding this
     /// citizen's own flee/walk AI in Update() until the captor dies
-    /// (auto-release) or it arrives and is eaten (docs/26 Phase 7).</summary>
-    public void Capture(UnitCombat captor, float speed)
+    /// (auto-release) or it arrives -- eaten (docs/26 Phase 7) by
+    /// default, or POSSESSED into a Worker (2026-07 epic) when `possess`
+    /// is true (a Collector's capture, as opposed to a web/psionic
+    /// attack's consume-for-resources capture -- same pull mechanic,
+    /// different arrival outcome).</summary>
+    public void Capture(UnitCombat captor, float speed, bool possess = false)
     {
         if (_capture == null) _capture = new CaptureState();
         _capture.Begin(captor, speed);
+        _possessOnArrival = possess;
     }
 
     public void Init(RuntimeCityBuilder builder, HexCoord home)
@@ -113,9 +127,19 @@ public class Citizen : MonoBehaviour
                 transform.position = new Vector3(cp.x, _builder.GroundHeightAt(cp) + 0.9f, cp.z);
                 if (arrived)
                 {
-                    var captorAgent = _capture.Captor != null ? _capture.Captor.GetComponent<MonsterAgent>() : null;
-                    if (captorAgent != null) captorAgent.NotifyCapturedCitizenEaten();
-                    _builder.OnCitizenEaten(this);
+                    if (_possessOnArrival)
+                    {
+                        // 2026-07 epic: a Collector's capture converts
+                        // this citizen into a Worker instead of eating it
+                        // -- same pull, different arrival outcome.
+                        _builder.OnCitizenPossessed(this, _capture.Captor);
+                    }
+                    else
+                    {
+                        var captorAgent = _capture.Captor != null ? _capture.Captor.GetComponent<MonsterAgent>() : null;
+                        if (captorAgent != null) captorAgent.NotifyCapturedCitizenEaten();
+                        _builder.OnCitizenEaten(this);
+                    }
                 }
                 return;
             }
