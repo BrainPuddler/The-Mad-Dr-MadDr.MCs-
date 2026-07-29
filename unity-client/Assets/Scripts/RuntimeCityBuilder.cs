@@ -63,8 +63,14 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     [Range(0.05f, 1f)]
     public float trafficMovingPercent = 0.55f;
 
-    [Tooltip("2026-07 creator direction (\"change where cars are driving to the areas close to or near the player view area -- let's not waste processing power\"): cars farther than this from the camera freeze in place (zero per-frame cost -- driving logic, threat checks, and roundabout math all skip entirely) until the camera comes back near them, and route-picking at every junction is biased toward staying within this radius so an active car's trip naturally curls back toward the view instead of wandering off to a part of the map nobody's looking at. v0.1 placeholder tuned to roughly a typical RTS camera's visible ground footprint, not measured against a real Editor session.")]
-    public float trafficActiveRadius = 130f;
+    [Tooltip("2026-07 creator direction (\"change where cars are driving to the areas close to or near the player view area -- let's not waste processing power\"): cars farther than this from the camera's actual ground focus freeze in place (zero per-frame cost -- driving logic, threat checks, and roundabout math all skip entirely) until the camera comes back near them, and route-picking at every junction is biased toward staying within this radius so an active car's trip naturally curls back toward the view instead of wandering off to a part of the map nobody's looking at. 2026-07 FIX: a first version of this used a FIXED radius against the wrong point entirely (see RefreshTrafficActivity's own doc comment) and froze the whole fleet from the very first refresh on a typical match -- a real, reported regression (\"still none of the cars are moving, in the editor\"), not a tuning nitpick. Now derived LIVE from camera height every refresh, reusing the exact same proven ratio SimpleCameraRig.shadowDistancePerHeight already uses for \"how far the visible ground extends from the look-at point\" -- this field is now a FLOOR (the minimum radius at minimum zoom), not the radius itself.")]
+    public float trafficActiveRadiusFloor = 60f;
+
+    [Tooltip("Same ratio as SimpleCameraRig.shadowDistancePerHeight (SnapTo's own camera-to-ground geometry: height * 1.28, plus margin so the covered ground extends to the visible frustum's edge, not just the exact look-at point) -- reused here rather than guessed, since it's the same camera and the same question (\"how far does the visible ground extend from here\").")]
+    public float trafficActiveRadiusPerCameraHeight = 1.9f;
+
+    [Tooltip("Same cap philosophy as SimpleCameraRig.shadowDistanceCap -- don't let the active-traffic zone keep growing at extreme zoom-out, where the perf savings matter most and individual cars are visually tiny anyway.")]
+    public float trafficActiveRadiusCap = 320f;
 
     [Tooltip("How much clear space (meters) stays between two units' bodies once a group has settled around a shared destination waypoint -- how tightly they pack in around the click point. Added to the pair's own combined body radii (ApplySeparation), so this is extra daylight on top of however big the units themselves are, not the whole gap.")]
     [Range(0f, 5f)]
@@ -357,27 +363,79 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     }
 
     /// <summary>Marks every traffic car near/far based on ground distance
-    /// from the camera, and caches the camera's own ground position for
-    /// <see cref="TrafficCar.PickNext"/>'s route bias to read. A no-op
-    /// (leaves every car in whatever state it already had) if there's no
-    /// main camera yet -- matches DynamicLightBudget.Refresh's own
-    /// defensive "cam == null: bail" convention.</summary>
+    /// from where the camera is actually LOOKING (not the camera rig's own
+    /// transform, which sits well off to the side of that -- see the
+    /// 2026-07 FIX note below), and caches that ground point for <see
+    /// cref="TrafficCar.PickNext"/>'s route bias to read. A no-op (leaves
+    /// every car in whatever state it already had) if there's no main
+    /// camera yet -- matches DynamicLightBudget.Refresh's own defensive
+    /// "cam == null: bail" convention. Same "fail open" posture if the
+    /// look-ray never crosses the ground plane either (camera pitched up
+    /// at the sky, a degenerate case SnapTo's own fixed 50-degree pitch
+    /// never actually produces, but scroll-zoom/rotation are player
+    /// input): keeps the LAST known good focus rather than computing
+    /// nonsense from it, so a bad frame can only ever leave cars in their
+    /// previous (working) state, never actively break them.
+    ///
+    /// 2026-07 FIX, real reported regression ("still none of the cars are
+    /// moving, in the editor"): the very first version of this used
+    /// `cam.transform.position` directly as the "ground focus" -- but
+    /// `SimpleCameraRig.SnapTo` places the camera RIG itself at `focus +
+    /// (0, height, -height*0.8)`, i.e. well ABOVE and BEHIND the actual
+    /// point it's looking at, never AT it. Treating that offset, elevated
+    /// rig position as "where the player is looking" put the reference
+    /// point tens of meters off from the real one on every single match,
+    /// and since traffic spawns scattered across the WHOLE road network
+    /// (not clustered near the start camera position), this likely froze
+    /// the entire default 10-car fleet the instant the very first refresh
+    /// ran (0.35s into the match) -- a real, severe regression, not a
+    /// tuning nitpick. Fixed by raycasting from the camera through the
+    /// VIEWPORT CENTER to the ground plane (y=0) -- the actual "what is
+    /// the player looking at" point, the same question <see
+    /// cref="SimpleCameraRig.FocusOn"/> already answers for its own
+    /// G-key-jump feature via a very similar ground-raycast, just done
+    /// here without a dependency on that component (RuntimeCityBuilder
+    /// only needs a math answer, not SimpleCameraRig's own drag-state).
+    /// Also switched the active radius from a single fixed guess to one
+    /// derived LIVE from camera height every refresh (see <see
+    /// cref="trafficActiveRadiusPerCameraHeight"/>'s own doc comment) --
+    /// the wrong-point bug was the primary cause, but a live, camera-
+    /// aware radius is far more robust across zoom levels than any one
+    /// fixed number could be.</summary>
     private void RefreshTrafficActivity()
     {
         var cam = Camera.main;
         if (cam == null) return;
-        var camPos = cam.transform.position;
-        camPos.y = 0f;
-        _cameraGroundFocus = camPos;
 
-        var activeSq = trafficActiveRadius * trafficActiveRadius;
+        var ray = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+        if (Mathf.Abs(ray.direction.y) > 1e-5f)
+        {
+            var t = -ray.origin.y / ray.direction.y;
+            if (t > 0f)
+            {
+                var ground = ray.origin + ray.direction * t;
+                ground.y = 0f;
+                _cameraGroundFocus = ground;
+            }
+            // t <= 0: the ground plane is BEHIND the camera along this
+            // ray (shouldn't happen at SnapTo's fixed downward pitch, but
+            // don't silently compute a nonsense point if it ever does) --
+            // keep the last known good focus.
+        }
+        // ray.direction.y == 0: looking perfectly level, no ground
+        // intersection at all -- same "keep the last known good focus"
+        // fallback.
+
+        var camHeight = cam.transform.position.y;
+        var activeRadius = Mathf.Min(camHeight * trafficActiveRadiusPerCameraHeight + trafficActiveRadiusFloor, trafficActiveRadiusCap);
+        var activeSq = activeRadius * activeRadius;
         for (var i = 0; i < _trafficCars.Count; i++)
         {
             var car = _trafficCars[i];
             if (car == null) continue;
             var p = car.transform.position;
             p.y = 0f;
-            car.SetNearCamera((p - camPos).sqrMagnitude <= activeSq);
+            car.SetNearCamera((p - _cameraGroundFocus).sqrMagnitude <= activeSq);
         }
     }
 

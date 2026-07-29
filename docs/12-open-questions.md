@@ -6204,3 +6204,99 @@ speed-variance range, the passing trigger thresholds, and the
 lookahead/offset distances are all reasoned v0.1 placeholders tuned
 against the flightcheck's own numeric output, not an actual Editor
 session's visual read.
+
+## 2026-07: FIX -- traffic freeze regression (wrong camera ground-focus point)
+
+Creator report, verbatim: "still non of the cars are moving, in the
+editor." A real, severe regression from the camera-proximity gating
+feature two entries above -- traced to a geometry mistake in that
+feature's own implementation, not a new bug in the passing/speed-
+variance work that followed it.
+
+**Root cause.** `RuntimeCityBuilder.RefreshTrafficActivity` computed
+its "where is the player looking" reference point as `Camera.main.
+transform.position` (Y zeroed) -- i.e., treated the camera RIG's own
+transform as if it sat directly above whatever it's looking at. It
+doesn't. `SimpleCameraRig.SnapTo` places the camera at `focus + (0,
+height, -height*0.8)` -- offset both UP (by `height`) and BACKWARD (by
+`0.8*height`) from the actual look-at point, a completely ordinary and
+correct way to build an angled RTS camera rig, just incompatible with
+treating the rig's raw position as a ground coordinate. At the game's
+own actual match-start camera height (70, from the `rig.SnapTo(...,
+70f)` call in `BeginMatch`), that's an error of exactly `70*0.8 = 56`
+meters -- not a rounding error, a completely different neighborhood of
+the map. Since the default 10-car traffic fleet spawns scattered
+across the ENTIRE generated road network (`SpawnTraffic` distributes
+across all of `RoadNetworkHexes()`, not clustered near city center),
+and the feature's active radius was ALSO a fixed, likely-too-small
+130m guess, this combination very plausibly froze the whole fleet
+within the first 0.35-second refresh of every single match -- exactly
+matching "still none of the cars are moving," not an intermittent or
+edge-case failure.
+
+**Fix, two parts:**
+
+1. **Correct reference point.** `RefreshTrafficActivity` now raycasts
+   from the camera through the VIEWPORT CENTER to the ground plane
+   (`y=0`) to find the actual point the camera is looking at --
+   exactly the same question `SimpleCameraRig.FocusOn` already answers
+   for its own G-key-jump-to-unit feature via a near-identical ground
+   raycast (`GroundUnderScreen`). Reimplemented locally in
+   `RuntimeCityBuilder` rather than calling into `SimpleCameraRig`,
+   since the only thing needed is the math, not that component's own
+   drag-state/instance. "Fail open" on every degenerate case: no
+   camera, the look-ray running parallel to the ground (never actually
+   produced by `SnapTo`'s fixed pitch, but player-driven scroll/rotate
+   input could in principle), or the ground plane being behind the
+   camera along that ray -- all keep the LAST known good focus rather
+   than computing (or silently defaulting to) a wrong point, so a bad
+   frame can only ever leave traffic in its last correctly-computed
+   state, never actively break it further.
+2. **Camera-aware active radius**, replacing the fixed 130m guess.
+   `SimpleCameraRig` already has an analogous, ALREADY-TUNED formula
+   for a related question -- "how far does the visible ground extend
+   from the camera's look-at point" -- used to size URP's shadow
+   distance (`shadowDistancePerHeight=1.9`, tied explicitly by its own
+   comment to `SnapTo`'s exact camera-to-ground ratio, `height*1.28`,
+   plus margin "so the covered area extends to the actual visible
+   frustum, not just the exact center point"). Reused that same ratio
+   directly (`trafficActiveRadiusPerCameraHeight=1.9`, floor 60,
+   cap 320) instead of inventing a second, independent guess for
+   what's really the same underlying question. At the actual
+   match-start height of 70, this gives an active radius of ~193m,
+   comfortably covering a scattered 10-car fleet near the start
+   position, versus the old fixed 130m radius centered on a point that
+   was ALSO wrong by 56m.
+
+**Verification.** No Unity Editor exists in this environment, so this
+couldn't be re-checked visually the way the creator's own report
+found it -- but the bug and its fix are both pure vector geometry, not
+engine behavior, so a plain C# console program (no Unity types
+involved at all) that replicates `SnapTo`'s EXACT camera placement
+formula and fixed 50-degree pitch was written and run for real. It
+confirms, at camera heights from 8 to 400 and multiple arbitrary focus
+points (not just the origin, ruling out a coincidental match there):
+the OLD approach was off by precisely 80% of camera height at every
+single height tested (not approximately -- exactly, since it's a
+direct consequence of the `0.8*height` term in `SnapTo`'s own offset
+formula); the FIX recovers the true focus point to within about 4% of
+camera height. That remaining ~4% residual is real but harmless and
+NOT a flaw in the fix -- it's a separate, pre-existing, small
+mismatch between `SnapTo`'s fixed 50-degree pitch and the angle its
+own `(height, -0.8*height)` offset would need to point EXACTLY at the
+focus (`atan(1/0.8) ≈ 51.3°`, not 50°) -- confirmed by working out
+that arithmetic directly rather than assuming the residual was a bug
+in the new ray-plane code and chasing it further. At the actual
+match-start height (70), that's roughly 2.7m of residual error against
+a 193m active radius -- 1.4%, negligible.
+
+Flagged honestly: this is a real Editor-reported bug that no
+flightcheck in this project caught in advance, because no flightcheck
+in this environment can render an actual camera/scene to notice "100%
+of visible traffic is frozen." A flightcheck can prove a formula's
+math is correct once told what to check; it can't discover on its own
+that a feature silently breaks something a real Editor session would
+show at a glance. Worth remembering for the next camera-relative
+feature this project adds: `Camera.main.transform.position` is NEVER
+automatically "where the player is looking" for an offset/angled rig
+like this one -- always resolve the actual look-at point first.
