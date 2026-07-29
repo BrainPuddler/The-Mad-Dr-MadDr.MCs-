@@ -5172,3 +5172,75 @@ arguments -- only where the code lives. Not seen in a real render.
 Remaining: per-faction/per-kind real building art, and giving the
 region picker a live preview (currently just labeled buttons, no
 thumbnail/gizmo-style rendering of each preset) are still open.
+
+## 2026-07: region picker gained live thumbnails
+
+Direct follow-up to the entry above -- "giving the region picker a live
+preview" closed the same session it was flagged.
+
+Each of the six options in `RegionPickerHud` now generates a real
+`CityModel` (`CityGenerator.Generate` against a fixed preview seed,
+`0xCAFE1950u` -- arbitrary but constant, so docs/18's own determinism
+contract means the picker shows the SAME six thumbnails every time, not
+a fresh reroll per session; deliberately distinct from
+`RuntimeCityBuilder.seed`, which is still the actual match seed) and
+bakes it into a small (160x160) top-down texture. The bake reuses
+`Minimap.BakeTerrain`'s own exact palette (water/ridge/road/bridge/
+building-tier/landmark colors) and hex-stamp technique, but couldn't
+call that method directly -- it's private and instance-bound to a live
+`RuntimeCityBuilder`'s own `WorldOf`/`_origin`, neither of which exist
+yet at picker time (no city has been placed in the world -- these are
+throwaway preview models, never built into the scene). Reimplemented
+against a standalone `CityModel` via `HexCoord.ToWorld()` directly
+instead. Hovering a button (tracked via `Rect.Contains(Event.current.
+mousePosition)`, the same pattern `Minimap.PointerOver` already uses)
+swaps the preview panel to that option's thumbnail; nothing hovered
+defaults to the first option so a thumbnail is always visible
+immediately, no blank-until-first-mouse-move gap.
+
+`RuntimeCityBuilder.ResolvePreset()` (private instance method, only
+ever resolved `this.preset`) was split into itself (a one-line
+forwarder) plus a new `public static ResolvePreset(PresetChoice choice)`
+-- a pure function of the enum value all along, so making it static
+cost nothing behaviorally and let the picker resolve any of the six
+candidate presets without first having to point a live instance's field
+at each one in turn.
+
+**A real finding, not silently smoothed over**: a standalone console
+check (real citygen-core DLL, all six actual presets, no stubs) showed
+BigCity and NewYork -- both dense-by-design presets -- come back with
+~100% of the 160x160 canvas touched by some non-ground color. First
+instinct was to treat that as a bug and shrink the minimum `stampRadius`
+below `Minimap.BakeTerrain`'s own proven `Clamp(..., 1, 6)`; tried a
+floor of 0, which dropped BigCity/NewYork to ~95% but didn't fix
+SmallTown/Paris/Montreal (all independently >90%, meaning stamp size
+was never the actual constraint for them) -- and would have meant this
+code no longer matches the ONE existing, presumably-already-tuned
+baking convention in the project for no proven benefit, since there is
+no way to see the actual rendered result in this environment and
+confirm a lower floor genuinely reads better. Reverted to matching
+Minimap's exact clamp; the ~100% coverage figure is recorded as an
+honest, unresolved observation (a dense preset may simply read as a
+busy, richly colored mosaic rather than a problem -- roads/buildings/
+landmarks remain visually DISTINCT colors even when nearly every texel
+is touched by one of them) rather than a claimed fix nobody can verify.
+
+Verified three ways, no Unity Editor available in this environment: (1)
+the six-script stub-compile from the entry above, extended with
+`Texture2D`/`Color32`/`FilterMode`/`TextureFormat` stubs (the real
+`Texture2D` derives from `UnityEngine.Object` -- the stub didn't
+originally, which surfaced as a real compile error the moment
+`RegionPickerHud`'s `OnDestroy` tried to `Object.Destroy` a cached
+thumbnail, fixed by inheriting the stub from `Object` too) plus
+`Mathf.Max`/`Clamp`/`RoundToInt`/`InverseLerp` and a static
+`RuntimeCityBuilder.ResolvePreset` -- compiled clean, 0 errors/
+warnings; (2) a standalone console check duplicating the bake math in
+plain float/int (no UnityEngine types) against all six REAL generated
+`CityModel`s via the real citygen-core DLL -- no exceptions, no
+degenerate bounds, and a determinism check (same seed baked twice,
+identical touched-texel count); (3) that same check is what surfaced
+the coverage finding above, worked through rather than hidden. Not seen
+in a real render.
+
+Remaining: per-faction/per-kind real building art is still open. The
+region picker itself has no further open items on this list.

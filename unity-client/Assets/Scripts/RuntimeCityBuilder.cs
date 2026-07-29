@@ -465,9 +465,16 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         }
     }
 
-    private CityPreset ResolvePreset()
+    private CityPreset ResolvePreset() => ResolvePreset(preset);
+
+    /// <summary>Static so <see cref="RegionPickerHud"/> can resolve any
+    /// candidate choice for its own preview thumbnails without needing a
+    /// live instance's <see cref="preset"/> field set to it first --
+    /// pure function of the enum value, same as it always was, just no
+    /// longer implicitly reading `this`.</summary>
+    public static CityPreset ResolvePreset(PresetChoice choice)
     {
-        switch (preset)
+        switch (choice)
         {
             case PresetChoice.SmallTown: return CityPreset.SmallTown();
             case PresetChoice.BigCity: return CityPreset.BigCity();
