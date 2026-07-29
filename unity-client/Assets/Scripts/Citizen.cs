@@ -37,6 +37,17 @@ public class Citizen : MonoBehaviour
     /// directly instead. Null until something calls Capture().</summary>
     private CaptureState _capture;
 
+    // 2026-07 creator direction: buildings that get destroyed "disgorge
+    // their human occupants that flee." A disgorged occupant should read
+    // as fleeing THE COLLAPSE, not calmly window-shopping until a monster
+    // happens to wander within FleeRadius -- so it gets a short forced
+    // panic sprint away from the origin point on spawn, independent of
+    // live monster proximity, before falling back to the normal
+    // proximity-based flee/walk AI below.
+    private const float ForcedFleeDuration = 4f;
+    private Vector3 _forcedFleeOrigin;
+    private float _forcedFleeTimer;
+
     /// <summary>Begin being dragged toward `captor`, overriding this
     /// citizen's own flee/walk AI in Update() until the captor dies
     /// (auto-release) or it arrives and is eaten (docs/26 Phase 7).</summary>
@@ -62,6 +73,17 @@ public class Citizen : MonoBehaviour
             mat.color = Color.HSVToRGB(hue, 0.35f, 0.8f);
             renderer.sharedMaterial = mat;
         }
+    }
+
+    /// <summary>Call right after <see cref="Init"/> for a citizen spawned
+    /// by a destroyed building's occupant disgorge (<see
+    /// cref="RuntimeCityBuilder.SpawnFleeingOccupant"/>) -- starts it in a
+    /// forced panic sprint away from `origin` (the wreck) for a few
+    /// seconds before it falls back to normal AI.</summary>
+    public void InitFleeingFrom(Vector3 origin)
+    {
+        _forcedFleeOrigin = origin;
+        _forcedFleeTimer = ForcedFleeDuration;
     }
 
     private void Update()
@@ -97,6 +119,44 @@ public class Citizen : MonoBehaviour
                 }
                 return;
             }
+        }
+
+        // forced panic sprint away from a building that just collapsed
+        // under this citizen -- same movement shape as the proximity flee
+        // below, just sourced from the fixed wreck point instead of a
+        // live monster; expires on its own and falls through to normal AI.
+        if (_forcedFleeTimer > 0f)
+        {
+            _forcedFleeTimer -= dt;
+            _hasDestination = false;
+            var awayFromWreck = transform.position - _forcedFleeOrigin;
+            awayFromWreck.y = 0f;
+            // degenerate case: this citizen spawned exactly on the wreck's
+            // own hex center (a real scenario -- the hex unblocks the
+            // instant the building dies, the same frame occupants spawn),
+            // so there's no real "away" direction yet -- pick a
+            // deterministic fallback angle off this citizen's own instance
+            // ID (same idiom Init already uses for its color hue) rather
+            // than leaving it stuck with a zero-length flee vector.
+            if (awayFromWreck.sqrMagnitude <= 0.01f)
+            {
+                var angle = (GetInstanceID() % 360) * Mathf.Deg2Rad;
+                awayFromWreck = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+            }
+            // the raw fleeTo point, NOT snapped to its hex's center like
+            // the proximity-flee block below does -- a hex's inradius
+            // (~10m) is bigger than this 6m step, so a citizen spawned
+            // dead-center on its wreck's own hex (every disgorged
+            // occupant, always) would otherwise round right back to the
+            // SAME hex center it started at and never move a single unit
+            // for the whole forced-flee window. Still gated by the same
+            // city/blocked legality check, just without the re-snap.
+            var fleeTo = transform.position + awayFromWreck.normalized * 6f;
+            var fleeHex = _builder.HexAt(fleeTo);
+            if (_builder.City.Contains(fleeHex) && !_builder.BlockedFor(false).Contains(fleeHex))
+                _target = fleeTo;
+            MoveToward(_target, FleeSpeed, dt);
+            return;
         }
 
         // flee: any monster close by overrides everything -- panic runs

@@ -26,9 +26,14 @@ using UnityEngine;
 /// (see <see cref="BuildCompleteShape"/>); <see cref="SimBuilding.
 /// IsDamaged"/> darkens the same tint (docs/18 §3's "Damaged" visual
 /// state, derived from HP, never its own persisted state); Destroyed
-/// despawns the GameObject outright -- no rubble/wreck FX yet (a
-/// reasonable follow-up reusing the existing DamageFx rubble system, not
-/// attempted here).
+/// despawns the GameObject, fires a one-time <see cref="DamageFx.
+/// BuildingRubble"/> wreck (scaled off the building's own footprint) and
+/// disgorges <see cref="BuildingDef.Occupants"/> fleeing Citizens near the
+/// wreck via <see cref="RuntimeCityBuilder.SpawnFleeingOccupant"/> (2026-07
+/// creator direction: "when they are destroyed they disgorge their human
+/// occupants that flee" -- the first link of the worker-economy epic's
+/// causal chain: building destroyed -> occupants flee -> a future
+/// Collector unit captures and possesses them into Workers).
 ///
 /// 2026-07 follow-up: real per-kind building art, closing the "every
 /// kind is the same cube, just tinted" v1 gap. Per the maddr-aesthetic-
@@ -73,6 +78,11 @@ public class BaseDresser : MonoBehaviour
     // move once placed), only re-tinted afterward.
     private readonly Dictionary<uint, GameObject> _completed = new Dictionary<uint, GameObject>();
 
+    // Destroyed is fired-once per EntityId (2026-07: rubble FX + occupant
+    // disgorge) -- match-core's own building list only grows, so without
+    // this a Destroyed building would re-trigger every frame forever.
+    private readonly HashSet<uint> _destroyedHandled = new HashSet<uint>();
+
     public void Init(SimBridge simBridge, RuntimeCityBuilder cityBuilder)
     {
         bridge = simBridge;
@@ -87,17 +97,24 @@ public class BaseDresser : MonoBehaviour
         {
             var b = bridge.BuildingAt(i);
 
-            if (b.State == BuildingState.Destroyed)
-            {
-                DestroyIfPresent(_scaffolds, b.EntityId);
-                DestroyIfPresent(_completed, b.EntityId);
-                continue;
-            }
-
             var def = BuildingDef.Get(b.Kind);
             var hexWorld = builder.WorldOf(b.Hex);
             var groundY = builder.GroundHeightAt(hexWorld);
             var fullScale = FullScaleFor(def);
+
+            if (b.State == BuildingState.Destroyed)
+            {
+                DestroyIfPresent(_scaffolds, b.EntityId);
+                DestroyIfPresent(_completed, b.EntityId);
+                if (_destroyedHandled.Add(b.EntityId))
+                {
+                    var wreckWorld = new Vector3(hexWorld.x, groundY, hexWorld.z);
+                    DamageFx.BuildingRubble(wreckWorld, transform, fullScale.x);
+                    for (var occ = 0; occ < def.Occupants; occ++)
+                        builder.SpawnFleeingOccupant(b.Hex);
+                }
+                continue;
+            }
 
             if (b.State == BuildingState.UnderConstruction)
             {

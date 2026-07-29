@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -53,6 +54,23 @@ public static class DamageFx
         go.transform.SetParent(parent, false);
         go.transform.position = at;
         go.AddComponent<DustBurstFx>();
+    }
+
+    /// <summary>A player-built base structure's actual collapse (2026-07,
+    /// "buildings need... more rubble when attacked"): the existing
+    /// one-shot <see cref="DustBurst"/> plus a lingering pile of scattered
+    /// debris chunks, sized off the building's own full-scale footprint
+    /// (a Landmark HQ leaves a bigger, longer-lived wreck than a Small
+    /// storage shed). Distinct from <see cref="DustBurst"/> -- that one
+    /// stays a quick puff-only beat used elsewhere; this is the actual
+    /// "there's rubble here now" persistent read.</summary>
+    public static void BuildingRubble(Vector3 at, Transform parent, float footprintScale)
+    {
+        DustBurst(at, parent);
+        var go = new GameObject("RubblePile");
+        go.transform.SetParent(parent, false);
+        go.transform.position = at;
+        go.AddComponent<RubblePileFx>().Init(footprintScale);
     }
 
     /// <summary>A vertical water spout where a hydrant just got sheared
@@ -290,5 +308,73 @@ public class DustBurstFx : MonoBehaviour
             go.AddComponent<SmokePuff>().InitBurst(mat, 0.9f, 3.2f, 0.8f);
         }
         Object.Destroy(gameObject, 1.2f);
+    }
+}
+
+/// <summary>A pile of scattered debris chunks left where a building stood
+/// -- unlike the puff-based FX above (which self-destruct in ~1-2s), this
+/// lingers for a real while, then fades and cleans itself up, same fade
+/// convention as <see cref="GroundStain"/> (so a long match's destroyed
+/// bases don't accumulate into permanent clutter).</summary>
+public class RubblePileFx : MonoBehaviour
+{
+    private const float Life = 40f;
+    private const float FadeStart = 30f;
+    private readonly List<Renderer> _chunks = new List<Renderer>();
+    private readonly List<Material> _mats = new List<Material>();
+    private float _age;
+
+    /// <summary>footprintScale: the building's own full-scale footprint
+    /// (BaseDresser's FullScaleFor) -- chunk count and scatter radius both
+    /// grow with it, so a Landmark HQ leaves visibly more wreckage than a
+    /// Small storage shed.</summary>
+    public void Init(float footprintScale)
+    {
+        var chunkCount = Mathf.Clamp(Mathf.RoundToInt(4f + footprintScale * 1.5f), 4, 14);
+        var radius = Mathf.Max(1.5f, footprintScale * 0.6f);
+        var id = GetInstanceID();
+
+        for (var i = 0; i < chunkCount; i++)
+        {
+            var salt = id + i * 977;
+            var angle = ((salt & 0xFFFF) % 360) * Mathf.PI / 180f;
+            var dist = radius * (0.3f + ((salt >> 8) & 15) / 15f * 0.7f);
+            var dir = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = "RubbleChunk";
+            go.transform.SetParent(transform, false);
+            go.transform.localPosition = dir * dist + Vector3.up * (0.15f + ((salt >> 4) & 7) * 0.03f);
+            var chunkScale = 0.4f + ((salt >> 12) & 7) / 7f * 0.5f;
+            go.transform.localScale = new Vector3(chunkScale, chunkScale * 0.6f, chunkScale);
+            go.transform.localRotation = Quaternion.Euler(0f, (salt & 4095) / 4096f * 360f, 0f);
+            var collider = go.GetComponent<Collider>();
+            if (collider != null) Object.Destroy(collider);
+
+            var mat = new Material(ShaderUtil.FindRenderableShader());
+            var gray = 0.28f + ((salt >> 6) & 7) / 7f * 0.18f;
+            mat.color = new Color(gray, gray * 0.94f, gray * 0.88f, 1f);
+            LabMeshBuilder.MakeTransparent(mat);
+            var renderer = go.GetComponent<Renderer>();
+            if (renderer != null) renderer.sharedMaterial = mat;
+            _chunks.Add(renderer);
+            _mats.Add(mat);
+        }
+    }
+
+    private void Update()
+    {
+        _age += Time.deltaTime;
+        if (_age > FadeStart)
+        {
+            var t = Mathf.Clamp01((_age - FadeStart) / (Life - FadeStart));
+            for (var i = 0; i < _mats.Count; i++)
+            {
+                if (_mats[i] == null) continue;
+                var c = _mats[i].color;
+                _mats[i].color = new Color(c.r, c.g, c.b, 1f - t);
+            }
+        }
+        if (_age >= Life) Object.Destroy(gameObject);
     }
 }

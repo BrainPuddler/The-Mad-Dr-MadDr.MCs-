@@ -1632,6 +1632,44 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// small cosmetic blips (docs/19, client-side crowd).</summary>
     public IReadOnlyList<Citizen> Citizens { get { return _citizens; } }
 
+    /// <summary>Spawns a single Citizen at `hex`, already in its forced
+    /// panic-flee state (2026-07: a destroyed base building "disgorges
+    /// its human occupants that flee"). Called once per occupant by <see
+    /// cref="BaseDresser"/> the instant a <see cref="SimBuilding"/> flips
+    /// to Destroyed -- same Citizen creation shape as <see
+    /// cref="SpawnCitizens"/>'s match-start scatter, just triggered
+    /// mid-match at a specific point instead of scattered at start.</summary>
+    public Citizen SpawnFleeingOccupant(HexCoord hex)
+    {
+        var blocked = BlockedFor(false);
+        var spawnHex = _city.Contains(hex) && !blocked.Contains(hex) ? hex : NearestOpenHex(hex, blocked);
+
+        var capsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        capsule.name = "Citizen_Occupant_" + _citizens.Count;
+        var citizen = capsule.AddComponent<Citizen>();
+        citizen.Init(this, spawnHex);
+        citizen.InitFleeingFrom(WorldOf(hex));
+        _citizens.Add(citizen);
+        return citizen;
+    }
+
+    /// <summary>Nearest hex to `from` (including `from` itself) that's
+    /// both inside the city and not blocked -- a destroyed building's own
+    /// hex is blocked terrain, so a disgorged occupant needs somewhere
+    /// open next to the wreck to actually stand on.</summary>
+    private HexCoord NearestOpenHex(HexCoord from, HashSet<HexCoord> blocked)
+    {
+        if (_city.Contains(from) && !blocked.Contains(from)) return from;
+        for (var ring = 1; ring <= 4; ring++)
+        {
+            foreach (var n in from.Ring(ring))
+            {
+                if (_city.Contains(n) && !blocked.Contains(n)) return n;
+            }
+        }
+        return from;
+    }
+
     /// <summary>Every spawned traffic car -- same minimap use as
     /// Citizens above.</summary>
     public IReadOnlyList<TrafficCar> TrafficCars { get { return _trafficCars; } }

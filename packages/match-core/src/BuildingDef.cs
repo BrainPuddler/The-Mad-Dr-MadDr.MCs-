@@ -60,6 +60,20 @@ namespace MadDr.MatchCore
         public int MaxHp { get; }
         public int Armor { get; }
 
+        /// <summary>Human garrison/crew count housed once Complete -- data
+        /// only, not simulated (no decay, no per-tick change). Read by
+        /// Unity the moment a building's <see cref="SimBuilding.State"/>
+        /// flips to Destroyed, to know how many fleeing Citizens to
+        /// disgorge near the wreck (2026-07 creator direction: "when they
+        /// are destroyed they disgorge their human occupants that flee").
+        /// v0.1 placeholder counts, same standing policy as every other
+        /// number in this file -- <see cref="Factory"/>'s 6 is the one
+        /// deliberately-sized figure (it's the number feeding the new
+        /// Collector/Worker/possession chain this epic builds toward),
+        /// everything else is a small flat garrison scaled loosely by
+        /// tier.</summary>
+        public int Occupants { get; }
+
         /// <summary>Wallet cap this building raises once complete, or null
         /// for kinds with no storage function (docs/23 §2's Function
         /// column). Data only -- Phase 2 does not enforce wallet caps at
@@ -73,7 +87,8 @@ namespace MadDr.MatchCore
         public (ResourceKind Resource, int Amount)? StorageCapBonus { get; }
 
         private BuildingDef(BuildingKind kind, string name, (ResourceKind, int)[] cost,
-            int buildTimeTicks, int maxHp, int armor, (ResourceKind, int)? storageCapBonus)
+            int buildTimeTicks, int maxHp, int armor, (ResourceKind, int)? storageCapBonus,
+            int occupants)
         {
             Kind = kind;
             Name = name;
@@ -82,13 +97,18 @@ namespace MadDr.MatchCore
             MaxHp = maxHp;
             Armor = armor;
             StorageCapBonus = storageCapBonus;
+            Occupants = occupants;
         }
 
-        // docs/18 §3 tiers, reused verbatim rather than invented:
-        private const int SmallHp = 300, SmallArmor = 2;     // house
-        private const int MediumHp = 600, MediumArmor = 4;   // storefront
-        private const int LargeHp = 1500, LargeArmor = 6;    // block/tower
-        private const int LandmarkHp = 3000, LandmarkArmor = 8;
+        // docs/18 §3 tiers as a base, bumped 50% (2026-07 creator
+        // direction: "buildings need larger hitpoints") -- armor unchanged,
+        // only HP grows, so a building takes more hits to fell without
+        // becoming any harder to actually damage per hit. v0.1 rebalance,
+        // same placeholder policy as every other number in this file.
+        private const int SmallHp = 450, SmallArmor = 2;     // house
+        private const int MediumHp = 900, MediumArmor = 4;   // storefront
+        private const int LargeHp = 2200, LargeArmor = 6;    // block/tower
+        private const int LandmarkHp = 4500, LandmarkArmor = 8;
 
         private static readonly BuildingDef[] All =
         {
@@ -97,13 +117,14 @@ namespace MadDr.MatchCore
             // the kind of structure that tier describes.
             new BuildingDef(BuildingKind.Hq, "Headquarters",
                 new (ResourceKind, int)[0], buildTimeTicks: 0,
-                maxHp: LandmarkHp, armor: LandmarkArmor, storageCapBonus: null),
+                maxHp: LandmarkHp, armor: LandmarkArmor, storageCapBonus: null,
+                occupants: 10),
 
             // docs/22 §6's real "Blood Bank" numbers.
             new BuildingDef(BuildingKind.BloodStorage, "Blood Storage",
                 new[] { (ResourceKind.Bones, 20), (ResourceKind.Blood, 10) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
-                storageCapBonus: (ResourceKind.Blood, 100)),
+                storageCapBonus: (ResourceKind.Blood, 100), occupants: 2),
 
             // v0.1 placeholder: no real number exists yet for the income
             // building; shaped like BloodStorage's cost as a reasonable
@@ -111,7 +132,7 @@ namespace MadDr.MatchCore
             new BuildingDef(BuildingKind.FuelPump, "Fuel Pump",
                 new[] { (ResourceKind.Bones, 20), (ResourceKind.Fuel, 10) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
-                storageCapBonus: null),
+                storageCapBonus: null, occupants: 2),
 
             // v0.1 placeholder cost, shaped like docs/22's Bone Pile (15
             // Bones only) as the closest existing analog; cap bonus
@@ -119,7 +140,7 @@ namespace MadDr.MatchCore
             new BuildingDef(BuildingKind.FuelStorage, "Fuel Storage",
                 new[] { (ResourceKind.Bones, 15) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
-                storageCapBonus: (ResourceKind.Fuel, 100)),
+                storageCapBonus: (ResourceKind.Fuel, 100), occupants: 2),
 
             // v0.1 placeholder cost. No cap bonus -- docs/23 §2's Function
             // column for Parts storage is "enables grafting," not a
@@ -127,7 +148,7 @@ namespace MadDr.MatchCore
             new BuildingDef(BuildingKind.PartsStorage, "Parts Storage",
                 new[] { (ResourceKind.Bones, 15) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
-                storageCapBonus: null),
+                storageCapBonus: null, occupants: 2),
 
             // v0.1 placeholder cost. docs/20's Collection Stations are a
             // pre-existing, hands-free CITY feature -- this is the
@@ -135,7 +156,7 @@ namespace MadDr.MatchCore
             new BuildingDef(BuildingKind.HarvestPost, "Harvest Post",
                 new[] { (ResourceKind.Bones, 15) },
                 buildTimeTicks: 80, maxHp: SmallHp, armor: SmallArmor,
-                storageCapBonus: null),
+                storageCapBonus: null, occupants: 3),
 
             // v0.1 placeholder cost, pricier than storage (docs/22 §7:
             // "a forward Stitchworks... is a massive tempo investment").
@@ -144,14 +165,14 @@ namespace MadDr.MatchCore
             new BuildingDef(BuildingKind.Factory, "Factory",
                 new[] { (ResourceKind.Bones, 30), (ResourceKind.Blood, 15) },
                 buildTimeTicks: 150, maxHp: MediumHp, armor: MediumArmor,
-                storageCapBonus: null),
+                storageCapBonus: null, occupants: 6),
 
             // v0.1 placeholder cost. Medium tier: a defensive structure
             // sturdier than basic storage, matching its role.
             new BuildingDef(BuildingKind.Defense, "Defense",
                 new[] { (ResourceKind.Bones, 25), (ResourceKind.Blood, 10) },
                 buildTimeTicks: 120, maxHp: MediumHp, armor: MediumArmor,
-                storageCapBonus: null),
+                storageCapBonus: null, occupants: 3),
         };
 
         public static BuildingDef Get(BuildingKind kind) => All[(int)kind];

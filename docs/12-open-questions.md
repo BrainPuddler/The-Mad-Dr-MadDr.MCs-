@@ -5581,3 +5581,125 @@ building.
 
 This was the only item still flagged open from the UI/UX-and-adjacent
 work earlier in this session.
+
+## 2026-07: worker-economy epic, Phase 1 (building HP/rubble/occupant disgorge)
+
+Creator direction, delivered directly rather than as a design-doc
+proposal: a five-part causal chain --
+
+1. City/base buildings get larger HP and richer rubble when attacked/destroyed.
+2. Destroyed buildings disgorge fleeing human occupants.
+3. A new Collector unit captures and possesses those fleeing humans.
+4. Possessed humans become Worker units (explicit SCV-from-StarCraft analogy).
+5. Workers are required to construct buildings (at minimum Factories).
+
+...with three faction-specific production mechanics layered on top: Mad
+Doctor fields a "Big Brain" control unit costing 20 harvested Brains that
+can control 100 humans; Aliens use mind control fueled by energy from
+captured citizens; Humans recruit volunteers at lower unit cost but
+requiring more resource types, explicitly meant to balance against the
+other two.
+
+Two clarifying-question attempts (`AskUserQuestion`, once for the
+3-faction production specifics, once for build-order/scope) both came
+back "the user did not answer the questions" -- the creator was sending
+rapid sequential elaborating messages rather than answering structured
+ones. Per this project's own "flag assumptions, don't silently guess OR
+block forever" posture, proceeding on best-judgment interpretation,
+stated back in prose for correction, building in dependency order.
+
+**Resolved ambiguity before implementing:** whether "buildings" meant
+citygen-core's procedurally-generated `Building` (cosmetic city dressing)
+or match-core's player-constructed `SimBuilding`. Checked directly:
+citygen-core's `Building` (`CityModel.cs`) is purely geometric --
+footprint/tier/archetype, no HP field, no damage/destruction concept at
+all, and `BuildingDresser.cs` has zero damage/rubble pipeline. Only
+`SimBuilding` has real HP/armor/destruction. So "buildings that get
+destroyed" can only mean player-constructed bases -- there is no other
+system where "destroyed" is currently meaningful.
+
+**This slice (dependency-free link #1 of the chain):**
+
+- `BuildingDef.cs`: tier HP constants bumped 50% (Small 300→450, Medium
+  600→900, Large 1500→2200, Landmark 3000→4500) -- armor left unchanged,
+  so buildings take more hits to fell without becoming harder to damage
+  per hit. v0.1 rebalance, same placeholder policy as every other number
+  in this file. New per-kind `Occupants` field (static data, not
+  simulated -- no decay, no SimBuilding state change) that Unity reads
+  the instant a building flips to Destroyed. `Factory`'s 6 is the one
+  deliberately-sized figure (it's what feeds the rest of this epic);
+  everything else is a small flat garrison loosely scaled by tier
+  (Hq=10, storage/pump kinds=2, HarvestPost/Defense=3).
+- `DamageFx.cs`: new `BuildingRubble(at, parent, footprintScale)` --
+  the existing one-shot `DustBurst` plus a new `RubblePileFx`, a
+  lingering pile of scattered debris chunks sized off the building's own
+  footprint, that fades and self-cleans after 40s (same fade convention
+  as `GroundStain`) rather than accumulating forever in a long match.
+- `BaseDresser.cs`: the Destroyed branch used to just despawn the
+  GameObject with a comment flagging "no rubble/wreck FX yet" as a
+  reasonable follow-up -- now fires that follow-up. A new
+  `_destroyedHandled` HashSet guards it to once-per-EntityId (match-core's
+  building list only grows, so without the guard this would refire every
+  frame forever). Also spawns `def.Occupants` fleeing Citizens via a new
+  `RuntimeCityBuilder.SpawnFleeingOccupant(HexCoord)`.
+- `RuntimeCityBuilder.cs`: new `SpawnFleeingOccupant(HexCoord)`, same
+  Citizen-creation shape as the existing match-start `SpawnCitizens`
+  scatter, plus `NearestOpenHex` (the destroyed building's own hex is
+  still blocked terrain at the instant of disgorge, so an occupant needs
+  the nearest actually-open neighbor to stand on).
+- `Citizen.cs`: new `InitFleeingFrom(origin)` starts a 4-second forced
+  panic sprint away from the wreck point, independent of live monster
+  proximity (a disgorged occupant should read as fleeing the collapse,
+  not calmly window-shopping until a monster happens to wander within
+  `FleeRadius`). Inserted between the existing capture-override and the
+  existing proximity-flee check, so a future Collector can still capture
+  a disgorged citizen mid-panic. Falls back to normal AI once the timer
+  expires.
+
+**Verification:** a new flightcheck harness
+(`building-destruction-verify`) drives a REAL `MatchState`/`SimBridge`
+through actual building placement, construction (ticked to Complete),
+and destruction (`MatchState.ApplyBuildingDamage` via reflection on
+`SimBridge`'s private `_match` field), then invokes the REAL
+`BaseDresser.Update()` over it via reflection -- not a fake-shaped
+building, an actual sim-driven one. Confirmed: exactly 6 Citizens spawn
+the instant the Factory reaches Destroyed (not at Complete, not on a
+second `Update()` call -- the once-only guard holds), and a disgorged
+citizen's `transform.position` genuinely moves away from the wreck point
+over simulated time (real `Citizen.Update()` invoked via reflection, the
+same technique the earlier TrafficCar/TramCar driving-verify harness
+used). `RuntimeCityBuilder` itself is stubbed narrowly rather than
+compiled whole (2154 lines, drags in traffic/trams/lighting/minimap far
+outside this check's scope) -- but `SpawnFleeingOccupant`/`NearestOpenHex`
+in the stub are verbatim copies of the real new methods, so the stub
+still exercises the actual logic, not a paraphrase of it.
+
+**The harness caught a real bug, not a harness gap.** Every disgorged
+occupant spawns exactly on its hex's dead-center (`Citizen.Init`'s own
+`WorldOf(home)`, zero sub-hex offset). The forced-flee step distance (6m,
+matching the existing proximity-flee code's own magnitude) is smaller
+than a hex's inradius (~10m, from `HexCoord.HexMeters=20`'s pointy-top
+geometry) -- so a flee step computed from dead-center can never cross
+into a neighboring hex. The original code snapped the flee target to
+`HexAt(fleeTo)`'s hex CENTER, which from dead-center rounds right back to
+the citizen's own starting position -- it would have stood frozen for the
+entire 4-second forced-flee window on every single destroyed building,
+every time, not an edge case. Fixed by using the raw `fleeTo` world point
+as the target (still gated by the same city/blocked legality check)
+instead of re-snapping to a hex center, scoped to the new forced-flee
+block only -- the older proximity-flee block (which in practice almost
+never starts from exact dead-center, since a citizen is normally already
+mid-walk when a monster gets close) is untouched.
+
+All 246 match-core tests still pass with the HP/Occupants changes. Not
+seen in a real render (no Unity Editor in this environment).
+
+**Deferred, not faked, to later phases of the same epic** (tracked as
+open tasks): the Collector unit and possess-into-Worker mechanic (a
+strong candidate to reuse/extend the existing `CaptureState`
+pull-toward-captor/consume-on-arrival system rather than building a
+parallel one, per docs/26 Phase 6/7 -- not yet attempted); Worker units
+and worker-gated construction; the shared `CommandKind.TrainUnit`
+production-queue plumbing and the three faction-specific mechanics on top
+of it (Mad Doctor Big Brain/Controlled-Human, Alien mind-control costed
+in captured-citizen energy, Human cheaper-but-multi-resource recruiting).
