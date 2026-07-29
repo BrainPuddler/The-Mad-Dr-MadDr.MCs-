@@ -6009,3 +6009,98 @@ This closes all four tracked phases of the worker-economy epic
 construction -> three-faction production). The bootstrapping gap noted
 just above is the one loose thread carried forward, not a phase of its
 own.
+
+## 2026-07: traffic simulation gated by camera proximity
+
+Creator direction, verbatim: "change where cars are driving to the
+areas close to or near the player view area. Let's not waste
+processing power." Two changes, both in `TrafficCar.cs`/
+`RuntimeCityBuilder.cs`:
+
+1. **Activity freeze.** A car farther than a new `RuntimeCityBuilder.
+   trafficActiveRadius` (Inspector-tunable, default 130m -- a v0.1
+   placeholder tuned to roughly a typical RTS camera's visible ground
+   footprint, not measured against a real Editor session) from the
+   camera skips its ENTIRE `Update()` -- the very first line, before
+   the threat scan, roundabout circulation math, follow-distance check,
+   or any movement. It simply holds its exact position/state until the
+   camera comes back near it, then resumes from exactly where it froze
+   -- imperceptible to a player who wasn't looking at it, by
+   construction.
+2. **Route bias.** `TrafficCar.PickNext`'s existing wander-hash scoring
+   (already penalizes candidates near a monster, per the pre-existing
+   `MonsterAwareRadius` term) gained a camera-distance penalty, so an
+   ACTIVE car's multi-hop trip statistically curls back toward the
+   view instead of wandering off to drive circles nobody will ever
+   see -- addressing the "change WHERE cars are driving to" half of
+   the direction, not just the "don't simulate what's off-screen"
+   half.
+
+**Central refresh, not per-car polling.** A new `RuntimeCityBuilder.
+RefreshTrafficActivity()` recomputes near/far for the WHOLE fleet plus
+caches the camera's own ground position once, on a throttled 0.35s
+cadence -- the exact same cadence and "cam == null: bail" defensive
+convention `DynamicLightBudget.Refresh` already established for the
+same reason (many objects, one shared camera lookup, refreshed
+periodically rather than every object polling `Camera.main` every
+frame). Folded into the SAME shared `Update()` the existing traffic-
+band check and deadlock poll already share, as a third independent
+rare-path timer -- matching that method's own documented convention
+rather than adding a fourth separate `MonoBehaviour`.
+
+**Weight tuning, and a real tuning mistake caught before landing.**
+`PickNext` only ever compares NEIGHBORING candidate hexes (~20m apart,
+one `HexCoord.HexMeters` step) against each other -- never the whole
+city span -- so the bias weight has to matter at THAT scale, not a
+city-scale one. An initial `CameraBiasWeight` of 45 was reasoned as
+"comparable to the 0..65535 wander hash over city-scale distances,"
+which is the wrong scale entirely: at a single hex-step's distance
+delta (~20m), a weight of 45 produces a penalty difference of under
+1000 against a hash whose typical spread between two random candidates
+is on the order of 25,000+ -- statistically negligible, confirmed
+directly by the verification harness (identical outcomes to the
+decimal place regardless of camera direction). Retuned to 250 -- still
+a real bias, not a hard override (verified statistically, not as a
+guaranteed flip on every single junction).
+
+**Verification, and two real test-authoring bugs it caught (fixed in
+the test, not the shipped code)** -- the existing `driving-verify`
+flightcheck (real `TrafficCar.cs` reflection-driven over simulated
+time, same technique as every other traffic/tram verification this
+project has used):
+
+- Confirmed the freeze directly: a car marked far from the camera
+  produces byte-identical position/rotation over 60 simulated seconds;
+  marking it near again resumes real movement immediately.
+- The FIRST attempt to verify the route bias used a long straight
+  1-hex-wide corridor network and measured "final X position after
+  many simulated hops." This failed even after the weight fix, which
+  is what caught it: `PickNext` always excludes `_from`, so on a line
+  network every hop past the very first has exactly ONE candidate (no
+  real choice at all) until a dead end forces a reversal -- "final
+  position" was actually measuring which phase of an endless back-and-
+  forth oscillation the car happened to be in after N seconds,
+  completely unrelated to which direction the bias had originally
+  preferred at the one hop where it could matter. Diagnosed by reading
+  `PickNext`'s own `_from`-exclusion logic directly, not by guessing.
+- Fixed by switching to a real branching disk network and a
+  statistical test across many independent junctions (the bias is a
+  NUDGE, not a guarantee, so a single sample isn't a fair test either)
+  -- which then produced a perfectly consistent, but COMPLETELY
+  INVERTED result: moving the camera east made every single trial pick
+  a hex to the west. Diagnosed by rereading `HexCoord.ToWorld()`
+  directly: world X is `size*(sqrt(3)*Q + sqrt(3)/2*R)`, mixing both Q
+  and R -- the test's trials swept a whole hex disk (many different R
+  values) but compared raw axial `.Q` as a stand-in for "east/west,"
+  which is only valid exactly on the R=0 row. Fixed by comparing real
+  `ToWorld()` X coordinates instead, which produced the expected,
+  correctly-signed result. Both bugs are recorded here in full because
+  they're a useful concrete pair: one caught a genuine PRODUCT
+  weakness (the tuning), the other two were purely TEST-side (in this
+  same feature, no less) -- worth distinguishing carefully rather than
+  either dismissing a failing check OR assuming a failing check always
+  means the product is wrong.
+
+Not seen in a real render (no Unity Editor in this environment) --
+the 130m active radius and 250 bias weight are both reasoned
+estimates, not measured against an actual camera/city at real scale.

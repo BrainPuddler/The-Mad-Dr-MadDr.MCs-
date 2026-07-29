@@ -53,6 +53,25 @@ public class TrafficCar : MonoBehaviour
     private const float NightEligibleThreshold = 0.05f;  // DayNightState.NightAmount above this: headlight can compete for a real light
     private const float BrakeDecelEpsilon = 0.2f;        // speed must drop by at least this much frame-to-frame to read as braking
 
+    // 2026-07 creator direction ("change where cars are driving to the
+    // areas close to or near the player view area -- let's not waste
+    // processing power"): a car more than RuntimeCityBuilder.
+    // trafficActiveRadius from the camera contributes ZERO per-frame cost
+    // -- see Update()'s very first line -- and PickNext biases its route
+    // choice back toward the camera so an active car's trip naturally
+    // curls toward the view instead of drifting off to drive circles
+    // nobody will ever see.
+    // PickNext only ever compares NEIGHBORING hexes (~HexMeters apart,
+    // 20m) against each other -- not the whole city span -- so the
+    // per-hop delta this weight has to work with is small; tuned so
+    // that delta is a real but not overwhelming fraction of the wander
+    // hash's own typical spread between two random candidates (~65535/
+    // sqrt(6) =~ 26750), verified empirically against a real generated
+    // road network in the driving-verify flightcheck (an initial 45 was
+    // too weak to produce any measurable directional drift at all --
+    // caught by that harness, not just asserted).
+    private const float CameraBiasWeight = 250f;
+
     private enum State { Driving, Parked }
 
     private RuntimeCityBuilder _builder;
@@ -83,7 +102,18 @@ public class TrafficCar : MonoBehaviour
     private Renderer[] _brakeLightBulbs;
     private float _lastSpeed;
 
+    // defaults true: a car behaves exactly as it always did until
+    // RuntimeCityBuilder's own periodic refresh has run at least once
+    // (and for any harness/scene that never wires the refresh at all --
+    // same "opt-in cost, unchanged default behavior" posture as every
+    // other budget/gate this project has added).
+    private bool _nearCamera = true;
+
     public bool IsDriving { get { return _state == State.Driving; } }
+
+    /// <summary>Called by RuntimeCityBuilder's own throttled refresh, not
+    /// every frame -- see RefreshTrafficActivity's own doc comment.</summary>
+    public void SetNearCamera(bool near) { _nearCamera = near; }
 
     /// <summary>Force an immediate departure regardless of this car's own
     /// remaining park timer -- called by RuntimeCityBuilder's periodic
@@ -391,6 +421,15 @@ public class TrafficCar : MonoBehaviour
                     var d = (_builder.WorldOf(n) - threat.transform.position).magnitude;
                     penalty = (MonsterAwareRadius - d) * 4000f; // dwarfs the 0..65535 wander hash near a monster
                 }
+                // 2026-07: gently prefer hexes closer to the player's
+                // camera -- a BIAS on top of the wander hash, not a
+                // replacement for it (still comparable in magnitude to
+                // the hash's own 0..65535 range over city-scale
+                // distances), so routes stay varied but drift back toward
+                // the view over a multi-hop trip instead of wandering
+                // off-screen where they'd just get frozen anyway.
+                var distToCamera = (_builder.WorldOf(n) - _builder.CameraGroundFocus).magnitude;
+                penalty += distToCamera * CameraBiasWeight;
                 score = baseScore - penalty;
             }
             if (score > bestScore) { bestScore = score; best = n; }
@@ -478,6 +517,14 @@ public class TrafficCar : MonoBehaviour
 
     private void Update()
     {
+        // 2026-07: zero cost for a car outside the player's view -- no
+        // threat scan, no roundabout/follow-distance math, no movement at
+        // all. It simply holds its exact current position/state until the
+        // camera comes back near it, at which point this resumes exactly
+        // where it left off (a frozen mid-trip car is imperceptible to a
+        // player who wasn't looking at it in the first place).
+        if (!_nearCamera) return;
+
         var dt = Time.deltaTime;
 
         if (_state == State.Parked)

@@ -63,6 +63,9 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     [Range(0.05f, 1f)]
     public float trafficMovingPercent = 0.55f;
 
+    [Tooltip("2026-07 creator direction (\"change where cars are driving to the areas close to or near the player view area -- let's not waste processing power\"): cars farther than this from the camera freeze in place (zero per-frame cost -- driving logic, threat checks, and roundabout math all skip entirely) until the camera comes back near them, and route-picking at every junction is biased toward staying within this radius so an active car's trip naturally curls back toward the view instead of wandering off to a part of the map nobody's looking at. v0.1 placeholder tuned to roughly a typical RTS camera's visible ground footprint, not measured against a real Editor session.")]
+    public float trafficActiveRadius = 130f;
+
     [Tooltip("How much clear space (meters) stays between two units' bodies once a group has settled around a shared destination waypoint -- how tightly they pack in around the click point. Added to the pair's own combined body radii (ApplySeparation), so this is extra daylight on top of however big the units themselves are, not the whole gap.")]
     [Range(0f, 5f)]
     public float groupSpacing = 1f;
@@ -109,6 +112,24 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     private readonly List<UnitCombat> _steerQueryBuffer = new List<UnitCombat>();
     private float _trafficCheckTimer;
     private int _trafficWakeCursor;
+
+    // 2026-07: which cars get to actually simulate, gated on camera
+    // distance -- see trafficActiveRadius's own tooltip. Refreshed on a
+    // SEPARATE, faster cadence than the traffic-band check above (the
+    // camera can pan across the whole map in under a second; a 4s check
+    // would leave newly-near/newly-far cars mis-classified for a very
+    // visible while), same 0.35s cadence DynamicLightBudget's own
+    // nearest-camera refresh already uses for the same reason.
+    private const float TrafficActivityRefreshInterval = 0.35f;
+    private float _trafficActivityTimer;
+    private Vector3 _cameraGroundFocus;
+
+    /// <summary>The camera's last-known ground position (X/Z only, Y
+    /// zeroed) -- <see cref="TrafficCar.PickNext"/> reads this to bias its
+    /// route choice back toward the player's view instead of wandering
+    /// off-screen. Updated on the same throttled cadence as the activity
+    /// freeze above, not every frame.</summary>
+    public Vector3 CameraGroundFocus { get { return _cameraGroundFocus; } }
 
     // docs/25 Phase D: rare-path stall detection + sidestep grants, polled
     // from the same periodic Update() traffic already uses (see that
@@ -191,6 +212,15 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         BuildBuildings();
         BuildBridges();
         BuildLandmarkAuras();
+
+        // seed the camera-ground focus BEFORE any traffic spawns -- the
+        // real camera doesn't exist/get snapped to the city center until
+        // later in this method, but TrafficCar.Init's own PickNext calls
+        // (inside SpawnTraffic below) already want a sensible bias target
+        // rather than defaulting to world origin for however many hexes
+        // that happens not to coincide with the actual map.
+        _cameraGroundFocus = WorldOf(_city.CenterHex);
+
         SpawnCitizens();
         SpawnTanks();
         SpawnTraffic();
@@ -310,6 +340,44 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         {
             _deadlockPollTimer = DeadlockPollInterval;
             _deadlockManager.Poll(_monsters, DeadlockPollInterval, Time.time, this);
+        }
+
+        // 2026-07 creator direction: only simulate traffic near the
+        // player's view. A third independent rare-path timer, same
+        // shared-Update() convention as the two above.
+        if (_trafficCars.Count > 0)
+        {
+            _trafficActivityTimer -= Time.deltaTime;
+            if (_trafficActivityTimer <= 0f)
+            {
+                _trafficActivityTimer = TrafficActivityRefreshInterval;
+                RefreshTrafficActivity();
+            }
+        }
+    }
+
+    /// <summary>Marks every traffic car near/far based on ground distance
+    /// from the camera, and caches the camera's own ground position for
+    /// <see cref="TrafficCar.PickNext"/>'s route bias to read. A no-op
+    /// (leaves every car in whatever state it already had) if there's no
+    /// main camera yet -- matches DynamicLightBudget.Refresh's own
+    /// defensive "cam == null: bail" convention.</summary>
+    private void RefreshTrafficActivity()
+    {
+        var cam = Camera.main;
+        if (cam == null) return;
+        var camPos = cam.transform.position;
+        camPos.y = 0f;
+        _cameraGroundFocus = camPos;
+
+        var activeSq = trafficActiveRadius * trafficActiveRadius;
+        for (var i = 0; i < _trafficCars.Count; i++)
+        {
+            var car = _trafficCars[i];
+            if (car == null) continue;
+            var p = car.transform.position;
+            p.y = 0f;
+            car.SetNearCamera((p - camPos).sqrMagnitude <= activeSq);
         }
     }
 
