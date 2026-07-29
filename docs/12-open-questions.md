@@ -5798,3 +5798,53 @@ Not seen in a real render. **Deferred to Phase 3/4 of the same epic**:
 worker move orders/selection, worker-gated building construction, and
 the actual spawn trigger for Collectors (Phase 4's Mad-Doctor
 production mechanic).
+
+## 2026-07: worker-economy epic, Phase 3 (worker-gated Factory construction)
+
+Third link: "Workers required to construct buildings." Scoped to
+Factory only, per the creator's own exact words ("Factories are built
+by possessed human workers") -- not a guess, not "every building now
+needs a worker."
+
+`BuildGhostCursor.cs`'s existing `canPlace` check (already `bridge.
+CanPlaceBuilding(...)`, the same check match-core applies when the
+command actually lands) gained one AND term:
+`&& (!RequiresWorker(kind.Value) || builder.Workers.Count > 0)`. New
+`RequiresWorker(BuildingKind)` -- a method, not an inline comparison,
+so it reads as a deliberate, easily-widened policy point -- returns
+true only for `Factory`. This single boolean feeds BOTH the ghost's
+red/green tint preview and the left-click confirm gate identically,
+so an unavailable-worker placement reads exactly like an unaffordable
+or illegal one already does -- no separate error state to design.
+
+**Explicitly, honestly scoped as UI-layer-only, not sim-enforced.**
+match-core's `ApplyBuildStructure`/`CanPlaceBuilding` have no concept
+of a Worker at all -- Workers are a Unity-legacy-combat-layer unit
+(`Tank.cs`'s pattern, per Phase 2's own entry above), not a match-core
+`SimUnit`, and match-core has zero engine/Unity reference by design. So
+a `SimBridge.QueueBuildCommand` call that bypasses this ghost cursor
+(a bot, a different UI, a future networked client) would still place a
+Factory with zero workers -- a real gap, flagged here rather than
+silently left undocumented. Closing it for real needs either (a) a new
+match-core-side "requires worker" concept threaded through
+`BuildingDef`/`ApplyBuildStructure`, which would need SOME way for the
+sim to know a worker exists (Workers becoming real `SimUnit`s, most
+likely), or (b) accepting this as a permanently UI-only convenience gate
+for a single-client game. Not decided here -- flagged for whoever picks
+up real multi-client/bot support.
+
+Verified by reflection-invoking the new `RequiresWorker` method
+directly against every real `BuildingKind` value from the actual
+match-core DLL: Factory true, all seven other kinds false. The
+containing `Update()` loop itself needs a real mouse/camera raycast to
+exercise end to end, which was judged out of proportion for this
+change's actual risk -- a single boolean AND against an existing,
+already-tested `CanPlaceBuilding` check, not new placement/cost/
+construction logic.
+
+Not seen in a real render. **Deferred to Phase 4**: the actual spawn
+trigger for both Collectors and the first Worker a player ever has
+(today a player literally cannot build a Factory until some Collector,
+itself not auto-spawned either, manually possesses a citizen) -- Phase
+4's Mad-Doctor production mechanic is what's supposed to close that
+bootstrapping gap.

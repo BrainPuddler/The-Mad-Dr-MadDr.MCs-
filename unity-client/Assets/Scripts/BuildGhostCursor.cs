@@ -20,6 +20,23 @@ using UnityEngine.InputSystem;
 /// "given a kind, preview and place it," the same split
 /// WaypointCommander (orders) keeps from whatever owns unit selection.
 ///
+/// 2026-07 worker-economy epic, Phase 3: a <see cref="BuildingKind.
+/// Factory"/> ghost also requires <see cref="RuntimeCityBuilder.Workers"/>
+/// to be non-empty -- "Factories are built by possessed human workers"
+/// (creator's own words) -- tints red and blocks the confirm click the
+/// same way an unaffordable/illegal placement already does, so the two
+/// gates read identically to the player. Every other BuildingKind is
+/// unaffected -- Factory is the one the creator specifically named. This
+/// is a UNITY-SIDE-ONLY gate: match-core's own `ApplyBuildStructure`/
+/// `CanPlaceBuilding` have no concept of a Worker at all (Workers are a
+/// Unity-legacy-combat-layer unit, `Tank.cs`'s pattern, not a match-core
+/// `SimUnit` -- see docs/12's Phase 2 entry for why), so a build command
+/// sent directly through `SimBridge.QueueBuildCommand` bypassing this
+/// ghost cursor would still succeed with zero workers. A real, flagged
+/// gap, not silently faked as sim-enforced -- closing it for real needs
+/// either a match-core-side worker concept or Workers becoming real
+/// `SimUnit`s, neither built yet.
+///
 /// The ghost shape is a single placeholder cube for every
 /// <see cref="BuildingKind"/> -- <see cref="BaseDresser"/> is the real
 /// per-kind visual; reusing its actual shapes for the ghost too is a
@@ -84,7 +101,11 @@ public class BuildGhostCursor : MonoBehaviour
         var hex = builder.HexAt(hit.Value.point);
         if (!builder.City.Contains(hex)) { HideGhost(); return; }
 
-        var canPlace = bridge.CanPlaceBuilding(localPlayerIndex, kind.Value, hex);
+        // 2026-07 epic: Factory construction requires a possessed Worker
+        // on hand -- every other kind is untouched (RequiresWorker(kind)
+        // is false for them, so this reduces to the original check).
+        var canPlace = bridge.CanPlaceBuilding(localPlayerIndex, kind.Value, hex)
+            && (!RequiresWorker(kind.Value) || builder.Workers.Count > 0);
         ShowGhost(builder.WorldOf(hex), canPlace);
 
         if (mouse.rightButton.wasPressedThisFrame)
@@ -101,6 +122,13 @@ public class BuildGhostCursor : MonoBehaviour
             HideGhost();
         }
     }
+
+    /// <summary>2026-07 epic: which BuildingKind(s) need a Worker on hand
+    /// to place -- just Factory, per the creator's own "Factories are
+    /// built by possessed human workers." A method (not a static set)
+    /// so it reads as an intentional, easily-extended policy point if a
+    /// later phase widens the requirement, not a magic inline comparison.</summary>
+    private static bool RequiresWorker(BuildingKind kind) => kind == BuildingKind.Factory;
 
     private void ShowGhost(Vector3 hexWorldPos, bool valid)
     {
