@@ -5509,3 +5509,75 @@ errors/warnings. Not seen in a real render.
 With this, the original UI/UX list from earlier in the session has no
 further open items; per-faction/per-kind building art (visual, not
 UI/UX) remains the one thing still flagged open overall.
+
+## 2026-07: real per-kind building silhouettes, closing the last flagged item
+
+Creator direction: "sure go ahead and do that" (per-faction/per-kind
+building art, the one item flagged open at the end of the entry above).
+Loaded the maddr-aesthetic-preferences skill before touching any
+geometry, per its own trigger condition ("world/city dressing... even
+if the request doesn't explicitly ask about style").
+
+The skill's §5 named the exact problem with `BaseDresser`'s existing
+v1: "shape communicates origin/function, color communicates contents/
+state... don't let one visual property carry two different facts."
+v1's Complete-state visual was ONE uniformly-sized cube for every
+`BuildingKind`, distinguished only by an HSV hue keyed off the kind --
+color was doing the job shape should have been doing, and nothing was
+using color for what it should actually carry in an RTS (whose building
+is this).
+
+**Shape now carries kind.** Each of the seven buildable kinds gets a
+real two-primitive silhouette, still primitive-kit only (`RuntimeCityBuilder.
+SpawnPrim`, no new mesh assets -- matching every other dresser's own
+constraint in this environment): BloodStorage/FuelStorage share a tank
+body + domed cap (the vessel read the skill's own example names
+directly); FuelPump gets a pump house + offset nozzle pole; PartsStorage
+a warehouse body + roof vent; HarvestPost a watchtower pole + platform
+near the top; Factory a body + offset smokestack; Defense a bunker +
+turret dome; Hq a keep + offset turret (Landmark-tier's own larger scale
+already makes it the biggest footprint too, now also the most distinct
+silhouette). `UnderConstruction` deliberately stays ONE generic scaling
+cube regardless of kind -- you can't tell what a construction site will
+become until it's built, so giving the scaffold real per-kind shape
+would be less honest, not more.
+
+**Color now carries owner + damage, not kind.** A two-color palette
+keyed by PLAYER INDEX, flavored off docs/17's own per-faction registers
+(a sickly organic green for index 0 -- today's demo always fields
+MadDoctor there -- olive-drab military for index 1 -- Human Army; any
+other index a neutral gray rather than guessing). This is a deliberate
+APPROXIMATION, recorded as such rather than oversold: `SimBridge` has no
+`FactionId` accessor for a given player index today, so this keys off
+the index itself, not a real faction lookup. A true per-faction lookup
+is real, separate, not-yet-built plumbing -- flagged, not faked.
+Damaged state still darkens the same tint, same idiom v1 already used.
+
+Structural change to support this: `BaseDresser` used to track one
+`Dictionary<uint, GameObject>` (`_visuals`) with a DIRECT renderer on
+the tracked object. Split into `_scaffolds` (UnderConstruction, one
+scaling cube, unchanged from v1 behavior) and `_completed` (Complete/
+Damaged, a ROOT GameObject holding the real per-kind shape as CHILDREN,
+built once since buildings never move after placement, then only
+re-tinted). `TintShape` walks `root.transform`'s children and reassigns
+material on each -- shape-building and coloring are now genuinely
+separate passes, matching the skill's own channel split structurally,
+not just cosmetically.
+
+Verified the same way as every prior HUD/build entry: a `dotnet build`
+stub-compile of the six real HUD/build scripts (this one included)
+against real match-core/citygen-core types and shape stubs -- caught
+several real compile errors that were all harness gaps, not code bugs:
+the stub was missing `Vector3.right`/`.forward`, `Mathf.Min(float,
+float)`, and `Transform.childCount`/`.GetChild(int)` -- all completely
+standard `UnityEngine` API this stub simply hadn't needed until this
+file exercised it. Fixed the stub, not the code, per the lighting
+skill's own "always suspect the harness first" guidance (same pattern
+as the `Mathf.Min(int,int)` gap the streetcar entry above already hit).
+Compiled clean afterward, 0 errors/warnings. Not seen in a real render
+-- the shape proportions (tank radius fractions, pole/turret offsets,
+etc.) are reasoned geometry, not confirmed against an actual rendered
+building.
+
+This was the only item still flagged open from the UI/UX-and-adjacent
+work earlier in this session.
