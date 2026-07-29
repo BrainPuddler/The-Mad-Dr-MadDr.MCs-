@@ -64,8 +64,31 @@ namespace MadDr.MatchCore
         public CombatStats Combat { get; }
         public int SalvageValue { get; }
 
+        /// <summary>2026-07 worker-economy epic, Phase 4: what a
+        /// <see cref="CommandKind.TrainUnit"/> command debits from the
+        /// training player's wallet, all-or-nothing (mirrors <see
+        /// cref="BuildingDef.Cost"/>'s own contract exactly). v0.1
+        /// placeholder numbers, same standing policy as every other cost
+        /// table in this codebase -- shaped by docs/17's own fictional
+        /// framing (creator direction, 2026-07): Human Army "recruiting
+        /// volunteers" is cheaper per line but spans MORE resource kinds
+        /// (Bones + Fuel, drilled infantry needs matériel, not genetics);
+        /// Alien Hive "mind control... energy from captured" is a single,
+        /// heavier Ichor cost (their one native energy currency) -- the
+        /// captured-citizen-energy SOURCE itself is explicitly deferred
+        /// (see docs/12's Phase 4 entry), only the Ichor SINK is real
+        /// here.</summary>
+        public IReadOnlyList<(ResourceKind Resource, int Amount)> Cost { get; }
+
+        /// <summary>Ticks to train, v0.1 placeholder scaled roughly with
+        /// the unit's own combat weight (a Rifleman trains fast, a
+        /// Floater Queen slow) -- no real docs/17 number exists for
+        /// this any more than for Cost above.</summary>
+        public int TrainTimeTicks { get; }
+
         private UnitRosterDef(RosterUnitKind kind, FactionId faction, string name,
-            double speed, double radius, CombatStats combat, int salvageValue)
+            double speed, double radius, CombatStats combat, int salvageValue,
+            (ResourceKind, int)[] cost, int trainTimeTicks)
         {
             Kind = kind;
             Faction = faction;
@@ -74,6 +97,8 @@ namespace MadDr.MatchCore
             Radius = radius;
             Combat = combat;
             SalvageValue = salvageValue;
+            Cost = cost;
+            TrainTimeTicks = trainTimeTicks;
         }
 
         // Tech and biotech units have no Lumen-cycle coupling of their
@@ -92,12 +117,14 @@ namespace MadDr.MatchCore
             new UnitRosterDef(RosterUnitKind.Rifleman, FactionId.HumanArmy, "Rifleman Squad",
                 speed: 3.0, radius: 1.0,
                 combat: new CombatStats(maxVitality: 60, power: 8, armor: 1, reach: 3, ferocity: 1.0, cunningPercent: 5, affinity: NoLumenCoupling),
-                salvageValue: 20),
+                salvageValue: 20,
+                cost: new[] { (ResourceKind.Bones, 10), (ResourceKind.Fuel, 5) }, trainTimeTicks: 40),
 
             new UnitRosterDef(RosterUnitKind.HalfTrack, FactionId.HumanArmy, "Half-Track",
                 speed: 5.0, radius: 2.0,
                 combat: new CombatStats(maxVitality: 250, power: 15, armor: 4, reach: 2, ferocity: 0.8, cunningPercent: 0, affinity: NoLumenCoupling),
-                salvageValue: 80),
+                salvageValue: 80,
+                cost: new[] { (ResourceKind.Bones, 20), (ResourceKind.Fuel, 15) }, trainTimeTicks: 80),
 
             // "The existing Tank" (unity-client/Assets/Scripts/Tank.cs) --
             // this is only its match-core COMBAT stat block; the turret/
@@ -105,12 +132,14 @@ namespace MadDr.MatchCore
             new UnitRosterDef(RosterUnitKind.Tank, FactionId.HumanArmy, "Tank",
                 speed: 2.5, radius: 2.5,
                 combat: new CombatStats(maxVitality: 500, power: 30, armor: 8, reach: 3, ferocity: 0.6, cunningPercent: 0, affinity: NoLumenCoupling),
-                salvageValue: 200),
+                salvageValue: 200,
+                cost: new[] { (ResourceKind.Bones, 30), (ResourceKind.Fuel, 25) }, trainTimeTicks: 120),
 
             new UnitRosterDef(RosterUnitKind.ZeppelinGunship, FactionId.HumanArmy, "Zeppelin Gunship",
                 speed: 4.0, radius: 3.0,
                 combat: new CombatStats(maxVitality: 300, power: 20, armor: 3, reach: 3, ferocity: 0.8, cunningPercent: 0, affinity: NoLumenCoupling),
-                salvageValue: 150),
+                salvageValue: 150,
+                cost: new[] { (ResourceKind.Bones, 25), (ResourceKind.Fuel, 30) }, trainTimeTicks: 100),
 
             // -- Alien Hive: cheap, fast swarm plus one precious
             // mastermind (docs/17: "the Queen is the Vat" -- decapitation
@@ -119,17 +148,20 @@ namespace MadDr.MatchCore
             new UnitRosterDef(RosterUnitKind.Drone, FactionId.AlienHive, "Drone",
                 speed: 4.0, radius: 0.8,
                 combat: new CombatStats(maxVitality: 40, power: 6, armor: 0, reach: 1, ferocity: 1.5, cunningPercent: 5, affinity: NoLumenCoupling),
-                salvageValue: 15),
+                salvageValue: 15,
+                cost: new[] { (ResourceKind.Ichor, 15) }, trainTimeTicks: 30),
 
             new UnitRosterDef(RosterUnitKind.Spitter, FactionId.AlienHive, "Spitter",
                 speed: 3.0, radius: 1.2,
                 combat: new CombatStats(maxVitality: 80, power: 14, armor: 1, reach: 3, ferocity: 0.9, cunningPercent: 5, affinity: NoLumenCoupling),
-                salvageValue: 40),
+                salvageValue: 40,
+                cost: new[] { (ResourceKind.Ichor, 25) }, trainTimeTicks: 60),
 
             new UnitRosterDef(RosterUnitKind.FloaterQueen, FactionId.AlienHive, "Floater Queen",
                 speed: 1.5, radius: 3.5,
                 combat: new CombatStats(maxVitality: 800, power: 25, armor: 5, reach: 2, ferocity: 0.7, cunningPercent: 10, affinity: NoLumenCoupling),
-                salvageValue: 300),
+                salvageValue: 300,
+                cost: new[] { (ResourceKind.Ichor, 80) }, trainTimeTicks: 200),
         };
 
         public static UnitRosterDef Get(RosterUnitKind kind) => All[(int)kind];

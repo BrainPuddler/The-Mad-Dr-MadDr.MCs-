@@ -55,6 +55,56 @@ namespace MadDr.MatchCore
         /// isn't "damaged," it's unfinished).</summary>
         public bool IsDamaged => State == BuildingState.Complete && Hp * 2 <= MaxHp;
 
+        /// <summary>2026-07 worker-economy epic, Phase 4: the roster unit
+        /// currently mid-training here, or null if idle. v0.1: ONE
+        /// in-progress slot per building, not a deep queue (docs/22 §7's
+        /// Stitchworks 5-deep queue is a real, larger design this
+        /// deliberately doesn't attempt yet) -- a second <see
+        /// cref="CommandKind.TrainUnit"/> while this is non-null is a
+        /// silent no-op, same "bad input never queues" contract as every
+        /// other command.</summary>
+        public RosterUnitKind? TrainingKind { get; private set; }
+
+        /// <summary>Ticks left on the current training slot, meaningless
+        /// while <see cref="TrainingKind"/> is null -- same relationship
+        /// <see cref="TicksUntilComplete"/> has to construction.</summary>
+        public int TrainTicksRemaining { get; private set; }
+
+        /// <summary>Begins training `kind` if this building's single slot
+        /// is free; returns false (silent no-op) if it's already
+        /// occupied. Cost/legality (faction match, affordability,
+        /// Complete state) are <see cref="MatchState.ApplyTrainUnit"/>'s
+        /// job, same split as every other command handler -- this class
+        /// only owns the slot itself, matching how it stays unaware of
+        /// economy concerns elsewhere in this file.</summary>
+        internal bool BeginTraining(RosterUnitKind kind, int ticks)
+        {
+            if (TrainingKind != null) return false;
+            TrainingKind = kind;
+            TrainTicksRemaining = ticks;
+            return true;
+        }
+
+        /// <summary>One tick's worth of training progress. Returns the
+        /// completed kind (and clears the slot) the instant it finishes,
+        /// null every other tick -- the caller (<see
+        /// cref="MatchState.Tick"/>) is what actually spawns the unit,
+        /// same "this class owns state, MatchState owns the economy/
+        /// entity-creation side effects" split <see cref="Tick"/>'s own
+        /// construction-completion handling already uses.</summary>
+        internal RosterUnitKind? TickTraining()
+        {
+            if (TrainingKind == null) return null;
+            if (TrainTicksRemaining > 0) TrainTicksRemaining--;
+            if (TrainTicksRemaining <= 0)
+            {
+                var done = TrainingKind;
+                TrainingKind = null;
+                return done;
+            }
+            return null;
+        }
+
         internal SimBuilding(uint entityId, int playerIndex, BuildingKind kind, HexCoord hex,
             int maxHp, int buildTimeTicks, bool completeImmediately)
         {
@@ -122,6 +172,11 @@ namespace MadDr.MatchCore
             h.Add(Hp);
             h.Add((int)State);
             h.Add(_ticksUntilComplete);
+            // 2026-07 epic: -1 is not a valid RosterUnitKind value (the
+            // enum starts at 0), so it unambiguously encodes "idle slot"
+            // without an extra bool field.
+            h.Add(TrainingKind.HasValue ? (int)TrainingKind.Value : -1);
+            h.Add(TrainTicksRemaining);
         }
     }
 }

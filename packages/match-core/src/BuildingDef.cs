@@ -21,6 +21,20 @@ namespace MadDr.MatchCore
         HarvestPost = 5,
         Factory = 6,
         Defense = 7,
+
+        /// <summary>2026-07 worker-economy epic, Phase 4: the Mad
+        /// Doctor's "Big Brain control unit" ("must make a big brain
+        /// control unit requiring harvesting 20 brain units, that can
+        /// control 100 humans" -- creator's own words). Modeled as a
+        /// BUILDING, not a <see cref="RosterUnitKind"/>, because
+        /// `FactionRoster.cs`'s own header already establishes the Doctor
+        /// gets NO fixed roster (custom-bred creatures only) -- this is a
+        /// control STRUCTURE, not a trainable unit, the same category as
+        /// <see cref="Hq"/>. "Controls 100 humans" is modeled as <see
+        /// cref="BuildingDef.SupplyCapBonus"/>, reusing <see
+        /// cref="PlayerState.RaiseSupplyCap"/> (existing, previously
+        /// unused).</summary>
+        BigBrain = 8,
     }
 
     /// <summary>Static per-building-kind data (docs/23 §2 Phase 2 tasks:
@@ -86,9 +100,21 @@ namespace MadDr.MatchCore
         /// cap enforcement in Phase 3, not decided here.</summary>
         public (ResourceKind Resource, int Amount)? StorageCapBonus { get; }
 
+        /// <summary>2026-07 worker-economy epic, Phase 4: Supply cap this
+        /// building raises once Complete, or null for every kind that
+        /// isn't one of the epic's population-control structures (today,
+        /// only <see cref="BuildingKind.BigBrain"/>). Same "raise-only,
+        /// applied once on the Complete transition" contract as <see
+        /// cref="StorageCapBonus"/> -- deliberately a SEPARATE field, not
+        /// folded into it, since Supply and wallet resources are
+        /// different currencies with different caps (<see
+        /// cref="PlayerState.SupplyCap"/> vs <see
+        /// cref="PlayerState.WalletCap"/>).</summary>
+        public int? SupplyCapBonus { get; }
+
         private BuildingDef(BuildingKind kind, string name, (ResourceKind, int)[] cost,
             int buildTimeTicks, int maxHp, int armor, (ResourceKind, int)? storageCapBonus,
-            int occupants)
+            int occupants, int? supplyCapBonus = null)
         {
             Kind = kind;
             Name = name;
@@ -98,6 +124,7 @@ namespace MadDr.MatchCore
             Armor = armor;
             StorageCapBonus = storageCapBonus;
             Occupants = occupants;
+            SupplyCapBonus = supplyCapBonus;
         }
 
         // docs/18 §3 tiers as a base, bumped 50% (2026-07 creator
@@ -173,6 +200,18 @@ namespace MadDr.MatchCore
                 new[] { (ResourceKind.Bones, 25), (ResourceKind.Blood, 10) },
                 buildTimeTicks: 120, maxHp: MediumHp, armor: MediumArmor,
                 storageCapBonus: null, occupants: 3),
+
+            // 2026-07 epic: 20 Brains, per the creator's own number --
+            // the one deliberately-sized cost in this whole table, not a
+            // placeholder. Large tier (sturdier than a basic storage/
+            // production building, matching a one-off strategic
+            // structure's stakes) and zero occupants (a control
+            // apparatus, not a staffed building -- nothing to disgorge
+            // if it falls).
+            new BuildingDef(BuildingKind.BigBrain, "Big Brain",
+                new[] { (ResourceKind.Brains, 20) },
+                buildTimeTicks: 200, maxHp: LargeHp, armor: LargeArmor,
+                storageCapBonus: null, occupants: 0, supplyCapBonus: 100),
         };
 
         public static BuildingDef Get(BuildingKind kind) => All[(int)kind];

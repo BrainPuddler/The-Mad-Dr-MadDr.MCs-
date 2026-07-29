@@ -68,6 +68,20 @@ namespace MadDr.MatchCore
         /// resolution loop -- an anomaly has no facing/arc/Armor of its
         /// own, unlike a real combatant).</summary>
         AttackAnomaly = 7,
+        /// <summary>2026-07 worker-economy epic, Phase 4: TargetEntity (a
+        /// Complete building) begins training the roster unit named by
+        /// ArgA (a <see cref="RosterUnitKind"/>, cast to int -- same
+        /// reinterpreted-slot contract as every other command with a data
+        /// operand instead of a second entity). Silently a no-op unless
+        /// the building exists, is Complete, belongs to the issuing
+        /// player, isn't already mid-training (v0.1: one in-progress slot
+        /// per building, not a deep queue), the kind belongs to the
+        /// player's own faction, and every line of <see
+        /// cref="UnitRosterDef.Cost"/> is affordable -- same "bad input
+        /// never queues, just rejects" contract as every other command
+        /// kind. See <see cref="MatchState.ApplyTrainUnit"/>'s own doc
+        /// comment for the full validation list.</summary>
+        TrainUnit = 8,
     }
 
     /// <summary>

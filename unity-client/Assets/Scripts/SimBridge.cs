@@ -189,6 +189,23 @@ public class SimBridge : MonoBehaviour
         return p?.SupplyCap ?? 0;
     }
 
+    /// <summary>2026-07 worker-economy epic, Phase 4: queue a TrainUnit
+    /// command for the NEXT tick boundary -- same one-tick-latency
+    /// contract as <see cref="QueueBuildCommand"/>. Never validates
+    /// itself; callers should check <see cref="CanTrainUnit"/> first for
+    /// a live UI preview.</summary>
+    public void QueueTrainCommand(int playerIndex, uint buildingEntityId, RosterUnitKind kind)
+    {
+        _pending.Add(new Command(playerIndex, CommandKind.TrainUnit, targetEntity: buildingEntityId, argA: (int)kind));
+    }
+
+    /// <summary>Read-only preview, false if no match is running. Wraps
+    /// <see cref="MatchState.CanTrainUnit"/> -- same "the ghost/UI check
+    /// can never disagree with what actually happens" contract as <see
+    /// cref="CanPlaceBuilding"/>.</summary>
+    public bool CanTrainUnit(int playerIndex, uint buildingEntityId, RosterUnitKind kind)
+        => _match != null && _match.CanTrainUnit(playerIndex, buildingEntityId, kind);
+
     private void Update() => Pump(Time.deltaTime);
 
     /// <summary>The actual fixed-timestep accumulator logic, taking `dt`

@@ -5848,3 +5848,164 @@ trigger for both Collectors and the first Worker a player ever has
 itself not auto-spawned either, manually possesses a citizen) -- Phase
 4's Mad-Doctor production mechanic is what's supposed to close that
 bootstrapping gap.
+
+## 2026-07: worker-economy epic, Phase 4 (three-faction production)
+
+Final link, and the one this epic's earlier phases (and docs/12's own
+Phase 6c entry: "no unit-production command exists in match-core at
+all") had been building toward. Full spec, creator's own words: "Mad
+doctor must make a big brain control unit requiring harvesting 20 brain
+units, that can control 100 humans. Aliens use mind control, requiring
+energy from captured (something similar) and Humans have a recruiting
+volunteers, some smaller cost but require more resources, that balance
+against Aliens and Mad Dr."
+
+**Resolved before implementing:** Mad Doctor gets no `RosterUnitKind`
+at all (`FactionRoster.cs`'s own header: "the Doctor's whole identity
+is fielding CUSTOM bred creatures... there is nothing for a roster
+table to enumerate for that faction"). So the Big Brain "control unit"
+can't be a trainable roster entry the way Human/Alien units are -- it's
+modeled as a `BuildingKind` instead (the same category as `Hq`), and
+"controls 100 humans" becomes a Supply-cap raise, reusing `PlayerState.
+RaiseSupplyCap` (existing since Phase 1's own summary flagged it as
+"currently, currently-unused" -- now used for the first time) rather
+than inventing a parallel "population" concept.
+
+**Shared plumbing** (the part actually gated on before this phase):
+
+- `Command.cs`: `CommandKind.TrainUnit = 8` -- TargetEntity is the
+  producing building's entity ID, ArgA is the `RosterUnitKind` to
+  train (cast to int), same "generic slots reinterpreted per Kind"
+  contract every other command already uses.
+- `SimBuilding.cs`: `TrainingKind`/`TrainTicksRemaining` plus
+  `BeginTraining`/`TickTraining` (internal, MatchState-only, same split
+  as construction's own `Tick()`). **v0.1 deliberately ships ONE
+  in-progress slot per building, not docs/22 §7's Stitchworks 5-deep
+  queue** -- a real, smaller scope than that design, flagged rather
+  than either faked as deeper or silently left unbounded. Both new
+  fields are in `WriteTo`'s determinism hash (`-1` sentinel for "no
+  training kind," since the enum starts at 0 and never needs a second
+  bool).
+- `MatchState.cs`: `CanTrainUnit` (pure validity check: building
+  exists/owned/Complete/slot-free, kind belongs to the player's own
+  faction, every `Cost` line affordable) and `ApplyTrainUnit` (debits
+  all-or-nothing, same order as `ApplyBuildStructure`, BEFORE opening
+  the slot) -- one shared check for both the eventual UI preview and
+  the actual command, same "can never disagree" precedent as
+  `CanPlaceBuilding`. `SpawnTrainedUnit`/`FindOpenHexNear` resolve a
+  spawn point by ring-searching outward from the producing building's
+  own (necessarily blocked) hex -- the match-core-side twin of Phase 1's
+  Unity-side `RuntimeCityBuilder.NearestOpenHex`, independently
+  reimplemented since match-core has no reference to that file. The
+  per-tick building loop (`Tick()`) now calls `TickTraining()` right
+  after construction's own `Tick()`, spawning on completion via the
+  same `SpawnUnit` entry point `SpawnRosterUnit` already uses --
+  NOT through `SpawnRosterUnit` itself, since that method's own doc
+  comment explicitly names "mid-match production from a Factory" as
+  the "different, not-yet-built feature" this phase now IS, and its
+  throw-on-faction-mismatch contract is wrong for a command handler
+  (a bad TrainUnit command must be a silent no-op, never an
+  exception) -- `CanTrainUnit` enforces the faction match instead,
+  before `ApplyTrainUnit` ever reaches the spawn path.
+- `UnitRosterDef` (`FactionRoster.cs`): new `Cost`/`TrainTimeTicks`
+  fields on every existing entry.
+- `SimBridge.cs`: `QueueTrainCommand`/`CanTrainUnit` pass-throughs,
+  same one-tick-latency/never-self-validates contract as the existing
+  `QueueBuildCommand`/`CanPlaceBuilding` pair. Not yet consumed by any
+  Unity HUD -- a training-queue UI is real, separate, not attempted
+  here (mirrors `BuildMenuHud`'s own eventual job, not built this
+  pass).
+
+**Per-faction costs**, v0.1 placeholder NUMBERS (same standing policy
+as every other cost table in this codebase) but a deliberately real
+SHAPE match to the creator's own spec:
+
+- **Human Army**: existing roster (Rifleman/Half-Track/Tank/Zeppelin
+  Gunship), each costed in Bones + Fuel -- two resource kinds, "smaller
+  cost but require more resources." A `HumanArmy_recruitCostSpansMultipleResourceKinds`
+  test asserts the SHAPE (>=2 resource kinds), not just that training
+  works at all.
+- **Alien Hive**: existing roster (Drone/Spitter/Floater Queen), each
+  costed in a single, heavier Ichor line -- "mind control... energy,"
+  Ichor being the Hive's own real energy currency (`FactionDef.
+  Get(AlienHive).Energy == Ichor`, confirmed via an existing test). The
+  "energy from CAPTURED (something similar)" clause -- i.e. Ichor
+  income actually being tied to captured citizens rather than a flat
+  faction income tick -- is explicitly NOT built here; only the Ichor
+  SINK (spending it to train) is real, the SOURCE stays deferred, same
+  ambiguity flagged since the epic's very first message (the creator's
+  own phrasing trailed off: "energy from captured (something similar)").
+- **Mad Doctor**: `BuildingKind.BigBrain`, 20 Brains (the one
+  deliberately-sized, non-placeholder cost in this entire epic --
+  every other number here is an honest guess), Large tier HP/armor,
+  zero `Occupants` (a control apparatus, not a staffed building --
+  nothing to disgorge if it falls, unlike every other buildable kind
+  from Phase 1). Raises Supply cap by 100 once Complete, via a new
+  `BuildingDef.SupplyCapBonus`/`MatchState.ApplySupplyCapBonus` --
+  copy-pasted in spirit from `StorageCapBonus`/`ApplyStorageCapBonus`
+  rather than generalizing that existing mechanism, since Supply and
+  wallet resources are genuinely different currencies with different
+  caps (`PlayerState.SupplyCap` vs `WalletCap`) and forcing one field
+  to mean either would be the wrong kind of code reuse.
+
+**A real, flagged architectural tension, not smoothed over:**
+`BuildingDef.cs`'s own header states the existing design law plainly
+-- "stats are shared across factions, only names are themed." This
+phase's three costs are NOT shared: Mad Doctor pays Brains, Aliens pay
+Ichor, Humans pay Bones+Fuel, for mechanically different buildings/
+units entirely (not the same `BuildingKind`/`RosterUnitKind` with a
+per-faction cost override, which the current data model has no way to
+express anyway). This was a deliberate, examined choice: implementing
+the three-way "balance against each other" the creator asked for
+inherently requires faction-differentiated economics, which the
+existing generic-stats law was never designed for. Reusing three
+SEPARATE mechanisms (existing roster training for two factions, a new
+building kind for the third) was judged less architecturally invasive
+than bending `BuildingDef`/`UnitRosterDef` to carry per-faction
+overrides on top of their current shared-data shape -- but that reuse
+itself docs/17's real per-faction economic design (a much larger,
+already-written document this phase only lightly touches) may call
+for later. Flagged for whoever does a real faction-balance pass.
+
+**Verification:** 9 new xunit tests in `TrainUnitTests.cs`
+(`packages/match-core/Tests~`), the project's own strongest form of
+verification for match-core changes (a real `dotnet test` run, not a
+flightcheck harness) -- `CanTrainUnit` gating on Complete state, cost
+debited all-or-nothing (checked as a DELTA against a pre-training
+balance snapshot, not an absolute zero, since the test's own Factory-
+build setup leaves leftover Bones/Blood on the wallet -- an early draft
+asserted the wrong thing here and the tests correctly failed, a test
+bug caught by the tests themselves, not a product bug), the single-slot
+no-double-debit guard, faction-mismatch rejection, completion timing
+(spawns on the exact tick training finishes, not before/after -- same
+off-by-one-aware style as the existing `Construction_completesExactlyAtItsBuildTimeTicks`
+test), the Alien Ichor-cost shape, the Human multi-resource-cost shape,
+and BigBrain's Supply-cap-once-not-on-every-subsequent-tick behavior.
+255 match-core tests total, all passing. `SimBridge.cs`'s new
+`QueueTrainCommand`/`CanTrainUnit` pass-throughs were flightcheck-
+compiled standalone against the real match-core DLL (0 errors) -- no
+Unity Editor available in this environment, same standing limitation
+every other Unity-side entry in this log already notes.
+
+**Deliberately NOT attempted, flagged rather than faked:**
+`SkirmishCommander` (the AI) never issues `TrainUnit` -- a real,
+separate AI-wiring job. No Unity HUD consumes the new `SimBridge`
+methods -- a training-queue panel is real, separate scope (mirrors
+`BuildMenuHud`'s own job for buildings). And, most importantly, this
+phase does NOT close the epic's own bootstrapping gap: a player still
+has no way to get their first Collector or Worker without one already
+existing (Phase 2/3's `SpawnCollector` is still a manual-only entry
+point) -- BigBrain raising Supply cap doesn't by itself produce a
+Worker or unlock Collector training, since Collector was never given a
+`RosterUnitKind`/roster-training path either. Closing that loop for
+real (does the Big Brain building itself produce Collectors? does it
+need its own dedicated production slot, separate from the generic
+Factory queue this phase built?) is a genuine open design question the
+creator's own spec doesn't fully answer, left here rather than guessed
+at.
+
+This closes all four tracked phases of the worker-economy epic
+(buildings/rubble/occupants -> Collector/possession -> Worker-gated
+construction -> three-faction production). The bootstrapping gap noted
+just above is the one loose thread carried forward, not a phase of its
+own.

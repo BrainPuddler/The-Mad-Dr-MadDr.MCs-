@@ -333,6 +333,19 @@ namespace MadDr.MatchCore
             _players[building.PlayerIndex].RaiseWalletCap(bonus.Resource, bonus.Amount);
         }
 
+        /// <summary>2026-07 worker-economy epic, Phase 4: sibling of
+        /// <see cref="ApplyStorageCapBonus"/> for <see
+        /// cref="BuildingDef.SupplyCapBonus"/> -- same "raise once, on
+        /// the UnderConstruction->Complete transition" contract, just a
+        /// different currency (Supply, not a wallet resource). Today only
+        /// <see cref="BuildingKind.BigBrain"/> sets this.</summary>
+        private void ApplySupplyCapBonus(SimBuilding building)
+        {
+            var def = BuildingDef.Get(building.Kind);
+            if (def.SupplyCapBonus == null) return;
+            _players[building.PlayerIndex].RaiseSupplyCap(def.SupplyCapBonus.Value);
+        }
+
         /// <summary>docs/03 / Phase 3.5: one tick of capture logic for
         /// every emitter, reading live unit positions fresh (no cached
         /// occupancy state -- a unit that moved off the hex this very
@@ -819,7 +832,18 @@ namespace MadDr.MatchCore
                 var b = _buildingsInOrder[i];
                 var wasComplete = b.State == BuildingState.Complete;
                 b.Tick();
-                if (!wasComplete && b.State == BuildingState.Complete) ApplyStorageCapBonus(b);
+                if (!wasComplete && b.State == BuildingState.Complete)
+                {
+                    ApplyStorageCapBonus(b);
+                    ApplySupplyCapBonus(b);
+                }
+
+                // 2026-07 epic Phase 4: training progress, Complete
+                // buildings only (a building mid-construction can never
+                // have a training slot open -- ApplyTrainUnit itself
+                // checks Complete before starting one).
+                var doneKind = b.TickTraining();
+                if (doneKind != null) SpawnTrainedUnit(b, doneKind.Value);
             }
 
             // docs/23 §13 amendment B (Phase 3.5): emitter capture, entity
@@ -880,6 +904,9 @@ namespace MadDr.MatchCore
                     break;
                 case CommandKind.AttackAnomaly:
                     ApplyAttackAnomaly(cmd);
+                    break;
+                case CommandKind.TrainUnit:
+                    ApplyTrainUnit(cmd);
                     break;
                 case CommandKind.None:
                 default:
@@ -1050,6 +1077,80 @@ namespace MadDr.MatchCore
             // non-null: CanPlaceBuilding above already returned false (and
             // we'd have returned) if _blockedToGround were null.
             _blockedToGround!.Add(hex);
+        }
+
+        /// <summary>2026-07 worker-economy epic, Phase 4: pure, read-only
+        /// validity check for a prospective <see cref="CommandKind.
+        /// TrainUnit"/> command -- same "one shared check, never a
+        /// hand-duplicated copy" precedent as <see cref="CanPlaceBuilding"/>.
+        /// Requires: the building exists, belongs to `playerIndex`, is
+        /// Complete, isn't already training something (v0.1's single
+        /// slot), `kind` belongs to `playerIndex`'s own faction, and
+        /// every line of its <see cref="UnitRosterDef.Cost"/> is
+        /// affordable.</summary>
+        public bool CanTrainUnit(int playerIndex, uint buildingEntityId, RosterUnitKind kind)
+        {
+            if (playerIndex < 0 || playerIndex >= _players.Length) return false;
+            var building = FindBuilding(buildingEntityId);
+            if (building == null || building.PlayerIndex != playerIndex) return false;
+            if (building.State != BuildingState.Complete) return false;
+            if (building.TrainingKind != null) return false;
+
+            var def = UnitRosterDef.Get(kind);
+            var player = _players[playerIndex];
+            if (player.Faction != def.Faction) return false;
+            foreach (var (resource, amount) in def.Cost)
+                if (player.Wallet(resource) < amount) return false;
+
+            return true;
+        }
+
+        /// <summary>docs/23 §2 Phase 2: begin training a roster unit at
+        /// TargetEntity (the producing building's entity ID), kind
+        /// decoded from ArgA. Validated by <see cref="CanTrainUnit"/>
+        /// BEFORE debiting any cost line (all-or-nothing, same contract
+        /// as <see cref="ApplyBuildStructure"/>). Silent no-op on any
+        /// failure. The unit itself is spawned later, when <see
+        /// cref="SimBuilding.TickTraining"/> reports the slot done (see
+        /// the building-tick loop in <see cref="Tick"/>) -- this method
+        /// only starts the clock and takes payment.</summary>
+        private void ApplyTrainUnit(Command cmd)
+        {
+            var kind = (RosterUnitKind)cmd.ArgA;
+            if (!CanTrainUnit(cmd.PlayerIndex, cmd.TargetEntity, kind)) return;
+
+            var def = UnitRosterDef.Get(kind);
+            var player = _players[cmd.PlayerIndex];
+            foreach (var (resource, amount) in def.Cost) player.TrySpend(resource, amount);
+
+            var building = FindBuilding(cmd.TargetEntity)!;
+            building.BeginTraining(kind, def.TrainTimeTicks);
+        }
+
+        /// <summary>Spawns a just-completed trained unit at the nearest
+        /// open hex to its producing building (the building's own hex is
+        /// always blocked by the building itself), falling back outward
+        /// ring by ring same as <see cref="RuntimeCityBuilder.
+        /// NearestOpenHex"/>'s Unity-side twin for disgorged occupants.
+        /// If every hex within 6 rings is somehow blocked (a pathological
+        /// map, never seen in practice), the unit is silently NOT spawned
+        /// rather than placed somewhere illegal -- a real, accepted v0.1
+        /// edge case, not worth a fallback-to-anywhere hack.</summary>
+        private void SpawnTrainedUnit(SimBuilding building, RosterUnitKind kind)
+        {
+            var spawnHex = FindOpenHexNear(building.Hex);
+            if (spawnHex == null) return;
+            var def = UnitRosterDef.Get(kind);
+            SpawnUnit(building.PlayerIndex, spawnHex.Value, def.Speed, def.Radius, def.Combat, def.SalvageValue);
+        }
+
+        private HexCoord? FindOpenHexNear(HexCoord from)
+        {
+            if (_city == null || _blockedToGround == null) return null;
+            for (var ring = 1; ring <= 6; ring++)
+                foreach (var n in from.Ring(ring))
+                    if (_city.Contains(n) && !_blockedToGround.Contains(n)) return n;
+            return null;
         }
 
         /// <summary>docs/23 §5 / docs/27 Phase C: one tick's separation
