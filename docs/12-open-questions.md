@@ -6433,3 +6433,76 @@ surface) is the one piece of ground truth this project has no way to
 obtain except by asking directly -- and per the creator's own stated
 preference this round, that should be a last resort after digging
 through the code first, not a first move.
+
+## 2026-07: the REAL likely root cause -- 57 scripts had no committed .meta file
+
+The creator reported the `CityBuilt` GameObject (the one carrying
+`RuntimeCityBuilder`) had disappeared -- "the empty gameobject with the
+citybuilder is gone." `SampleScene.unity` itself, unchanged by any
+commit this whole session, still listed it correctly. Digging into WHY
+a correctly-committed scene reference could still fail in a real
+Editor surfaced something much bigger than a scene-sync hiccup: **57 of
+this repo's 59 C# scripts under `Assets/Scripts` had never had a
+committed `.meta` file** -- including `RuntimeCityBuilder.cs` itself.
+Only `CityGizmo.cs`/`HexGridGizmo.cs` (plus the two stock
+`TutorialInfo` template scripts) had one; `.gitignore` doesn't exclude
+`.meta` files, so this wasn't deliberate -- every script this project
+has added was apparently written directly (no real Unity Editor
+available in this environment to auto-generate the `.meta` the normal
+way) without a matching `.meta` ever being authored or committed
+alongside it.
+
+**Why this breaks everything, not just one GameObject.** A Unity
+`.meta` file's `guid` is the ONLY thing a scene/prefab uses to resolve
+"which script does this component actually run" -- `SampleScene.unity`
+stores `m_Script: {fileID: 11500000, guid:
+59f1bcb7b35f24dca88b3126df764dd0, ...}` on the `CityBuilt` GameObject,
+a guid that has been sitting in the committed scene this entire time
+with NOTHING in git ever backing it. On the creator's own original
+machine, at whatever point they first set this up in a real Editor,
+Unity would have auto-generated a real `.meta` with that exact guid
+LOCALLY -- but since it was never committed, anyone else (or the same
+machine after a `Library/` reset, a fresh clone, or anything else that
+makes Unity re-import the script fresh) would have Unity mint a BRAND
+NEW, DIFFERENT random guid for `RuntimeCityBuilder.cs`, which can never
+match the scene's own stored reference. The result: "Missing (Mono
+Behaviour)" on that component -- and a missing script reference means
+Unity calls NONE of its lifecycle methods. `Start()` (and therefore
+`BeginMatch()`, `SpawnTraffic()`, city generation, everything) would
+simply never run. This is a complete, sufficient explanation for
+"cars are just parked" and "the citybuilder is gone" BOTH, independent
+of the `BuildBody`/lights hardening fixed in the entry above -- if
+`RuntimeCityBuilder` itself never started running at all, NOTHING in
+the whole match would ever exist, regardless of how correct
+`TrafficCar.cs`'s own logic is. This also explains the repo's own
+earlier "Restore creator's CityBuilt test GameObject into
+SampleScene.unity" commit (from a prior session) -- the same
+underlying gap, recurring, because the actual missing piece (committed
+`.meta` files) was never addressed, only the symptom (the scene entry)
+patched over.
+
+**Fix:** created `RuntimeCityBuilder.cs.meta` with the EXACT guid
+(`59f1bcb7b35f24dca88b3126df764dd0`) the scene has always expected --
+confirmed by grepping the scene file directly, not assumed -- and
+fresh, collision-checked guids for the other 56 previously-meta-less
+scripts (verified against every existing guid in the project, not just
+generated blind). Also verified: zero OTHER assets or folders under
+`Assets/` are missing a `.meta` (only the 57 `.cs` files were
+affected), and zero duplicate guids exist anywhere in the project
+after the fix.
+
+**Honest framing:** this environment still has no real Unity Editor,
+so there is no way to press Play here and confirm this resolves what
+the creator is seeing -- but unlike the `BuildBody`/shader-lookup
+theory (a real, demonstrated bug class, just not confirmed as THE
+trigger in this specific case), this one is closer to certain: the
+scene's own stored guid for `RuntimeCityBuilder` provably had no
+committed backing anywhere in this repo's history, which is not a
+"maybe" -- it is a structural gap that WILL break the script reference
+on any environment that doesn't happen to still have the creator's own
+original local `Library` cache. If the game still doesn't run after
+this, the next thing worth checking is whether OTHER GameObjects in
+the scene (not just `CityBuilt`) show "Missing Script" warnings in the
+Inspector, and whether Unity needed to reimport on this pull (a
+"reimporting" progress bar, or a changed `Library/` folder) -- both
+would confirm or rule out this exact theory further.
