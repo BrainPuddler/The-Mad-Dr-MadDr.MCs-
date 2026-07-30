@@ -6506,3 +6506,80 @@ the scene (not just `CityBuilt`) show "Missing Script" warnings in the
 Inspector, and whether Unity needed to reimport on this pull (a
 "reimporting" progress bar, or a changed `Library/` folder) -- both
 would confirm or rule out this exact theory further.
+
+## 2026-07: FIX -- one car drove, lights on, then stopped for good; no other car ever seen moving
+
+Creator report, after the `.meta`-file fix above got the match actually
+running: "one car drove for a bit, had lights but it stopped and did
+not find any other cars moving on the map." Distinct symptom from the
+earlier "cars are just parked, no lights either" bug -- this car WAS
+driving, with working headlights, and then permanently stopped while
+still (per the lights) in the `Driving` state, not `Parked`
+(`UpdateLights` only lights the headlights on the `driving: true`
+path; a genuinely `Parked` car's lights would be off). That distinction
+is the thread that unravels it: something in the DRIVING path itself
+can grind a car to a permanent, un-recovering halt.
+
+**Root cause, found by re-reading `TrafficCar.Update()`'s passing logic
+line by line.** The follow-distance check (`DistanceAhead`) treats
+every other traffic car as a potential lane obstacle regardless of its
+own state -- including a `Parked` one sitting at the curb. That's
+deliberate (a curbed car is a real obstacle a driver has to get around,
+same as the creator's own "slow down if there's a car in front"
+direction), and `ParkHere()`'s curb offset (`CurbOffset` = 2.5m) sits
+only 0.5m further from the road centerline than the driving lane
+offset itself (`LaneOffset` = 2.0m) -- well inside `LaneHalfWidth`
+(2.4m), so roughly half of all parked cars (whichever curb `sign` they
+rolled) sit squarely "in lane" for same-direction traffic that later
+drives the same stretch. The passing maneuver (`_passing`) exists to
+handle exactly this: swerve onto the opposite side, boost speed, and
+merge back once past. But its own "have I gotten past it" check,
+`ownLaneClear`, queried `DistanceAhead` from `transform.position`
+directly -- and DURING a pass, that position is already offset
+sideways by up to `PassLaneOffset` (4m) toward the opposite lane. A
+stationary blocker sitting near the ORIGINAL lane centerline reads as
+"more than `LaneHalfWidth` away, therefore clear" within the first
+frame or two of the swerve, purely from the LATERAL offset -- long
+before the car has actually traveled far enough ALONG the road to be
+past the blocker. That false-positive "clear" immediately ends the
+pass (`_passing = false`), which re-centers the car's steering back
+onto the original lane line, heading straight back at the still-
+parked, still-not-moved blocker; `_blockedTimer` resets to 0 and the
+whole cycle (wait past `PassBlockedTriggerTime`, commit, immediately
+false-abort) repeats roughly once a second, forever, with no net
+forward progress -- a car that LOOKS stopped (because it net-is), still
+reads as `Driving` (lights stay on), and never reaches `ArriveRadius`
+so `_hopsRemaining` never ticks down to a real `ParkHere()` either.
+Because any car whose route crosses a same-side-curbed parked car hits
+this the same way, and the fleet's `trafficMovingPercent` (0.55
+default) means roughly half the cars are parked (i.e. candidate
+blockers) at any moment, this plausibly explains why the creator saw
+the WHOLE fleet read as stopped, not just the one car they happened to
+be watching when it happened.
+
+**Fix:** `ownLaneClear` now queries from `transform.position + right *
+PassLaneOffset` -- i.e. the passing car's current along-track position
+projected BACK onto the original lane (undoing its own swerve offset)
+before checking clearance, instead of checking from wherever the
+swerve has currently put it. This reports "still blocked" for as long
+as the blocker is genuinely still ahead along the road, regardless of
+how far sideways the car itself has swerved to get around it, and
+correctly reports "clear" once the car's own along-track position has
+actually carried it past the blocker (at which point the blocker's
+`along` value from that projected point goes negative -- behind, not
+ahead -- and `DistanceAhead`'s own `Consider` already skips anything
+behind). `passSideClear`'s own check (from `transform.position - right
+* PassLaneOffset`, the opposite-lane point) was already correct and is
+unchanged.
+
+**Honest limits:** no real Unity Editor in this environment to press
+Play and watch a car actually clear a parked blocker after this fix --
+same posture as every other `TrafficCar` entry in this log. The
+reasoning above is a line-by-line trace of the actual geometry
+(`LaneOffset` vs `CurbOffset` vs `LaneHalfWidth`, and what `transform.
+position` is during a committed pass vs. what the check assumed it
+was), not a guess -- but if the fleet still reads as fully stopped
+after this, the next thing worth checking is whether it's this SAME
+mechanism in a different guise (e.g. two driving cars mutually
+blocking after a fleeing U-turn) rather than the parked-car case this
+fix targets specifically.

@@ -728,7 +728,35 @@ public class TrafficCar : MonoBehaviour
                 // successful pass: the slow car is no longer in the way).
                 _passTimer -= dt;
                 var passSideClear = _builder.DistanceAhead(transform.position - right * PassLaneOffset, fwd, PassLaneCheckRange, LaneHalfWidth, this);
-                var ownLaneClear = _builder.DistanceAhead(transform.position, fwd, FollowRange, LaneHalfWidth, this);
+                // 2026-07 fix (creator report: a car would drive for a bit,
+                // lights on, then stop for good, and no other car on the
+                // map was ever seen moving either): this used to query from
+                // `transform.position` directly -- but WHILE passing, that
+                // position is already offset sideways by (up to)
+                // PassLaneOffset toward the opposite lane, so the blocker
+                // sitting near the ORIGINAL lane centerline reads as
+                // "outside LaneHalfWidth, therefore clear" within the very
+                // first frame or two of the swerve, long before the car has
+                // actually driven far enough ALONG the road to be past it.
+                // That false-positive "clear" immediately aborts the pass
+                // (see the branch below), which snaps the car back onto the
+                // original lane line heading straight back at the still-
+                // stationary blocker -- re-triggering `_blockedTimer` from
+                // zero and re-attempting (and re-aborting) a pass every
+                // ~1s, forever, with no net progress. A parked car sits
+                // curbed only CurbOffset (2.5m) from the road centerline --
+                // just outside LaneOffset (2.0m) -- so it is exactly the
+                // kind of permanent, never-moving blocker this breaks on,
+                // and every car whose route crosses one gets stuck behind
+                // it the same way (the whole fleet reads as "stopped",
+                // not just the one the creator happened to be watching).
+                // Projecting back onto the ORIGINAL lane (undoing this
+                // car's own PassLaneOffset swerve) before checking clearance
+                // fixes the reference point: it now reports "still blocked"
+                // for as long as the blocker is genuinely still ahead
+                // along the road, regardless of how far sideways this car
+                // itself has swerved to get around it.
+                var ownLaneClear = _builder.DistanceAhead(transform.position + right * PassLaneOffset, fwd, FollowRange, LaneHalfWidth, this);
                 if (_passTimer <= 0f || passSideClear < FollowGap || ownLaneClear >= FollowRange)
                 {
                     _passing = false;
