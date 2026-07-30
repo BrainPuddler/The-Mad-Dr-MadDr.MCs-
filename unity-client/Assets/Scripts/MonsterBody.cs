@@ -80,6 +80,17 @@ public class MonsterBody : MonoBehaviour
     private readonly List<Transform> _tailSegments = new List<Transform>(); // serpentine
     private readonly List<Vector3> _tailTrail = new List<Vector3>();
     private Transform _torso;
+
+    /// <summary>2026-07 (GrabCursor grab feature, "for arm actions just
+    /// rotate the shoulder joints up and down"): the pivot the whole
+    /// hand/weapon assembly is built under, at the SAME mount point
+    /// <see cref="BuildWeapon"/> always used -- not an anatomically real
+    /// shoulder socket (this rig has no such data for the hand/weapon the
+    /// way legs have real hip sockets), just an armature to rotate the
+    /// existing static geometry around. Null for a creature with nothing
+    /// mounted there (BuildWeapon still creates it unconditionally for
+    /// simplicity -- an empty pivot is harmless).</summary>
+    private Transform _shoulder;
     private string _plan = "tetrapod";
     private float _legLen = 1.2f;
     private float _stride = 1.8f;
@@ -484,46 +495,57 @@ public class MonsterBody : MonoBehaviour
         var metal = new Color(0.45f, 0.51f, 0.56f);
         var ichor = new Color(0.59f, 0.33f, 0.9f);
 
+        // 2026-07: every hand/weapon part now hangs off ONE shoulder pivot
+        // at the mount point instead of straight off _torso -- an
+        // armature purely to rotate the whole assembly around (see
+        // UpdateLocomotion's own new shoulder-swing block), not a change
+        // to how anything looks at rest. Every part's position below is
+        // therefore relative to `mount` now (the pivot's own origin), not
+        // an absolute `mount + offset` anymore.
+        _shoulder = new GameObject("Shoulder").transform;
+        _shoulder.SetParent(_torso, false);
+        _shoulder.localPosition = mount;
+
         switch (handFamily)
         {
             case "rifle_arm":
             case "chain_blade":
-                Part(PrimitiveType.Cube, _torso, mount, new Vector3(0.25f, 0.3f, 0.9f) * _bulkScale, metal);
-                Part(PrimitiveType.Cylinder, _torso, mount + new Vector3(0f, 0.05f * _bulkScale, 0.9f * _bulkScale),
+                Part(PrimitiveType.Cube, _shoulder, Vector3.zero, new Vector3(0.25f, 0.3f, 0.9f) * _bulkScale, metal);
+                Part(PrimitiveType.Cylinder, _shoulder, new Vector3(0f, 0.05f * _bulkScale, 0.9f * _bulkScale),
                     new Vector3(0.1f, 0.55f, 0.1f) * _bulkScale, Shade(metal, 0.7f))
                     .localRotation = Quaternion.Euler(90f, 0f, 0f);
                 break;
             case "plasma_lance":
-                Part(PrimitiveType.Cylinder, _torso, mount + new Vector3(0f, 0.3f * _bulkScale, 0.2f * _bulkScale),
+                Part(PrimitiveType.Cylinder, _shoulder, new Vector3(0f, 0.3f * _bulkScale, 0.2f * _bulkScale),
                     new Vector3(0.12f, 0.7f, 0.12f) * _bulkScale, ichor)
                     .localRotation = Quaternion.Euler(70f, 0f, 0f);
-                Part(PrimitiveType.Sphere, _torso, mount + new Vector3(0f, 0.9f * _bulkScale, 0.5f * _bulkScale),
+                Part(PrimitiveType.Sphere, _shoulder, new Vector3(0f, 0.9f * _bulkScale, 0.5f * _bulkScale),
                     Vector3.one * 0.25f * _bulkScale, new Color(1f, 0.8f, 0.2f));
                 break;
             case "laser_array":
                 for (var i = -1; i <= 1; i++)
                 {
-                    Part(PrimitiveType.Cylinder, _torso,
-                        mount + new Vector3(i * 0.15f * _bulkScale, 0.35f * _bulkScale, 0.1f * i * _bulkScale),
+                    Part(PrimitiveType.Cylinder, _shoulder,
+                        new Vector3(i * 0.15f * _bulkScale, 0.35f * _bulkScale, 0.1f * i * _bulkScale),
                         new Vector3(0.05f, 0.55f, 0.05f) * _bulkScale, new Color(0.51f, 0.86f, 1f))
                         .localRotation = Quaternion.Euler(75f, i * 8f, 0f);
                 }
                 break;
             case "photon_blaster":
-                Part(PrimitiveType.Sphere, _torso, mount + new Vector3(0f, 0.2f * _bulkScale, 0.3f * _bulkScale),
+                Part(PrimitiveType.Sphere, _shoulder, new Vector3(0f, 0.2f * _bulkScale, 0.3f * _bulkScale),
                     Vector3.one * 0.55f * _bulkScale, Shade(skin, 0.9f));
-                Part(PrimitiveType.Sphere, _torso, mount + new Vector3(0f, 0.2f * _bulkScale, 0.62f * _bulkScale),
+                Part(PrimitiveType.Sphere, _shoulder, new Vector3(0f, 0.2f * _bulkScale, 0.62f * _bulkScale),
                     Vector3.one * 0.3f * _bulkScale, new Color(1f, 0.92f, 0.69f));
                 break;
             case "spore_launcher":
-                Part(PrimitiveType.Sphere, _torso, mount + new Vector3(0f, 0.25f * _bulkScale, 0.2f * _bulkScale),
+                Part(PrimitiveType.Sphere, _shoulder, new Vector3(0f, 0.25f * _bulkScale, 0.2f * _bulkScale),
                     Vector3.one * 0.5f * _bulkScale, Shade(ichor, 0.75f));
                 break;
             case "hand_stump":
-                break; // healed over -- nothing to mount
+                break; // healed over -- nothing to mount (the pivot stays, just empty)
             default: // claw_hand, pincer, tentacle: an organic arm nub + claw wedge
-                Part(PrimitiveType.Sphere, _torso, mount, Vector3.one * 0.4f * _bulkScale, Shade(skin, 0.9f));
-                Part(PrimitiveType.Cube, _torso, mount + new Vector3(0.1f * _bulkScale, -0.25f * _bulkScale, 0.3f * _bulkScale),
+                Part(PrimitiveType.Sphere, _shoulder, Vector3.zero, Vector3.one * 0.4f * _bulkScale, Shade(skin, 0.9f));
+                Part(PrimitiveType.Cube, _shoulder, new Vector3(0.1f * _bulkScale, -0.25f * _bulkScale, 0.3f * _bulkScale),
                     new Vector3(0.15f, 0.4f, 0.5f) * _bulkScale, new Color(0.77f, 0.72f, 0.6f));
                 break;
         }
@@ -912,6 +934,34 @@ public class MonsterBody : MonoBehaviour
 
             RenderLeg(leg, hipW);
         }
+
+        UpdateShoulderSwing();
+    }
+
+    // 2026-07 (GrabCursor grab feature, creator direction verbatim: "for
+    // arm actions just rotate the shoulder joints up and down a
+    // naturalist way do not go over 30 degrees of motion. NOT IN THE Y
+    // Axis"): 30 degrees is the swing's own AMPLITUDE, not a peak-to-
+    // peak span -- Sin ranges [-1,1], so the shoulder never deviates more
+    // than this many degrees from its rest pose in either direction.
+    private const float ShoulderSwingMaxDeg = 30f;
+
+    /// <summary>Swings the whole hand/weapon assembly (see BuildWeapon's
+    /// own <see cref="_shoulder"/> pivot) up and down around its LOCAL X
+    /// axis ONLY -- pitch, never Y (yaw) or Z (roll), matching "NOT IN
+    /// THE Y Axis" precisely -- driven by the SAME <see
+    /// cref="StrugglePhase"/> the legs already kick to, so the whole
+    /// creature reads as one struggling gesture instead of two
+    /// independently-timed animations. Rests at identity the instant
+    /// <see cref="ForceTuckLegs"/> goes false (dropped, or never grabbed
+    /// at all) -- StrugglePhase itself is reset to 0 on drop (see
+    /// MonsterAgent.EndHeld/BeginRoofDisplay), so this naturally settles
+    /// there too without a separate flag.</summary>
+    private void UpdateShoulderSwing()
+    {
+        if (_shoulder == null) return;
+        var swingDeg = ForceTuckLegs ? Mathf.Sin(StrugglePhase * 0.9f) * ShoulderSwingMaxDeg : 0f;
+        _shoulder.localRotation = Quaternion.Euler(swingDeg, 0f, 0f);
     }
 
     /// <summary>Bat-style flap: fast, powerful beats while still climbing

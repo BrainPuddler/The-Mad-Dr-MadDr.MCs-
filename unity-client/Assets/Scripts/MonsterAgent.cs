@@ -572,14 +572,16 @@ public class MonsterAgent : MonoBehaviour
     // earlier "slower, roll+pitch only" pass, not a reversion to the
     // original fast/spinning first draft). WiggleSpeed/Amplitude are the
     // slow overall squirm (roll+pitch only, no yaw); Thrash* layers a
-    // faster, smaller jitter on top so the weapon/limb geometry mounted
-    // on the torso reads as flailing at a different rate than the body's
-    // own slow twist -- the closest this rig (no independent arm IK, see
-    // MonsterBody's own header) can honestly get to "arms struggling"
-    // without inventing a whole new limb-animation system for it. Real
-    // per-leg struggle IS independently animated, via MonsterBody.
-    // StrugglePhase (see the Airborne+ForceTuckLegs branch of
-    // UpdateLocomotion).
+    // faster, smaller jitter on top of THAT. Real independent limb
+    // animation now exists for both: legs kick via MonsterBody.
+    // StrugglePhase (the Airborne+ForceTuckLegs branch of
+    // UpdateLocomotion), and the arm/weapon assembly swings up/down
+    // around its own shoulder pivot via MonsterBody.UpdateShoulderSwing
+    // (2026-07 follow-up: "rotate the shoulder joints up and down...
+    // not over 30 degrees... NOT in the Y Axis") -- driven by the SAME
+    // StrugglePhase so every limb reads as one struggling gesture, not
+    // several independently-timed ones. The Thrash* jitter here stays as
+    // an additional whole-body layer on top of that real limb motion.
     private const float WiggleSpeed = 3.0f;        // radians/sec -- up from the previous pass's 1.6
     private const float WiggleAmplitudeDeg = 16f;
     private const float ThrashSpeed = 11f;

@@ -7120,3 +7120,50 @@ Verified for real: `MonsterAgent.cs`/`MonsterBody.cs` braces/parens
 balanced across the whole file, the honest ceiling of static
 verification available with no `UnityEngine` assembly to compile
 against in this environment.
+
+### 2026-07 third follow-up: real shoulder-joint rotation for arms
+
+Creator direction, verbatim: "for arm actions just Rotate the shoulder
+joints up and down a naturalist way do not go over 30 degrees of motion.
+NOT IN THE Y Axis." A direct, corrective follow-up to the prior entry's
+own honest admission that "arms struggling" only reached the torso's own
+whole-body thrash, since `MonsterBody` had no independent arm rig at
+all -- this closes that real gap rather than leaving it as a permanent
+ceiling.
+
+`BuildWeapon` (every hand/weapon family: rifle_arm, plasma_lance,
+laser_array, photon_blaster, spore_launcher, the organic claw/pincer/
+tentacle default) now builds its geometry under one new `_shoulder`
+pivot Transform instead of straight off `_torso` -- the pivot sits at
+the exact same `mount` point the geometry was already offset from, so
+every part's position became relative to the pivot (`mount + offset` ->
+`offset`) with zero change to how anything looks at rest. Not an
+anatomically real shoulder socket (this rig has no such socket data for
+the hand/weapon the way legs have real hip sockets) -- an armature to
+rotate the existing static assembly around, built at the one point that
+already made sense to pivot from.
+
+`MonsterBody.UpdateShoulderSwing` (called every frame from
+`UpdateLocomotion`, after the leg loop) rotates `_shoulder.localRotation`
+via `Quaternion.Euler(swingDeg, 0f, 0f)` -- X only, Y and Z always
+exactly 0, so it is structurally impossible for this to introduce any
+yaw ("NOT IN THE Y Axis," satisfied by construction, not by convention).
+`swingDeg = Sin(StrugglePhase * 0.9) * 30`, so 30 degrees is the
+amplitude in EITHER direction from rest, never a peak-to-peak span --
+"do not go over 30 degrees of motion" read as a hard per-side cap, the
+stricter of the two possible readings. Driven by the SAME
+`StrugglePhase` the legs already kick to (not a second, independently-
+phased clock) so the whole creature reads as one struggling gesture.
+Rests at identity automatically whenever `ForceTuckLegs` is false (never
+grabbed, or dropped) -- no separate reset needed since `StrugglePhase`
+itself is already reset to 0 on drop (`MonsterAgent.EndHeld`/
+`BeginRoofDisplay`, from the prior entry).
+
+**Honest limits, unchanged:** no Unity Editor here to confirm the swing
+actually reads as naturalistic (vs. too fast/slow/robotic) at real
+render time. Verified for real: `MonsterBody.cs`/`MonsterAgent.cs`
+braces/parens balanced across the whole file; every `BuildWeapon` case
+was individually checked to confirm its `mount +` prefix was correctly
+dropped (not just the ones this description happened to quote) so no
+weapon silently drifted position when its parent changed from `_torso`
+to `_shoulder`.
