@@ -7025,3 +7025,46 @@ braces/parens balanced across the whole file (`MonsterAgent.cs`,
 `RuntimeCityBuilder.cs`, `WaypointCommander.cs`, `GrabCursor.cs`) -- the
 honest ceiling of static verification available with no `UnityEngine`
 assembly to compile against in this environment.
+
+### 2026-07 follow-up: mechanical claw, tucked feet, slower roll/pitch wiggle, roof landing + park-around-Factory
+
+Five refinements to the grab/clone feature above, all creator-directed:
+
+- **"The Claw should be a mechanical Claw for all races."** Redrew
+  `ClawTexture()` from the original gothic-red creature-pincer into a
+  brushed-steel, riveted arcade-claw-machine glyph (a cable-mount hub +
+  three hinged prongs) -- race-neutral by construction, not skinned per
+  faction. Also fixed a real bug the redraw surfaced: the cursor hotspot
+  passed to `Cursor.SetCursor` was never converted from the Color32
+  array's bottom-up row order to `SetCursor`'s own top-down pixel
+  convention -- the claw would have grabbed several pixels off from
+  where it visually pointed.
+- **"Disengage the feet from the ground when grabbed."** `MonsterBody`
+  gained `ForceTuckLegs` (defaults false, so every non-grabbed creature
+  is byte-for-byte unchanged) -- ORed into the existing `Airborne` check
+  that already tucks a flying creature's legs mid-air, reusing that exact
+  mechanism rather than inventing a second one. `MonsterAgent.Update()`
+  still calls `UpdateLocomotion(Vector3.zero, dt)` while held/roof-
+  displaying (not a bare early-return) specifically so the tucked legs
+  stay synced to the wiggling/spinning torso instead of frozen mid-
+  stride.
+- **"Wiggling should be in roll and pitch and a lot slower."** Dropped
+  the yaw-spin component entirely and cut `WiggleSpeed` from 9 to 1.6
+  rad/sec -- roll (Z) and pitch (X) only now, on two different sine
+  rates/phases so they never lock into one repeating figure.
+- **"When dropped into the factory, it should land on the roof and
+  rotate slowly in the Y axis."** New `MonsterAgent.BeginRoofDisplay` /
+  `TickRoofDisplay`: the ORIGINAL (never-consumed) creature settles atop
+  the Factory's own roof height (`BaseDresser.RoofHeightFor`, a public
+  wrapper around the SAME tier-height table `BaseDresser` already
+  renders buildings with, not a second copy of those numbers) and spins
+  slowly around Y, persisting until a real order is issued (hooked into
+  `ClearTargets`'s existing "any fresh order cancels a pending X" law --
+  same "stays put until manually disturbed" contract `Perch` already
+  has for rooftop-resting flyers).
+- **"When clones pop out they should emerge and park themselves around
+  the factory."** Clones now spawn AT the Factory's own hex (visibly
+  emerging from it) and get a settle-creep destination via a new
+  `MonsterAgent.SetSettleTarget`, reusing the EXISTING `TickSettle`
+  direct-line-creep machinery group-move arrival already uses --
+  deliberately not a new movement system.

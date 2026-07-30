@@ -175,6 +175,14 @@ public class BaseDresser : MonoBehaviour
         return new Vector3(11f, 5f, 11f);                            // Small
     }
 
+    /// <summary>2026-07 (GrabCursor's post-clone "lands on the roof" beat):
+    /// the world-space height of a building's own roof above its
+    /// footprint's ground point -- the SAME tier-height table <see
+    /// cref="FullScaleFor"/> already uses for rendering, exposed here so
+    /// nothing outside this class has to duplicate (and risk drifting
+    /// from) those numbers.</summary>
+    public static float RoofHeightFor(BuildingKind kind) => FullScaleFor(BuildingDef.Get(kind)).y;
+
     // ---- per-kind silhouettes (all children of `root`, which is
     // already positioned at the hex's ground point) ----
 

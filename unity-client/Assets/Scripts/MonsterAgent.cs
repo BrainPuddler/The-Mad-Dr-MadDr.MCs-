@@ -501,6 +501,14 @@ public class MonsterAgent : MonoBehaviour
         _targetSpecialAttackUnit = null;
         _attackMoveDestination = null;  // any fresh order cancels a pending attack-move/patrol
         _isPatrolling = false;
+        // 2026-07: any fresh order also ends the post-clone "resting on
+        // the roof, slowly spinning" display beat -- same "any fresh
+        // order cancels a pending X" law every other field here follows.
+        if (_roofDisplay)
+        {
+            _roofDisplay = false;
+            if (_body != null) _body.ForceTuckLegs = false;
+        }
     }
 
     // ---- 2026-07: grab-carry (GrabCursor) ------------------------------------
@@ -511,7 +519,14 @@ public class MonsterAgent : MonoBehaviour
     /// was doing (same as any fresh order) and hands control of its
     /// transform to <see cref="TickHeld"/>, called externally by
     /// GrabCursor every frame from here on -- this class's own Update()
-    /// no-ops entirely while held.</summary>
+    /// stops issuing orders/movement while held (see the top of Update()),
+    /// though it still calls into <see cref="MonsterBody.UpdateLocomotion"/>
+    /// with zero velocity so the legs stay properly synced to the
+    /// wiggling torso instead of frozen. Creator direction: "disengage the
+    /// feet from the ground when grabbed" -- <see cref="MonsterBody.
+    /// ForceTuckLegs"/> folds them up the same way a flying creature's
+    /// legs already tuck mid-air, since a grabbed creature has just as
+    /// little ground under it.</summary>
     public void BeginHeld()
     {
         _held = true;
@@ -521,38 +536,86 @@ public class MonsterAgent : MonoBehaviour
         _path = null;
         _order = OrderKind.Idle;
         if (_fighter != null) _fighter.LastVelocity = Vector3.zero;
+        if (_body != null) _body.ForceTuckLegs = true;
     }
 
     /// <summary>Ends the grab-carry state -- the very next Update() resumes
     /// normal per-frame ticking as a freshly-idle unit (AcquireTarget,
     /// TickSettle), exactly as if it had just arrived somewhere and
     /// stopped, since <see cref="BeginHeld"/> already left `_order` at
-    /// Idle with no pending target.</summary>
+    /// Idle with no pending target. Re-engages the legs (see
+    /// <see cref="BeginHeld"/>) -- the very next terrain-follow in
+    /// Update() will settle it back onto the ground, and the next
+    /// UpdateLocomotion call re-plants them from scratch there.</summary>
     public void EndHeld()
     {
         _held = false;
+        if (_body != null) _body.ForceTuckLegs = false;
     }
 
-    private const float WiggleSpeed = 9f;         // radians/sec -- a fast, agitated squirm
-    private const float WiggleAmplitudeDeg = 14f;
+    // 2026-07 refinement (creator direction: "wiggling should be in roll
+    // and pitch and a lot slower"): roll (Z) + pitch (X) only, no yaw
+    // spin, and a much slower cadence than the original first pass.
+    private const float WiggleSpeed = 1.6f;       // radians/sec -- a slow, ponderous squirm
+    private const float WiggleAmplitudeDeg = 16f;
 
     /// <summary>Driven externally by GrabCursor once per frame while held
     /// -- creator direction: "pick it up... it will wiggle and squirm."
     /// Hovers the monster above `worldPos` (the cursor's current ground
-    /// point, GrabCursor's own raycast) and layers a wobbling squirm
-    /// rotation on top: two out-of-phase sine/cosine tilts plus a slower
-    /// full-turn spin, so it reads as a creature twisting against a grip
-    /// rather than a rigid object being carried.</summary>
+    /// point, GrabCursor's own raycast) and layers a slow roll/pitch
+    /// wobble on top: two out-of-phase, differently-timed sine tilts, no
+    /// yaw component -- a creature straining against a grip, not
+    /// spinning in place.</summary>
     public void TickHeld(Vector3 worldPos, float dt)
     {
         _wigglePhase += dt * WiggleSpeed;
         var hoverHeight = _body != null ? Mathf.Max(1.5f, _body.BodyHeight * 0.6f) : 2f;
         transform.position = new Vector3(worldPos.x, worldPos.y + hoverHeight, worldPos.z);
 
-        var wobbleX = Mathf.Sin(_wigglePhase * 1.3f) * WiggleAmplitudeDeg;
-        var wobbleZ = Mathf.Cos(_wigglePhase) * WiggleAmplitudeDeg;
-        var wobbleY = Mathf.Sin(_wigglePhase * 0.7f) * 180f;
-        transform.rotation = Quaternion.Euler(wobbleX, wobbleY, wobbleZ);
+        var pitch = Mathf.Sin(_wigglePhase) * WiggleAmplitudeDeg;
+        var roll = Mathf.Sin(_wigglePhase * 0.77f + 1.3f) * WiggleAmplitudeDeg;   // different rate + phase offset so roll and pitch never lock into a single repeating figure
+        transform.rotation = Quaternion.Euler(pitch, 0f, roll);
+    }
+
+    // ---- 2026-07: post-clone roof display (GrabCursor) -----------------------
+
+    private bool _roofDisplay;
+    private const float RoofSpinDegPerSec = 40f;
+
+    /// <summary>Creator direction: "When dropped into the factory, it
+    /// should land on the roof and rotate slowly in the Y axis." Called by
+    /// GrabCursor instead of <see cref="EndHeld"/> when the drop landed on
+    /// the player's own Factory -- same leg-tuck reasoning as being held
+    /// (nothing to plant a foot on up on a roof either), persists until a
+    /// real order is issued (see <see cref="ClearTargets"/>'s own new
+    /// clause), the same "stays put until manually disturbed" contract
+    /// <see cref="OrderPerch"/> already established for flyers resting on
+    /// a roof.</summary>
+    public void BeginRoofDisplay(Vector3 roofWorldPos)
+    {
+        _held = false;
+        _roofDisplay = true;
+        transform.position = roofWorldPos;
+        if (_body != null) _body.ForceTuckLegs = true;
+        if (_fighter != null) _fighter.LastVelocity = Vector3.zero;
+    }
+
+    private void TickRoofDisplay(float dt)
+    {
+        transform.Rotate(Vector3.up, RoofSpinDegPerSec * dt, Space.World);
+        if (_body != null) _body.UpdateLocomotion(Vector3.zero, dt);
+    }
+
+    /// <summary>2026-07 (GrabCursor's clone-onto-Factory feature): give an
+    /// already-idle unit a settle-creep destination directly, without
+    /// issuing a real Move order -- "clones emerge and park themselves
+    /// around the factory" reuses the SAME direct-line creep <see
+    /// cref="TickSettle"/> already does for group-move arrival, just
+    /// seeded here instead of via <see cref="OrderMove"/>'s own group-move
+    /// path.</summary>
+    public void SetSettleTarget(Vector3 worldPoint)
+    {
+        _settleTarget = worldPoint;
     }
 
     /// <summary>The single place _order becomes Idle. Flight is only ever
@@ -647,10 +710,27 @@ public class MonsterAgent : MonoBehaviour
         var dt = Time.deltaTime;
 
         // 2026-07: grabbed by GrabCursor -- it drives this monster's
-        // transform directly via TickHeld every frame; this Update()
-        // contributes nothing while held (no orders, no separation, no
-        // terrain-follow) so the two never fight over the same transform.
-        if (_held) return;
+        // transform directly via TickHeld every frame; this Update() issues
+        // no orders/separation/terrain-follow (GrabCursor owns the
+        // transform outright) but still ticks the body's own locomotion
+        // with zero velocity, purely so the tucked legs (ForceTuckLegs)
+        // stay visually synced to the wiggling torso instead of frozen in
+        // whatever pose they were in the instant before the grab.
+        if (_held)
+        {
+            if (_body != null) _body.UpdateLocomotion(Vector3.zero, dt);
+            return;
+        }
+
+        // 2026-07: resting on a Factory roof after a clone-drop -- see
+        // BeginRoofDisplay's own doc comment. Same "own the transform
+        // outright" contract as held, just spinning in place instead of
+        // following a cursor.
+        if (_roofDisplay)
+        {
+            TickRoofDisplay(dt);
+            return;
+        }
 
         if (_fighter != null && !_fighter.Alive)
         {

@@ -125,7 +125,13 @@ public class GrabCursor : MonoBehaviour
     private void EnterArmed()
     {
         _mode = Mode.Armed;
-        Cursor.SetCursor(ClawTexture(), new Vector2(6f, 26f), CursorMode.Auto);
+        // Cursor.SetCursor's hotspot is top-down pixel coords, but the
+        // Color32 array ClawTexture builds (via SetPixels32) is bottom-up
+        // (row 0 = bottom row) -- the claw's own grab point sits at
+        // texture-space (16, 6) in that bottom-up drawing, which is
+        // (16, 32-1-6) = (16, 25) once flipped to the top-down convention
+        // SetCursor actually expects.
+        Cursor.SetCursor(ClawTexture(), new Vector2(16f, 25f), CursorMode.Auto);
     }
 
     private void ExitToOff()
@@ -162,7 +168,20 @@ public class GrabCursor : MonoBehaviour
         {
             var dropHex = builder.HexAt(groundPoint.Value);
             var factory = FindOwnFactoryNear(dropHex);
-            if (factory != null) CloneOnto(agent, factory.Hex);
+            if (factory != null)
+            {
+                CloneOnto(agent, factory.Hex);
+
+                // creator direction: "it should land on the roof and
+                // rotate slowly in the Y axis" -- the ORIGINAL creature
+                // (not consumed by cloning) settles on top of the Factory
+                // it was just dropped on, instead of hovering wherever
+                // the cursor happened to be.
+                var roofWorld = builder.WorldOf(factory.Hex);
+                roofWorld.y = builder.GroundHeightAt(roofWorld) + BaseDresser.RoofHeightFor(factory.Kind);
+                agent.BeginRoofDisplay(roofWorld);
+                return;
+            }
         }
         agent.EndHeld();
     }
@@ -179,11 +198,17 @@ public class GrabCursor : MonoBehaviour
         return null;
     }
 
-    /// <summary>Spend down `builder.WalletBlood` one clone at a time,
-    /// each an exact copy of `original`'s own genome, spawned at the
-    /// nearest open hex to the Factory that isn't already claimed by an
-    /// earlier clone from this same drop -- so N clones fan out around
-    /// the Factory instead of stacking on one hex.</summary>
+    /// <summary>Spend down `builder.WalletBlood` one clone at a time, each
+    /// an exact copy of `original`'s own genome. Creator direction: "when
+    /// clones pop out they should emerge and park themselves around the
+    /// factory" -- each clone SPAWNS at the Factory's own hex (it visibly
+    /// comes out of the building that made it) and is immediately handed
+    /// a settle-creep destination to a nearby open hex via <see
+    /// cref="MonsterAgent.SetSettleTarget"/>, the SAME direct-line "walk
+    /// to a point and stop" mechanism group-move arrival already uses --
+    /// reused rather than reinvented. Each clone claims a distinct parking
+    /// hex so N of them fan out around the Factory instead of walking to
+    /// the same spot and stacking.</summary>
     private void CloneOnto(MonsterAgent original, HexCoord factoryHex)
     {
         var creature = original.Creature;
@@ -193,14 +218,16 @@ public class GrabCursor : MonoBehaviour
         var spawned = 0;
         while (spawned < maxClonesPerDrop)
         {
-            // find the spot BEFORE spending -- an unaffordable-or-nowhere-
-            // to-land check must never debit Blood for a clone that then
-            // doesn't actually spawn.
-            var spot = FindOpenHexNear(factoryHex, claimed);
-            if (spot == null) break;
+            // find the parking spot BEFORE spending -- an unaffordable-or-
+            // nowhere-to-park check must never debit Blood for a clone
+            // that then has nowhere to go.
+            var parkSpot = FindOpenHexNear(factoryHex, claimed);
+            if (parkSpot == null) break;
             if (!builder.TrySpendBlood(cloneCostBlood)) break;
-            claimed.Add(spot.Value);
-            builder.SpawnMonster(creature, spot.Value);
+            claimed.Add(parkSpot.Value);
+
+            var clone = builder.SpawnMonster(creature, factoryHex);
+            clone.SetSettleTarget(builder.WorldOf(parkSpot.Value));
             spawned++;
         }
 
@@ -249,14 +276,19 @@ public class GrabCursor : MonoBehaviour
         return null;
     }
 
-    /// <summary>A small (32x32) procedurally-drawn claw/pincer glyph --
-    /// two curved prongs converging toward the hotspot -- since this repo
-    /// has no cursor/icon asset files anywhere (same reasoning
+    /// <summary>A small (32x32) procedurally-drawn MECHANICAL claw glyph
+    /// -- creator direction: "The Claw should be a mechanical Claw for
+    /// all races," a neutral tool cursor rather than anything
+    /// faction/origin-flavored (a real design correction from the first
+    /// pass's own gothic-red creature-pincer look). A cable-mount hub at
+    /// the top with three riveted metal prongs curving down to a
+    /// convergence point, arcade-claw-machine silhouette -- since this
+    /// repo has no cursor/icon asset files anywhere (same reasoning
     /// BuildingNavHud's own header gives for its colored-swatch "icons").
     /// Honesty note: legibility at real cursor size can't be verified
     /// without a real Editor/Player render in this environment; the shape
-    /// is a best-effort recognizable pincer, not a claimed pixel-perfect
-    /// result.</summary>
+    /// is a best-effort recognizable mechanical claw, not a claimed
+    /// pixel-perfect result.</summary>
     private static Texture2D ClawTexture()
     {
         if (_clawTexture != null) return _clawTexture;
@@ -266,35 +298,63 @@ public class GrabCursor : MonoBehaviour
         var clear = new Color32(0, 0, 0, 0);
         for (var i = 0; i < pixels.Length; i++) pixels[i] = clear;
 
-        var outline = new Color32(20, 15, 15, 255);
-        var fill = new Color32(150, 40, 40, 255);   // a gothic-red claw, not a neutral gray -- matches the project's own palette-discipline preference for its horror-tone reds over a generic UI gray
+        var metal = new Color32(195, 198, 205, 255);    // brushed-steel gray, race-neutral
+        var metalDark = new Color32(120, 124, 132, 255); // shaded underside of each prong
+        var outline = new Color32(35, 36, 40, 255);
+        var rivet = new Color32(70, 72, 78, 255);
 
         void Plot(int x, int y, Color32 c)
         {
             if (x < 0 || x >= size || y < 0 || y >= size) return;
             pixels[y * size + x] = c;
         }
-
-        // two mirrored curved prongs (a quarter-circle arc each), tips
-        // converging near the top-left hotspot -- a simple, cheap
-        // procedural pincer shape, matching this codebase's own
-        // primitive-first, no-external-asset dressing convention.
-        for (var t = 0; t <= 20; t++)
+        void PlotThick(float fx, float fy, Color32 c, int r)
         {
-            var a = Mathf.Lerp(10f, 90f, t / 20f) * Mathf.Deg2Rad;
-            var r = 13f;
-            var cx = 8f; var cy = 24f;
-            var px = cx + Mathf.Cos(a) * r;
-            var py = cy - Mathf.Sin(a) * r;
-            for (var w = -1; w <= 1; w++)
-                Plot(Mathf.RoundToInt(px) + w, Mathf.RoundToInt(py), fill);
-            Plot(Mathf.RoundToInt(px), Mathf.RoundToInt(py) - 1, outline);
+            var cx = Mathf.RoundToInt(fx);
+            var cy = Mathf.RoundToInt(fy);
+            for (var dy = -r; dy <= r; dy++)
+                for (var dx = -r; dx <= r; dx++)
+                    if (dx * dx + dy * dy <= r * r) Plot(cx + dx, cy + dy, c);
+        }
 
-            // mirrored second prong, offset across the hotspot
-            var px2 = cx + 10f + Mathf.Cos(a + Mathf.PI) * r * 0.55f;
-            var py2 = cy - 6f - Mathf.Sin(a) * r * 0.6f;
-            for (var w = -1; w <= 1; w++)
-                Plot(Mathf.RoundToInt(px2) + w, Mathf.RoundToInt(py2), fill);
+        // cable-mount hub near the top -- where the claw's "arm" would
+        // continue off-screen -- plus 3 rivets around its rim.
+        var hubX = 16f; var hubY = 27f;
+        PlotThick(hubX, hubY, outline, 5);
+        PlotThick(hubX, hubY, metal, 4);
+        for (var i = 0; i < 3; i++)
+        {
+            var ra = (i / 3f) * Mathf.PI * 2f;
+            PlotThick(hubX + Mathf.Cos(ra) * 3f, hubY + Mathf.Sin(ra) * 3f, rivet, 1);
+        }
+
+        // three curved prongs sweeping down from the hub and converging
+        // toward the hotspot (the actual grab point) below-center -- the
+        // classic arcade-claw-machine silhouette. Each prong drawn as a
+        // thick arc plus a hinge knuckle partway down, shaded on one edge
+        // so the round cross-section reads even at pixel scale.
+        var hotspotX = 16f; var hotspotY = 6f;
+        float[] spread = { -7f, 0f, 7f };   // horizontal offset of each prong's outer sweep
+        foreach (var s in spread)
+        {
+            for (var t = 0; t <= 16; t++)
+            {
+                var u = t / 16f;
+                var px = Mathf.Lerp(hubX + s, hotspotX, u * u);          // eased inward -- prongs bow outward before closing on the hotspot
+                var py = Mathf.Lerp(hubY - 2f, hotspotY, u);
+                var bow = Mathf.Sin(u * Mathf.PI) * Mathf.Abs(s) * 0.5f * Mathf.Sign(s == 0f ? 1f : s);
+                PlotThick(px + bow, py, outline, 2);
+                PlotThick(px + bow, py, u > 0.45f && u < 0.55f ? rivet : metal, 1);   // a hinge knuckle at the midpoint
+            }
+            // shaded underside stroke, offset slightly, for a rounded read
+            for (var t = 0; t <= 16; t++)
+            {
+                var u = t / 16f;
+                var px = Mathf.Lerp(hubX + s, hotspotX, u * u);
+                var py = Mathf.Lerp(hubY - 2f, hotspotY, u);
+                var bow = Mathf.Sin(u * Mathf.PI) * Mathf.Abs(s) * 0.5f * Mathf.Sign(s == 0f ? 1f : s);
+                Plot(Mathf.RoundToInt(px + bow) + 1, Mathf.RoundToInt(py) - 1, metalDark);
+            }
         }
 
         var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);

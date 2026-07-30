@@ -119,12 +119,22 @@ public class MonsterBody : MonoBehaviour
     }
     private const float FlightLiftAirborneThreshold = 0.5f;   // this far above _groundY, legs are considered "in the air"
 
+    /// <summary>2026-07 (GrabCursor's grab/roof-display feature): forces
+    /// <see cref="Airborne"/> true regardless of <see cref="_flightLift"/>
+    /// -- a non-flying creature grabbed by the claw (or resting on a
+    /// Factory roof after a clone-drop) has no ground under it either,
+    /// the exact same "nothing to plant a foot on" situation flight
+    /// already solves for winged creatures, just reached a different way.
+    /// Defaults false, so every creature that never sets it renders
+    /// byte-for-byte unchanged.</summary>
+    public bool ForceTuckLegs;
+
     /// <summary>True while the body is meaningfully off its standing
     /// surface -- the single definition every airborne check shares, so
     /// "perched on a 6m roof" (lift == groundY, feet planted) never gets
     /// confused with "flying 6m up" (lift far above groundY, legs
     /// tucked).</summary>
-    private bool Airborne { get { return _flightLift > _groundY + FlightLiftAirborneThreshold; } }
+    private bool Airborne { get { return ForceTuckLegs || _flightLift > _groundY + FlightLiftAirborneThreshold; } }
 
     // wing flap (winged plan only): a hinge transform per side, posed
     // ROOT-RELATIVE geometry parented under it (packages/creature-mesh's
