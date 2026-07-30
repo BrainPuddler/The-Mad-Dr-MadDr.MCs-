@@ -25,7 +25,9 @@ using UnityEngine.InputSystem;
 ///                            instead of walking past it (Shift queues)
 ///   P + left click       : patrol -- attack-move back and forth forever
 ///                            between here and the clicked ground point
-///   G                    : glide the camera to the unit nearest the cursor
+///   J                    : glide the camera to the unit nearest the cursor
+///                            (2026-07: moved off G -- see GrabCursor.cs's
+///                            own header for what G does now)
 /// </summary>
 public class WaypointCommander : MonoBehaviour
 {
@@ -70,7 +72,8 @@ public class WaypointCommander : MonoBehaviour
         if (cam == null) return;
         var keyboard = Keyboard.current;
 
-        if (keyboard != null && keyboard.gKey.wasPressedThisFrame)
+        // 2026-07: moved off G (now GrabCursor's grab-mode key) onto J.
+        if (keyboard != null && keyboard.jKey.wasPressedThisFrame)
             JumpToNearestUnit(cam, mouse);
 
         // trackpad support: Ctrl+left-click stands in for a right click
@@ -432,10 +435,11 @@ public class WaypointCommander : MonoBehaviour
         return new Rect(x, y, Mathf.Abs(a.x - b.x), Mathf.Abs(a.y - b.y));
     }
 
-    // ---- G: jump camera to nearest unit -------------------------------------
+    // ---- J: jump camera to nearest unit -------------------------------------
 
-    /// <summary>G-key: find the monster closest to whatever the cursor is
-    /// over and glide the camera to it. "Over" is the physics hit under the
+    /// <summary>J-key (moved off G in 2026-07 -- see GrabCursor.cs): find
+    /// the monster closest to whatever the cursor is over and glide the
+    /// camera to it. "Over" is the physics hit under the
     /// cursor when there is one (a unit, a building, the ground), falling
     /// back to the y=0 ground plane the ray crosses, then to the camera
     /// itself if the ray never dips below the horizon.</summary>

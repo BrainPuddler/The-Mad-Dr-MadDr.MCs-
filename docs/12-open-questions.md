@@ -6941,3 +6941,87 @@ balanced across the whole file (`BuildingNavHud.cs`, and the
 `RuntimeCityBuilder.cs`/`WaypointCommander.cs`/`BuildGhostCursor.cs`
 wiring edits) -- the honest ceiling of static verification available
 with no `UnityEngine` assembly to compile against in this environment.
+
+## 2026-07: idle-monster auto-eat + G-key grab/clone (GrabCursor.cs)
+
+Two creator directions landed together this session.
+
+**"If not attacking and humans are around monsters will chase and
+consume them."** `MonsterAgent.AcquireTarget()` (the existing idle
+auto-engage entry point, previously combat-only: retaliate against a
+last attacker, else engage the nearest enemy in aggro range) now falls
+back to `_builder.NearestCitizenTo(...)` + the EXISTING `OrderEat`/
+`TickEat` order path once combat finds nothing to engage. Deliberately
+NOT nested inside the existing `_fighter.Weapon == null || !CanAttack`
+early-return -- `OrderEat`/`TickEat`'s own bodies never touch `_fighter`/
+`Weapon` at all, so gating the citizen-fallback behind a weapon check
+would have silently starved exactly the units least able to also fight
+back (a real correctness bug caught before it shipped, not a stylistic
+choice). `RuntimeCityBuilder.NearestCitizenTo` mirrors the existing
+`NearestMonsterTo`/`NearestEnemyOf` nearest-of-type pattern exactly.
+
+**"Press G, pointer becomes a claw, click a monster to pick it up (it
+wiggles/squirms), drop it onto the Factory to clone it, spawning more
+based on resources required."** Real key conflict surfaced and resolved
+by the creator directly: G was already "jump camera to nearest unit" --
+moved to **J** (`WaypointCommander.cs`), freeing G for `GrabCursor.cs`'s
+new grab mode (a toggle, not a held modifier).
+
+`MonsterAgent` gained a `_held` state (`BeginHeld`/`EndHeld`/`IsHeld`)
+that suspends its OWN `Update()` entirely (no orders, no separation, no
+terrain-follow) while grabbed -- `TickHeld(worldPos, dt)`, driven
+externally by `GrabCursor` every frame, hovers it above the cursor's
+ground point and layers a sine/cosine wobble + slow spin on top ("wiggle
+and squirm," the creator's own words). `GrabCursor` itself: G toggles
+Armed (real OS cursor swap via `Cursor.SetCursor` to a procedurally-drawn
+32x32 claw glyph -- no cursor/icon asset files exist anywhere in this
+repo, same reasoning `BuildingNavHud`'s colored-swatch icons already
+established); a left-click on a monster while Armed picks it up
+(Carrying); a second left-click drops it -- if the drop point lands
+within `dropRangeHexes` of one of the LOCAL player's own Complete
+Factory buildings, `CloneOnto` fires.
+
+**Cloning is not routed through match-core.** The Mad Doctor has no
+fixed `RosterUnitKind` roster at all (`FactionRoster.cs`'s own header:
+bred creatures only) -- cloning an already-live genome doesn't fit that
+model, and a full new match-core `CommandKind` for it (mirroring
+`TrainUnit`'s cost-debit/queue machinery) is real, separate,
+not-yet-attempted scope, flagged here rather than silently invented as a
+parallel spend path match-core's own wallet never sees. Instead:
+`RuntimeCityBuilder` factored a reusable `SpawnMonster(StoredGenomeDto,
+HexCoord)` out of `HandleRosterReady`'s own original inline spawn loop
+(both the match-start roster fetch and GrabCursor's clone now call the
+SAME method, not a drifting second copy of it), and gained a new
+`TrySpendBlood(int)` -- a GATED spend (false + unchanged if
+unaffordable), the deliberate opposite of the existing
+`SpendWalletForCast`'s "never blocks, floors at 0" contract, since
+cloning a whole creature is a real purchase, not an unblockable sink.
+Cost is a flat, invented v0.1 placeholder (`cloneCostBlood = 60`, CLAUDE.md's
+standing policy for every unsourced number in this project) spent from
+`WalletBlood` -- the SAME wallet eating citizens already fills, so
+cloning literally spends the Blood harvested from citizens, a real
+thematic fit rather than an arbitrary currency choice. `CloneOnto` keeps
+spawning (each clone fanning out to the nearest unclaimed open hex near
+the Factory) for as long as the wallet affords the next one, hard-capped
+at `maxClonesPerDrop = 10` regardless of remaining Blood. The carried
+monster itself is never consumed -- dropping it is what clones MORE, not
+a sacrifice of the original; no instruction said otherwise, and
+destroying the player's own creature on every drop would have been a
+needlessly punishing reading of "drop it onto the factory to clone that
+monster."
+
+**A real bug caught before commit, not after:** the first draft of
+`CloneOnto`'s loop spent Blood BEFORE checking whether an open hex even
+existed to place the clone on, meaning a crowded Factory neighborhood
+could silently burn the player's Blood for clones that then never
+spawned. Reordered to find-the-spot-first, spend-only-if-a-spot-exists.
+
+**Honest limits:** no Unity Editor here to confirm the claw cursor glyph
+is actually legible at real cursor size, that the wiggle/squirm reads as
+intended, or that a real OS `Cursor.SetCursor` call behaves as expected
+in a live Player -- same standing posture as every other Unity-side
+entry in this log. Verified for real: every touched/new C# file's
+braces/parens balanced across the whole file (`MonsterAgent.cs`,
+`RuntimeCityBuilder.cs`, `WaypointCommander.cs`, `GrabCursor.cs`) -- the
+honest ceiling of static verification available with no `UnityEngine`
+assembly to compile against in this environment.

@@ -70,6 +70,12 @@ public class MonsterAgent : MonoBehaviour
     private Vector3? _settleTarget;   // shared cluster point to creep toward once idle (group moves only)
     private GroupFacing _groupFacing; // shared arrival-facing token for a group move (see GroupFacing)
 
+    // 2026-07 creator direction ("press G... click on a monster, pick it
+    // up... drop it onto the factory to clone"): grab-carry state, driven
+    // externally by GrabCursor -- see IsHeld/BeginHeld/EndHeld/TickHeld.
+    private bool _held;
+    private float _wigglePhase;
+
     // 2026-07: roof "parking" -- the SPECIFIC footprint hex this perch
     // order was assigned to land on (WaypointCommander's AssignPerch),
     // distinct per unit so a group ordered onto one roof spreads across
@@ -137,6 +143,12 @@ public class MonsterAgent : MonoBehaviour
     /// <summary>The creature's body plan -- the "type" for SC2-style
     /// double-click "select all of this type on screen."</summary>
     public string BodyPlan { get { return _creature.Genome.Body.Plan; } }
+
+    /// <summary>The genome this monster was built from -- 2026-07:
+    /// GrabCursor's clone-onto-Factory feature needs the ORIGINAL genome
+    /// to spawn copies of, the same way <see cref="RuntimeCityBuilder.
+    /// SpawnMonster"/> already builds any monster from one.</summary>
+    public StoredGenomeDto Creature { get { return _creature; } }
 
     /// <summary>Winged plan -- the commander routes a roof-click to a
     /// perch order for these, an attack order for everyone else.</summary>
@@ -491,6 +503,58 @@ public class MonsterAgent : MonoBehaviour
         _isPatrolling = false;
     }
 
+    // ---- 2026-07: grab-carry (GrabCursor) ------------------------------------
+
+    public bool IsHeld { get { return _held; } }
+
+    /// <summary>Begin the grab-carry state: clears whatever this monster
+    /// was doing (same as any fresh order) and hands control of its
+    /// transform to <see cref="TickHeld"/>, called externally by
+    /// GrabCursor every frame from here on -- this class's own Update()
+    /// no-ops entirely while held.</summary>
+    public void BeginHeld()
+    {
+        _held = true;
+        _wigglePhase = 0f;
+        ClearTargets();
+        _waypoints.Clear();
+        _path = null;
+        _order = OrderKind.Idle;
+        if (_fighter != null) _fighter.LastVelocity = Vector3.zero;
+    }
+
+    /// <summary>Ends the grab-carry state -- the very next Update() resumes
+    /// normal per-frame ticking as a freshly-idle unit (AcquireTarget,
+    /// TickSettle), exactly as if it had just arrived somewhere and
+    /// stopped, since <see cref="BeginHeld"/> already left `_order` at
+    /// Idle with no pending target.</summary>
+    public void EndHeld()
+    {
+        _held = false;
+    }
+
+    private const float WiggleSpeed = 9f;         // radians/sec -- a fast, agitated squirm
+    private const float WiggleAmplitudeDeg = 14f;
+
+    /// <summary>Driven externally by GrabCursor once per frame while held
+    /// -- creator direction: "pick it up... it will wiggle and squirm."
+    /// Hovers the monster above `worldPos` (the cursor's current ground
+    /// point, GrabCursor's own raycast) and layers a wobbling squirm
+    /// rotation on top: two out-of-phase sine/cosine tilts plus a slower
+    /// full-turn spin, so it reads as a creature twisting against a grip
+    /// rather than a rigid object being carried.</summary>
+    public void TickHeld(Vector3 worldPos, float dt)
+    {
+        _wigglePhase += dt * WiggleSpeed;
+        var hoverHeight = _body != null ? Mathf.Max(1.5f, _body.BodyHeight * 0.6f) : 2f;
+        transform.position = new Vector3(worldPos.x, worldPos.y + hoverHeight, worldPos.z);
+
+        var wobbleX = Mathf.Sin(_wigglePhase * 1.3f) * WiggleAmplitudeDeg;
+        var wobbleZ = Mathf.Cos(_wigglePhase) * WiggleAmplitudeDeg;
+        var wobbleY = Mathf.Sin(_wigglePhase * 0.7f) * 180f;
+        transform.rotation = Quaternion.Euler(wobbleX, wobbleY, wobbleZ);
+    }
+
     /// <summary>The single place _order becomes Idle. Flight is only ever
     /// for transit/aerial-attack, never for standing around -- landing
     /// here (rather than scattered across every early-return) means a
@@ -581,6 +645,13 @@ public class MonsterAgent : MonoBehaviour
     private void Update()
     {
         var dt = Time.deltaTime;
+
+        // 2026-07: grabbed by GrabCursor -- it drives this monster's
+        // transform directly via TickHeld every frame; this Update()
+        // contributes nothing while held (no orders, no separation, no
+        // terrain-follow) so the two never fight over the same transform.
+        if (_held) return;
+
         if (_fighter != null && !_fighter.Alive)
         {
             if (_body != null) _body.UpdateLocomotion(Vector3.zero, dt);   // dead: stand still

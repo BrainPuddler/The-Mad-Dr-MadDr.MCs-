@@ -102,6 +102,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     private readonly Dictionary<Collider, Building> _buildingByCollider = new Dictionary<Collider, Building>();
     private readonly Dictionary<Building, List<GameObject>> _cubesByBuilding = new Dictionary<Building, List<GameObject>>();
     private Transform _buildingsHost;
+    private Transform _monstersHost;
     private readonly List<MonsterAgent> _monsters = new List<MonsterAgent>();
     private readonly List<Citizen> _citizens = new List<Citizen>();
     private readonly List<Tank> _tanks = new List<Tank>();
@@ -277,6 +278,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var buildingNavHud = gameObject.GetComponent<BuildingNavHud>();
         if (buildingNavHud == null) buildingNavHud = gameObject.AddComponent<BuildingNavHud>();
         buildingNavHud.Init(_simBridge, this, playerIndex: 0);
+
+        var grabCursor = gameObject.GetComponent<GrabCursor>();
+        if (grabCursor == null) grabCursor = gameObject.AddComponent<GrabCursor>();
+        grabCursor.Init(_simBridge, this, playerIndex: 0);
 
         // docs/28: set BEFORE any dresser runs -- BuildingDresser/RoadDresser
         // are static generators that mint their cached emissive materials
@@ -2032,6 +2037,22 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         WalletBones = Mathf.Max(0, WalletBones - bones);
     }
 
+    /// <summary>2026-07 (GrabCursor's clone-onto-Factory feature): a
+    /// GATED spend, deliberately the opposite contract of <see
+    /// cref="SpendWalletForCast"/>'s own "never blocks, floors at 0"
+    /// design -- cloning a whole creature is a real purchase ("spawning
+    /// more based on the amount of resources required"), not an
+    /// unblockable economy sink, so it needs a real affordability check.
+    /// Same validation-not-clamping discipline match-core's own
+    /// `PlayerState.TrySpend` follows: false and unchanged if
+    /// unaffordable, never a partial/negative spend.</summary>
+    public bool TrySpendBlood(int amount)
+    {
+        if (amount < 0 || WalletBlood < amount) return false;
+        WalletBlood -= amount;
+        return true;
+    }
+
     public void OnCitizenEaten(Citizen citizen)
     {
         // docs/20 per-citizen yield: Blood 2 / Bones 1 / Brains 1
@@ -2127,8 +2148,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         Debug.Log("RuntimeCityBuilder: roster ready (" + cache.Creatures.Length + " creatures, "
             + (wasFromCache ? "from local cache, fetched " + cache.FetchedAtUtc : "live") + ")");
 
-        var monsters = new GameObject("Monsters").transform;
-        monsters.SetParent(transform, false);
+        if (_monstersHost == null)
+        {
+            var monsters = new GameObject("Monsters").transform;
+            monsters.SetParent(transform, false);
+            _monstersHost = monsters;
+        }
 
         var center = _city.CenterHex;
         var blockedToGround = BlockedFor(false);
@@ -2140,13 +2165,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         {
             var creature = cache.Creatures[i];
             var home = landingSpots.Count > 0 ? landingSpots[i % landingSpots.Count] : center;
-
-            var root = new GameObject("Monster_" + creature.Id);
-            root.transform.SetParent(monsters, false);
-            var agent = root.AddComponent<MonsterAgent>();
-            agent.Init(this, creature, home);
-            _monsters.Add(agent);
-            if (agent.Fighter != null) _combatants.Add(agent.Fighter);
+            var agent = SpawnMonster(creature, home);
 
             // docs/27 Phase A dev check: opt the FIRST spawned monster
             // into sim-driven movement, and nothing else -- left-click it,
@@ -2164,10 +2183,30 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // narrower purpose.
             if (simDrivenDemo && i == 0)
             {
-                Debug.Log("docs/27: sim-driven demo active on " + root.name + " -- left-click it, right-click to move it.");
+                Debug.Log("docs/27: sim-driven demo active on " + agent.gameObject.name + " -- left-click it, right-click to move it.");
                 agent.EnableSimDriven(_simBridge, playerIndex: 0, atHex: home, speed: 6.0);
             }
         }
+    }
+
+    /// <summary>Build one live MonsterAgent from a genome, register it with
+    /// this builder (`_monsters`/`_combatants`), and return it -- factored
+    /// out of `HandleRosterReady`'s own spawn loop (2026-07) so
+    /// <see cref="GrabCursor"/>'s clone-onto-Factory feature can spawn a
+    /// COPY of an already-live creature's own genome the exact same way
+    /// the match-start roster fetch spawns the original, rather than a
+    /// second, drifting copy of this logic. Requires <see cref="_monstersHost"/>
+    /// to already exist (both current call sites -- the roster-ready loop
+    /// and GrabCursor -- only ever run after a match/city exists).</summary>
+    public MonsterAgent SpawnMonster(StoredGenomeDto creature, HexCoord home)
+    {
+        var root = new GameObject("Monster_" + creature.Id);
+        root.transform.SetParent(_monstersHost, false);
+        var agent = root.AddComponent<MonsterAgent>();
+        agent.Init(this, creature, home);
+        _monsters.Add(agent);
+        if (agent.Fighter != null) _combatants.Add(agent.Fighter);
+        return agent;
     }
 
     /// <summary>Enemy tanks at the city edge -- the combat test dummies.
