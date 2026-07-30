@@ -117,9 +117,34 @@ public class GrabCursor : MonoBehaviour
         if (_carried == null) { _mode = Mode.Armed; return; }   // held monster died/was destroyed mid-carry
 
         var groundPoint = GroundUnderCursor(cam, mouse);
-        if (groundPoint.HasValue) _carried.TickHeld(groundPoint.Value, Time.deltaTime);
+        if (groundPoint.HasValue) _carried.TickHeld(HoverTargetFor(groundPoint.Value), Time.deltaTime);
 
         if (mouse.leftButton.wasPressedThisFrame) Drop(groundPoint);
+    }
+
+    /// <summary>Creator direction: "when I move the pointer with the
+    /// grabbed monster it should automatically position the monster
+    /// above the roof of the factory." A drag-and-drop snap preview: once
+    /// the cursor's ground point falls within <see cref="dropRangeHexes"/>
+    /// of the local player's own Factory (the SAME check <see
+    /// cref="Drop"/> uses to decide whether to clone), the carried
+    /// monster hovers centered above THAT Factory's roof instead of
+    /// following the raw cursor position -- the same "the preview can
+    /// never disagree with the actual outcome" principle
+    /// `BuildGhostCursor`'s own placement preview already follows for
+    /// building placement, applied here to the grab/clone drop target
+    /// instead. Falls back to the raw ground point when no Factory is in
+    /// range, i.e. everywhere else on the map behaves exactly as
+    /// before.</summary>
+    private Vector3 HoverTargetFor(Vector3 groundPoint)
+    {
+        var hex = builder.HexAt(groundPoint);
+        var factory = FindOwnFactoryNear(hex);
+        if (factory == null) return groundPoint;
+
+        var roofWorld = builder.WorldOf(factory.Hex);
+        roofWorld.y = builder.GroundHeightAt(roofWorld) + BaseDresser.RoofHeightFor(factory.Kind);
+        return roofWorld;
     }
 
     private void EnterArmed()

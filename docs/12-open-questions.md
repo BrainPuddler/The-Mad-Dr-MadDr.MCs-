@@ -7196,3 +7196,27 @@ being built" is the ORIGINAL specimen resting in a lit dais atop the
 Factory while its clones are produced -- a cloning-vat spotlight, not a
 tractor-beam glow under whatever's currently being dragged around by the
 claw.
+
+### 2026-07 follow-up: carried monster auto-snaps above the Factory roof while dragging
+
+Creator direction: "when I move the pointer with the grabbed monster it
+should automatically position the monster above the roof of the
+factory." A drag-and-drop snap preview, `GrabCursor.HoverTargetFor`:
+every frame while carrying, once the cursor's ground point falls within
+`dropRangeHexes` of the local player's own Factory -- the EXACT same
+`FindOwnFactoryNear` check `Drop` itself uses to decide whether to
+clone, not a second, potentially-drifting copy of that range logic --
+the carried monster's hover target snaps to that Factory's own hex
+center at roof height (`BaseDresser.RoofHeightFor`, the same helper
+`BeginRoofDisplay` already uses) instead of following the raw cursor
+position. Falls back to the raw ground point everywhere else on the
+map, so nothing about normal carrying changes outside a Factory's own
+drop range. Same "the preview can never disagree with the actual
+outcome" principle `BuildGhostCursor`'s own placement preview already
+established for building placement, applied here to the clone-drop
+target instead.
+
+**Honest limits:** no Unity Editor here to confirm the snap actually
+reads as a clear, well-timed magnetic pull rather than a jarring pop
+once the cursor crosses into range. Verified for real: `GrabCursor.cs`
+braces/parens balanced across the whole file.
