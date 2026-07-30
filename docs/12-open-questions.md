@@ -7167,3 +7167,32 @@ was individually checked to confirm its `mount +` prefix was correctly
 dropped (not just the ones this description happened to quote) so no
 weapon silently drifted position when its parent changed from `_torso`
 to `_shoulder`.
+
+### 2026-07 correction: the glowing disc belongs on the Factory roof, not under a carried monster
+
+Creator correction, verbatim: "I asked for a lit disk on the roof of the
+factory that illuminated the monster being built." The prior entry's own
+"Add a glowing disk under the monster... make it luminous with a soft
+glow" was genuinely ambiguous between two phases of the grab/clone
+feature (being carried vs. resting on the roof afterward), and the first
+pass guessed wrong -- it attached the disc to the CARRIED state
+(`BeginHeld`/`TickHeld`/`EndHeld`), tracking the cursor's ground point.
+
+Moved wholesale to the roof-display state instead: `_grabGlow`/
+`EnsureGrabGlow`/`TickGrabGlow` (carry-phase, cursor-tracking, deleted)
+became `_roofGlow`/`EnsureRoofGlow` (roof-phase, fixed local child of
+the agent's own root -- no more per-frame world-space tracking needed,
+since the root only ROTATES in place on the roof rather than
+translating, and a flat symmetric disc looks identical at any Y
+rotation). Activated in `BeginRoofDisplay` alongside the existing
+land-on-roof-and-spin behavior; deactivated in `ClearTargets`'s existing
+"any fresh order ends the roof-display beat" clause, right alongside the
+leg-untuck it already does there. Same `GlowPointRegistry`
+append-only/`isEligible`-gated wiring as before, just the predicate
+switched from `() => _held` to `() => _roofDisplay`.
+
+Reads correctly now against the creator's own framing: "the monster
+being built" is the ORIGINAL specimen resting in a lit dais atop the
+Factory while its clones are produced -- a cloning-vat spotlight, not a
+tractor-beam glow under whatever's currently being dragged around by the
+claw.

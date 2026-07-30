@@ -508,6 +508,7 @@ public class MonsterAgent : MonoBehaviour
         {
             _roofDisplay = false;
             if (_body != null) _body.ForceTuckLegs = false;
+            if (_roofGlow != null) _roofGlow.SetActive(false);
         }
     }
 
@@ -537,8 +538,6 @@ public class MonsterAgent : MonoBehaviour
         _order = OrderKind.Idle;
         if (_fighter != null) _fighter.LastVelocity = Vector3.zero;
         if (_body != null) _body.ForceTuckLegs = true;
-        EnsureGrabGlow();
-        if (_grabGlow != null) _grabGlow.SetActive(true);
     }
 
     /// <summary>Ends the grab-carry state -- the very next Update() resumes
@@ -564,7 +563,6 @@ public class MonsterAgent : MonoBehaviour
             _body.ForceTuckLegs = false;
             _body.StrugglePhase = 0f;
         }
-        if (_grabGlow != null) _grabGlow.SetActive(false);
     }
 
     // 2026-07 refinement (creator direction: "the wiggling needs to be a
@@ -593,10 +591,9 @@ public class MonsterAgent : MonoBehaviour
     /// `worldPos` (the cursor's current ground point, GrabCursor's own
     /// raycast) and layers a slow roll/pitch squirm plus a faster small
     /// thrash on top (no yaw component either way -- a creature straining
-    /// against a grip, not spinning in place), drives <see
+    /// against a grip, not spinning in place), and drives <see
     /// cref="MonsterBody.StrugglePhase"/> so the legs kick in time with
-    /// it, and keeps the grab-glow disc (see <see cref="TickGrabGlow"/>)
-    /// tracking the ground point underneath.</summary>
+    /// it.</summary>
     public void TickHeld(Vector3 worldPos, float dt)
     {
         _wigglePhase += dt * WiggleSpeed;
@@ -610,80 +607,13 @@ public class MonsterAgent : MonoBehaviour
         transform.rotation = Quaternion.Euler(pitch + thrashPitch, 0f, roll + thrashRoll);
 
         if (_body != null) _body.StrugglePhase = _wigglePhase * 1.6f;
-
-        TickGrabGlow(worldPos);
-    }
-
-    // ---- 2026-07: glowing pickup disc (GrabCursor) ----------------------------
-
-    private GameObject _grabGlow;
-
-    /// <summary>Creator direction: "Add a glowing disk under the monster
-    /// with light that light up them model, make it luminous with a soft
-    /// glow." Built once per agent, lazily on first grab (never for a
-    /// monster that's never picked up), then just toggled active/inactive
-    /// on every later grab/drop -- matches <see cref="GlowPointRegistry"/>'s
-    /// own documented design: it's an APPEND-ONLY registry with no
-    /// unregister lifecycle, gated by an `isEligible` predicate instead
-    /// (the same pattern TrafficCar headlights already use for "only lit
-    /// while driving at night"), so registering once and toggling
-    /// eligibility via <see cref="IsHeld"/> is the intended shape here,
-    /// not a workaround. Tier 1 (the disc's own emissive material) is
-    /// always free/visible the instant it's active; Tier 2 (a real
-    /// `Light` promoted from the registry) only lights the model up if
-    /// this point wins the shared city-wide budget slot, same as every
-    /// other glow point in the game -- a held creature doesn't get to
-    /// skip the budget system other props already live under.</summary>
-    private void EnsureGrabGlow()
-    {
-        if (_grabGlow != null) return;
-
-        _grabGlow = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        _grabGlow.name = "GrabGlowDisc";
-        // a CHILD of this agent (not a sibling under the shared monsters
-        // host) specifically so Unity destroys it automatically if this
-        // monster dies/is destroyed while never grabbed again -- TickGrabGlow
-        // still positions/orients it in WORLD space every frame regardless,
-        // so being parented under the wiggling root causes no visual drift.
-        _grabGlow.transform.SetParent(transform, true);
-        _grabGlow.transform.localScale = new Vector3(2.4f, 0.05f, 2.4f);   // Cylinder is 1 unit diameter x 2 tall at scale 1 -- squashed flat into a disc
-        var collider = _grabGlow.GetComponent<Collider>();
-        if (collider != null) Object.Destroy(collider);
-
-        var mat = new Material(ShaderUtil.FindRenderableShader());
-        var glowColor = new Color(0.55f, 0.85f, 1f);   // cool energy-cyan -- a race-neutral "grabbed" cue, matching the mechanical (not gothic-red) claw redesign
-        mat.color = new Color(glowColor.r, glowColor.g, glowColor.b, 0.55f);
-        mat.EnableKeyword("_EMISSION");
-        mat.SetColor("_EmissionColor", glowColor * 2.2f);
-        LabMeshBuilder.MakeTransparent(mat);
-        var renderer = _grabGlow.GetComponent<Renderer>();
-        if (renderer != null) renderer.sharedMaterial = mat;
-
-        GlowPointRegistry.Register(_grabGlow.transform, glowColor, isEligible: () => _held);
-
-        _grabGlow.SetActive(false);
-    }
-
-    /// <summary>Keeps the glow disc under the cursor's current ground
-    /// point while carried, a small offset above the terrain so it
-    /// doesn't Z-fight with the ground it's sitting on. Sets WORLD
-    /// position/rotation explicitly every frame (not local) -- being
-    /// parented under this agent's own wiggling root (see
-    /// <see cref="EnsureGrabGlow"/>'s own comment on why it's a child at
-    /// all) would otherwise tilt the disc right along with the squirming
-    /// torso; forcing world rotation to identity here keeps it flat on
-    /// the ground regardless of whatever the root is doing above it.</summary>
-    private void TickGrabGlow(Vector3 worldPos)
-    {
-        if (_grabGlow == null) return;
-        _grabGlow.transform.position = new Vector3(worldPos.x, worldPos.y + 0.05f, worldPos.z);
-        _grabGlow.transform.rotation = Quaternion.identity;
     }
 
     // ---- 2026-07: post-clone roof display (GrabCursor) -----------------------
 
     private bool _roofDisplay;
     private const float RoofSpinDegPerSec = 40f;
+    private GameObject _roofGlow;
 
     /// <summary>Creator direction: "When dropped into the factory, it
     /// should land on the roof and rotate slowly in the Y axis" -- AFTER
@@ -698,7 +628,14 @@ public class MonsterAgent : MonoBehaviour
     /// the roof). Persists until a real order is issued (see <see
     /// cref="ClearTargets"/>'s own new clause), the same "stays put until
     /// manually disturbed" contract <see cref="OrderPerch"/> already
-    /// established for flyers resting on a roof.</summary>
+    /// established for flyers resting on a roof.
+    ///
+    /// Follow-up correction (creator direction, verbatim: "I asked for a
+    /// lit disk on the roof of the factory that illuminated the monster
+    /// being built"): the glowing disc belongs HERE, under the specimen
+    /// resting on the Factory roof while clones are produced -- not under
+    /// a monster being carried, which is where the first pass wrongly put
+    /// it. See <see cref="EnsureRoofGlow"/>.</summary>
     public void BeginRoofDisplay(Vector3 roofWorldPos)
     {
         _held = false;
@@ -712,13 +649,64 @@ public class MonsterAgent : MonoBehaviour
             _body.StrugglePhase = 0f;
         }
         if (_fighter != null) _fighter.LastVelocity = Vector3.zero;
-        if (_grabGlow != null) _grabGlow.SetActive(false);
+        EnsureRoofGlow();
+        if (_roofGlow != null) _roofGlow.SetActive(true);
     }
 
     private void TickRoofDisplay(float dt)
     {
         transform.Rotate(Vector3.up, RoofSpinDegPerSec * dt, Space.World);
         if (_body != null) _body.UpdateLocomotion(Vector3.zero, dt);
+    }
+
+    /// <summary>Creator direction: "Add a glowing disk... on the roof of
+    /// the factory that illuminated the monster being built" -- a fixed
+    /// "build platform" light under the ORIGINAL creature while it rests
+    /// on the Factory roof (see <see cref="BeginRoofDisplay"/>), not
+    /// something that tracks a moving cursor. Built once per agent,
+    /// lazily the first time it ever lands on a roof, then just toggled
+    /// active/inactive on every later landing/departure -- same
+    /// append-only-registry, gate-by-eligibility shape <see
+    /// cref="GlowPointRegistry"/> already established for every other
+    /// transient glow point in this project (TrafficCar headlights' own
+    /// precedent: register once, gate with `isEligible`, never
+    /// unregister). Tier 1 (the disc's own emissive material) is free/
+    /// always visible the instant it's active; Tier 2 (a real promoted
+    /// `Light`) only fires if this point wins the shared city-wide
+    /// budget, same as every other glow point in the game.
+    ///
+    /// Parented as a LOCAL child of this agent's own root and left there
+    /// (unlike the discarded carry-glow's own per-frame world-space
+    /// tracking) -- while roof-displaying this root only ROTATES in
+    /// place around Y (see TickRoofDisplay), it never translates, and a
+    /// flat symmetric disc looks identical at any Y rotation, so a fixed
+    /// local offset stays correctly under the model with no per-frame
+    /// work needed.</summary>
+    private void EnsureRoofGlow()
+    {
+        if (_roofGlow != null) return;
+
+        _roofGlow = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        _roofGlow.name = "RoofGlowDisc";
+        _roofGlow.transform.SetParent(transform, false);
+        _roofGlow.transform.localPosition = new Vector3(0f, 0.05f, 0f);   // just above the model's own feet-level origin -- the roof surface it's standing on
+        _roofGlow.transform.localRotation = Quaternion.identity;
+        _roofGlow.transform.localScale = new Vector3(2.8f, 0.05f, 2.8f);   // Cylinder is 1 unit diameter x 2 tall at scale 1 -- squashed flat into a disc
+        var collider = _roofGlow.GetComponent<Collider>();
+        if (collider != null) Object.Destroy(collider);
+
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        var glowColor = new Color(0.55f, 0.85f, 1f);   // cool energy-cyan -- a race-neutral "cloning vat" cue, matching the mechanical (not gothic-red) claw redesign
+        mat.color = new Color(glowColor.r, glowColor.g, glowColor.b, 0.55f);
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", glowColor * 2.2f);
+        LabMeshBuilder.MakeTransparent(mat);
+        var renderer = _roofGlow.GetComponent<Renderer>();
+        if (renderer != null) renderer.sharedMaterial = mat;
+
+        GlowPointRegistry.Register(_roofGlow.transform, glowColor, isEligible: () => _roofDisplay);
+
+        _roofGlow.SetActive(false);
     }
 
     /// <summary>2026-07 (GrabCursor's clone-onto-Factory feature): give an
