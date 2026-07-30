@@ -736,11 +736,29 @@ public class MonsterAgent : MonoBehaviour
             return;
         }
 
-        if (_fighter.Weapon == null || !_fighter.Weapon.CanAttack) return;
-        var attacker = _fighter.LastAttacker;
-        if (attacker != null && attacker.Alive) { OrderAttackUnit(attacker); return; }
-        var enemy = _builder.NearestEnemyOf(_fighter, AggroRangeMeters);
-        if (enemy != null) OrderAttackUnit(enemy);
+        if (_fighter.Weapon != null && _fighter.Weapon.CanAttack)
+        {
+            var attacker = _fighter.LastAttacker;
+            if (attacker != null && attacker.Alive) { OrderAttackUnit(attacker); return; }
+            var enemy = _builder.NearestEnemyOf(_fighter, AggroRangeMeters);
+            if (enemy != null) { OrderAttackUnit(enemy); return; }
+        }
+
+        // 2026-07 creator direction: "if not attacking and humans are
+        // around monsters will chase and consume them." Combat still
+        // wins -- an armed unit that found a retaliation target or a
+        // nearby enemy above already returned before reaching here; this
+        // is only the fallback once there's genuinely nothing to fight.
+        // Deliberately NOT gated behind the Weapon check above (unlike
+        // that block): OrderEat/TickEat never touch _fighter/Weapon at
+        // all, so a weaponless (or on-cooldown) monster still gets to
+        // eat -- gating this behind the weapon check would silently
+        // starve exactly the units least able to also fight back.
+        if (_builder != null)
+        {
+            var citizen = _builder.NearestCitizenTo(transform.position, AggroRangeMeters);
+            if (citizen != null) OrderEat(citizen);
+        }
     }
 
     /// <summary>docs/26 Phase 8: picks the best ready special attack +

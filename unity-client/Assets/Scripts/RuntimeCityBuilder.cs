@@ -1979,6 +1979,30 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return best;
     }
 
+    /// <summary>2026-07 creator direction ("if not attacking and humans
+    /// are around monsters will chase and consume them"): the citizen
+    /// counterpart to <see cref="NearestMonsterTo"/> and <see
+    /// cref="NearestEnemyOf"/> -- same squared-distance nearest-of-type
+    /// scan, called from <see cref="MonsterAgent.AcquireTarget"/>'s idle
+    /// fallback once combat has nothing to engage.</summary>
+    public Citizen NearestCitizenTo(Vector3 position, float within)
+    {
+        Citizen best = null;
+        var bestSq = within * within;
+        foreach (var z in _citizens)
+        {
+            if (z == null) continue;
+            var d = z.transform.position - position;
+            d.y = 0f;
+            if (d.sqrMagnitude < bestSq)
+            {
+                bestSq = d.sqrMagnitude;
+                best = z;
+            }
+        }
+        return best;
+    }
+
     /// <summary>A harvester unloads its onboard tank into the session
     /// wallet (docs/22): the carried load is banked as Blood (fuel), the
     /// dominant lane a harvest tool draws. Called when a laden harvester
