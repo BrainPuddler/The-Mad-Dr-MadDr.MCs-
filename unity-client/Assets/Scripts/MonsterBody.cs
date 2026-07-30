@@ -129,6 +129,16 @@ public class MonsterBody : MonoBehaviour
     /// byte-for-byte unchanged.</summary>
     public bool ForceTuckLegs;
 
+    /// <summary>2026-07 (GrabCursor's grab feature: "arm and legs
+    /// struggling"): set externally (MonsterAgent.TickHeld) every frame
+    /// while <see cref="ForceTuckLegs"/> is active -- each leg kicks
+    /// against its own tucked fold with a phase offset derived from this
+    /// value, so the legs read as actively struggling against the grip
+    /// rather than passively folded the way flight-tuck is. Ignored
+    /// entirely while ForceTuckLegs is false (a flying creature's normal
+    /// flight-tuck stays exactly as it was).</summary>
+    public float StrugglePhase;
+
     /// <summary>True while the body is meaningfully off its standing
     /// surface -- the single definition every airborne check shares, so
     /// "perched on a 6m roof" (lift == groundY, feet planted) never gets
@@ -799,6 +809,23 @@ public class MonsterBody : MonoBehaviour
                 // here -- SnapFeetToGround() re-derives it from scratch
                 // the moment this creature actually lands.
                 var tucked = hipW - Vector3.up * (_legLen * 0.55f) + transform.forward * (_legLen * 0.35f);
+
+                // 2026-07 (GrabCursor grab feature: "arm and legs
+                // struggling"): ForceTuckLegs (never true for ordinary
+                // flight) layers a per-leg kicking offset on top of the
+                // static flight-tuck fold, phase-shifted by this leg's
+                // own index so the legs kick out of sync with each
+                // other -- a struggle, not a synchronized wiggle. _legs
+                // is small (a handful of legs at most) so the IndexOf
+                // scan here is cheap; not worth caching an index per Leg
+                // for a list this size.
+                if (ForceTuckLegs)
+                {
+                    var kickPhase = StrugglePhase + _legs.IndexOf(leg) * 1.7f;
+                    tucked += transform.right * (Mathf.Sin(kickPhase) * _legLen * 0.25f)
+                            + Vector3.up * (Mathf.Cos(kickPhase * 1.3f) * _legLen * 0.12f);
+                }
+
                 leg.FootWorld = tucked;
                 leg.Swinging = false;
                 RenderLeg(leg, hipW);

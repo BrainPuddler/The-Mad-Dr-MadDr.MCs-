@@ -537,6 +537,8 @@ public class MonsterAgent : MonoBehaviour
         _order = OrderKind.Idle;
         if (_fighter != null) _fighter.LastVelocity = Vector3.zero;
         if (_body != null) _body.ForceTuckLegs = true;
+        EnsureGrabGlow();
+        if (_grabGlow != null) _grabGlow.SetActive(true);
     }
 
     /// <summary>Ends the grab-carry state -- the very next Update() resumes
@@ -546,26 +548,53 @@ public class MonsterAgent : MonoBehaviour
     /// Idle with no pending target. Re-engages the legs (see
     /// <see cref="BeginHeld"/>) -- the very next terrain-follow in
     /// Update() will settle it back onto the ground, and the next
-    /// UpdateLocomotion call re-plants them from scratch there.</summary>
+    /// UpdateLocomotion call re-plants them from scratch there. Creator
+    /// direction: "When the user drops the wiggling stops and the monster
+    /// reset to normal orientation: body, arms and legs" -- root rotation
+    /// snaps back to identity and the struggle phase resets to 0 (a calm,
+    /// non-kicking tuck for the one frame before legs re-plant), not just
+    /// "whatever it happened to be mid-squirm."</summary>
     public void EndHeld()
     {
         _held = false;
-        if (_body != null) _body.ForceTuckLegs = false;
+        transform.rotation = Quaternion.identity;
+        _wigglePhase = 0f;
+        if (_body != null)
+        {
+            _body.ForceTuckLegs = false;
+            _body.StrugglePhase = 0f;
+        }
+        if (_grabGlow != null) _grabGlow.SetActive(false);
     }
 
-    // 2026-07 refinement (creator direction: "wiggling should be in roll
-    // and pitch and a lot slower"): roll (Z) + pitch (X) only, no yaw
-    // spin, and a much slower cadence than the original first pass.
-    private const float WiggleSpeed = 1.6f;       // radians/sec -- a slow, ponderous squirm
+    // 2026-07 refinement (creator direction: "the wiggling needs to be a
+    // bit faster, with arm and legs struggling" -- a follow-up to the
+    // earlier "slower, roll+pitch only" pass, not a reversion to the
+    // original fast/spinning first draft). WiggleSpeed/Amplitude are the
+    // slow overall squirm (roll+pitch only, no yaw); Thrash* layers a
+    // faster, smaller jitter on top so the weapon/limb geometry mounted
+    // on the torso reads as flailing at a different rate than the body's
+    // own slow twist -- the closest this rig (no independent arm IK, see
+    // MonsterBody's own header) can honestly get to "arms struggling"
+    // without inventing a whole new limb-animation system for it. Real
+    // per-leg struggle IS independently animated, via MonsterBody.
+    // StrugglePhase (see the Airborne+ForceTuckLegs branch of
+    // UpdateLocomotion).
+    private const float WiggleSpeed = 3.0f;        // radians/sec -- up from the previous pass's 1.6
     private const float WiggleAmplitudeDeg = 16f;
+    private const float ThrashSpeed = 11f;
+    private const float ThrashAmplitudeDeg = 6f;
 
     /// <summary>Driven externally by GrabCursor once per frame while held
-    /// -- creator direction: "pick it up... it will wiggle and squirm."
-    /// Hovers the monster above `worldPos` (the cursor's current ground
-    /// point, GrabCursor's own raycast) and layers a slow roll/pitch
-    /// wobble on top: two out-of-phase, differently-timed sine tilts, no
-    /// yaw component -- a creature straining against a grip, not
-    /// spinning in place.</summary>
+    /// -- creator direction: "pick it up... it will wiggle and squirm,"
+    /// "with arm and legs struggling." Hovers the monster above
+    /// `worldPos` (the cursor's current ground point, GrabCursor's own
+    /// raycast) and layers a slow roll/pitch squirm plus a faster small
+    /// thrash on top (no yaw component either way -- a creature straining
+    /// against a grip, not spinning in place), drives <see
+    /// cref="MonsterBody.StrugglePhase"/> so the legs kick in time with
+    /// it, and keeps the grab-glow disc (see <see cref="TickGrabGlow"/>)
+    /// tracking the ground point underneath.</summary>
     public void TickHeld(Vector3 worldPos, float dt)
     {
         _wigglePhase += dt * WiggleSpeed;
@@ -574,7 +603,79 @@ public class MonsterAgent : MonoBehaviour
 
         var pitch = Mathf.Sin(_wigglePhase) * WiggleAmplitudeDeg;
         var roll = Mathf.Sin(_wigglePhase * 0.77f + 1.3f) * WiggleAmplitudeDeg;   // different rate + phase offset so roll and pitch never lock into a single repeating figure
-        transform.rotation = Quaternion.Euler(pitch, 0f, roll);
+        var thrashPitch = Mathf.Sin(_wigglePhase * ThrashSpeed) * ThrashAmplitudeDeg;
+        var thrashRoll = Mathf.Cos(_wigglePhase * ThrashSpeed * 1.1f) * ThrashAmplitudeDeg;
+        transform.rotation = Quaternion.Euler(pitch + thrashPitch, 0f, roll + thrashRoll);
+
+        if (_body != null) _body.StrugglePhase = _wigglePhase * 1.6f;
+
+        TickGrabGlow(worldPos);
+    }
+
+    // ---- 2026-07: glowing pickup disc (GrabCursor) ----------------------------
+
+    private GameObject _grabGlow;
+
+    /// <summary>Creator direction: "Add a glowing disk under the monster
+    /// with light that light up them model, make it luminous with a soft
+    /// glow." Built once per agent, lazily on first grab (never for a
+    /// monster that's never picked up), then just toggled active/inactive
+    /// on every later grab/drop -- matches <see cref="GlowPointRegistry"/>'s
+    /// own documented design: it's an APPEND-ONLY registry with no
+    /// unregister lifecycle, gated by an `isEligible` predicate instead
+    /// (the same pattern TrafficCar headlights already use for "only lit
+    /// while driving at night"), so registering once and toggling
+    /// eligibility via <see cref="IsHeld"/> is the intended shape here,
+    /// not a workaround. Tier 1 (the disc's own emissive material) is
+    /// always free/visible the instant it's active; Tier 2 (a real
+    /// `Light` promoted from the registry) only lights the model up if
+    /// this point wins the shared city-wide budget slot, same as every
+    /// other glow point in the game -- a held creature doesn't get to
+    /// skip the budget system other props already live under.</summary>
+    private void EnsureGrabGlow()
+    {
+        if (_grabGlow != null) return;
+
+        _grabGlow = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        _grabGlow.name = "GrabGlowDisc";
+        // a CHILD of this agent (not a sibling under the shared monsters
+        // host) specifically so Unity destroys it automatically if this
+        // monster dies/is destroyed while never grabbed again -- TickGrabGlow
+        // still positions/orients it in WORLD space every frame regardless,
+        // so being parented under the wiggling root causes no visual drift.
+        _grabGlow.transform.SetParent(transform, true);
+        _grabGlow.transform.localScale = new Vector3(2.4f, 0.05f, 2.4f);   // Cylinder is 1 unit diameter x 2 tall at scale 1 -- squashed flat into a disc
+        var collider = _grabGlow.GetComponent<Collider>();
+        if (collider != null) Object.Destroy(collider);
+
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        var glowColor = new Color(0.55f, 0.85f, 1f);   // cool energy-cyan -- a race-neutral "grabbed" cue, matching the mechanical (not gothic-red) claw redesign
+        mat.color = new Color(glowColor.r, glowColor.g, glowColor.b, 0.55f);
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", glowColor * 2.2f);
+        LabMeshBuilder.MakeTransparent(mat);
+        var renderer = _grabGlow.GetComponent<Renderer>();
+        if (renderer != null) renderer.sharedMaterial = mat;
+
+        GlowPointRegistry.Register(_grabGlow.transform, glowColor, isEligible: () => _held);
+
+        _grabGlow.SetActive(false);
+    }
+
+    /// <summary>Keeps the glow disc under the cursor's current ground
+    /// point while carried, a small offset above the terrain so it
+    /// doesn't Z-fight with the ground it's sitting on. Sets WORLD
+    /// position/rotation explicitly every frame (not local) -- being
+    /// parented under this agent's own wiggling root (see
+    /// <see cref="EnsureGrabGlow"/>'s own comment on why it's a child at
+    /// all) would otherwise tilt the disc right along with the squirming
+    /// torso; forcing world rotation to identity here keeps it flat on
+    /// the ground regardless of whatever the root is doing above it.</summary>
+    private void TickGrabGlow(Vector3 worldPos)
+    {
+        if (_grabGlow == null) return;
+        _grabGlow.transform.position = new Vector3(worldPos.x, worldPos.y + 0.05f, worldPos.z);
+        _grabGlow.transform.rotation = Quaternion.identity;
     }
 
     // ---- 2026-07: post-clone roof display (GrabCursor) -----------------------
@@ -583,21 +684,33 @@ public class MonsterAgent : MonoBehaviour
     private const float RoofSpinDegPerSec = 40f;
 
     /// <summary>Creator direction: "When dropped into the factory, it
-    /// should land on the roof and rotate slowly in the Y axis." Called by
-    /// GrabCursor instead of <see cref="EndHeld"/> when the drop landed on
-    /// the player's own Factory -- same leg-tuck reasoning as being held
-    /// (nothing to plant a foot on up on a roof either), persists until a
-    /// real order is issued (see <see cref="ClearTargets"/>'s own new
-    /// clause), the same "stays put until manually disturbed" contract
-    /// <see cref="OrderPerch"/> already established for flyers resting on
-    /// a roof.</summary>
+    /// should land on the roof and rotate slowly in the Y axis" -- AFTER
+    /// resetting to normal orientation first (see <see cref="EndHeld"/>'s
+    /// own doc comment for that reset; this method leaves the root
+    /// rotation at identity too, same reset, before the spin below starts
+    /// turning it). Called by GrabCursor instead of <see cref="EndHeld"/>
+    /// when the drop landed on the player's own Factory -- legs stay
+    /// tucked (nothing to plant a foot on up on a roof either) but
+    /// STATIC, not kicking (`StrugglePhase` reset to 0 -- the struggle
+    /// was specifically part of being carried, not part of resting on
+    /// the roof). Persists until a real order is issued (see <see
+    /// cref="ClearTargets"/>'s own new clause), the same "stays put until
+    /// manually disturbed" contract <see cref="OrderPerch"/> already
+    /// established for flyers resting on a roof.</summary>
     public void BeginRoofDisplay(Vector3 roofWorldPos)
     {
         _held = false;
         _roofDisplay = true;
         transform.position = roofWorldPos;
-        if (_body != null) _body.ForceTuckLegs = true;
+        transform.rotation = Quaternion.identity;
+        _wigglePhase = 0f;
+        if (_body != null)
+        {
+            _body.ForceTuckLegs = true;
+            _body.StrugglePhase = 0f;
+        }
         if (_fighter != null) _fighter.LastVelocity = Vector3.zero;
+        if (_grabGlow != null) _grabGlow.SetActive(false);
     }
 
     private void TickRoofDisplay(float dt)

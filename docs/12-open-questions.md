@@ -7068,3 +7068,55 @@ Five refinements to the grab/clone feature above, all creator-directed:
   `MonsterAgent.SetSettleTarget`, reusing the EXISTING `TickSettle`
   direct-line-creep machinery group-move arrival already uses --
   deliberately not a new movement system.
+
+### 2026-07 second follow-up: faster struggle, real per-leg kicking, orientation reset on drop, glowing pickup disc
+
+- **"The wiggling needs to be a bit faster, with arm and legs
+  struggling."** `WiggleSpeed` bumped 1.6 -> 3.0 rad/s, plus a NEW faster
+  small thrash layered on top of the slow roll/pitch (11 rad/s, ±6°) so
+  the weapon/limb geometry rigidly mounted on the torso reads as
+  flailing at a distinct rate from the body's own slower squirm -- the
+  honest ceiling for "arms struggling" given this rig has no independent
+  arm IK (`MonsterBody` only articulates legs; arms/weapons are static
+  torso-mounted geometry). Legs get REAL independent struggle: a new
+  `MonsterBody.StrugglePhase` (driven from `TickHeld`, index-phase-offset
+  per leg) layers a kicking offset onto the existing flight-tuck fold
+  whenever `ForceTuckLegs` is set -- actual per-leg animation, not
+  reusing the whole-body wiggle.
+- **"When the user drops the wiggling stops and the monster reset to
+  normal orientation: body, arms and legs, before it is mounted on the
+  roof of the factory."** `EndHeld`/`BeginRoofDisplay` now both reset
+  `transform.rotation` to identity and `StrugglePhase` to 0 the instant
+  the drop happens -- a clean, calm pose (legs still tucked on the roof,
+  since there's genuinely no ground up there, but STATIC, not kicking)
+  rather than whatever mid-squirm frame the drop happened to land on.
+- **"Add a glowing disk under the monster with light that light up them
+  model, make it luminous with a soft glow."** A flat emissive disc
+  (`MonsterAgent.EnsureGrabGlow`), built once per agent lazily on first
+  grab and toggled active/inactive on every later grab/drop rather than
+  destroyed/recreated. Registered with the EXISTING `GlowPointRegistry`
+  (docs/28's Tier-1-emissive/Tier-2-budgeted-real-Light model, the same
+  one every streetlamp/window/car headlight already competes under) via
+  an `isEligible: () => _held` predicate -- that registry is explicitly
+  append-only with no unregister lifecycle by design (its own header:
+  "rather than adding true register/unregister lifecycle... an
+  ineligible point simply never competes"), the exact precedent
+  TrafficCar headlights already established for "only lit while driving
+  at night." A held creature does NOT get to skip the shared city-wide
+  light budget other props already live under -- the disc's own emissive
+  material is always visible for free; a real promoted `Light` only
+  fires if this point wins a budget slot like anything else. Cool
+  energy-cyan, race-neutral, matching the mechanical (not gothic-red)
+  claw redesign from the prior pass. Parented as a CHILD of the agent
+  (not the shared monsters host) specifically so it's auto-destroyed if
+  the creature dies without ever having been grabbed again -- position/
+  rotation are still set in WORLD space every frame regardless, so being
+  a child of the wiggling root causes no visual drift.
+
+**Honest limits, unchanged from the prior entries:** no Unity Editor
+here to confirm any of this actually reads correctly at real render
+time -- same standing posture as every Unity-side entry in this log.
+Verified for real: `MonsterAgent.cs`/`MonsterBody.cs` braces/parens
+balanced across the whole file, the honest ceiling of static
+verification available with no `UnityEngine` assembly to compile
+against in this environment.
