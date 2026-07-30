@@ -84,16 +84,28 @@ namespace MadDr.MatchCore
     /// <summary>Static lookup table, one row per (docs/23 §7's own faction
     /// x phase table). DATA read by the sim, never simulation state (same
     /// convention as <see cref="FactionDef"/>/<see cref="BuildingDef"/>/
-    /// <see cref="UnitRosterDef"/>) -- not part of the tick hash.</summary>
+    /// <see cref="UnitRosterDef"/>) -- not part of the tick hash.
+    ///
+    /// <see cref="FactionId.Mixed"/>'s own row is left at
+    /// <see cref="FactionLumenModifier.None"/> for every phase --
+    /// deliberately, not an oversight. Mixed has no faction-level bonus of
+    /// its own; <see cref="MatchState"/>'s Lumen lookups resolve each
+    /// UNIT's effective faction (<see cref="SimUnit.RaceOverride"/> if
+    /// set, else its owner's) before indexing this table, so a Mixed
+    /// player's units already get their own race's real row. This row
+    /// only matters as a fallback for a hypothetical unit with no race
+    /// override under a Mixed owner, and staying neutral there is the
+    /// "no stacked advantage" guarantee made explicit, not just implied by
+    /// call-site behavior.</summary>
     public static class FactionLumenTable
     {
-        // Indexed [FactionId, LumenPhase] -- 3 factions x 4 phases.
+        // Indexed [FactionId, LumenPhase] -- 4 factions x 4 phases.
         private static readonly FactionLumenModifier[,] All = BuildTable();
 
         private static FactionLumenModifier[,] BuildTable()
         {
-            var t = new FactionLumenModifier[3, 4];
-            for (var f = 0; f < 3; f++)
+            var t = new FactionLumenModifier[4, 4];
+            for (var f = 0; f < 4; f++)
                 for (var p = 0; p < 4; p++)
                     t[f, p] = FactionLumenModifier.None;
 

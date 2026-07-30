@@ -72,6 +72,17 @@ namespace MadDr.MatchCore
         public int PlayerIndex { get; }
         public double Speed { get; }   // m/s, IEEE-exact ops only
 
+        /// <summary>2026-07 Mixed-faction amendment (docs/23 §13 amendment
+        /// G): this unit's OWN race for <see cref="FactionLumenTable"/>
+        /// lookups, overriding its owner's <see cref="PlayerState.Faction"/>.
+        /// Null for every unit spawned by a non-Mixed player (every
+        /// existing call site, unaffected -- same backward-compatible-
+        /// default pattern <see cref="Combat"/> already uses) AND for a
+        /// Mixed player's own pure-movement test spawns that don't care.
+        /// Set at spawn time only -- a unit's race never changes mid-life,
+        /// same as <see cref="Radius"/>.</summary>
+        public FactionId? RaceOverride { get; }
+
         /// <summary>docs/27 Phase C: body half-width for
         /// <see cref="Flocking.Separate"/> -- the sim-side twin of
         /// Unity's <c>UnitCombat.Radius</c>. Fixed for the unit's whole
@@ -385,7 +396,7 @@ namespace MadDr.MatchCore
         /// pathfound for `SetPath` either.</summary>
         private readonly Queue<HexCoord> _waypointQueue = new Queue<HexCoord>();
 
-        internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed, double radius, CombatStats? combat, int salvageValue = 0, bool hasRegenerationQuirk = false)
+        internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed, double radius, CombatStats? combat, int salvageValue = 0, bool hasRegenerationQuirk = false, FactionId? raceOverride = null)
         {
             EntityId = entityId;
             PlayerIndex = playerIndex;
@@ -397,6 +408,7 @@ namespace MadDr.MatchCore
             Vitality = combat?.MaxVitality ?? 0;
             SalvageValue = salvageValue;
             HasRegenerationQuirk = hasRegenerationQuirk;
+            RaceOverride = raceOverride;
         }
 
         /// <summary>Begin walking a precomputed path (HexPathfinder output,
@@ -702,6 +714,12 @@ namespace MadDr.MatchCore
             // undetected.
             h.Add(HasRegenerationQuirk ? 1 : 0);
             h.Add(LastCombatFrame ?? -1);
+
+            // 2026-07 Mixed-faction amendment: another fixed identity
+            // stat, hashed for the same reason as HasRegenerationQuirk --
+            // it changes real gameplay behavior (FactionLumenTable
+            // lookups), so two clients must agree on it.
+            h.Add(RaceOverride.HasValue ? (int)RaceOverride.Value : -1);
         }
     }
 }

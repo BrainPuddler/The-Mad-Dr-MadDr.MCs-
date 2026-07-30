@@ -53,6 +53,13 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     [Tooltip("Shows an in-game 'choose your city' screen before generation instead of using the Inspector's preset field directly. Off by default so every existing scene/workflow (Inspector preset, CityGizmo sync) keeps working byte-for-byte unchanged -- this only changes anything when explicitly turned on.")]
     public bool showRegionPicker = false;
 
+    [Header("Faction picker (2026-07 amendment, off by default -- unchanged behavior)")]
+    [Tooltip("Shows an in-game 'choose your faction' screen before generation. Off by default so every existing scene keeps working byte-for-byte unchanged. Shown BEFORE the region picker when both are on (see FactionPickerHud's own header for why).")]
+    public bool showFactionPicker = false;
+
+    [Tooltip("The human player's faction (docs/23 §1, plus FactionId.Mixed as of the 2026-07 amendment). Set by FactionPickerHud when showFactionPicker is on; otherwise this Inspector value is used directly -- same 'Inspector field is the source of truth until a picker opts in' pattern as `preset`.")]
+    public FactionId chosenFaction = FactionId.MadDoctor;
+
     [Header("docs/27 Phase A dev check (off by default)")]
     [Tooltip("Wires the FIRST spawned monster to docs/27's SimBridge/interpolated-view pipeline instead of its normal Time.deltaTime movement, so a Move order on it is decided by match-core and rendered by interpolation -- the actual Editor smoke test docs/27 Phase A has been waiting on (nothing else in this environment can check it). Left-click that monster, right-click to move it, same as always. Every other monster (and every other order kind on this one) is completely unaffected.")]
     public bool simDrivenDemo = false;
@@ -177,6 +184,19 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             preset = ConvertPreset(gizmo.preset);
         }
 
+        // 2026-07 amendment: the faction picker goes FIRST when both it
+        // and the region picker are enabled (see FactionPickerHud's own
+        // header for why) -- its own Confirm() chains into the region
+        // picker itself when showRegionPicker is also on, so this check
+        // must run before the region-picker check below, not after.
+        if (showFactionPicker)
+        {
+            var factionPicker = gameObject.GetComponent<FactionPickerHud>();
+            if (factionPicker == null) factionPicker = gameObject.AddComponent<FactionPickerHud>();
+            factionPicker.Init(this);
+            return;
+        }
+
         // docs/23 Phase 8's own still-open "region picker" item: off by
         // default (BeginMatch runs immediately, identical to every prior
         // session's behavior) -- opting in defers generation until
@@ -208,6 +228,51 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         _terrain = new TerrainField(_city, _origin, unchecked((uint)seed));
         foreach (var lm in _city.Landmarks)
             if (lm.Archetype == "rail_depot") { _railyardCenter = lm.Site; break; }
+
+        // 2026-07 amendment (docs/12 "give the player one fully functional
+        // factory on startup" + the faction picker): a real MatchState now
+        // exists for EVERY match, not just when the simDrivenDemo dev
+        // toggle happens to be on -- HandleRosterReady's own simDrivenDemo
+        // block (below) now just opts the first monster into sim-driven
+        // MOVEMENT against this already-running match, rather than also
+        // creating it. player 0 is the human's chosen faction; player 1 is
+        // a simple AI-antagonist default (docs/12 Q13: "AI-only Army/Hive
+        // antagonists for single-player skirmish"), deliberately never
+        // Mixed -- Mixed is the human's own unlocked reward, not something
+        // an AI opponent spontaneously gets.
+        _simBridge = gameObject.GetComponent<SimBridge>();
+        if (_simBridge == null) _simBridge = gameObject.AddComponent<SimBridge>();
+        var opponentFaction = chosenFaction == FactionId.HumanArmy ? FactionId.AlienHive : FactionId.HumanArmy;
+        _simBridge.StartMatch(unchecked((uint)seed), new List<FactionId> { chosenFaction, opponentFaction }, _city);
+        SpawnStartingBases();
+
+        // the moon-dial/mana/capture-progress HUD, the build-menu/ghost-
+        // cursor/BaseDresser trio, and the component-wallet/supply HUD all
+        // read live match-core state through THIS SimBridge -- wired here
+        // unconditionally (moved 2026-07 out of the simDrivenDemo-gated
+        // roster-ready block below, which used to be the only place a
+        // real match was guaranteed to exist) so the player's starting
+        // Factory/HQ are actually visible without needing that dev toggle
+        // on.
+        var lumenHud = gameObject.GetComponent<LumenHud>();
+        if (lumenHud == null) lumenHud = gameObject.AddComponent<LumenHud>();
+        lumenHud.Init(_simBridge, this, playerIndex: 0);
+
+        var buildMenu = gameObject.GetComponent<BuildMenuHud>();
+        if (buildMenu == null) buildMenu = gameObject.AddComponent<BuildMenuHud>();
+        buildMenu.Init(_simBridge, playerIndex: 0);
+
+        var ghostCursor = gameObject.GetComponent<BuildGhostCursor>();
+        if (ghostCursor == null) ghostCursor = gameObject.AddComponent<BuildGhostCursor>();
+        ghostCursor.Init(_simBridge, this, buildMenu, playerIndex: 0);
+
+        var baseDresser = gameObject.GetComponent<BaseDresser>();
+        if (baseDresser == null) baseDresser = gameObject.AddComponent<BaseDresser>();
+        baseDresser.Init(_simBridge, this);
+
+        var resourceHud = gameObject.GetComponent<ResourceHud>();
+        if (resourceHud == null) resourceHud = gameObject.AddComponent<ResourceHud>();
+        resourceHud.Init(_simBridge, playerIndex: 0);
 
         // docs/28: set BEFORE any dresser runs -- BuildingDresser/RoadDresser
         // are static generators that mint their cached emissive materials
@@ -1831,6 +1896,63 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return from;
     }
 
+    /// <summary>2026-07 amendment: same shape as <see cref="NearestOpenHex"/>
+    /// but a much wider ring search (base placement needs to reach across
+    /// a whole map, e.g. an AI opponent's base near a map edge, unlike
+    /// NearestOpenHex's own nearby-disgorge-point use case) and an
+    /// EXCLUDE set on top of the terrain-blocked set, so two hexes picked
+    /// in the same <see cref="SpawnStartingBases"/> call never collide
+    /// even though match-core's own building-blocked set (mutated by
+    /// SpawnHqForPlayer/SpawnFactoryForPlayer) isn't visible to Unity's
+    /// own <see cref="BlockedFor"/> query. Falls back to `from` itself if
+    /// nothing opens up within range -- same honest "don't invent a
+    /// placement, just use the best guess available" contract
+    /// <see cref="MatchState.FindOpenHexNear"/>'s sim-side twin
+    /// documents for its own analogous silent-fallback case.</summary>
+    private HexCoord FindOpenHexWide(HexCoord from, HashSet<HexCoord> blocked, HashSet<HexCoord> exclude, int maxRing)
+    {
+        if (_city.Contains(from) && !blocked.Contains(from) && !exclude.Contains(from)) return from;
+        for (var ring = 1; ring <= maxRing; ring++)
+            foreach (var n in from.Ring(ring))
+                if (_city.Contains(n) && !blocked.Contains(n) && !exclude.Contains(n)) return n;
+        return from;
+    }
+
+    /// <summary>2026-07 amendment (docs/12 "give the player one fully
+    /// functional factory on startup"): place both players' starting HQ +
+    /// Factory the instant a match exists, bypassing the worker-economy
+    /// epic's own Collector->Worker->Factory bootstrap chain entirely for
+    /// this ONE starting building per kind per player (see <see
+    /// cref="MatchState.SpawnFactoryForPlayer"/>'s own doc comment).
+    /// Site selection is a real, flagged v0.1 placeholder (CLAUDE.md's
+    /// standing policy): player 0 near the city center, the AI opponent
+    /// offset toward a map edge so the two starts don't crowd each other
+    /// -- not the "themed landmark site" docs/23 §2 eventually describes
+    /// (no such landmark-selection logic exists anywhere yet), just two
+    /// distinct, valid, non-overlapping hexes.</summary>
+    private void SpawnStartingBases()
+    {
+        if (_simBridge == null) return;
+        var blocked = BlockedFor(false);
+        var claimed = new HashSet<HexCoord>();
+        var center = _city.CenterHex;
+
+        var p0Hq = FindOpenHexWide(center, blocked, claimed, 24);
+        claimed.Add(p0Hq);
+        _simBridge.SpawnHqForPlayer(0, p0Hq);
+        var p0Factory = FindOpenHexWide(p0Hq, blocked, claimed, 24);
+        claimed.Add(p0Factory);
+        _simBridge.SpawnFactoryForPlayer(0, p0Factory);
+
+        var opponentSeed = new HexCoord(center.Q + 18, center.R - 9);
+        var p1Hq = FindOpenHexWide(opponentSeed, blocked, claimed, 24);
+        claimed.Add(p1Hq);
+        _simBridge.SpawnHqForPlayer(1, p1Hq);
+        var p1Factory = FindOpenHexWide(p1Hq, blocked, claimed, 24);
+        claimed.Add(p1Factory);
+        _simBridge.SpawnFactoryForPlayer(1, p1Factory);
+    }
+
     /// <summary>Every spawned traffic car -- same minimap use as
     /// Citizens above.</summary>
     public IReadOnlyList<TrafficCar> TrafficCars { get { return _trafficCars; } }
@@ -2004,40 +2126,17 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // class's own header comment describes. Everything else about
             // it (combat, special attacks, eating, flying) is untouched;
             // only its Move order routes through match-core now.
+            // 2026-07 amendment: the HUD wiring (moon dial, build menu,
+            // ghost cursor, BaseDresser, resource HUD) used to live in
+            // THIS block because it was the only place a real _simBridge
+            // was guaranteed to exist. It now happens unconditionally in
+            // BeginMatch (see the "match-core state" wiring below this
+            // loop) since a real match always exists -- this block is only
+            // the docs/27 sim-driven-MOVEMENT demo now, its own original,
+            // narrower purpose.
             if (simDrivenDemo && i == 0)
             {
-                if (_simBridge == null)
-                {
-                    _simBridge = gameObject.AddComponent<SimBridge>();
-                    _simBridge.StartMatch(unchecked((uint)seed), new List<FactionId> { FactionId.MadDoctor, FactionId.HumanArmy }, _city);
-                    Debug.Log("docs/27: sim-driven demo active on " + root.name + " -- left-click it, right-click to move it.");
-
-                    // the moon-dial/mana/capture-progress HUD, the
-                    // build-menu/ghost-cursor/BaseDresser trio, and the
-                    // component-wallet/supply HUD all read live match-core
-                    // state through THIS SimBridge -- this is the one
-                    // place in any scene a real match exists today, so
-                    // it's also the one place they get wired.
-                    var lumenHud = gameObject.GetComponent<LumenHud>();
-                    if (lumenHud == null) lumenHud = gameObject.AddComponent<LumenHud>();
-                    lumenHud.Init(_simBridge, this, playerIndex: 0);
-
-                    var buildMenu = gameObject.GetComponent<BuildMenuHud>();
-                    if (buildMenu == null) buildMenu = gameObject.AddComponent<BuildMenuHud>();
-                    buildMenu.Init(_simBridge, playerIndex: 0);
-
-                    var ghostCursor = gameObject.GetComponent<BuildGhostCursor>();
-                    if (ghostCursor == null) ghostCursor = gameObject.AddComponent<BuildGhostCursor>();
-                    ghostCursor.Init(_simBridge, this, buildMenu, playerIndex: 0);
-
-                    var baseDresser = gameObject.GetComponent<BaseDresser>();
-                    if (baseDresser == null) baseDresser = gameObject.AddComponent<BaseDresser>();
-                    baseDresser.Init(_simBridge, this);
-
-                    var resourceHud = gameObject.GetComponent<ResourceHud>();
-                    if (resourceHud == null) resourceHud = gameObject.AddComponent<ResourceHud>();
-                    resourceHud.Init(_simBridge, playerIndex: 0);
-                }
+                Debug.Log("docs/27: sim-driven demo active on " + root.name + " -- left-click it, right-click to move it.");
                 agent.EnableSimDriven(_simBridge, playerIndex: 0, atHex: home, speed: 6.0);
             }
         }

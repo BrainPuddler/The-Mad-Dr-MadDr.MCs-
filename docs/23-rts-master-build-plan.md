@@ -110,13 +110,15 @@ nondeterminism.
 
 ## 1. Match structure & the three (then four) factions
 
-**Factions at match start — exactly three, per docs/17:**
+**Factions at match start — three per docs/17, plus a 2026-07 unlockable
+4th (see the update note just below the table):**
 
 | Faction | Fantasy | Origin bias | Resource | Base name (§2) |
 | --- | --- | --- | --- | --- |
 | **The Mad Doctor** (player default) | Stitched b-movie monsters | organic + grafts | **Blood** | *The Sanatorium* |
 | **The Human Army** | 1950s military-industrial | tech | **Fuel** | *Fort Vigilance* |
 | **The Alien Hive** | Saucer-people biotech | biotech | **Ichor** | *The Brood Nest* |
+| **Mixed** (2026-07, unlock-gated) | Fields any race's units, each keeping its own rules | none (per-unit) | none (per-unit) | *The Patchwork Ward* |
 
 **The 4th category — Hybrids — is unlocked, not picked.** An advanced-stage
 match mechanic (§6.4): once a player has salvaged and grafted parts from BOTH
@@ -125,6 +127,29 @@ units that mix all three origins' parts (grafts only, honoring invariant #3)
 and a hybrid super-unit created by an Archon-style **Fusion** of two leveled
 monsters (§4.4). Hybrids are the endgame reward for playing the salvage game
 hard, not a fourth lobby button.
+
+> **2026-07 update: `FactionId.Mixed` is now ALSO a real starting pick,**
+> creator-directed ("player first must choose faction from one of the
+> races or the mixed... yes it will be an achievement after winning the
+> campaign") — this supersedes "not a fourth lobby button" above rather
+> than silently contradicting it. The mid-match Chimera Track described
+> above is UNCHANGED (still real, still how a mono-faction player reaches
+> hybrid parts in-match); Mixed as a starting faction is a SEPARATE,
+> additional path, gated behind a persistent "won a campaign" unlock
+> (`MixedFactionUnlock` in the Unity layer — the campaign mode itself
+> doesn't exist in this codebase yet, so today the flag simply stays
+> permanently locked until something real calls `MarkUnlocked`; flagged,
+> not faked). Critically, Mixed is **not** a stat-boosted "best of all
+> three" option: `MatchState` resolves each unit's Lumen bonuses/
+> handicaps from its OWN race (`SimUnit.RaceOverride`), never from a
+> Mixed-wide bonus — `FactionLumenTable`'s own Mixed row is neutral for
+> every phase. Fielding one Rifleman and one Drone under Mixed gets
+> exactly the sum of what those two units would get under HumanArmy/
+> AlienHive respectively, never more — the reward is roster breadth
+> (train/spawn any race's units from one Factory), not raw power. See
+> docs/12's 2026-07 "Mixed faction + starting factory" entry for the full
+> account, and `packages/match-core/src/FactionDef.cs`/
+> `FactionLumenModifier.cs` for the implementation.
 
 **Victory conditions** (docs/02 unchanged): destroy every enemy HQ, or hold a
 majority of emitters through a full Lumen Cycle. 1v1 through 4v4 (§11).
@@ -150,6 +175,22 @@ majority of emitters through a full Lumen Cycle. 1v1 through 4v4 (§11).
 Every player starts with a **themed HQ** placed by the generator at a
 faction-appropriate landmark site, plus a builder mechanism in faction flavor
 (Doctor: Ghouls, docs/22; Army: Engineer Corps trucks; Hive: Larval tillers).
+
+> **2026-07 update: every player ALSO starts with one fully-functional
+> Factory,** creator-directed ("initially give the player one fully
+> functional factory on startup/new game"). This closes the worker-
+> economy epic's own bootstrapping gap (docs/12: a player previously had
+> NO legal path to a first Factory at all — Factory placement requires a
+> Worker, nothing spawns a Worker without a Collector, nothing spawns a
+> Collector automatically) for the ONE starting building; every Factory
+> built AFTER the starting one still goes through the normal Worker-gated
+> `BuildStructure` path unchanged. `MatchState.SpawnFactoryForPlayer`
+> mirrors `SpawnHqForPlayer` exactly (Complete immediately, free, setup-
+> time API, not a Command). Site selection (which hex) is still a real
+> v0.1 placeholder — near the city center for the human player, offset
+> toward a map edge for the AI opponent — not the landmark-selection logic
+> this section otherwise describes; see `RuntimeCityBuilder.
+> SpawnStartingBases` in the Unity layer.
 
 **HQ theming (names are canon, use them in code and UI):**
 - Mad Doctor — **The Sanatorium**: a gothic hospital-manor grafted onto a 1950s

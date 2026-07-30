@@ -6,12 +6,16 @@ namespace MadDr.MatchCore.Tests;
 public class FoundationTests
 {
     [Fact]
-    public void Three_factions_with_correct_energy_per_origin()
+    public void Four_factions_with_correct_energy_per_origin()
     {
-        Assert.Equal(3, FactionDef.AllFactions.Count);
+        // 2026-07 amendment: FactionId.Mixed is a real 4th faction now
+        // (docs/12, docs/23 §1 2026-07 update) -- with no single origin/
+        // energy of its own, unlike the original three.
+        Assert.Equal(4, FactionDef.AllFactions.Count);
         Assert.Equal(ResourceKind.Blood, FactionDef.Get(FactionId.MadDoctor).Energy);
         Assert.Equal(ResourceKind.Fuel, FactionDef.Get(FactionId.HumanArmy).Energy);
         Assert.Equal(ResourceKind.Ichor, FactionDef.Get(FactionId.AlienHive).Energy);
+        Assert.Null(FactionDef.Get(FactionId.Mixed).Energy);
         // energy follows origin (docs/17 invariant)
         Assert.Equal(ResourceKind.Blood, Resources.EnergyOf(Origin.Organic));
         Assert.Equal(ResourceKind.Fuel, Resources.EnergyOf(Origin.Tech));
@@ -24,6 +28,7 @@ public class FoundationTests
         Assert.Equal("The Sanatorium", FactionDef.Get(FactionId.MadDoctor).BaseName);
         Assert.Equal("Fort Vigilance", FactionDef.Get(FactionId.HumanArmy).BaseName);
         Assert.Equal("The Brood Nest", FactionDef.Get(FactionId.AlienHive).BaseName);
+        Assert.Equal("The Patchwork Ward", FactionDef.Get(FactionId.Mixed).BaseName);
     }
 
     [Fact]

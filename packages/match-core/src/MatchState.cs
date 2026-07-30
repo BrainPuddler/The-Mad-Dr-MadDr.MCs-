@@ -180,8 +180,13 @@ namespace MadDr.MatchCore
         /// than being forced to widen its own call site.
         /// <paramref name="hasRegenerationQuirk"/> (docs/23 Phase 7 /
         /// docs/06) defaults to false, same backward-compatible-default
-        /// pattern. Returns the new unit's entity ID.</summary>
-        public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, double radius = DefaultUnitRadius, CombatStats? combat = null, int salvageValue = 0, bool hasRegenerationQuirk = false)
+        /// pattern. <paramref name="raceOverride"/> (2026-07 Mixed-faction
+        /// amendment) defaults to null -- every pre-amendment call site
+        /// keeps compiling and gets a unit that follows its owner's own
+        /// faction as before; only a Mixed player's spawn call sites pass
+        /// a real value (see <see cref="SimUnit.RaceOverride"/>). Returns
+        /// the new unit's entity ID.</summary>
+        public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, double radius = DefaultUnitRadius, CombatStats? combat = null, int salvageValue = 0, bool hasRegenerationQuirk = false, FactionId? raceOverride = null)
         {
             if (_city == null) throw new InvalidOperationException("MatchState has no city -- cannot spawn units");
             if (playerIndex < 0 || playerIndex >= _players.Length)
@@ -191,7 +196,7 @@ namespace MadDr.MatchCore
 
             var id = AllocateEntityId();
             var (x, z) = atHex.ToWorld();
-            var unit = new SimUnit(id, playerIndex, x, z, speed, radius, combat, salvageValue, hasRegenerationQuirk);
+            var unit = new SimUnit(id, playerIndex, x, z, speed, radius, combat, salvageValue, hasRegenerationQuirk, raceOverride);
             _unitsInOrder.Add(unit);
             _unitsById[id] = unit;
             return id;
@@ -219,17 +224,24 @@ namespace MadDr.MatchCore
         /// roster kind's faction (docs/23 §6: these are each faction's OWN
         /// fixed roster, not a shared unit pool) -- a setup-time
         /// programming error, not a replayable command's "bad input,
-        /// silent no-op" contract. Returns the new unit's entity
-        /// ID.</summary>
+        /// silent no-op" contract. <see cref="FactionId.Mixed"/> is the one
+        /// exception (2026-07 amendment): a Mixed player may field ANY
+        /// roster kind (the whole point of the faction), and the spawned
+        /// unit's <see cref="SimUnit.RaceOverride"/> is set to the roster
+        /// kind's OWN faction so it keeps that race's real Lumen bonuses/
+        /// handicaps rather than Mixed's neutral row. Returns the new
+        /// unit's entity ID.</summary>
         public uint SpawnRosterUnit(int playerIndex, HexCoord atHex, RosterUnitKind kind)
         {
             if (playerIndex < 0 || playerIndex >= _players.Length)
                 throw new ArgumentOutOfRangeException(nameof(playerIndex));
             var def = UnitRosterDef.Get(kind);
-            if (_players[playerIndex].Faction != def.Faction)
-                throw new InvalidOperationException($"{kind} belongs to {def.Faction}'s roster, not player {playerIndex}'s {_players[playerIndex].Faction}");
+            var ownerFaction = _players[playerIndex].Faction;
+            if (ownerFaction != def.Faction && ownerFaction != FactionId.Mixed)
+                throw new InvalidOperationException($"{kind} belongs to {def.Faction}'s roster, not player {playerIndex}'s {ownerFaction}");
 
-            return SpawnUnit(playerIndex, atHex, def.Speed, def.Radius, def.Combat, def.SalvageValue);
+            var raceOverride = ownerFaction == FactionId.Mixed ? def.Faction : (FactionId?)null;
+            return SpawnUnit(playerIndex, atHex, def.Speed, def.Radius, def.Combat, def.SalvageValue, raceOverride: raceOverride);
         }
 
         /// <summary>docs/23 §2: place a player's HQ, Complete immediately
@@ -249,6 +261,37 @@ namespace MadDr.MatchCore
             var def = BuildingDef.Get(BuildingKind.Hq);
             var id = AllocateEntityId();
             var building = new SimBuilding(id, playerIndex, BuildingKind.Hq, atHex, def.MaxHp, def.BuildTimeTicks, completeImmediately: true);
+            _buildingsInOrder.Add(building);
+            _buildingsById[id] = building;
+            _blockedToGround?.Add(atHex);
+            return id;
+        }
+
+        /// <summary>2026-07 amendment (docs/12: "give the player one fully
+        /// functional factory on startup"): place a player's starting
+        /// Factory, Complete immediately, free -- same setup-time
+        /// direct-call precedent and Complete-immediately/no-cost contract
+        /// as <see cref="SpawnHqForPlayer"/> (this is a bootstrap grant,
+        /// not a purchase; <see cref="CanTrainUnit"/> only cares that the
+        /// building is Complete and player-owned, not how it got that
+        /// way). Closes the worker-economy epic's own "no way to get a
+        /// first Factory without a Worker, and no way to get a first
+        /// Worker without a Collector" bootstrapping gap (docs/12, Phase
+        /// 4 entry) by skipping that whole chain for the ONE starting
+        /// building -- <see cref="BuildGhostCursor.RequiresWorker"/>'s
+        /// Worker gate still applies to every Factory built AFTER this
+        /// one. The caller (Unity/CityGen) picks the actual hex, same
+        /// division of responsibility as <see cref="SpawnHqForPlayer"/>.
+        /// Blocks the hex like any other building.</summary>
+        public uint SpawnFactoryForPlayer(int playerIndex, HexCoord atHex)
+        {
+            if (_city == null) throw new InvalidOperationException("MatchState has no city -- cannot spawn buildings");
+            if (playerIndex < 0 || playerIndex >= _players.Length)
+                throw new ArgumentOutOfRangeException(nameof(playerIndex));
+
+            var def = BuildingDef.Get(BuildingKind.Factory);
+            var id = AllocateEntityId();
+            var building = new SimBuilding(id, playerIndex, BuildingKind.Factory, atHex, def.MaxHp, def.BuildTimeTicks, completeImmediately: true);
             _buildingsInOrder.Add(building);
             _buildingsById[id] = building;
             _blockedToGround?.Add(atHex);
@@ -692,13 +735,22 @@ namespace MadDr.MatchCore
             return false;
         }
 
+        /// <summary>2026-07 Mixed-faction amendment (docs/23 §13 amendment
+        /// G): a unit's real faction for <see cref="FactionLumenTable"/>
+        /// purposes -- its own <see cref="SimUnit.RaceOverride"/> if set
+        /// (a Mixed player's unit, tagged with its own race at spawn),
+        /// else its owner's <see cref="PlayerState.Faction"/> unchanged
+        /// (every other unit, exactly as before this amendment).</summary>
+        private FactionId EffectiveFaction(SimUnit unit) =>
+            unit.RaceOverride ?? _players[unit.PlayerIndex].Faction;
+
         /// <summary>docs/23 §7: this attacker's own faction/Lumen-phase
         /// damage percent (Army's Day +15%; 100 = no change for every
         /// other faction/phase). Looked up fresh at the moment of attack
         /// rather than cached -- cheap (an array read), and correct across
         /// a phase transition mid-fight.</summary>
         private int LumenDamagePercentFor(SimUnit attacker) =>
-            FactionLumenTable.Get(_players[attacker.PlayerIndex].Faction, CurrentLumenPhase).DamagePercent;
+            FactionLumenTable.Get(EffectiveFaction(attacker), CurrentLumenPhase).DamagePercent;
 
         /// <summary>docs/23 Phase 7 / docs/06: the `regeneration` quirk's
         /// real rate (1% max-HP/s), scaled by this unit's own faction/
@@ -722,7 +774,7 @@ namespace MadDr.MatchCore
                 if (!u.HasRegenerationQuirk || !u.IsAlive || u.Combat == null) continue;
                 if (u.LastCombatFrame.HasValue && Frame - u.LastCombatFrame.Value < OutOfCombatThresholdTicks) continue;
 
-                var modifier = FactionLumenTable.Get(_players[u.PlayerIndex].Faction, CurrentLumenPhase).RegenMultiplier;
+                var modifier = FactionLumenTable.Get(EffectiveFaction(u), CurrentLumenPhase).RegenMultiplier;
                 var amount = (int)Math.Round(u.EffectiveMaxVitality * RegenerationQuirkPercentPerSecond / 100.0 * modifier);
                 u.Heal(amount);
             }
@@ -766,7 +818,7 @@ namespace MadDr.MatchCore
                 // docs/23 §7: this unit's own faction/Lumen-phase speed
                 // multiplier (Hive's Day -10%, Doctor's Night +10%; 1.0 =
                 // no change for every other faction/phase).
-                var speedMultiplier = FactionLumenTable.Get(_players[u.PlayerIndex].Faction, CurrentLumenPhase).SpeedMultiplier;
+                var speedMultiplier = FactionLumenTable.Get(EffectiveFaction(u), CurrentLumenPhase).SpeedMultiplier;
                 var (preMoveX, preMoveZ) = (u.X, u.Z);
                 u.Tick(DtSeconds, speedMultiplier);
 
@@ -1085,9 +1137,11 @@ namespace MadDr.MatchCore
         /// hand-duplicated copy" precedent as <see cref="CanPlaceBuilding"/>.
         /// Requires: the building exists, belongs to `playerIndex`, is
         /// Complete, isn't already training something (v0.1's single
-        /// slot), `kind` belongs to `playerIndex`'s own faction, and
-        /// every line of its <see cref="UnitRosterDef.Cost"/> is
-        /// affordable.</summary>
+        /// slot), `kind` belongs to `playerIndex`'s own faction (or
+        /// `playerIndex` is <see cref="FactionId.Mixed"/>, which may train
+        /// ANY roster kind -- 2026-07 amendment, same exception as <see
+        /// cref="SpawnRosterUnit"/>), and every line of its <see
+        /// cref="UnitRosterDef.Cost"/> is affordable.</summary>
         public bool CanTrainUnit(int playerIndex, uint buildingEntityId, RosterUnitKind kind)
         {
             if (playerIndex < 0 || playerIndex >= _players.Length) return false;
@@ -1098,7 +1152,7 @@ namespace MadDr.MatchCore
 
             var def = UnitRosterDef.Get(kind);
             var player = _players[playerIndex];
-            if (player.Faction != def.Faction) return false;
+            if (player.Faction != def.Faction && player.Faction != FactionId.Mixed) return false;
             foreach (var (resource, amount) in def.Cost)
                 if (player.Wallet(resource) < amount) return false;
 
@@ -1135,13 +1189,17 @@ namespace MadDr.MatchCore
         /// If every hex within 6 rings is somehow blocked (a pathological
         /// map, never seen in practice), the unit is silently NOT spawned
         /// rather than placed somewhere illegal -- a real, accepted v0.1
-        /// edge case, not worth a fallback-to-anywhere hack.</summary>
+        /// edge case, not worth a fallback-to-anywhere hack. 2026-07
+        /// amendment: a Mixed producer's trained unit gets <see
+        /// cref="SimUnit.RaceOverride"/> set to the roster kind's own
+        /// faction, same reasoning as <see cref="SpawnRosterUnit"/>.</summary>
         private void SpawnTrainedUnit(SimBuilding building, RosterUnitKind kind)
         {
             var spawnHex = FindOpenHexNear(building.Hex);
             if (spawnHex == null) return;
             var def = UnitRosterDef.Get(kind);
-            SpawnUnit(building.PlayerIndex, spawnHex.Value, def.Speed, def.Radius, def.Combat, def.SalvageValue);
+            var raceOverride = _players[building.PlayerIndex].Faction == FactionId.Mixed ? def.Faction : (FactionId?)null;
+            SpawnUnit(building.PlayerIndex, spawnHex.Value, def.Speed, def.Radius, def.Combat, def.SalvageValue, raceOverride: raceOverride);
         }
 
         private HexCoord? FindOpenHexNear(HexCoord from)

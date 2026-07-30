@@ -70,6 +70,22 @@ public class SimBridge : MonoBehaviour
         return id;
     }
 
+    /// <summary>2026-07 amendment: setup-time pass-through to <see
+    /// cref="MatchState.SpawnHqForPlayer"/> -- same direct-call contract
+    /// as <see cref="SpawnUnit"/> (never queued; Complete the instant it's
+    /// called), not a Command. No-op returning 0 if no match is
+    /// running.</summary>
+    public uint SpawnHqForPlayer(int playerIndex, HexCoord atHex)
+        => _match?.SpawnHqForPlayer(playerIndex, atHex) ?? 0;
+
+    /// <summary>2026-07 amendment (docs/12 "give the player one fully
+    /// functional factory on startup"): setup-time pass-through to <see
+    /// cref="MatchState.SpawnFactoryForPlayer"/> -- same contract as <see
+    /// cref="SpawnHqForPlayer"/> above. No-op returning 0 if no match is
+    /// running.</summary>
+    public uint SpawnFactoryForPlayer(int playerIndex, HexCoord atHex)
+        => _match?.SpawnFactoryForPlayer(playerIndex, atHex) ?? 0;
+
     /// <summary>Queue a REPLACE move order for the NEXT tick boundary --
     /// never applied immediately (docs/27 §5: one-tick input latency is
     /// correct lockstep behavior, not a bug). Drops any waypoints already

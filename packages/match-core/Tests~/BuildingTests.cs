@@ -60,6 +60,41 @@ public class BuildingTests
     }
 
     [Fact]
+    public void SpawnFactoryForPlayer_isCompleteImmediatelyAndBlocksItsHex()
+    {
+        // 2026-07 amendment: the starting-Factory bootstrap grant (docs/12
+        // "give the player one fully functional factory on startup"),
+        // same shape as SpawnHqForPlayer above.
+        var city = SmallCity();
+        var m = MatchState.Create(11u, TwoPlayers(), city);
+        var factoryHex = FindOpenHex(city, city.CenterHex);
+
+        var id = m.SpawnFactoryForPlayer(0, factoryHex);
+
+        var factory = m.FindBuilding(id)!;
+        Assert.Equal(BuildingState.Complete, factory.State);
+        Assert.Equal(BuildingKind.Factory, factory.Kind);
+        Assert.Equal(BuildingDef.Get(BuildingKind.Factory).MaxHp, factory.MaxHp);
+        Assert.Equal(0, factory.PlayerIndex);
+
+        // free -- no wallet debit for the starting grant
+        Assert.Equal(0, m.Player(0).Wallet(ResourceKind.Bones));
+        Assert.Equal(0, m.Player(0).Wallet(ResourceKind.Blood));
+
+        // Complete (not UnderConstruction) the instant it's spawned --
+        // e.g. CanTrainUnit's own readiness gate is already satisfied,
+        // unlike a player-built Factory which starts UnderConstruction.
+        Assert.False(m.CanTrainUnit(0, id, RosterUnitKind.Rifleman));   // player 0 here is MadDoctor -- wrong roster kind, not wrong readiness; TrainUnitTests covers the readiness gate itself
+
+        // the Factory's own hex is now blocked -- a second build there fails
+        var player = m.Player(0);
+        player.Grant(ResourceKind.Bones, 100);
+        player.Grant(ResourceKind.Blood, 100);
+        m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: factoryHex.Q, argB: factoryHex.R) });
+        Assert.Equal(1, m.BuildingCount);   // still just the Factory -- the second build was rejected
+    }
+
+    [Fact]
     public void BuildStructure_debitsExactCostAndStartsUnderConstruction()
     {
         var city = SmallCity();

@@ -6741,3 +6741,136 @@ parked car sit flush against the curb -- same posture as every other
 `CardinalAnchor`'s own documented nudge against what `ParkHere` used to
 compute, not a guess, and the flightcheck now exercises a scenario
 proven (via its own `RoadDresser` port) to genuinely diverge.
+
+## 2026-07: faction picker, `FactionId.Mixed`, and a starting Factory
+
+Creator direction, verbatim: "initially give the player one fully
+functional factory on startup/new game. Player first must choose
+faction from one of the races or the mixed. With all the rules bonuses
+and handicaps associated with that faction." Follow-up, on whether
+Mixed's per-unit-race rule application could give it an unfair
+advantage, and whether Mixed contradicts docs/23 §13's "not a fourth
+lobby button" ruling for the Chimera Track: "for each unit in mixed the
+rules will apply to the race of the unit, evaluated if that will give
+mixed undo advantanages... yes it will be an achievement after winning
+the campaign."
+
+**What existed before this entry (see the "worker-economy epic" entries
+above, Phases 1-4):** no player had ANY starting building at all in the
+actual playable game -- `MatchState.SpawnHqForPlayer` existed and was
+tested but never called from Unity; `_simBridge`/`MatchState` itself
+only ever got created behind the dev-only `simDrivenDemo` Inspector
+toggle, with a hardcoded 2-player `{MadDoctor, HumanArmy}` list; no UI
+let a player pick a faction at all.
+
+**FactionId.Mixed.** Added as a real 4th enum value (`FactionDef.cs`).
+This directly reverses docs/23 §1's own prior ruling ("Hybrids are the
+endgame reward for playing the salvage game hard, not a fourth lobby
+button") -- a deliberate, creator-directed change, not an oversight; the
+doc itself now carries a `2026-07 update` blockquote saying so rather
+than silently contradicting the code. The PRE-EXISTING Chimera Track
+(salvaging parts of all three origins mid-match, docs/23 §13 amendment
+F) is completely unchanged and still the only way a MONO-faction player
+reaches hybrid grafted parts in-match -- Mixed-as-a-starting-faction is
+an additional, separate path, not a replacement.
+
+**"No undue advantage," made structural, not just claimed.** The
+creator's own framing ("rules apply to the race of the unit") became
+the actual implementation, not just flavor text: `SimUnit` gained a
+nullable `RaceOverride` (`FactionId?`, defaults null -- every pre-
+existing spawn call site unaffected). `SpawnRosterUnit`/`CanTrainUnit`
+grew a Mixed-only exception letting a Mixed player field/train ANY
+faction's roster kind, and the spawned/trained unit's `RaceOverride` is
+set to that roster kind's OWN faction. `MatchState.EffectiveFaction(unit)`
+(`RaceOverride ?? owner.Faction`) is now what every `FactionLumenTable`
+lookup (damage, speed, regen) resolves against, not the player's raw
+`Faction` -- so a Rifleman fielded under Mixed gets EXACTLY Human Army's
+real Day/Night modifiers, a Drone gets EXACTLY Alien Hive's, etc.
+`FactionLumenTable`'s own Mixed row (widened from a 3x4 to a 4x4 table)
+stays `FactionLumenModifier.None` for every phase -- Mixed itself grants
+no faction-wide bonus on top. Net effect, verified by
+`MixedFactionTests.cs` (including a real Tick-level movement-distance
+assertion, not just a data-table check): fielding one of each race under
+Mixed nets exactly the SUM of what those units would get mono-faction,
+never a stacked bonus. The reward is roster breadth (one Factory can
+train any race's units), not raw power -- answering the "undo
+advantanages" question directly rather than leaving it unverified.
+`SimUnit.RaceOverride` is hashed (`WriteTo`) since it's real gameplay-
+affecting state, same "everything gets hashed" discipline every other
+fixed identity stat in that class follows; `Tools~/DetHarness` re-run
+after the change, still bit-identical across two runs.
+
+**Achievement-gated, not free from turn one.** The creator's own words
+("an achievement after winning the campaign") map to a persistent,
+account-level unlock flag rather than an in-match condition --
+`MixedFactionUnlock` (Unity layer, `PlayerPrefs`-backed,
+`IsUnlocked`/`MarkUnlocked`). Honest limit, stated in that file's own
+header rather than papered over: **no campaign mode exists anywhere in
+this codebase yet** (grepped the whole repo for "campaign" -- every hit
+is a design-doc mention in docs/01/docs/12/docs/17, never a built
+feature). Rather than fake a campaign system just to have something call
+`MarkUnlocked`, the flag is wired for real and left permanently locked
+by default until a real campaign-completion event exists to call it --
+the correct, non-broken default, not a stub pretending to gate
+something. `FactionPickerHud` draws Mixed greyed-out/unclickable while
+locked.
+
+**The starting Factory.** `MatchState.SpawnFactoryForPlayer` mirrors
+`SpawnHqForPlayer` exactly (Complete immediately, free, setup-time API,
+not a `Command`) -- closes the worker-economy epic's own bootstrapping
+gap (Phase 3/4 entries above) for the ONE starting building per kind per
+player, by skipping the Collector->Worker->Factory chain entirely for
+it. Every Factory built AFTER the starting one still goes through the
+normal Worker-gated `BuildGhostCursor.RequiresWorker` path, completely
+unchanged. `BuildingTests.cs` covers it (Complete immediately, blocks
+its hex, zero cost, same as the HQ's own existing test).
+
+**Unifying match creation.** `RuntimeCityBuilder.BeginMatch` now creates
+a real `MatchState`/`SimBridge` and calls `SpawnStartingBases()`
+(HQ+Factory for both players) UNCONDITIONALLY, right after city
+generation -- not gated behind `simDrivenDemo` anymore. The build-menu/
+ghost-cursor/BaseDresser/resource-HUD wiring, which used to live inside
+the `simDrivenDemo`-gated roster-ready callback ONLY because that was
+the one place a real match was guaranteed to exist, moved into
+`BeginMatch` for the same reason -- it was never actually specific to
+the docs/27 sim-driven-movement demo, just co-located with it out of
+convenience. `simDrivenDemo`'s own block is now exactly what its own
+doc comment always said it was: opting the first spawned monster into
+sim-driven MOVEMENT, nothing else. For every existing default scene
+(no faction picker, no region picker, `simDrivenDemo` off or on), the
+two-player faction list resolves to the exact same `{MadDoctor,
+HumanArmy}` the old hardcoded call used -- byte-for-byte unchanged
+default behavior, just reached through a real player-facing path now
+instead of a dev-only one.
+
+**Faction picker.** `FactionPickerHud.cs` copies `RegionPickerHud.cs`'s
+exact opt-in wiring shape (`RuntimeCityBuilder.showFactionPicker`, off
+by default; IMGUI; centered; sets one field then calls the same
+`BeginMatch` entry point). Shown BEFORE the region picker when both are
+on, per the creator's own word order ("player first must choose
+faction"). Blurbs on each option are `FactionLumenTable`'s own real
+docs/23 §7 numbers, not invented flavor text.
+
+**AI opponent faction.** Never Mixed (Mixed is the human player's own
+unlocked reward, not something an AI antagonist spontaneously gets,
+matching Q13's existing "AI-only Army/Hive antagonists" recommendation)
+-- simple default: Army unless the human picked Army, in which case
+Hive.
+
+**Honest limits:** no Unity Editor here to visually confirm the picker
+screens render/click correctly, that BaseDresser actually shows a
+visible Factory model, or that the two starting bases don't visually
+overlap on every city preset -- same standing posture as every other
+Unity-side entry in this log. Verified for real: all 263
+`packages/match-core` tests green (including the new
+`MixedFactionTests.cs` and the updated `FoundationTests.cs`/
+`BuildingTests.cs`), `dotnet build` clean, `Tools~/DetHarness` bit-
+identical across two runs post-hash-change, and every new/changed C#
+file's braces/parens verified balanced across the whole file (no Unity
+assemblies exist in this environment to run a real Roslyn compile
+against `UnityEngine`, so this is the honest ceiling of static
+verification available, same as every prior Unity-side "flightcheck" in
+this log). Site selection for the starting HQ/Factory hexes (near
+center for the human, offset toward a map edge for the AI) is a real,
+flagged v0.1 placeholder, not the "themed landmark site" docs/23 §2
+eventually describes.
