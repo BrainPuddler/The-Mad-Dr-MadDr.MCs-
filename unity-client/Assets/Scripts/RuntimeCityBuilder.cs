@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using MadDr.CityGen;
 using MadDr.MatchCore;
@@ -452,12 +451,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // partial selection is plenty fast at the fleet sizes this
         // project actually has (tens, not thousands); not worth pulling
         // in a full sort for a single threshold value.
-        var minCount = Math.Min(trafficActiveMinimumCount, count);
+        var minCount = Mathf.Min(trafficActiveMinimumCount, count);
         var thresholdSq = float.MaxValue;
         if (minCount > 0 && minCount < count)
         {
             var sorted = (float[])sqDistances.Clone();
-            Array.Sort(sorted);
+            System.Array.Sort(sorted);
             thresholdSq = sorted[minCount - 1];
         }
 
