@@ -6583,3 +6583,100 @@ after this, the next thing worth checking is whether it's this SAME
 mechanism in a different guise (e.g. two driving cars mutually
 blocking after a fleeing U-turn) rather than the parked-car case this
 fix targets specifically.
+
+## 2026-07: destination-based traffic routing, and a second passing-bug find
+
+**Creator report:** raising `trafficCarCount` to 40 made traffic
+visible at last, "but they are driving erratically all over the road.
+They should drive or be picking destinations on the map to go to, be
+more realistic." `TrafficCar.PickNext` had no concept of "going
+somewhere" at all -- every hop was a fresh pseudo-random wander-hash
+pick (rotated by `_hopCounter` to avoid ping-ponging a fixed 2-3 hex
+loop), nudged only by monster-avoidance and a camera-proximity bias.
+Locally sensible (never immediately reverses, dodges threats), it adds
+up to a car with no destination, which reads exactly as "erratic."
+
+**Fix:** ported `Citizen.cs`'s own destination pattern (`_destination`
++ a greedy walk that favors whichever neighbor gets closer) onto the
+road network instead of the sidewalk set:
+
+- `TrafficCar.PickDestination()` (called once per trip, from `Init()`'s
+  driving branch and `BeginTrip()`) picks a real hex via
+  `RandomRoadHexNear` -- a hash-ranked pick within `MaxTripHops` (14)
+  hexes of the car's current position, biased toward
+  `RuntimeCityBuilder.CameraGroundFocus` by `CameraBiasWeight` (250,
+  reused unchanged from the earlier camera-gating work). A flee
+  (`awayFrom.HasValue`) skips picking a destination entirely -- panic
+  overrides the errand, unchanged from before.
+- `PickNext`'s per-hop score is now PRIMARILY `-DistanceTo(_destination)
+  * DestinationWeight` (mirroring `Citizen.StepTowardDestination`'s own
+  greedy scoring), with the wander hash demoted to a tie-breaker and
+  the monster-aware penalty kept as a safety override.
+  `DestinationWeight` (90000) is deliberately sized to sit strictly
+  between the wander hash's own 0-65535 spread (so the errand is never
+  a coin flip) and the monster-penalty's own max of 112000 (so a
+  threat genuinely close to a candidate hex can still steer the car
+  away from it -- safety still beats the errand).
+- The camera-bias term MOVED out of `PickNext` (where, once
+  `DestinationWeight` dominates every hop, it had no measurable effect
+  left at all -- caught by the existing route-bias flightcheck
+  regressing to a coin flip) and into `PickDestination`/
+  `RandomRoadHexNear` instead: it now shapes WHICH destination gets
+  picked, once per trip, rather than fighting the greedy walk every
+  single hop. Same net effect (trips trend toward the view over time),
+  cleaner separation of "where am I going" from "how do I get there."
+- Trip completion is now PRIMARILY "arrived at `_destination`" (checked
+  alongside the existing hop-count check in `Update()`'s arrival
+  branch), not just "used up N hops." `RandomHopBudget()` still exists
+  but is now only a safety cap -- `hexDistance(_to, _destination) *
+  SafetyHopMultiplier` (3x), generous slack since the greedy walk is
+  constrained to the road GRAPH (real detours around blocks), not a
+  straight hex line -- so an unreachable or looping destination still
+  parks eventually instead of wandering forever.
+- `PickExit` (the roundabout-exit choice) got the same destination-
+  first scoring, so a car doesn't lose its errand's sense of direction
+  just because its route happened to pass through a traffic circle.
+
+**Second passing-bug find, same underlying shape as the last one:** the
+destination-routing flightcheck's own passing-a-slow-car test (same
+one the previous log entry fixed) reproduced the identical "stuck
+passing forever, no net progress" symptom -- just via a different
+route direction than before, which is exactly why it hadn't shown up
+until this pass changed what gets picked first. Tracing it: the
+PREVIOUS fix's `ownLaneClear` query point
+(`transform.position + right * PassLaneOffset`) assumed the car has
+ALREADY swerved the full `PassLaneOffset` by the time this check runs.
+On the very first frame(s) after committing to a pass, the car is
+still essentially ON the original lane -- adding a FULL assumed
+`PassLaneOffset` to "undo the swerve" instead overshoots past the
+centerline to the far side, reproducing the exact same false-clear/
+immediate-abort failure the previous fix already diagnosed once, just
+from a different trigger (an on-axis blocker directly ahead, rather
+than a same-side-curbed parked car). **Fix:** track `_passStartPos`
+(the car's actual position the instant it commits to a pass) and
+project back onto the original lane using the car's own REAL lateral
+displacement since then (`Dot(transform.position - _passStartPos,
+right)`), not an assumed constant -- on frame one that displacement is
+genuinely ~0 (no overshoot), and it grows to the real swerve amount as
+the car actually moves.
+
+**Verified (flightcheck, no real Editor here):** extended
+`driving-verify` with a destination-routing test (a car has a real
+destination immediately after `Init`, holds it for a whole trip rather
+than re-picking every hop, and `_to` genuinely equals `_destination` at
+some point with a park stay beginning there) and a destination-vs-
+danger test (a monster planted directly on the destination-favored hex
+still steers the pick elsewhere -- safety still overrides the errand).
+The pre-existing camera-bias and passing-a-slow-car tests both caught
+real regressions during this pass (an over-large `DestinationWeight`
+swamping monster-avoidance entirely, and the second passing bug above)
+before being fixed and re-verified passing. All of it lives in real
+`TrafficCar.cs`/`RuntimeCityBuilder.cs`, run through the same real-
+DLL-plus-stub harness every other `TrafficCar` entry in this log uses;
+`Mathf.CeilToInt` was missing from the harness's own `Mathf` stub
+(Unity's real one has it) and was added to match.
+
+**Honest limits:** no real Unity Editor here to watch a car actually
+drive a purposeful-looking route end to end -- same posture as every
+other entry in this log. The reasoning and the flightcheck are as far
+as verification goes in this environment.

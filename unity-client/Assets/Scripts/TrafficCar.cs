@@ -5,15 +5,18 @@ using UnityEngine;
 /// <summary>
 /// Docs/19 traffic (docs/21 batch 2, item 9; extended per creator report --
 /// see the fix note on <see cref="PickNext"/>): a car that drives the road
-/// network in bounded TRIPS, then pulls to the curb and parks for a while
-/// before setting off again -- not an endless wander. Panics like a Citizen
-/// when a monster gets close (peeling toward whichever reachable hex is
-/// farthest from the threat, breaking off a trip OR a parked stay to do
-/// it), and steers away from monsters even off-panic while picking a
-/// normal route. Not a combatant: no collider, doesn't fight, doesn't
-/// block movement -- purely cosmetic crowd dressing for the streets
-/// RoadDresser paints, same scoping Citizen.cs already established for
-/// pedestrians.
+/// network toward a chosen DESTINATION hex (see <see cref="PickDestination"/>,
+/// mirroring Citizen's own destination-walk pattern -- creator direction,
+/// 2026-07: "they are driving erratically all over the road. They should
+/// ... be picking destinations on the map to go to, be more realistic"),
+/// then pulls to the curb and parks for a while before setting off again --
+/// not an endless wander. Panics like a Citizen when a monster gets close
+/// (peeling toward whichever reachable hex is farthest from the threat,
+/// breaking off a trip OR a parked stay to do it), and steers away from
+/// monsters even off-panic while picking a normal route. Not a combatant:
+/// no collider, doesn't fight, doesn't block movement -- purely cosmetic
+/// crowd dressing for the streets RoadDresser paints, same scoping
+/// Citizen.cs already established for pedestrians.
 /// </summary>
 public class TrafficCar : MonoBehaviour
 {
@@ -34,7 +37,27 @@ public class TrafficCar : MonoBehaviour
     private const float LaneHalfWidth = 2.4f;  // only things within this of the lane line count as "ahead of me"
 
     private const int MinTripHops = 5;
-    private const int MaxTripHops = 14;
+    private const int MaxTripHops = 14;   // also the destination-search radius -- see PickDestination
+
+    // 2026-07 creator direction ("they are driving erratically all over
+    // the road. They should ... be picking destinations on the map to go
+    // to, be more realistic"): PickNext used to be a pure wander hash with
+    // no concept of "going somewhere" -- fine for a first pass, but reads
+    // as aimless. Mirrors Citizen.StepTowardDestination's own pattern: pick
+    // a real hex to head for, then greedily favor whichever neighbor gets
+    // closer to it every hop, over the road network instead of sidewalks.
+    //
+    // DestinationWeight, per hex-distance step, is sized to sit strictly
+    // BETWEEN the wander hash's own 0-65535 spread and the monster-aware
+    // penalty's own max of (MonsterAwareRadius * 4000 = 112000) -- big
+    // enough that "closer to the destination" always beats the wander
+    // noise (so the errand is never a coin flip), small enough that a
+    // monster sitting genuinely close to a candidate hex can still
+    // outweigh a 1-hex destination preference (safety still overrides the
+    // errand -- verified by the driving-verify flightcheck's "destination
+    // routing does not override real danger" check, not just asserted).
+    private const float DestinationWeight = 90000f;
+    private const float SafetyHopMultiplier = 3f;     // hop-count safety cap = chosen destination's hex distance * this, generous slack since the greedy walk is constrained to the road GRAPH (real detours around blocks), not a straight hex line -- exists only so an unreachable/looping destination still parks eventually
 
     // docs/28's two-tier lighting model, extended to traffic (creator
     // direction, 2026-07: "forward and slightly down facing lights and
@@ -55,21 +78,19 @@ public class TrafficCar : MonoBehaviour
 
     // 2026-07 creator direction ("change where cars are driving to the
     // areas close to or near the player view area -- let's not waste
-    // processing power"): a car more than RuntimeCityBuilder.
-    // trafficActiveRadius from the camera contributes ZERO per-frame cost
-    // -- see Update()'s very first line -- and PickNext biases its route
-    // choice back toward the camera so an active car's trip naturally
-    // curls toward the view instead of drifting off to drive circles
-    // nobody will ever see.
-    // PickNext only ever compares NEIGHBORING hexes (~HexMeters apart,
-    // 20m) against each other -- not the whole city span -- so the
-    // per-hop delta this weight has to work with is small; tuned so
-    // that delta is a real but not overwhelming fraction of the wander
-    // hash's own typical spread between two random candidates (~65535/
-    // sqrt(6) =~ 26750), verified empirically against a real generated
-    // road network in the driving-verify flightcheck (an initial 45 was
-    // too weak to produce any measurable directional drift at all --
-    // caught by that harness, not just asserted).
+    // processing power"): biases WHICH destination PickDestination picks
+    // (see that method), so a car's whole errand naturally tends to land
+    // somewhere near the view instead of clear across a network nobody
+    // will ever see, without fighting the per-hop destination-seeking
+    // score every single hop the way it used to when this lived in
+    // PickNext directly (a 2026-07 revision: an earlier version applied
+    // this every hop alongside the destination term, but at that scale it
+    // was either negligible next to DestinationWeight or, tuned larger,
+    // fought the greedy walk hop to hop -- moving it to a ONE-TIME pick
+    // at trip start gets the same "cars trend toward the view" outcome
+    // without diluting "the car is actually going somewhere," caught by
+    // the driving-verify flightcheck's route-bias test regressing when
+    // this was still a per-hop term).
     private const float CameraBiasWeight = 250f;
 
     // 2026-07 creator direction ("verify naturalistic driving. Speed up
@@ -108,12 +129,15 @@ public class TrafficCar : MonoBehaviour
     private float _parkDurationBase; // 0 when movingPercent is ~1 (never park)
     private int _tripSalt;
     private int _hopCounter; // rotates the wander hash every pick -- see PickNext
+    private HexCoord _destination;
+    private bool _hasDestination;
 
     // naturalistic-driving state (see the constants above for the "why")
     private float _personalSpeedMult;
     private float _blockedTimer;
     private bool _passing;
     private float _passTimer;
+    private Vector3 _passStartPos; // where this car actually was the instant it committed to the pass -- see the ownLaneClear fix in Update()
 
     // roundabout circulation state (creator direction, 2026-07: "Cars
     // must follow the curve proper curves of the road")
@@ -236,6 +260,7 @@ public class TrafficCar : MonoBehaviour
         if (_parkDurationBase <= 0f || startRoll < pct)
         {
             _state = State.Driving;
+            PickDestination();
             _hopsRemaining = RandomHopBudget();
             PickNext();
         }
@@ -529,6 +554,16 @@ public class TrafficCar : MonoBehaviour
             }
             else
             {
+                // primary: real progress toward the chosen destination
+                // (creator direction, 2026-07: "they are driving
+                // erratically all over the road. They should ... be
+                // picking destinations on the map to go to") -- mirrors
+                // Citizen's own greedy walk-toward-destination scoring.
+                // Negated hex distance so "closer" scores higher, matching
+                // this loop's own max-wins convention; weighted to dwarf
+                // every other term below except a genuinely close threat.
+                var destScore = _hasDestination ? -(float)n.DistanceTo(_destination) * DestinationWeight : 0f;
+
                 var baseScore = (float)(((long)n.Q * 928371 + (long)n.R * 128371
                     + GetInstanceID() + (long)_hopCounter * 40503) & 0xFFFF);
                 var threat = _builder.NearestMonsterTo(_builder.WorldOf(n), MonsterAwareRadius);
@@ -536,18 +571,17 @@ public class TrafficCar : MonoBehaviour
                 if (threat != null)
                 {
                     var d = (_builder.WorldOf(n) - threat.transform.position).magnitude;
-                    penalty = (MonsterAwareRadius - d) * 4000f; // dwarfs the 0..65535 wander hash near a monster
+                    // safety still overrides the errand: at its max (a
+                    // threat right on top of this hex) this beats
+                    // DestinationWeight's own single-hex-step value.
+                    penalty = (MonsterAwareRadius - d) * 4000f;
                 }
-                // 2026-07: gently prefer hexes closer to the player's
-                // camera -- a BIAS on top of the wander hash, not a
-                // replacement for it (still comparable in magnitude to
-                // the hash's own 0..65535 range over city-scale
-                // distances), so routes stay varied but drift back toward
-                // the view over a multi-hop trip instead of wandering
-                // off-screen where they'd just get frozen anyway.
-                var distToCamera = (_builder.WorldOf(n) - _builder.CameraGroundFocus).magnitude;
-                penalty += distToCamera * CameraBiasWeight;
-                score = baseScore - penalty;
+                // camera-bias lived here until 2026-07's destination-
+                // routing pass -- it now only shapes WHICH destination
+                // PickDestination picks (a one-time choice per trip), not
+                // every hop's route score; see CameraBiasWeight's own
+                // doc comment for why.
+                score = destScore + baseScore - penalty;
             }
             if (score > bestScore) { bestScore = score; best = n; }
         }
@@ -581,8 +615,21 @@ public class TrafficCar : MonoBehaviour
         return new Vector3(anchor.x, 0.75f, anchor.z);
     }
 
+    /// <summary>The hop-count SAFETY CAP for a trip -- no longer the
+    /// primary trip-completion trigger (arrival at _destination is, see
+    /// Update()'s arrival check), just a backstop so a car whose chosen
+    /// destination turns out unreachable (a network gap, or a dead-end
+    /// maze the greedy walk can't escape) still parks eventually instead
+    /// of wandering forever. Scaled off the destination's own hex
+    /// distance with slack, falling back to the old random range when
+    /// there's no destination to measure against.</summary>
     private int RandomHopBudget()
     {
+        if (_hasDestination)
+        {
+            var hexDist = Mathf.Max(1, _to.DistanceTo(_destination));
+            return Mathf.Max(MinTripHops, Mathf.CeilToInt(hexDist * SafetyHopMultiplier));
+        }
         _tripSalt++;
         var h = Hash(_to, unchecked(GetInstanceID() * 131 + _tripSalt * 977));
         return MinTripHops + h % (MaxTripHops - MinTripHops + 1);
@@ -627,9 +674,43 @@ public class TrafficCar : MonoBehaviour
     private void BeginTrip(Vector3? awayFrom = null)
     {
         _state = State.Driving;
-        _hopsRemaining = RandomHopBudget();
         _fleeing = awayFrom.HasValue;
+        if (!_fleeing) PickDestination(); // a flee doesn't need an errand -- PickNext(awayFrom) overrides route choice entirely below
+        _hopsRemaining = RandomHopBudget();
         PickNext(awayFrom);
+    }
+
+    /// <summary>Choose a real hex on the road network to head for -- see
+    /// the DestinationWeight doc comment for why. Mirrors Citizen's own
+    /// RandomSidewalkNear pattern, scanning the road network this car was
+    /// initialized with instead of the sidewalk set.</summary>
+    private void PickDestination()
+    {
+        _tripSalt++;
+        _destination = RandomRoadHexNear(_to, MaxTripHops, unchecked(GetInstanceID() * 131 + _tripSalt * 977));
+        _hasDestination = !_destination.Equals(_to);
+    }
+
+    /// <summary>A random road hex within `radius` of `near`, for a car to
+    /// head toward -- gently prefers hexes closer to the player's camera
+    /// (see CameraBiasWeight) so a car's whole errand trends toward the
+    /// view instead of clear across the network, without touching the
+    /// per-hop destination-seeking score in PickNext at all. Falls back
+    /// to `near` itself if nothing else is in range (a tiny or
+    /// disconnected network).</summary>
+    private HexCoord RandomRoadHexNear(HexCoord near, int radius, int salt)
+    {
+        var best = near;
+        var bestScore = float.NegativeInfinity;
+        foreach (var r in _network)
+        {
+            if (r.Equals(near) || r.DistanceTo(near) > radius) continue;
+            var hash = (float)(unchecked((r.Q * 73856093) ^ (r.R * 19349663) ^ (salt * 83492791)) & 0xFFFF);
+            var distToCamera = (_builder.WorldOf(r) - _builder.CameraGroundFocus).magnitude;
+            var score = hash - distToCamera * CameraBiasWeight;
+            if (score > bestScore) { bestScore = score; best = r; }
+        }
+        return best;
     }
 
     private void Update()
@@ -696,7 +777,11 @@ public class TrafficCar : MonoBehaviour
         if (toTarget.magnitude < ArriveRadius)
         {
             _hopsRemaining--;
-            if (_hopsRemaining <= 0) { ParkHere(); return; }
+            // real trip completion: arrived at the chosen destination --
+            // not just "used up N hops" (that's now only the safety cap
+            // for an unreachable/looping pick, see RandomHopBudget).
+            var arrived = _hasDestination && _to.Equals(_destination);
+            if (arrived || _hopsRemaining <= 0) { ParkHere(); return; }
             PickNext();
         }
 
@@ -750,13 +835,31 @@ public class TrafficCar : MonoBehaviour
                 // and every car whose route crosses one gets stuck behind
                 // it the same way (the whole fleet reads as "stopped",
                 // not just the one the creator happened to be watching).
-                // Projecting back onto the ORIGINAL lane (undoing this
-                // car's own PassLaneOffset swerve) before checking clearance
-                // fixes the reference point: it now reports "still blocked"
-                // for as long as the blocker is genuinely still ahead
-                // along the road, regardless of how far sideways this car
-                // itself has swerved to get around it.
-                var ownLaneClear = _builder.DistanceAhead(transform.position + right * PassLaneOffset, fwd, FollowRange, LaneHalfWidth, this);
+                //
+                // 2026-07 follow-up fix (found via the destination-routing
+                // flightcheck pass: a route toward a different first hex
+                // reproduced the SAME "stuck passing forever" symptom this
+                // comment describes, just from a different direction --
+                // this original fix wasn't wrong in intent, but assumed the
+                // car had ALREADY swerved the full PassLaneOffset by the
+                // time this check runs. On the very first frame(s) after
+                // committing to a pass, the car is still essentially ON the
+                // original lane -- adding a FULL assumed PassLaneOffset to
+                // "undo the swerve" instead OVERSHOOTS past the centerline
+                // to the far side, which reproduces the exact same false-
+                // clear/immediate-abort bug the comment above already
+                // diagnosed once, just via a different trigger. Projecting
+                // back using the car's own ACTUAL lateral displacement
+                // since it committed to the pass (`_passStartPos`), rather
+                // than an assumed constant, fixes the reference point for
+                // real: on frame one that displacement is genuinely ~0 (no
+                // overshoot), and it grows to the real swerve amount as the
+                // car actually moves -- verified by the driving-verify
+                // flightcheck's passing test, which reproduced this exact
+                // stuck-forever failure before this fix.
+                var lateralOffset = Vector3.Dot(transform.position - _passStartPos, right);
+                var ownLaneQuery = transform.position - right * lateralOffset;
+                var ownLaneClear = _builder.DistanceAhead(ownLaneQuery, fwd, FollowRange, LaneHalfWidth, this);
                 if (_passTimer <= 0f || passSideClear < FollowGap || ownLaneClear >= FollowRange)
                 {
                     _passing = false;
@@ -811,6 +914,7 @@ public class TrafficCar : MonoBehaviour
                     {
                         _passing = true;
                         _passTimer = PassMaxDuration;
+                        _passStartPos = transform.position; // the reference point ownLaneClear measures actual swerve progress from
                     }
                 }
             }
@@ -874,8 +978,10 @@ public class TrafficCar : MonoBehaviour
 
     /// <summary>Pick a spoke to leave a roundabout by -- a road neighbor
     /// of the hub other than the one we entered from (falling back to
-    /// any neighbor at a dead-end hub), by the same rotating wander hash
-    /// PickNext uses so exits vary trip to trip.</summary>
+    /// any neighbor at a dead-end hub). Same destination-first scoring as
+    /// PickNext (with the rotating wander hash as a tie-breaker), so a
+    /// car doesn't lose its errand's sense of direction just because it
+    /// passed through a traffic circle.</summary>
     private HexCoord PickExit(HexCoord hub)
     {
         var candidates = new List<HexCoord>();
@@ -888,10 +994,12 @@ public class TrafficCar : MonoBehaviour
 
         _hopCounter++;
         var best = candidates[0];
-        var bestScore = long.MinValue;
+        var bestScore = float.NegativeInfinity;
         foreach (var n in candidates)
         {
-            var score = ((long)n.Q * 928371 + (long)n.R * 128371 + GetInstanceID() + (long)_hopCounter * 40503) & 0xFFFF;
+            var destScore = _hasDestination ? -(float)n.DistanceTo(_destination) * DestinationWeight : 0f;
+            var hashScore = (float)(((long)n.Q * 928371 + (long)n.R * 128371 + GetInstanceID() + (long)_hopCounter * 40503) & 0xFFFF);
+            var score = destScore + hashScore;
             if (score > bestScore) { bestScore = score; best = n; }
         }
         return best;
