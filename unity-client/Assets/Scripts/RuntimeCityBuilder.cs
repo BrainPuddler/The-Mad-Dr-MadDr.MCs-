@@ -274,6 +274,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (resourceHud == null) resourceHud = gameObject.AddComponent<ResourceHud>();
         resourceHud.Init(_simBridge, playerIndex: 0);
 
+        var buildingNavHud = gameObject.GetComponent<BuildingNavHud>();
+        if (buildingNavHud == null) buildingNavHud = gameObject.AddComponent<BuildingNavHud>();
+        buildingNavHud.Init(_simBridge, this, playerIndex: 0);
+
         // docs/28: set BEFORE any dresser runs -- BuildingDresser/RoadDresser
         // are static generators that mint their cached emissive materials
         // (Bulb(), window glow) ONCE at build time, reading whatever

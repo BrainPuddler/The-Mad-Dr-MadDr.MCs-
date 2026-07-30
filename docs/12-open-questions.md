@@ -6874,3 +6874,70 @@ this log). Site selection for the starting HQ/Factory hexes (near
 center for the human, offset toward a map edge for the AI) is a real,
 flagged v0.1 placeholder, not the "themed landmark site" docs/23 §2
 eventually describes.
+
+## 2026-07: SC2-style building navigation bar (BuildingNavHud.cs)
+
+Creator direction, verbatim: "Like starcraft 2 I need icons that quick
+navigate to my building. When you click on the building icon it will
+hilite icon quick scroll to the building. then on the hilited icon the
+&lt;&gt; keys will jump to the next building of that type if there are
+more than one. or use arrow icon below the building to do the same. All
+building that have been built will show up in small / medium icons on
+the bottom of the screen."
+
+**Implementation, one-to-one with the request.** `BuildingNavHud.cs`
+draws one icon per COMPLETE building this local player owns (`SimBridge.
+BuildingCount`/`BuildingAt`, filtered by `PlayerIndex` and `BuildingState.
+Complete` — "have been built," not mid-construction), bottom-center of
+the screen, sorted by `(Kind, EntityId)` so same-kind icons sit
+physically adjacent. Clicking an icon sets `HighlightedEntityId` and
+glides the camera there via `SimpleCameraRig.FocusOn` — the SAME method
+`WaypointCommander.JumpToNearestUnit` (the existing G-key jump-to-
+nearest-unit) already uses, not a new camera-movement code path. While an
+icon is highlighted, the `<`/`>` keys (mapped to the UNSHIFTED comma/
+period keys — SC2-style paging shouldn't need a held Shift) OR two small
+`<`/`>` buttons drawn directly below the highlighted icon page through
+every OTHER building sharing that icon's own `BuildingKind`, wrapping in
+both directions; both paths call the same `CycleSameKind` so keyboard and
+mouse can never disagree. The arrow buttons simply don't draw when
+there's nothing else of that kind to jump to (an arrow that does nothing
+reads as broken, not as disabled).
+
+**Why comma/period, not the literal arrow keys.** `SimpleCameraRig`
+already binds the arrow keys to camera panning (WASD's own alternate
+binding) — reusing them for building-nav paging would silently steal
+camera control the instant a building is highlighted. Comma/period are
+what a US keyboard's `<`/`>` legends actually sit on without a held
+Shift, matches the creator's own "the &lt;&gt; keys" wording, and doesn't
+collide with anything else already bound in this project.
+
+**No new icon art.** This repo has no icon sprite/texture assets
+anywhere — every existing IMGUI panel (`BuildMenuHud`, `RegionPickerHud`,
+`FactionPickerHud`) already represents its own options as colored
+swatches plus short text, never real icon graphics. `BuildingNavHud`
+follows the same established idiom (a per-`BuildingKind` colored square
+plus a 2-3 letter abbreviation — "HQ", "Fac", "Bld", etc.) rather than
+inventing new asset infrastructure this feature didn't ask for.
+
+**Extends a known, already-flagged debt, doesn't create a new kind of
+it.** docs/23 §13 amendment H already warned "IMGUI already forced the
+`Minimap.PointerOver` hack and won't survive build menus/toasts/dial."
+This feature needed the exact same hack (a static `BuildingNavHud.
+PointerOver`, wired into both `WaypointCommander` and `BuildGhostCursor`
+alongside their existing `Minimap.PointerOver`/`BuildMenuHud.
+PointerOverPanel` checks) so clicking a building icon doesn't ALSO fire a
+world-space select/order/placement click underneath it. Recorded here
+rather than silently added as one more copy of a pattern the panel review
+already flagged as not scaling — the uGUI migration amendment H asked
+for is still the real fix, still not done.
+
+**Honest limits:** no Unity Editor here to confirm the icons actually
+render at a legible size/position, that the highlighted icon's arrow
+buttons land in a sensible spot relative to the row, or that
+`GUI.skin.label.alignment` mutate-then-restore behaves as expected across
+a real frame -- same standing posture as every other Unity-side entry in
+this log. Verified for real: every touched C# file's braces/parens
+balanced across the whole file (`BuildingNavHud.cs`, and the
+`RuntimeCityBuilder.cs`/`WaypointCommander.cs`/`BuildGhostCursor.cs`
+wiring edits) -- the honest ceiling of static verification available
+with no `UnityEngine` assembly to compile against in this environment.

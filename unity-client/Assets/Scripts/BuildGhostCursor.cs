@@ -90,10 +90,10 @@ public class BuildGhostCursor : MonoBehaviour
         if (mouse == null || cam == null) { HideGhost(); return; }
 
         // same "OnGUI already claimed this click" guard WaypointCommander
-        // applies for Minimap -- also skip while over the build menu's
-        // own panel, so switching the selected kind mid-placement doesn't
-        // ALSO fire a world-space confirm click underneath the menu.
-        if (Minimap.PointerOver || buildMenu.PointerOverPanel) return;
+        // applies for Minimap -- also skip while over the build menu's own
+        // panel or the building-nav icon bar (2026-07), so clicking either
+        // doesn't ALSO fire a world-space confirm click underneath it.
+        if (Minimap.PointerOver || buildMenu.PointerOverPanel || BuildingNavHud.PointerOver) return;
 
         var hit = RaycastGround(cam, mouse);
         if (!hit.HasValue) { HideGhost(); return; }

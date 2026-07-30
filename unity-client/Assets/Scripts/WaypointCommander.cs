@@ -60,8 +60,9 @@ public class WaypointCommander : MonoBehaviour
         // order the selection) using the SAME click -- without this guard
         // the New Input System's Mouse.current (read below) has no idea
         // OnGUI already claimed the click, so a minimap click would ALSO
-        // fire a world-space select/order underneath it.
-        if (Minimap.PointerOver) return;
+        // fire a world-space select/order underneath it. Same reasoning
+        // for the building-nav icon bar (2026-07).
+        if (Minimap.PointerOver || BuildingNavHud.PointerOver) return;
 
         var mouse = Mouse.current;
         if (mouse == null || _builder == null) return;
