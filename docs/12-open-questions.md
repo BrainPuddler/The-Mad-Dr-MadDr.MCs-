@@ -6680,3 +6680,64 @@ DLL-plus-stub harness every other `TrafficCar` entry in this log uses;
 drive a purposeful-looking route end to end -- same posture as every
 other entry in this log. The reasoning and the flightcheck are as far
 as verification goes in this environment.
+
+## 2026-07: FIX -- cars parking diagonally across roads
+
+**Creator report:** "Cars are parking diagonally across roads. Not
+properly parallel, I think it is too close to corner issue."
+
+**Root cause:** `RoadDresser.CardinalAnchor` nudges a road hex's raw
+world position onto its street's straight centerline whenever that hex
+is on a VERTICAL (N/S) street -- cancelling the pointy-top odd-r grid's
+own per-row sawtooth (adjacent rows alternate the nudge sign, since row
+parity always differs between them). `TrafficCar.RoadPoint` (the
+target a car actually DRIVES to) already used this corrected anchor --
+its own doc comment even names the exact failure mode this fixes for
+driving ("driving to the RAW hex center instead is exactly why cars
+zig-zagged down a straightened street"). `ParkHere`, though, still
+computed its parking direction and spot from the RAW
+`WorldOf(_to) - WorldOf(_from)` -- the same class of bug, just left
+unfixed in the parking code path. A same-row (horizontal) hop is
+already collinear in raw coordinates and never shows this, which is
+exactly why it wasn't caught earlier; a VERTICAL hop always diverges,
+and a corner -- where the incoming hex is unnudged but the corner hex
+itself IS "vertical" (it has a N/S neighbor) -- is the most visible
+single-hop case, matching the creator's own diagnosis, though the
+underlying bug is really about any vertical hop, not corners
+specifically.
+
+**Fix:** extracted `CardinalAnchorOf(hex)` (the same
+`CardinalNeighbors`+`CardinalAnchor` call `RoadPoint` already made) and
+had `ParkHere` use it for BOTH the parking direction and the spot
+position, instead of raw `WorldOf`. `RoadPoint` itself is unchanged in
+behavior, just refactored to call the shared helper.
+
+**Verified (flightcheck, no real Editor here):** the `driving-verify`
+harness's own `RoadDresser` stub had previously simplified away the
+real straightening nudge entirely ("not load-bearing for 'does the car
+move'") -- which meant `CardinalAnchorOf(hex) == WorldOf(hex)` always
+in that harness, silently hiding this exact bug from every existing
+test. Replaced it with a verbatim port of the real
+`Offset`/`CardinalNeighbors`/`CardinalAnchor` logic, and gave the
+stub's previously-inert `Quaternion` a real implementation (AngleAxis/
+Euler/a yaw-only `LookRotation` shortcut, justified since every real
+call site here only ever rotates on the horizontal plane/nlerp-based
+`Slerp`) so a test could inspect `Transform.forward` instead of just a
+method's internal `dir` variable. New test: an explicit vertical-
+street network where two adjacent hexes are guaranteed opposite nudge
+signs, confirming (a) the raw and corrected directions genuinely
+diverge in this scenario (so the check isn't trivially vacuous), (b)
+`ParkHere`'s actual chosen facing matches the corrected direction, not
+the raw one, and (c) the parked spot sits near the corrected anchor's
+curb line. Making the stub honest this way also surfaced one test-only
+brittleness (a "parked car redeparts within 2s" check that only
+sampled its FINAL frame, which a very short destination-based trip
+could legitimately complete and re-park within that same window) --
+fixed to sample every frame instead of asserting on a coincidence.
+
+**Honest limits:** no real Unity Editor here to actually watch a
+parked car sit flush against the curb -- same posture as every other
+`TrafficCar` entry in this log. The reasoning is a direct trace of
+`CardinalAnchor`'s own documented nudge against what `ParkHere` used to
+compute, not a guess, and the flightcheck now exercises a scenario
+proven (via its own `RoadDresser` port) to genuinely diverge.

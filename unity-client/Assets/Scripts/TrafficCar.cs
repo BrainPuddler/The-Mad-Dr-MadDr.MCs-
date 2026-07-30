@@ -590,21 +590,31 @@ public class TrafficCar : MonoBehaviour
         _target = RoadPoint(_to, _from);
     }
 
-    /// <summary>The world point a car aims at to sit ON the drawn road,
-    /// in its own lane: the target hex's CARDINAL road centerline (the
-    /// same corrected anchor RoadDresser renders the strip at -- driving
-    /// to the RAW hex center instead is exactly why cars zig-zagged down
-    /// a straightened street), nudged to the RIGHT of travel by
-    /// LaneOffset so opposing traffic stays apart and each car holds a
-    /// lane.</summary>
-    private Vector3 RoadPoint(HexCoord hex, HexCoord from)
+    /// <summary>The hex's CARDINAL road centerline -- the same corrected
+    /// anchor RoadDresser renders the strip at (a hex on a vertical N/S
+    /// street gets nudged onto that street's shared straight X, undoing
+    /// the pointy-top grid's own per-row sawtooth; see CardinalAnchor's
+    /// own doc comment). Shared by RoadPoint (driving) and ParkHere
+    /// (parking) so both agree on where the road actually IS -- using
+    /// the RAW hex center for either one is exactly why cars zig-zagged
+    /// down a straightened street (driving) or parked at an angle across
+    /// it (parking): the raw hex-to-hex direction and this corrected one
+    /// diverge most right where a street's vertical/horizontal
+    /// classification changes hex to hex, i.e. at a turn or corner.</summary>
+    private Vector3 CardinalAnchorOf(HexCoord hex)
     {
         var vertical = RoadDresser.CardinalNeighbors(hex, _network).Vertical;
-        var anchor = RoadDresser.CardinalAnchor(_builder, hex, vertical);
+        return RoadDresser.CardinalAnchor(_builder, hex, vertical);
+    }
 
-        var fromVertical = RoadDresser.CardinalNeighbors(from, _network).Vertical;
-        var fromAnchor = RoadDresser.CardinalAnchor(_builder, from, fromVertical);
-        var dir = anchor - fromAnchor;
+    /// <summary>The world point a car aims at to sit ON the drawn road,
+    /// in its own lane: the target hex's cardinal-corrected anchor (see
+    /// CardinalAnchorOf), nudged to the RIGHT of travel by LaneOffset so
+    /// opposing traffic stays apart and each car holds a lane.</summary>
+    private Vector3 RoadPoint(HexCoord hex, HexCoord from)
+    {
+        var anchor = CardinalAnchorOf(hex);
+        var dir = anchor - CardinalAnchorOf(from);
         dir.y = 0f;
         if (dir.sqrMagnitude > 0.01f)
         {
@@ -648,16 +658,22 @@ public class TrafficCar : MonoBehaviour
 
     /// <summary>Trip complete: pull off to the curb (the same lane offset
     /// RoadDresser parks its own set-dressing cars at) facing the way it
-    /// arrived, and sit for a rolled park duration.</summary>
+    /// arrived, and sit for a rolled park duration. Uses the same
+    /// cardinal-corrected anchor RoadPoint drives to, not the raw hex
+    /// center -- see CardinalAnchorOf's own doc comment for why using the
+    /// raw center here was making cars park at an angle across the road,
+    /// worst right at corners/turns (creator report, 2026-07: "cars are
+    /// parking diagonally across roads... too close to corner issue").</summary>
     private void ParkHere()
     {
-        var dir = _builder.WorldOf(_to) - _builder.WorldOf(_from);
+        var anchor = CardinalAnchorOf(_to);
+        var dir = anchor - CardinalAnchorOf(_from);
         dir.y = 0f;
         if (dir.sqrMagnitude < 0.01f) dir = Vector3.forward;
         dir = dir.normalized;
         var side = new Vector3(dir.z, 0f, -dir.x);
         var sign = (Hash(_to, GetInstanceID() + 13) % 2 == 0) ? 1f : -1f;
-        var spot = _builder.WorldOf(_to) + side * (sign * CurbOffset);
+        var spot = anchor + side * (sign * CurbOffset);
         spot.y = _builder.GroundHeightAt(spot) + 0.75f;
 
         transform.position = spot;
