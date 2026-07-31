@@ -347,10 +347,12 @@ namespace MadDr.MatchCore
         public SimEmitter EmitterAt(int index) => _emitters[index];
 
         /// <summary>Apply damage to a building (docs/23 §2's "Damaged →
-        /// Destroyed (rubble hexes reopen)" staging) -- a forward-looking
-        /// entry point for the combat phase that hasn't landed sim-side
-        /// yet (see <see cref="SimBuilding.ApplyDamage"/>'s own doc
-        /// comment). Reopens the hex the instant the building is
+        /// Destroyed (rubble hexes reopen)" staging). Originally a
+        /// forward-looking entry point with nothing calling it yet (see
+        /// <see cref="SimBuilding.ApplyDamage"/>'s own doc comment); as of
+        /// 2026-07 this is exactly what <see cref="TickBuildingCombat"/>
+        /// calls once per resolved attack -- the combat phase this was
+        /// always meant for. Reopens the hex the instant the building is
         /// Destroyed. Silent no-op for an unknown entity, matching every
         /// other bad-input contract in this class.</summary>
         public void ApplyBuildingDamage(uint entityId, int amount)
@@ -527,9 +529,14 @@ namespace MadDr.MatchCore
 
                 // docs/23 §4: "kill = 40 XP flat + 4xvictim level" -- credit
                 // the attacker the instant its blow finishes the target.
-                // Assist and building-destruction XP are NOT implemented
-                // (docs/12's Phase 4 RPG entry: no specified assist window,
-                // no AttackBuilding command to know who dealt the damage).
+                // Assist XP is NOT implemented (docs/12's Phase 4 RPG
+                // entry: no specified assist window). Building-destruction
+                // XP is a deliberate scope choice, not a missing-command
+                // gap anymore (2026-07: CommandKind.AttackBuilding/
+                // TickBuildingCombat exist) -- a building has no Level of
+                // its own to derive a victim-level bonus from, matching
+                // TickAnomalyCombat's own "nothing to credit" reasoning
+                // for anomalies.
                 if (!defender.IsAlive)
                 {
                     attacker.GrantXp(UnitLeveling.KillXp(victimLevelBeforeDeath));
@@ -590,6 +597,53 @@ namespace MadDr.MatchCore
                     attacker.ApplyAnomalyBuff(anomaly.CurrentBuff(Frame));
                     RespawnAnomaly(anomaly);
                 }
+            }
+        }
+
+        /// <summary>2026-07 (creator direction: "Building need decent
+        /// amount of HPs and should show damage and some low-poly fire
+        /// when being attacked"): resolve one tick's worth of attacks
+        /// against player-built <see cref="SimBuilding"/>s -- a
+        /// deliberately separate loop from <see cref="TickCombat"/>, same
+        /// reasoning <see cref="TickAnomalyCombat"/> already established:
+        /// a building isn't a <see cref="SimUnit"/>, has no facing/arc of
+        /// its own (posMod is always a flat 100 -- no orientation to
+        /// flank), and no Level/XP to credit -- destroying a building
+        /// deliberately grants NO XP (docs/23 §4's kill-XP table is
+        /// unit-kill-specific; a building has no Level of its own to
+        /// derive a victim-level bonus from, the same "nothing to credit"
+        /// reasoning TickAnomalyCombat already applies for anomalies).
+        /// Reuses the PRE-EXISTING <see cref="ApplyBuildingDamage"/> --
+        /// previously a forward-looking entry point nothing in the sim
+        /// ever called -- for the actual damage application plus the
+        /// Destroyed-transition/hex-reopen it already handles, rather
+        /// than duplicating that logic here.</summary>
+        private void TickBuildingCombat()
+        {
+            for (var i = 0; i < _unitsInOrder.Count; i++)
+            {
+                var attacker = _unitsInOrder[i];
+                if (attacker.Order != UnitOrderKind.AttackBuilding || !attacker.IsAlive) continue;
+                if (!attacker.AttackBuildingTargetId.HasValue || attacker.Combat == null) continue;
+
+                var building = FindBuilding(attacker.AttackBuildingTargetId.Value);
+                if (building == null || building.State == BuildingState.Destroyed) continue;   // already destroyed -- unit just waits
+                if (!attacker.CanAttackNow) continue;
+
+                var attackerHex = HexAt(attacker.X, attacker.Z);
+                var combat = attacker.Combat.Value;
+                if (attackerHex.DistanceTo(building.Hex) > combat.Reach) continue;
+
+                var inAura = IsWithinAnyEmitterAura(attackerHex);
+                var emitterMod = CombatMath.EmitterModPercent(combat.Affinity, CurrentLumenPhase, inAura);
+                var isCrit = CombatMath.RollCrit(_rng, combat.CunningPercent);
+                var luckOrCrit = isCrit ? 150 : CombatMath.RollLuckPercent(_rng);
+
+                var lumenMod = LumenDamagePercentFor(attacker);
+                var armor = BuildingDef.Get(building.Kind).Armor;
+                var damage = CombatMath.ResolveDamage(attacker.EffectivePower, posModPercent: 100, emitterMod, luckOrCrit, armor, lumenMod);
+                ApplyBuildingDamage(building.EntityId, damage);
+                attacker.ResetAttackCooldown(Frame);
             }
         }
 
@@ -859,6 +913,11 @@ namespace MadDr.MatchCore
             // but same entity-ID-order law.
             TickAnomalyCombat();
 
+            // 2026-07: building-attack resolution -- a separate loop from
+            // TickCombat (see TickBuildingCombat's own doc comment), but
+            // same entity-ID-order law.
+            TickBuildingCombat();
+
             // docs/23 Phase 6a (docs/04): harvest-channel resolution, after
             // combat so a corpse that dies THIS tick can't be validly
             // targeted until next tick (matches TickCombat's own "target
@@ -960,6 +1019,9 @@ namespace MadDr.MatchCore
                 case CommandKind.TrainUnit:
                     ApplyTrainUnit(cmd);
                     break;
+                case CommandKind.AttackBuilding:
+                    ApplyAttackBuilding(cmd);
+                    break;
                 case CommandKind.None:
                 default:
                     break;
@@ -1007,6 +1069,28 @@ namespace MadDr.MatchCore
             if (fromHex.DistanceTo(toHex) > attacker.Combat.Value.Reach) return;
 
             attacker.BeginAttackingAnomaly(anomaly.EntityId);
+        }
+
+        /// <summary>2026-07: TargetEntity begins attacking the <see
+        /// cref="SimBuilding"/> at ArgA. Same existence/alive/Reach
+        /// preconditions as <see cref="ApplyAttackAnomaly"/>, minus the
+        /// defender-Combat-stats check (a building is never a combatant
+        /// either) -- plus an explicit Destroyed check, since unlike an
+        /// anomaly (which respawns and is always "alive" as a target
+        /// until captured) a building can persist in the entity list
+        /// forever after dying, so "exists" alone isn't enough here.</summary>
+        private void ApplyAttackBuilding(Command cmd)
+        {
+            var attacker = FindUnit(cmd.TargetEntity);
+            var building = FindBuilding(unchecked((uint)cmd.ArgA));
+            if (attacker == null || building == null) return;
+            if (attacker.Combat == null || !attacker.IsAlive) return;
+            if (building.State == BuildingState.Destroyed) return;
+
+            var fromHex = HexAt(attacker.X, attacker.Z);
+            if (fromHex.DistanceTo(building.Hex) > attacker.Combat.Value.Reach) return;
+
+            attacker.BeginAttackingBuilding(building.EntityId);
         }
 
         /// <summary>docs/23 §13-A: order TargetEntity to walk to hex

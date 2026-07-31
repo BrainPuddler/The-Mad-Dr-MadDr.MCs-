@@ -22,6 +22,25 @@ public static class DamageFx
         go.AddComponent<SmokePlume>();
     }
 
+    /// <summary>2026-07 (creator direction: "Building need decent amount
+    /// of HPs and should show damage and some low-poly fire when being
+    /// attacked"): a flickering, low, EMISSIVE flame plume -- lower on
+    /// the building than <see cref="AttachSmoke"/>'s own placement (fire
+    /// licks near where it's actually burning; the smoke it produces
+    /// rises above it), faster/smaller-lived puffs than smoke's own lazy
+    /// drift so it reads as agitated flame rather than another slow gray
+    /// cloud. Parented under the building's own holder the same way
+    /// AttachSmoke already is, so it's automatically destroyed along
+    /// with the rest of the building's geometry once it collapses to
+    /// rubble -- no separate cleanup needed.</summary>
+    public static void AttachFire(Transform holder, float height)
+    {
+        var go = new GameObject("FirePlume");
+        go.transform.SetParent(holder, false);
+        go.transform.position = holder.position + Vector3.up * (height * 0.25f);
+        go.AddComponent<FirePlume>();
+    }
+
     /// <summary>One-shot muzzle smoke the instant a gun fires (creator
     /// direction, 2026-07: "guns have smoke when they fire") -- small and
     /// quick next to the building SmokePlume's lazy loop or DustBurstFx's
@@ -177,6 +196,53 @@ public class SmokePlume : MonoBehaviour
         if (renderer != null) renderer.sharedMaterial = mat;
 
         go.AddComponent<SmokePuff>().Init(mat);
+    }
+}
+
+/// <summary>Spawns a bright, flickering EMISSIVE puff every beat -- much
+/// faster cadence and shorter per-puff life than <see cref="SmokePlume"/>'s
+/// own lazy 0.7-1.0s drift, so it reads as agitated flame licking up
+/// rather than another slow gray cloud. Lives exactly as long as the
+/// GameObject it's attached to (i.e. until the building's holder is torn
+/// down at Destroyed).</summary>
+public class FirePlume : MonoBehaviour
+{
+    private float _timer;
+
+    private void Awake()
+    {
+        _timer = (GetInstanceID() & 7) * 0.03f;
+    }
+
+    private void Update()
+    {
+        _timer -= Time.deltaTime;
+        if (_timer > 0f) return;
+        _timer = 0.12f + (GetInstanceID() & 3) * 0.03f;
+        SpawnPuff();
+    }
+
+    private void SpawnPuff()
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        go.name = "FirePuff";
+        go.transform.SetParent(transform, false);
+        var id = go.GetInstanceID();
+        go.transform.position = transform.position + new Vector3(((id & 3) - 1.5f) * 0.15f, 0f, (((id >> 2) & 3) - 1.5f) * 0.15f);
+        go.transform.localScale = new Vector3(0.55f, 0.55f, 0.55f);
+        var collider = go.GetComponent<Collider>();
+        if (collider != null) Object.Destroy(collider);
+
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        var warm = ((id >> 4) & 3) == 0;
+        mat.color = warm ? new Color(0.95f, 0.55f, 0.12f, 0.9f) : new Color(0.98f, 0.78f, 0.2f, 0.9f);
+        LabMeshBuilder.MakeTransparent(mat);
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", (warm ? new Color(0.95f, 0.35f, 0.05f) : new Color(1f, 0.65f, 0.1f)) * 2.5f);
+        var renderer = go.GetComponent<Renderer>();
+        if (renderer != null) renderer.sharedMaterial = mat;
+
+        go.AddComponent<SmokePuff>().InitBurst(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.6f, 0.9f);
     }
 }
 

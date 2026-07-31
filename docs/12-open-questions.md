@@ -7220,3 +7220,81 @@ target instead.
 reads as a clear, well-timed magnetic pull rather than a jarring pop
 once the cursor crosses into range. Verified for real: `GrabCursor.cs`
 braces/parens balanced across the whole file.
+
+## 2026-07: AttackBuilding combat + fire VFX -- RTS SimBuildings could not actually be attacked until now
+
+Creator direction (resumed after the grab/clone feature above): "Building
+need decent amount of HPs and should show damage and some low-poly fire
+when being attacked." The HP half of this was already done (task #95,
+the worker-economy epic's Phase 1 HP bump). Investigating the rest
+surfaced a real gap, not a tuning question: `MatchState.
+ApplyBuildingDamage` existed and worked, but **nothing in the sim ever
+called it** -- a player-built `SimBuilding` (HQ/Factory/storage/etc) had
+no attack path at all, unlike units (`AttackUnit`) and anomalies
+(`AttackAnomaly`), both of which already had one. Closing that gap was
+the actual work here, mirrored deliberately close to `AttackAnomaly`'s
+own existing shape rather than inventing a new pattern:
+
+- **`CommandKind.AttackBuilding = 9`** (`Command.cs`): TargetEntity is
+  the attacker, ArgA is the building's entity ID cast to int -- the same
+  reinterpreted-slot contract every other two-entity command already
+  uses. `SimUnit` gained `UnitOrderKind.AttackBuilding`,
+  `AttackBuildingTargetId`, and `BeginAttackingBuilding(uint)`, cleared on
+  death exactly like `AttackAnomalyTargetId` already is.
+- **`MatchState.ApplyAttackBuilding`** validates existence/alive/Reach
+  (silent no-op otherwise, same "bad input never queues" contract as
+  every other command) and calls `BeginAttackingBuilding`.
+  **`TickBuildingCombat`** (a new tick-loop, deliberately separate from
+  `TickCombat`/`TickAnomalyCombat` for the same reason `AttackAnomaly`
+  got its own loop instead of reusing `TickCombat`: a building has no
+  facing/arc/Level/XP of its own) resolves cooldown-gated hits through
+  the existing `CombatMath.ResolveDamage`, reading the target building's
+  OWN per-kind `Armor` (`BuildingDef.Get(building.Kind).Armor`) --
+  verified with a dedicated test that an HQ (armor 8) takes less net
+  damage than a BloodStorage (armor 2) from an identical hit, not just
+  that damage happens at all. No XP is granted for a building kill,
+  matching `AttackAnomaly`'s own "nothing to credit" reasoning -- an
+  anomaly/building isn't a leveled combatant either. Like every other
+  attack command in this codebase, there is no owner/faction check
+  (`ApplyAttackUnit` doesn't have one either) -- friendly fire on
+  buildings is allowed by the same existing precedent, not a new
+  decision made here.
+- **Tests** (`AttackBuildingTests.cs`, new file, 5 cases, all passing):
+  damage-to-destruction, out-of-reach no-op, already-destroyed no-op, the
+  "target destroyed mid-channel, attacker just waits" idiom (same
+  contract `TickCombat` already documents for a dead unit defender), and
+  the armor-respected check above. Full `dotnet test
+  Tests~/MatchCore.Tests.csproj` suite re-run clean afterward (no
+  regressions from the new tick loop touching shared state).
+- **`SimBridge.QueueAttackBuildingCommand`** wraps the new command for
+  Unity, but nothing calls it yet -- no UI path exists to actually ISSUE
+  an attack-building order from the RTS demo (that's `WaypointCommander`
+  right-click-on-enemy-building scope, not attempted here since the
+  creator's own words were about HP/damage-visibility/fire, not a new
+  attack-order UI flow). Flagged as a real, separate gap rather than
+  silently built anyway.
+- **Fire VFX** (`DamageFx.cs`): a new `FirePlume` component, `AttachFire`
+  entry point, mirroring the existing `SmokePlume`/`SmokePuff` "no
+  ParticleSystem, primitive-kit + Update-driven" idiom exactly --
+  spawns small EMISSIVE (`_EMISSION` keyword + warm orange/yellow
+  `_EmissionColor`) puffs on a much faster, more agitated cadence
+  (~0.12-0.21s) and shorter life (~0.5-0.74s) than smoke's own lazy
+  0.7-1.0s drift, and lower on the building (25% height vs. smoke's 90%)
+  since flame licks near where it's burning while the smoke it produces
+  rises above it. `BaseDresser.cs` gained `_damagedHandled` (a
+  `HashSet<uint>`, same one-shot-per-EntityId pattern `_destroyedHandled`
+  already uses) so the Intact -> Damaged transition fires BOTH
+  `AttachSmoke` (pre-existing helper, never actually wired to RTS
+  SimBuildings before now -- only the LEGACY world-generated `Building`
+  system in `RuntimeCityBuilder.cs` called it) and the new `AttachFire`
+  exactly once, parented under the building's own root so both
+  self-destruct automatically when the building collapses to rubble (no
+  separate cleanup needed, same reasoning `DustBurst`/`RubblePileFx`
+  already rely on for their own parenting).
+
+**Honest limits:** no Unity Editor here to confirm the fire reads as
+"agitated flame" rather than just a faster smoke clone at real render
+time, or that the emissive glow is visible/legible under URP's default
+lighting. Verified for real: `dotnet test Tests~/MatchCore.Tests.csproj`
+passes in full (all suites, not just the new file); `DamageFx.cs`/
+`BaseDresser.cs` braces/parens balanced across each whole file.

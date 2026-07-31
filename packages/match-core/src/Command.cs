@@ -82,6 +82,19 @@ namespace MadDr.MatchCore
         /// kind. See <see cref="MatchState.ApplyTrainUnit"/>'s own doc
         /// comment for the full validation list.</summary>
         TrainUnit = 8,
+        /// <summary>2026-07 (creator direction: "Building need decent
+        /// amount of HPs and should show damage and some low-poly fire
+        /// when being attacked"): TargetEntity (the attacker) begins
+        /// attacking ArgA (a <see cref="SimBuilding"/>'s entity ID, cast
+        /// to int -- same reinterpreted-slot contract as <see
+        /// cref="AttackUnit"/>/<see cref="AttackAnomaly"/>). Same
+        /// existence/alive/Reach preconditions as those two, resolved by
+        /// <see cref="MatchState.TickBuildingCombat"/> instead -- a
+        /// building has no facing/arc/Level/XP of its own, the same
+        /// reasoning <see cref="AttackAnomaly"/> already established for
+        /// anomalies. Silently a no-op for a Destroyed building, matching
+        /// every other command kind's "bad input is a no-op" contract.</summary>
+        AttackBuilding = 9,
     }
 
     /// <summary>

@@ -83,6 +83,14 @@ public class BaseDresser : MonoBehaviour
     // this a Destroyed building would re-trigger every frame forever.
     private readonly HashSet<uint> _destroyedHandled = new HashSet<uint>();
 
+    // 2026-07 (creator direction: "Building need decent amount of HPs and
+    // should show damage and some low-poly fire when being attacked"):
+    // Intact -> Damaged fires the smoke+fire attach exactly once per
+    // EntityId, same "match-core's building list only grows" reasoning
+    // as _destroyedHandled above -- there is no repair mechanic yet, so
+    // IsDamaged never regresses back to false for a live building.
+    private readonly HashSet<uint> _damagedHandled = new HashSet<uint>();
+
     public void Init(SimBridge simBridge, RuntimeCityBuilder cityBuilder)
     {
         bridge = simBridge;
@@ -137,6 +145,11 @@ public class BaseDresser : MonoBehaviour
                 _completed[b.EntityId] = root;
             }
             TintShape(root, b.PlayerIndex, b.IsDamaged);
+            if (b.IsDamaged && _damagedHandled.Add(b.EntityId))
+            {
+                DamageFx.AttachSmoke(root.transform, fullScale.y);
+                DamageFx.AttachFire(root.transform, fullScale.y);
+            }
         }
     }
 

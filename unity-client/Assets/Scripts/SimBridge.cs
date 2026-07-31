@@ -222,6 +222,21 @@ public class SimBridge : MonoBehaviour
     public bool CanTrainUnit(int playerIndex, uint buildingEntityId, RosterUnitKind kind)
         => _match != null && _match.CanTrainUnit(playerIndex, buildingEntityId, kind);
 
+    /// <summary>2026-07 (creator direction: "Building need decent amount
+    /// of HPs and should show damage and some low-poly fire when being
+    /// attacked"): queue an AttackBuilding command for the NEXT tick
+    /// boundary -- same one-tick-latency contract as <see
+    /// cref="QueueTrainCommand"/>. Never validates itself (there is no
+    /// separate "CanAttackBuilding" preview -- see <see cref="MatchState.
+    /// ApplyAttackBuilding"/>'s own doc comment for its full
+    /// existence/alive/Reach/Destroyed precondition list, silently a
+    /// no-op if any fail, the same contract every other queued command
+    /// in this class already follows).</summary>
+    public void QueueAttackBuildingCommand(int playerIndex, uint attackerEntityId, uint buildingEntityId)
+    {
+        _pending.Add(new Command(playerIndex, CommandKind.AttackBuilding, targetEntity: attackerEntityId, argA: unchecked((int)buildingEntityId)));
+    }
+
     private void Update() => Pump(Time.deltaTime);
 
     /// <summary>The actual fixed-timestep accumulator logic, taking `dt`

@@ -40,6 +40,18 @@ namespace MadDr.MatchCore
         /// from <see cref="AttackUnit"/>'s own -- an anomaly isn't a
         /// <see cref="SimUnit"/> at all.</summary>
         AttackAnomaly = 4,
+
+        /// <summary>2026-07 (creator direction: "Building need decent
+        /// amount of HPs and should show damage and some low-poly fire
+        /// when being attacked"): channeling an attack against a <see
+        /// cref="SimBuilding"/> (<see cref="SimUnit.
+        /// AttackBuildingTargetId"/>). Set by <see cref="CommandKind.
+        /// AttackBuilding"/>; resolved by <see cref="MatchState.
+        /// TickBuildingCombat"/>, a separate loop from <see
+        /// cref="AttackUnit"/>'s own -- a building has no facing/arc/
+        /// Level/XP of its own, the same reasoning <see cref="AttackAnomaly"/>
+        /// already established for anomalies.</summary>
+        AttackBuilding = 5,
     }
 
     /// <summary>
@@ -329,6 +341,11 @@ namespace MadDr.MatchCore
         /// <see cref="UnitOrderKind.AttackAnomaly"/>.</summary>
         public uint? AttackAnomalyTargetId { get; private set; }
 
+        /// <summary>Which <see cref="SimBuilding"/> this unit is
+        /// attacking, while <see cref="Order"/> is <see
+        /// cref="UnitOrderKind.AttackBuilding"/>.</summary>
+        public uint? AttackBuildingTargetId { get; private set; }
+
         /// <summary>Seconds until this unit's next attack may resolve
         /// (docs/04: Ferocity is attacks/second). Counts down every tick
         /// regardless of order, so switching targets doesn't grant a free
@@ -595,6 +612,15 @@ namespace MadDr.MatchCore
             Order = UnitOrderKind.AttackAnomaly;
         }
 
+        /// <summary>2026-07: start (or retarget) attacking a <see
+        /// cref="SimBuilding"/>. Same "doesn't reset cooldown" contract as
+        /// <see cref="BeginAttacking"/>/<see cref="BeginAttackingAnomaly"/>.</summary>
+        internal void BeginAttackingBuilding(uint buildingId)
+        {
+            AttackBuildingTargetId = buildingId;
+            Order = UnitOrderKind.AttackBuilding;
+        }
+
         /// <summary>docs/23 Phase 4: start (or retarget) an attack channel.
         /// Does NOT reset the cooldown -- an attack already close to
         /// ready keeps its progress even when retargeting, matching
@@ -644,6 +670,7 @@ namespace MadDr.MatchCore
                 Order = UnitOrderKind.Idle;
                 AttackTargetId = null;
                 AttackAnomalyTargetId = null;
+                AttackBuildingTargetId = null;
                 SalvageTargetId = null;
                 _salvageChannelRemainingSeconds = 0.0;
                 _path = null;
@@ -720,6 +747,10 @@ namespace MadDr.MatchCore
             // it changes real gameplay behavior (FactionLumenTable
             // lookups), so two clients must agree on it.
             h.Add(RaceOverride.HasValue ? (int)RaceOverride.Value : -1);
+
+            // 2026-07: building-attack target, same "real mutable state
+            // two clients must agree on" reasoning as AttackAnomalyTargetId.
+            h.Add(AttackBuildingTargetId.HasValue ? (long)AttackBuildingTargetId.Value : -1L);
         }
     }
 }
