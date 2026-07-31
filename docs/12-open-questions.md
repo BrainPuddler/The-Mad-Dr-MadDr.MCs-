@@ -7298,3 +7298,92 @@ time, or that the emissive glow is visible/legible under URP's default
 lighting. Verified for real: `dotnet test Tests~/MatchCore.Tests.csproj`
 passes in full (all suites, not just the new file); `DamageFx.cs`/
 `BaseDresser.cs` braces/parens balanced across each whole file.
+
+### 2026-07 follow-up: dropping a new monster on a Factory boots the current roof occupant to a parking spot
+
+Creator direction, verbatim: "when a new monster is dropped on a factory,
+the current monster is booted to the next parking spot closest to the
+factory and the new monster replaces the old on on the factory roof.
+Ready to be cloned." A real gap in the grab/clone feature above: nothing
+tracked which monster was currently resting on a given Factory's roof, so
+a second drop onto the same Factory would have landed the new arrival
+directly on top of whatever was already there instead of making room for
+it.
+
+`MonsterAgent` gained `BootFromRoof(Vector3 parkWorldPos)`: ends the
+roof-display state with the exact same reset `EndHeld` already gives a
+dropped carry (identity rotation, legs re-engaged, struggle phase
+zeroed, glow disc off) rather than leaving the evicted specimen spinning
+in place, then hands it a walk-away destination via the existing
+`SetSettleTarget` -- the SAME direct-line creep every freshly-spawned
+clone already uses to park itself, so the booted monster reads as
+stepping aside, not vanishing.
+
+`GrabCursor` gained `_roofOccupant` (`Dictionary<uint, MonsterAgent>`,
+keyed by the Factory's own `EntityId` -- one roof slot per Factory).
+`Drop`, right before calling `BeginRoofDisplay` for the newly-dropped
+monster: if a DIFFERENT agent already holds that Factory's slot, it gets
+`FindOpenHexNear(factory.Hex, ...)` -- the SAME parking-spot search
+`CloneOnto`'s own fan-out already uses -- and is booted there via
+`BootFromRoof` before the new arrival takes the roof. Dropping the SAME
+agent back onto its own Factory is a no-op boot (nothing to evict).
+`_roofOccupant` is kept in sync at the only other place a roof
+occupant's real state can change -- `TryPickUp`, via a new
+`RemoveFromRoofOccupancy` helper -- so a monster grabbed back off one
+Factory's roof and dropped somewhere else doesn't leave a stale
+reference that would wrongly evict it a second time later (a roof-
+displaying monster never leaves on its own; `MonsterAgent.Update()`
+early-returns for as long as `_roofDisplay` is true, so idle target-
+acquisition/orders never fire on it -- grab and boot are genuinely the
+only two ways occupancy changes).
+
+**Flightcheck harness catch-up, not just this feature's own check:** the
+scratch compile harness in this session's scratchpad had drifted well
+behind the actual codebase (missing `BaseDresser.cs`/`GrabCursor.cs`/
+`Collector.cs`/`Worker.cs` from its compile list entirely, several
+`UnityEngine` stub members it had never needed before -- `Cursor`/
+`CursorMode`, `Space`, `Transform.Rotate`/`childCount`/`GetChild`,
+`Camera.ViewportPointToRay`, `Renderer.enabled`, `Keyboard.jKey` -- and,
+once those were added, a genuinely confusing false-negative: `SimBridge.
+SpawnFactoryForPlayer`/`CanTrainUnit`/`CommandKind.TrainUnit`/
+`AttackBuilding`/`BuildingDef.Occupants` all reported "does not exist"
+even though a from-scratch isolated reference check proved the rebuilt
+`MadDr.MatchCore.dll` genuinely has every one of them. Root cause: half a
+dozen unrelated leftover one-off verification projects from EARLIER in
+this session (`build-stub-compile/`, `car-lights-stub-compile/`,
+`tram-trace-verify/`, etc.) were sitting as SUBDIRECTORIES inside the
+`flightcheck/` folder itself, each with its own stale `MadDr.MatchCore.
+dll` copy in its own `bin/`; `EnableDefaultCompileItems=false` only
+disables the SDK's default **Compile** item glob, not its default
+**None**-item glob, so those nested `.dll` files were still being swept
+in as implicit `None` items and fed into `ResolveAssemblyReference`'s
+`{CandidateAssemblyFiles}` search path -- which is consulted BEFORE
+`{HintPathFromItem}` in the default search order, so a same-named stale
+DLL several directories over silently outranked the correct, explicitly-
+`HintPath`'d one every time, even with an absolute path. Fixed with
+`<EnableDefaultItems>false</EnableDefaultItems>` (turns off every
+default glob, not just Compile's), plus a new `MissingPeerStubs.cs` for
+the still-missing `FactionPickerHud`/`RegionPickerHud`/`LumenHud`/
+`BuildMenuHud`/`BuildGhostCursor`/`ResourceHud`/`BuildingNavHud`/
+`TramDresser`/`TramCar` types RuntimeCityBuilder.cs/WaypointCommander.cs
+reference but this harness had never compiled for real -- empty
+`MonoBehaviour`s with matching `Init(...)` signatures, explicitly NOT
+claiming to verify those other files' own actual behavior (docs/12's own
+established "no production code changed by harness catch-up, compile-
+check plumbing only" precedent). With all of that: **the whole Unity
+gameplay layer (36 real files, MadDr.MatchCore/CityGen/CreatureMesh/
+RosterClient referenced live) now compiles clean against the freshly
+rebuilt match-core DLL** -- the first time this session's harness has
+actually proven that for GrabCursor.cs/BaseDresser.cs/DamageFx.cs at all,
+not just the two files this specific feature touched.
+
+**Honest limits:** no Unity Editor here to confirm the booted monster's
+walk-away reads as a deliberate "making room" beat rather than an
+abrupt teleport-then-walk, or that two rapid drops onto the same Factory
+don't visibly overlap for a frame before the boot's `BootFromRoof` call
+takes effect (both happen in the same `Drop()` call, so this should be a
+non-issue, but only a real Player run proves it). Verified for real: the
+harness catch-up above, plus a targeted isolated-DLL check confirming
+`CommandKind.AttackBuilding`/`TrainUnit` and `MatchState.
+SpawnFactoryForPlayer` resolve correctly outside the harness's own
+(now-fixed) reference-resolution bug.

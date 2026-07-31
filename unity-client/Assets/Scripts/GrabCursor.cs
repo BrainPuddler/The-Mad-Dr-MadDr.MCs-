@@ -75,6 +75,18 @@ public class GrabCursor : MonoBehaviour
     private Mode _mode = Mode.Off;
     private MonsterAgent _carried;
 
+    // 2026-07 (creator direction: "when a new monster is dropped on a
+    // factory, the current monster is booted to the next parking spot
+    // closest to the factory and the new monster replaces the old one on
+    // the factory roof"): one roof slot per Factory, keyed by its own
+    // EntityId. Kept in sync at the two (and only two) places a roof
+    // occupant's real state can change -- TryPickUp (grabbed back off the
+    // roof) and Drop (bumped by a fresh drop) -- see
+    // RemoveFromRoofOccupancy's own header for why nothing else needs to
+    // touch this dictionary.
+    private readonly System.Collections.Generic.Dictionary<uint, MonsterAgent> _roofOccupant =
+        new System.Collections.Generic.Dictionary<uint, MonsterAgent>();
+
     private static Texture2D _clawTexture;
 
     public void Init(SimBridge simBridge, RuntimeCityBuilder cityBuilder, int playerIndex)
@@ -177,6 +189,7 @@ public class GrabCursor : MonoBehaviour
         var agent = hit.Value.collider.GetComponentInParent<MonsterAgent>();
         if (agent == null || agent.IsHeld) return;
 
+        RemoveFromRoofOccupancy(agent);
         agent.BeginHeld();
         _carried = agent;
         _mode = Mode.Carrying;
@@ -197,6 +210,21 @@ public class GrabCursor : MonoBehaviour
             {
                 CloneOnto(agent, factory.Hex);
 
+                // creator direction: "when a new monster is dropped on a
+                // factory, the current monster is booted to the next
+                // parking spot closest to the factory and the new monster
+                // replaces the old one on the factory roof" -- whoever
+                // already holds this Factory's roof slot (if anyone, and
+                // if it isn't this same agent being re-dropped on its own
+                // spot) steps aside to the nearest open hex before the new
+                // arrival takes the roof, the SAME FindOpenHexNear parking
+                // search CloneOnto's own fan-out already uses.
+                if (_roofOccupant.TryGetValue(factory.EntityId, out var evicted) && evicted != null && evicted != agent)
+                {
+                    var bootSpot = FindOpenHexNear(factory.Hex, new System.Collections.Generic.HashSet<HexCoord>());
+                    if (bootSpot != null) evicted.BootFromRoof(builder.WorldOf(bootSpot.Value));
+                }
+
                 // creator direction: "it should land on the roof and
                 // rotate slowly in the Y axis" -- the ORIGINAL creature
                 // (not consumed by cloning) settles on top of the Factory
@@ -205,10 +233,32 @@ public class GrabCursor : MonoBehaviour
                 var roofWorld = builder.WorldOf(factory.Hex);
                 roofWorld.y = builder.GroundHeightAt(roofWorld) + BaseDresser.RoofHeightFor(factory.Kind);
                 agent.BeginRoofDisplay(roofWorld);
+                _roofOccupant[factory.EntityId] = agent;
                 return;
             }
         }
         agent.EndHeld();
+    }
+
+    /// <summary>Roof occupancy only ever changes at TWO real events -- a
+    /// monster gets grabbed back off the roof (TryPickUp), or a fresh
+    /// drop bumps it (Drop, above) -- a roof-displaying monster never
+    /// leaves on its own (Update() early-returns for as long as
+    /// `_roofDisplay` is true, so idle target-acquisition/orders never
+    /// fire on it). Called from TryPickUp so a monster grabbed off one
+    /// Factory's roof and dropped somewhere else (a different Factory, or
+    /// nowhere at all) doesn't leave a stale reference behind that would
+    /// wrongly evict it a second time later.</summary>
+    private void RemoveFromRoofOccupancy(MonsterAgent agent)
+    {
+        uint? key = null;
+        foreach (var kv in _roofOccupant)
+        {
+            if (kv.Value != agent) continue;
+            key = kv.Key;
+            break;
+        }
+        if (key.HasValue) _roofOccupant.Remove(key.Value);
     }
 
     private SimBuilding FindOwnFactoryNear(HexCoord hex)

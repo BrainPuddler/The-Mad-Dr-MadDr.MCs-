@@ -721,6 +721,40 @@ public class MonsterAgent : MonoBehaviour
         _settleTarget = worldPoint;
     }
 
+    /// <summary>2026-07 (creator direction: "when a new monster is dropped
+    /// on a factory, the current monster is booted to the next parking
+    /// spot closest to the factory and the new monster replaces the old
+    /// one on the factory roof"): called by GrabCursor on whichever
+    /// monster is currently resting on a Factory's roof the instant a
+    /// DIFFERENT monster gets dropped onto that same Factory. Ends the
+    /// roof-display state with the exact same reset <see cref="EndHeld"/>
+    /// already gives a dropped carry (identity rotation, legs re-engaged,
+    /// struggle phase zeroed, glow disc off) rather than leaving it
+    /// spinning in place, then immediately hands it a walk-away
+    /// destination via <see cref="SetSettleTarget"/> -- the SAME
+    /// direct-line creep every freshly-spawned clone already uses to park
+    /// itself, so the booted specimen reads as stepping aside to make
+    /// room, not vanishing or teleporting. Safe to call on a monster that
+    /// isn't currently roof-displaying (defensive only -- GrabCursor's own
+    /// occupancy bookkeeping should prevent this, but a stale reference
+    /// here should degrade to "just walk over there," never a crash).</summary>
+    public void BootFromRoof(Vector3 parkWorldPos)
+    {
+        if (_roofDisplay)
+        {
+            _roofDisplay = false;
+            transform.rotation = Quaternion.identity;
+            _wigglePhase = 0f;
+            if (_body != null)
+            {
+                _body.ForceTuckLegs = false;
+                _body.StrugglePhase = 0f;
+            }
+            if (_roofGlow != null) _roofGlow.SetActive(false);
+        }
+        SetSettleTarget(parkWorldPos);
+    }
+
     /// <summary>The single place _order becomes Idle. Flight is only ever
     /// for transit/aerial-attack, never for standing around -- landing
     /// here (rather than scattered across every early-return) means a
