@@ -187,28 +187,42 @@ public class LumenCycleController : MonoBehaviour
     // slider's min only guards direct Inspector drags, not
     // ApplyProfile() copying in a lower value from a CityLightingProfile
     // asset.
-    [Tooltip("Ambient light at full night. 0.02 (the original default) was near-black, deliberately, so the lamps would pool against real darkness -- raise this if the UNLIT parts of the night are too dark to read at all; lower it if the lamp 'pools of light' look gets washed out. Hard-floored at MinNightAmbient regardless of what's set here. Distinct from nightFillLift below (a post-process grade, doesn't affect actual scene lighting).")]
+    // 2026-07 correction, same cinematic brief as nightAmbientTint above:
+    // "do not globally brighten the scene." nightAmbient is a FLAT,
+    // uniform light -- it raises the floor everywhere equally, unlit
+    // gaps and already-bright lamp pools alike, which is the definition
+    // of "globally brighten." Pulled back from 0.45 toward a more
+    // moderate value; nightFillLift below (a SURGICAL near-black-only
+    // lift, not global) now does more of the actual readability work,
+    // which is what the brief is asking for by name ("shadows and
+    // contrast," "avoid flattening").
+    [Tooltip("Ambient light at full night. 0.02 (the original default) was near-black, deliberately, so the lamps would pool against real darkness -- raise this if the UNLIT parts of the night are too dark to read at all; lower it if the lamp 'pools of light' look gets washed out. Hard-floored at MinNightAmbient regardless of what's set here. Distinct from nightFillLift below (a post-process grade, doesn't affect actual scene lighting) -- prefer raising THAT first, since it's the tool that doesn't also brighten the lamp pools themselves.")]
     [Range(0.12f, 1f)]
-    public float nightAmbient = 0.45f;
+    public float nightAmbient = 0.35f;
 
     // 2026-07 creator: "the middle of the night is unplayable, it needs to
     // be significantly lighter, which is what actually happens due to
-    // light pollution." Two separate fixes bundled here, NOT a fog
-    // change -- fog only hazes distant geometry toward its own (dark)
-    // color; the actual "how lit does everything look" lever has always
-    // been nightAmbient/nightFillLift below. First: nightAmbient's
-    // default raised 0.24 -> 0.45 (still comfortably under the 1.0
-    // ceiling). Second, and the more important miss: the OLD ambient
-    // formula (flooredNightAmbient, flooredNightAmbient, x2 on blue only)
-    // reads as cool blue MOONLIGHT, not the warm amber/orange skyglow
-    // real urban light pollution actually produces (scattered sodium-
-    // vapor/LED streetlight color bouncing off low cloud/haze) -- exactly
-    // the effect the creator named. nightAmbientTint now carries that
-    // color explicitly (multiplied onto nightAmbient's brightness) instead
-    // of a hardcoded blue-boost formula, so the color itself is a live,
-    // tunable knob too, not just the brightness.
-    [Tooltip("Color tint multiplied onto nightAmbient's brightness at full night. Default is a warm amber/orange -- real urban light-pollution skyglow (scattered sodium-vapor/LED streetlight color), not cool blue moonlight. Raise R/G, lower B for a warmer glow; the reverse for a colder one.")]
-    public Color nightAmbientTint = new Color(1.2f, 0.95f, 0.65f);
+    // light pollution." First pass: nightAmbient's default raised
+    // 0.24 -> 0.45, and this tint was made WARM amber (the OLD hardcoded
+    // formula was blue-only, a moonlight read, not light-pollution
+    // skyglow).
+    //
+    // 2026-07 CORRECTED, same session, with a fuller cinematic brief:
+    // "1950's sci-fi cinema... darkness remains dominant... use a cool
+    // night color palette... do not globally brighten the scene." A flat
+    // WARM ambient was the wrong fix -- it washes the whole picture one
+    // color (exactly the "flattening" the brief warns against) and reads
+    // as dusk, not night. Real day-for-night cinematography (the actual
+    // technique this brief is asking for) keeps ambient/fill COOL (blue
+    // moonlight/skyglow) specifically so the WARM practical lights --
+    // streetlamp/window/neon materials plus LampBoost/NeonBoost, both
+    // already warm-toned and untouched here -- read as contrast against
+    // it. That contrast, not raw brightness, is what makes a night scene
+    // both legible and still feel like night. Back to cool, now
+    // deliberately (not the same as the pre-this-session default: this
+    // is a moodier teal-blue skyglow, not the old moonlight-blue).
+    [Tooltip("Color tint multiplied onto nightAmbient's brightness at full night. Default is a cool blue-teal -- day-for-night skyglow/moonlight, deliberately COOL so the warm practical lights (streetlamps/windows/neon) read as contrast against it rather than the whole frame washing one color. Raise B, lower R/G for a colder/moodier night; the reverse trends toward a (less cinematic, flatter) warm wash.")]
+    public Color nightAmbientTint = new Color(0.55f, 0.72f, 1f);
 
     private const float MinNightAmbient = 0.12f;
 
@@ -227,9 +241,19 @@ public class LumenCycleController : MonoBehaviour
     // crushed black while a lit lamp or window stays comparatively brighter
     // than its surroundings, preserving the pool-of-light contrast instead
     // of flattening it.
-    [Tooltip("HDR-style shadow lift at night: raises the floor of near-black areas (unlit streets, building shadows) without touching bright areas, so the picture doesn't read as crushed black -- unlike nightAmbient, which brightens EVERYTHING uniformly and can wash out the lamp 'pools of light' look. 0 = no lift (old behavior).")]
+    // 2026-07: raised again as the PRIMARY readability tool (see
+    // nightAmbient's own comment just above) -- this is the "lift shadow
+    // detail without touching highlights/flattening the image" technique
+    // the cinematic brief specifically asked to review (Lift/Gamma/Gain),
+    // and it's the one post-process grade in this file that structurally
+    // can't wash out the lamp-pool contrast the way a flat ambient bump
+    // can: it only ever touches near-black pixels, so a bright lamp/
+    // window/monster stays exactly as bright relative to its surroundings
+    // as before, while the previously-crushed unlit gaps between them
+    // gain real detail.
+    [Tooltip("HDR-style shadow lift at night: raises the floor of near-black areas (unlit streets, building shadows) without touching bright areas, so the picture doesn't read as crushed black -- unlike nightAmbient, which brightens EVERYTHING uniformly and can wash out the lamp 'pools of light' look. THIS is the primary night-readability knob -- prefer raising it over nightAmbient. 0 = no lift (old behavior).")]
     [Range(0f, 1f)]
-    public float nightFillLift = 0.45f;
+    public float nightFillLift = 0.6f;
 
     private const float TimeLapseMultiplier = 20f;
     private static readonly double TickInterval = 1.0 / MatchState.TicksPerSecond;
@@ -290,6 +314,23 @@ public class LumenCycleController : MonoBehaviour
         // below -- day brightness, nightAmbient, the whole blend -- was
         // silently doing nothing without this. Set once; nothing else in
         // this project ever sets ambient mode.
+        //
+        // 2026-07 (cinematic-night brief, "review baked lighting settings
+        // / improve indirect bounce lighting"): confirmed via direct scene
+        // inspection (docs/28 row 24) that NOTHING in this project is
+        // baked -- no GameObject sets `isStatic`/`staticEditorFlags`, and
+        // `SampleScene.unity`'s `m_LightingSettings: {fileID: 0}` means no
+        // Lighting Settings asset is even assigned. There is no lightmap
+        // bake and no realtime GI solution running (URP's newer Adaptive
+        // Probe Volumes aren't set up either) -- this Flat `ambientLight`
+        // value IS the entire indirect/bounce-light stand-in for the
+        // whole city. That's exactly why nightAmbient/nightFillLift carry
+        // so much weight for readability: there's no actual light
+        // bouncing off a building's lit face onto its neighbor to fall
+        // back on. Setting up Adaptive Probe Volumes for real bounce
+        // light is a genuine option but a substantial Editor-side task
+        // (probe placement/baking) this environment can't do blind --
+        // flagged as a real future avenue, not attempted here.
         RenderSettings.ambientMode = AmbientMode.Flat;
 
         if (_grades == null) _grades = BuildGrades(CityRegion.Generic);
@@ -759,12 +800,23 @@ public class LumenCycleController : MonoBehaviour
             // top of an already-lit scene. Full night now goes close to
             // black ambient with only the faintest moonlit sun, so the
             // lamps/signage/windows are close to the only visible light.
+            //
+            // 2026-07 follow-up (cinematic-night brief: "shadows are deep
+            // but readable... avoid flattening the image"): Contrast
+            // raised 18 -> 24 and PostExposure darkened -0.35 -> -0.4 as a
+            // deliberate counterweight to nightFillLift's higher value
+            // above -- a shadow lift alone reduces apparent contrast (it
+            // literally raises the black point), so without this the
+            // extra readability would come at the cost of the "deep
+            // shadows" half of the brief. Net effect: darks get detail
+            // (fill lift) AND stay punchy (contrast/exposure), instead of
+            // the whole image reading as uniformly gray.
             new PhaseGrade
             {
                 SunColor = new Color(0.35f, 0.4f, 0.65f), SunIntensity = 0.05f, SunElevationDeg = -8f, SunYawDeg = 285f,
                 Ambient = new Color(0.02f, 0.02f, 0.05f), Fog = new Color(0.18f, 0.15f, 0.28f), FogDensity = fogDensityNight,
                 NeonBoost = 2.2f, LampBoost = 1f,
-                PostExposure = -0.35f, Saturation = 22f, ColorFilter = new Color(0.85f, 0.85f, 1.05f), Contrast = 18f,
+                PostExposure = -0.4f, Saturation = 22f, ColorFilter = new Color(0.85f, 0.85f, 1.05f), Contrast = 24f,
                 VignetteIntensity = 0.42f, BloomIntensity = 1.3f, FilmGrainIntensity = 0.3f,
             },
         };

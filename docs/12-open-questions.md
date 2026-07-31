@@ -7460,3 +7460,78 @@ braces/parens balanced across each whole file; the flightcheck harness
 (fixed for real last entry, not just papered over) compiles the whole
 Unity gameplay layer clean against the rebuilt DLL with both files'
 changes in place.
+
+## 2026-07 follow-up: cinematic-night lighting pass, explicitly scoped to "only files directly related to lighting" -- corrects the prior entry's own color choice
+
+Creator gave a full cinematic brief in the same session, one round after
+the fog/night entry above: "1950's sci-fi cinema... darkness remains
+dominant... shadows are deep but readable... ambient city light softly
+reveals surfaces... use a cool night color palette... do not globally
+brighten the scene... avoid flattening the image... explain each
+lighting parameter changed and why," plus explicit scope-fencing: "use
+only files directly related to lighting."
+
+**A real correction, stated plainly, not smoothed over:** the prior
+entry's `nightAmbientTint` (warm amber, "light pollution") was the wrong
+DIRECTION for this fuller brief. A flat warm ambient washes the whole
+frame one color -- exactly the "flattening" this brief warns against --
+and reads as dusk, not night. Real day-for-night cinematography keeps
+ambient/fill COOL specifically so the WARM practical lights
+(streetlamp/window/neon materials + `LampBoost`/`NeonBoost`, both
+already warm-toned and untouched all session) read as contrast against
+it; that contrast, not raw brightness, is what makes a scene both
+legible and still feel like night.
+
+Five changes, all in `LumenCycleController.cs`/`CityLightingProfile.cs`
+only (per the scope fence):
+
+- **`nightAmbientTint`** reversed cool -> `(0.55, 0.72, 1)` -- a moodier
+  teal-blue, not a plain revert to the pre-fog-entry default.
+- **`nightAmbient`** pulled back 0.45 -> 0.35 ("do not globally
+  brighten" -- it's a FLAT uniform light, brightens lamp pools and unlit
+  gaps by the same amount, the opposite of selective readability).
+- **`nightFillLift`** raised instead, 0.45 -> 0.6, now the PRIMARY
+  night-readability knob (both fields' tooltips and the profile's
+  "where to tune" quick-reference updated to say so) -- it's the one
+  post-process grade that structurally can't wash out the lamp-pool
+  contrast, since it only ever touches near-black pixels.
+- **Night's baked `Contrast`** 18 -> 24 and **`PostExposure`** -0.35 ->
+  -0.4, a deliberate counterweight to the higher fill lift (a shadow
+  lift alone reduces apparent contrast by raising the black point) --
+  "deep but readable" needs both halves, not just the readable one.
+- **A new code comment** at `RenderSettings.ambientMode = Flat` in
+  `Start()` documents, for whoever asks "review baked lighting /
+  improve indirect bounce" next: nothing in this project is baked
+  (already established by docs/28 row 24), so the Flat `ambientLight`
+  value IS the entire indirect-light stand-in; real bounce light via
+  URP Adaptive Probe Volumes is flagged as a genuine but substantial
+  Editor-only future option, not attempted here.
+
+**Explicitly declined, per the scope fence, not silently dropped:**
+monster-specific rim/fill lighting ("threatening silhouettes... subtle
+separation lighting... do not make monsters look artificially lit")
+would need a `GlowPointRegistry` registration call from `MonsterAgent.cs`
+or a material change in `MonsterBody.cs` -- neither is a file "directly
+related to lighting," so this round didn't touch them. The ambient/
+shadow-lift changes above DO generically help monster silhouettes read
+(monsters are lit by the same `RenderSettings.ambientLight` + shadow
+lift as everything else), but a dedicated accent/rim light is separate,
+not-yet-attempted scope, flagged rather than assumed out of the brief.
+Wet-surface reflections likewise need Reflection Probes or a URP
+Screen-Space-Reflections Renderer Feature -- Editor-only setup, not a
+code-only change, also flagged rather than attempted.
+
+Full row-by-row account (row 31) added to docs/28's own bug-history
+table, including an explicit note that this reverses row 30's color
+choice one round later rather than pretending row 30 was right all
+along.
+
+**Honest limits:** no Unity Editor here to confirm the cool ambient +
+raised fill lift + contrast counterweight actually reads as "1950s
+sci-fi noir" rather than just "differently dark," or that monsters
+genuinely read as legible silhouettes against it without the
+dedicated accent lighting this round explicitly declined to add --
+exactly the kind of visual-feel judgment docs/28 §5 says this
+environment can't verify. Verified for real: both files' braces/parens
+balanced; flightcheck harness compiles the whole Unity gameplay layer
+clean with these changes in place.

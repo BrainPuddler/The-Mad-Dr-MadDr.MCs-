@@ -25,8 +25,9 @@ using UnityEngine;
 /// the city is rebuilt, by design. If lights look wrong:
 ///   * too BRIGHT a glowing ball  -> LumenCycleController.emissiveScale
 ///   * too LARGE a glowing ball   -> LumenCycleController.bloomScale
-///   * washed-out scene overall   -> LumenCycleController.nightAmbient
-///   * night too crushed-black    -> LumenCycleController.nightFillLift
+///   * night too crushed-black    -> LumenCycleController.nightFillLift (prefer this FIRST -- surgical, doesn't wash out lamp-pool contrast)
+///   * still unreadable after that -> LumenCycleController.nightAmbient (flat/global, use sparingly)
+///   * night ambient reads wrong color -> LumenCycleController.nightAmbientTint (default cool blue-teal, day-for-night)
 ///   * lit ground area too strong -> DynamicLightBudget.pointIntensityMax/spotIntensityMax
 ///   * lit ground area too wide   -> DynamicLightBudget.range
 ///   * lights don't dim in fog    -> DynamicLightBudget.fogDimReferenceDensity
@@ -105,16 +106,16 @@ public class CityLightingProfile : ScriptableObject
     [Range(0f, 2f)]
     public float BloomThreshold = 0.6f;
 
-    [Tooltip("Ambient light brightness at full Night -- 0.02 (near-black), then 0.08, then 0.24, all reported too dark to see the unlit parts of the city; 0.45 is the current default. Hard-floored at 0.12 by LumenCycleController.MinNightAmbient regardless of what's set here.")]
+    [Tooltip("Ambient light brightness at full Night -- 0.02 (near-black), then 0.08, then 0.24, then 0.45, all reported too dark or too flat/globally-brightened; 0.35 is the current default. Prefer raising NightFillLift below first -- it's the tool that doesn't also wash out the lamp 'pools of light' look. Hard-floored at 0.12 by LumenCycleController.MinNightAmbient regardless of what's set here.")]
     [Range(0.12f, 1f)]
-    public float NightAmbientBrightness = 0.45f;
+    public float NightAmbientBrightness = 0.35f;
 
-    [Tooltip("Color tint multiplied onto NightAmbientBrightness -- default is a warm amber/orange, matching real urban light-pollution skyglow (scattered sodium-vapor/LED streetlight color) rather than cool blue moonlight. See LumenCycleController.nightAmbientTint.")]
-    public Color NightAmbientTint = new Color(1.2f, 0.95f, 0.65f);
+    [Tooltip("Color tint multiplied onto NightAmbientBrightness -- default is a cool blue-teal (day-for-night skyglow/moonlight), deliberately cool so the warm practical lights (streetlamps/windows/neon) read as contrast against it rather than washing the whole frame one color. See LumenCycleController.nightAmbientTint.")]
+    public Color NightAmbientTint = new Color(0.55f, 0.72f, 1f);
 
-    [Tooltip("HDR-style shadow lift at full Night -- raises the floor of near-black areas without touching bright ones (unlike NightAmbientBrightness, which is a flat uniform light). See LumenCycleController.nightFillLift.")]
+    [Tooltip("HDR-style shadow lift at full Night -- raises the floor of near-black areas without touching bright ones (unlike NightAmbientBrightness, which is a flat uniform light). THIS is the primary night-readability knob. See LumenCycleController.nightFillLift.")]
     [Range(0f, 1f)]
-    public float NightFillLift = 0.45f;
+    public float NightFillLift = 0.6f;
 
     [Header("Fog density per phase")]
     [Tooltip("Fog density at Dawn. See LumenCycleController.fogDensityDawn.")]
