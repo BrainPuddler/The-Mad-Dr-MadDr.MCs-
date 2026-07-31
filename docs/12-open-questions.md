@@ -7677,3 +7677,98 @@ often it can happen. Verified for real: both `RoadDresser.cs`/
 artifact, resolved by an actual compile); flightcheck harness compiles
 the whole Unity gameplay layer clean with both files' changes in
 place.
+
+## 2026-07 follow-up: fog defaults, and "realistic driving" -- three more concrete gaps closed
+
+Creator: set `fogDensityScale` default to 0.41 and `fogDensityNight` to
+0.034 (done, mirrored onto `CityLightingProfile`); then, still on
+driving/parking, explicitly: "Still parking diagonal, driving through
+parked cars," with a scoped goal -- "naturally realistic cars being
+driven by people with personalities, avoiding collisions, smooth turns
+and slowing down and speeding up to pass... Avoiding monsters do NOT
+count in these basic rules of the road model." Investigated why the
+prior round's fixes weren't enough before writing any new code.
+
+**"Driving through parked cars" -- a real, previously-undiscovered gap,
+not a re-occurrence of a fixed bug.** `RoadDresser`'s static decorative
+parked cars were pure visual `GameObject`s with a `KnockableProp` for
+physics knockback, but `TrafficCar`'s own `DistanceAhead` obstacle
+check (the thing that makes a car slow/stop/decide to pass) only ever
+iterated the moving fleet, tanks, and citizens -- it had ZERO awareness
+these decorative cars existed at all. A driving car had no reason to
+avoid one; it would drive straight through. New `RuntimeCityBuilder.
+_parkedObstacles` (a `List<Transform>`, populated once by `RoadDresser.
+SpawnCar` via a new `RegisterParkedObstacle`, since this dressing never
+moves after city-build) is now checked by `DistanceAhead` alongside
+everything else -- the SAME check that already gates following AND the
+"is the opposite lane clear" half of the passing maneuver, so this one
+fix covers both slowing for a parked car ahead and not swerving into
+one while overtaking.
+
+**A second, distinct "still parking diagonal" cause: `TrafficCar.
+ParkHere`'s curb offset never scaled with road width.** The prior round
+fixed the ANGLE (using the cardinal-corrected anchor instead of the raw
+hex center). This round found the DISTANCE was also wrong on arterial
+roads: `ParkHere` used a flat `CurbOffset = 2.5f` constant -- exactly
+`RoadDresser.RoadWidth / 3f` for a RESIDENTIAL street (RoadDresser's
+own static-car formula), but RoadDresser's formula scales with
+`hexRoadWidth / 3f` (residential 7.5m -> arterial 14m) while
+`ParkHere`'s never did. On a 14m arterial, parking 2.5m from centerline
+sits well inside the arterial's own lane markings -- a dynamically-
+"parked" car was really parking mid-lane, which reads as sitting wrong
+AND is a direct collision hazard for anyone driving that lane. New
+`RuntimeCityBuilder.IsArterial` (lazily-cached `HashSet<HexCoord>`,
+same pattern as the existing `IsWaterHex`/`IsRoundabout`) lets
+`ParkHere` read the SAME per-hex road width RoadDresser used to dress
+that exact hex, and apply the identical `/3f` formula -- both parking
+systems now agree on the physical curb line. `RoadDresser.RoadWidth`/
+`ArterialRoadWidth` promoted from `private` to `public const` so
+`TrafficCar` can reuse the exact numbers instead of duplicating them
+(avoiding future drift between the two).
+
+**"Smooth turns" -- the deeper structural gap flagged last round,
+now actually addressed (scoped, not the full rewrite).** A car's
+steering point used to jump straight from one hop's lane-offset target
+to the next's the instant it arrived, cutting a hard-angled chord
+across every junction/bend -- this was already identified as the root
+cause behind the "wrong way to avoid each other" fix, and is exactly
+what "smooth turns" is asking to fix at the source rather than just
+mitigate. New `TrafficCar._hopEnterDir`/`_hopStartPos`, set in
+`PickNext` right as a new hop begins (capturing the ENDING hop's own
+direction before `_from`/`_to` get reassigned): for the first
+`TurnBlendDistance` (6m) of a new hop, the steering point's direction
+eases from the old hop's heading into the new one via `Vector3.Slerp`,
+instead of snapping straight onto the far-off `_target`. A genuine
+straight continuation (dot near 1, no real direction change) skips the
+blend entirely -- no extra cost on ordinary hops, only at real
+junctions/bends. Deliberately scoped to `PickNext`'s normal hop
+transition only -- roundabout exits already have dedicated smooth
+circulation via `CirculateRoundabout` and weren't touched.
+
+**Scope respected:** nothing here touches monster-avoidance
+(`SwerveOffset`, flee/panic routing) at all -- every change is in the
+car-vs-car/car-vs-parked-obstacle "rules of the road" path the creator
+explicitly carved out, per their own "avoiding monsters do NOT count in
+these basic rules" instruction.
+
+**A real stub gap found and fixed along the way, not worked around:**
+`Vector3.Slerp` doesn't exist in the flightcheck harness's `UnityStub.cs`
+(a genuine UnityEngine API this codebase had just never needed before) --
+rather than downgrade the turn-blend to `Lerp` to dodge the compile
+error, added a real `Vector3.Slerp`/`Mathf.Acos` to the stub (matching
+real Unity's own direction-and-magnitude spherical interpolation
+contract) and, while there, fixed `Vector3.Lerp` itself, which had been
+a `default(Vector3)` no-op stub the whole session -- the same "silently
+vacuous check" risk this harness's own comments already warn about
+elsewhere, just never surfaced until this was the first thing to
+actually call it.
+
+**Honest limits:** no Unity Editor here to confirm the turn blend reads
+as a genuine smooth curve (vs. still visibly kinked, or over/under-
+shooting through a tight corner), that parked cars are now reliably
+avoided rather than just less-often-clipped, or that arterial parking
+now visibly sits at the true curb. Verified for real: `RuntimeCityBuilder.cs`/
+`RoadDresser.cs`/`TrafficCar.cs`/`LumenCycleController.cs`/
+`CityLightingProfile.cs` braces balanced; flightcheck harness (including
+the newly-fixed `Vector3.Lerp`/`Slerp`/`Mathf.Acos` stubs) compiles the
+whole Unity gameplay layer clean with every change in place.

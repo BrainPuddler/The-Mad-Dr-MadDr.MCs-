@@ -115,6 +115,24 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     private readonly List<Worker> _workers = new List<Worker>();
     private readonly List<TrafficCar> _trafficCars = new List<TrafficCar>();
 
+    // 2026-07 (creator report: "driving through parked cars" -- realistic
+    // driving/collision-avoidance pass): RoadDresser's STATIC decorative
+    // parked cars (set-dressing, `RoadDresser.SpawnCar`) were pure visual
+    // GameObjects with a `KnockableProp` for physics knockback but no way
+    // for a driving TrafficCar's own AI to even know they exist --
+    // `DistanceAhead` below only ever checked the moving fleet/tanks/
+    // citizens, never this static dressing, so a car had zero reason to
+    // slow or steer around one. Registered once at spawn (never moves, so
+    // this list never needs updating after city-build), read by
+    // DistanceAhead the same way every other obstacle kind already is.
+    private readonly List<Transform> _parkedObstacles = new List<Transform>();
+
+    /// <summary>Called once by RoadDresser.SpawnCar for every static
+    /// decorative parked car it places, so TrafficCar's own DistanceAhead
+    /// obstacle check can see it -- see this list's own field comment for
+    /// why that wasn't already true.</summary>
+    public void RegisterParkedObstacle(Transform t) { _parkedObstacles.Add(t); }
+
     // docs/25 Phase A: uniform-grid neighbour lookup behind ApplySeparation/
     // SteerFollowPath, rebuilt lazily on first use each frame (checked via
     // Time.frameCount rather than from Update(), so this has no dependency
@@ -544,6 +562,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
     private HashSet<HexCoord> _waterSet;
     private HashSet<HexCoord> _roundaboutSet;
+    private HashSet<HexCoord> _arterialSet;
 
     /// <summary>O(1) water-hex lookup, lazily built from CityModel.Water
     /// (never changes after generation).</summary>
@@ -564,18 +583,38 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return _roundaboutSet.Contains(hex);
     }
 
+    /// <summary>O(1) arterial-hex lookup (CityModel.ArterialRoads),
+    /// lazily built the same way IsWaterHex/IsRoundabout already are --
+    /// `CityModel.ArterialRoads` is only an `IReadOnlyList`, not something
+    /// safe to `.Contains()` directly every call. TrafficCar.ParkHere
+    /// reads this so a dynamically-parked car's curb offset scales with
+    /// the SAME road width RoadDresser's own dressing already uses
+    /// (creator report, 2026-07: cars parking mid-lane on the wide
+    /// arterial, because ParkHere's old curb offset was a flat constant
+    /// only ever tuned for the 7.5m residential width).</summary>
+    public bool IsArterial(HexCoord hex)
+    {
+        if (_arterialSet == null) _arterialSet = new HashSet<HexCoord>(_city.ArterialRoads);
+        return _arterialSet.Contains(hex);
+    }
+
     /// <summary>The circulating-lane radius traffic follows around a
     /// roundabout island -- kept in sync with RoadDresser's ring so cars
     /// drive on the asphalt, not over the curb or off the edge.</summary>
     public const float RoundaboutLaneRadius = 7.4f;
 
-    /// <summary>Distance to the nearest thing (traffic car, tank, or
-    /// citizen) sitting AHEAD of `pos` along `dir` and within
-    /// `laneHalfWidth` of that line, up to `maxRange`; `maxRange` if the
-    /// lane is clear. A car reads this to keep a following gap (creator
-    /// direction, 2026-07: "slow down if there is a human, car, tank
-    /// something in front of them"). O(fleet) per call -- fine at
-    /// tens of cars.</summary>
+    /// <summary>Distance to the nearest thing (traffic car, parked-car
+    /// dressing prop, tank, or citizen) sitting AHEAD of `pos` along
+    /// `dir` and within `laneHalfWidth` of that line, up to `maxRange`;
+    /// `maxRange` if the lane is clear. A car reads this to keep a
+    /// following gap (creator direction, 2026-07: "slow down if there is
+    /// a human, car, tank something in front of them") and, via the same
+    /// check on the opposite-lane offset, to decide whether it's safe to
+    /// pass. Static parked-car dressing added 2026-07 (creator report:
+    /// "driving through parked cars") -- see `_parkedObstacles`' own
+    /// field comment for why it wasn't already covered. O(fleet +
+    /// parked-dressing-count) per call -- fine at the scale this project
+    /// runs.</summary>
     public float DistanceAhead(Vector3 pos, Vector3 dir, float maxRange, float laneHalfWidth, TrafficCar self)
     {
         var best = maxRange;
@@ -590,6 +629,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             best = along;
         }
         foreach (var c in _trafficCars) if (c != null && c != self) Consider(c.transform.position);
+        foreach (var p in _parkedObstacles) if (p != null) Consider(p.position);
         foreach (var t in _tanks) if (t != null && t.Combat != null && t.Combat.Alive) Consider(t.transform.position);
         foreach (var z in _citizens) if (z != null) Consider(z.transform.position);
         return best;

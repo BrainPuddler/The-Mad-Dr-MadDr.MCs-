@@ -132,11 +132,11 @@ public class CityLightingProfile : ScriptableObject
 
     [Tooltip("Fog density at full Night. See LumenCycleController.fogDensityNight.")]
     [Range(0f, 0.1f)]
-    public float FogDensityNight = 0.022f;
+    public float FogDensityNight = 0.034f;
 
     [Tooltip("Multiplies the blended fog density curve at EVERY time of day, live. See LumenCycleController.fogDensityScale.")]
     [Range(0f, 3f)]
-    public float FogDensityScale = 1f;
+    public float FogDensityScale = 0.41f;
 
     [Header("Flicker (windows, occasional neon dropout)")]
     [Tooltip("Per-instance flicker cycle speed range (Hz-ish) -- each registered light picks its own speed in this range so hundreds of windows don't flicker in lockstep.")]

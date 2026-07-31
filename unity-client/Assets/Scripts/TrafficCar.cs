@@ -27,7 +27,6 @@ public class TrafficCar : MonoBehaviour
     private const float SwerveMax = 5.5f;      // lateral metres at full strength -- a real lane's worth
     private const float MonsterAwareRadius = 28f; // a monster this close: steer a normal route away from it
     private const float ArriveRadius = 1.5f;
-    private const float CurbOffset = 2.5f;     // same curb-lane distance RoadDresser parks its own cars at
 
     // lane discipline (creator direction, 2026-07: cars must drive in
     // straight lines, in their lane, with proper following gaps)
@@ -122,6 +121,20 @@ public class TrafficCar : MonoBehaviour
     private HexCoord _to;
     private Vector3 _target;
     private bool _fleeing;
+
+    // 2026-07 (creator direction: "realistic driving... smooth turns"):
+    // a car's steering point used to jump straight from one hop's
+    // lane-offset target to the next's the instant it arrived, cutting a
+    // hard-angled chord across every junction/bend instead of curving
+    // through it -- see the driving Update()'s own steerTarget blend for
+    // where these are read. _hopEnterDir is the direction of travel as
+    // this hop began (captured from the ENDING hop in PickNext, before
+    // _from/_to get reassigned); _hopStartPos is where the car actually
+    // was when this hop began, so "how far into this hop am I" can be
+    // measured without any extra hex math.
+    private Vector3 _hopEnterDir = Vector3.forward;
+    private Vector3 _hopStartPos;
+    private const float TurnBlendDistance = 6f; // metres over which the steering direction eases from the old hop into the new one
 
     private State _state;
     private int _hopsRemaining;
@@ -585,9 +598,22 @@ public class TrafficCar : MonoBehaviour
             }
             if (score > bestScore) { bestScore = score; best = n; }
         }
+
+        // 2026-07 (creator direction: "realistic driving... smooth
+        // turns"): capture the direction of the hop that's ENDING before
+        // overwriting _from/_to, so the steering blend below (see its own
+        // call site) can ease from it into the new hop's direction
+        // instead of snapping the steering point straight onto the new
+        // hop's target the instant this hex is reached -- see
+        // _hopEnterDir's own field comment.
+        var endingHopDir = CardinalAnchorOf(_to) - CardinalAnchorOf(_from);
+        endingHopDir.y = 0f;
+        if (endingHopDir.sqrMagnitude > 0.01f) _hopEnterDir = endingHopDir.normalized;
+
         _from = _to;
         _to = best;
         _target = RoadPoint(_to, _from);
+        _hopStartPos = transform.position;
     }
 
     /// <summary>The hex's CARDINAL road centerline -- the same corrected
@@ -691,7 +717,24 @@ public class TrafficCar : MonoBehaviour
     /// center -- see CardinalAnchorOf's own doc comment for why using the
     /// raw center here was making cars park at an angle across the road,
     /// worst right at corners/turns (creator report, 2026-07: "cars are
-    /// parking diagonally across roads... too close to corner issue").</summary>
+    /// parking diagonally across roads... too close to corner issue").
+    ///
+    /// 2026-07 follow-up (creator report: "still parking diagonal,
+    /// driving through parked cars"): the curb offset itself used to be a
+    /// flat constant (2.5m) tuned only for the 7.5m residential road --
+    /// exactly `RoadDresser.RoadWidth / 3f`, RoadDresser's OWN static
+    /// parked-car formula for a residential street, but that formula
+    /// scales with road width (`/3f` of whichever width the hex actually
+    /// rendered at) while this one never did. On the 14m arterial, a flat
+    /// 2.5m sits well inside the arterial's own lane markings -- a car
+    /// "parking" there is really parking mid-lane, exactly the kind of
+    /// obstruction another car would have no reason to expect at the
+    /// curb, contributing to both symptoms in the report. Now reads the
+    /// SAME per-hex road width RoadDresser used to dress this exact hex
+    /// (RuntimeCityBuilder.IsArterial) and applies the SAME /3f formula,
+    /// so a dynamically-parked car ends up at the same physical curb
+    /// line as RoadDresser's own decorative ones would on an identical
+    /// hex.</summary>
     private void ParkHere()
     {
         var anchor = CardinalAnchorOf(_to);
@@ -701,7 +744,9 @@ public class TrafficCar : MonoBehaviour
         dir = dir.normalized;
         var side = new Vector3(dir.z, 0f, -dir.x);
         var sign = (Hash(_to, GetInstanceID() + 13) % 2 == 0) ? 1f : -1f;
-        var spot = anchor + side * (sign * CurbOffset);
+        var hexRoadWidth = _builder.IsArterial(_to) ? RoadDresser.ArterialRoadWidth : RoadDresser.RoadWidth;
+        var curbOffset = hexRoadWidth / 3f;
+        var spot = anchor + side * (sign * curbOffset);
         spot.y = _builder.GroundHeightAt(spot) + 0.75f;
 
         transform.position = spot;
@@ -829,6 +874,33 @@ public class TrafficCar : MonoBehaviour
             PickNext();
         }
 
+        // 2026-07 (creator direction: "realistic driving... smooth
+        // turns"): ease the steering point's direction from the ending
+        // hop's heading into the new hop's over the first TurnBlendDistance
+        // metres of it, instead of aiming straight at the far-off _target
+        // the instant a new hop begins -- that hard snap is what read as
+        // cutting a diagonal chord across every junction/bend. A genuine
+        // straight continuation (dot near 1, no real direction change)
+        // skips this -- nothing to blend, and no reason to spend the
+        // extra lookahead-point math on every ordinary hop.
+        var steerTarget = _target;
+        var distIntoHop = (transform.position - _hopStartPos).magnitude;
+        if (distIntoHop < TurnBlendDistance)
+        {
+            var newHopDir = _target - _hopStartPos;
+            newHopDir.y = 0f;
+            if (newHopDir.sqrMagnitude > 0.01f)
+            {
+                newHopDir = newHopDir.normalized;
+                if (Vector3.Dot(_hopEnterDir, newHopDir) < 0.98f)
+                {
+                    var blendT = distIntoHop / TurnBlendDistance;
+                    var blendedDir = Vector3.Slerp(_hopEnterDir, newHopDir, blendT);
+                    steerTarget = transform.position + blendedDir * Mathf.Max(1f, TurnBlendDistance - distIntoHop);
+                }
+            }
+        }
+
         // realistic on-road avoidance (creator direction, 2026-07:
         // "avoiding monsters on the road by swerving around monsters in
         // a realistic way"): the reroute above only changes which hex
@@ -837,8 +909,7 @@ public class TrafficCar : MonoBehaviour
         // toward the CURRENT target. This nudges just this frame's
         // steering point sideways around a monster the car is about to
         // drive past. Purely cosmetic steering.
-        var steerTarget = _target;
-        var travelDir = _target - transform.position;
+        var travelDir = steerTarget - transform.position;
         travelDir.y = 0f;
         if (travelDir.sqrMagnitude > 0.01f)
         {
@@ -873,8 +944,9 @@ public class TrafficCar : MonoBehaviour
                 // stationary blocker -- re-triggering `_blockedTimer` from
                 // zero and re-attempting (and re-aborting) a pass every
                 // ~1s, forever, with no net progress. A parked car sits
-                // curbed only CurbOffset (2.5m) from the road centerline --
-                // just outside LaneOffset (2.0m) -- so it is exactly the
+                // curbed only ~2.5m (residential -- scales with road width,
+                // see ParkHere) from the road centerline -- just outside
+                // LaneOffset (2.0m) -- so it is exactly the
                 // kind of permanent, never-moving blocker this breaks on,
                 // and every car whose route crosses one gets stuck behind
                 // it the same way (the whole fleet reads as "stopped",

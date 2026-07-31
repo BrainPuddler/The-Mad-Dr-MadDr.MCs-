@@ -273,8 +273,14 @@ public static class RoadDresser
 
     private const float HalfSpanEW = 10f;        // E/W: offset cols are 20 m apart, edge at 10 m
     private static readonly float HalfSpanNS = (float)(HexCoord.HexMeters * 1.5 / 1.7320508 / 2.0); // N/S: rows ~17.32 m apart, edge at ~8.66 m
-    private const float RoadWidth = 7.5f;
-    private const float ArterialRoadWidth = 14f;   // a real 3-4 lane arterial (creator direction, 2026-07), not a residential street
+    // 2026-07: promoted from private to public so TrafficCar.ParkHere can
+    // scale its own curb offset off the SAME numbers this class already
+    // uses for its own furniture/parked-car curb line -- see ParkHere's
+    // own doc comment (creator report: cars parking mid-lane on the wide
+    // arterial because CurbOffset was a flat constant tuned only for the
+    // 7.5m residential width).
+    public const float RoadWidth = 7.5f;
+    public const float ArterialRoadWidth = 14f;   // a real 3-4 lane arterial (creator direction, 2026-07), not a residential street
 
     // minimum gap left between a piece of street furniture and a
     // building's wall face, beyond the building's own half-extent
@@ -745,5 +751,11 @@ public static class RoadDresser
             fin.transform.rotation = rot;
         }
         MakeKnockable(b, holder.gameObject, 2.6f);
+
+        // 2026-07 (creator report: "driving through parked cars"): this
+        // was pure visual dressing with no way for a driving TrafficCar's
+        // own obstacle check to know it exists -- see
+        // RuntimeCityBuilder._parkedObstacles' own field comment.
+        b.RegisterParkedObstacle(holder);
     }
 }

@@ -164,11 +164,13 @@ public class LumenCycleController : MonoBehaviour
 
     [Tooltip("Fog density at full Night.")]
     [Range(0f, 0.1f)]
-    public float fogDensityNight = 0.022f;
+    public float fogDensityNight = 0.034f;
 
+    // 2026-07 creator direction: explicit defaults for both fog knobs --
+    // "set default fog density scale: 0.41. And night fog: 0.034."
     [Tooltip("Multiplies the blended fog density curve at EVERY time of day, live -- the quick 'more/less fog overall' knob, same model as bloomScale. 1 = the per-phase values above, unchanged.")]
     [Range(0f, 3f)]
-    public float fogDensityScale = 1f;
+    public float fogDensityScale = 0.41f;
 
     // 2026-07 creator, after the shadow-lift addition below: "still need
     // an ambient light so we can see in the darkest part of the night."
