@@ -7972,3 +7972,63 @@ degeneracy, normal-map round-trip, map variation) passes clean after
 three genuine bug fixes; the main flightcheck harness still compiles
 the whole Unity gameplay layer against the real match-core DLL with
 these two new files included.
+
+## 2026-07 follow-up: the mastermind-tier brain in the Lab gets the same upgrade -- as the existing genome tier, not a new schema field
+
+Creator: "That brain needs to be in the lab as well." Site/ (`site/` +
+`packages/genome-core`, "the Lab" per CLAUDE.md/docs/23's own glossary)
+already renders a brain today -- it's not a new concept to add, it's an
+existing one to fix. `BRAIN_TIERS` (`site/lib/genome.js`) already has a
+`mastermind` tier whose head visual (`buildHead`, `site/creature-
+renderer.js`) is "exposed pulsing brain with two lobes" sealed under
+`buildGlassDome`'s riveted glass jar -- the same fiction as the Big
+Brain base building, just on a creature's own head instead of a
+building. Asked the creator to confirm scope before touching anything
+(three read options: a standalone dev-preview panel outside the genome
+system, a real selectable Brain-tier genome part touching the
+normative schema, or a plain non-interactive gallery entry); the answer
+was **the existing `mastermind` tier's OWN visual, upgraded** -- not a
+new schema field, not a new tier, not a dev-only preview panel.
+
+**What changed, `buildHead`'s mastermind branch only:** the old code
+built one big blob ellipsoid plus two brighter "highlight" ellipsoids
+layered on top under `TILE.slick` (a smooth-skin texture -- wrong
+material for brain tissue) with no fissure and no cerebellum. Replaced
+with real twin-hemisphere geometry (two separate lobe ellipsoids, not a
+mass-plus-highlight illusion), `TILE.veins` (the same "veined
+membrane -- the 1950s brain-alien hide" texture `alienDetails` already
+uses for the Alien faction's own exposed brain, correctly a brain
+texture this time), a central-fissure sulcus (the exact tube-along-the-
+midline technique `alienDetails` already uses, previously missing from
+the mastermind tier entirely), and a new small cerebellum lobe tucked
+low at the back -- bringing this closer to the Big Brain base's own
+`BrainMesh.cs` topology (two hemispheres + cerebellum) so the same
+creature-fiction "brain" reads consistently whether it's on a
+creature's head or in a base's jar, without literally porting the
+Unity mesh/texture-kit code into WebGL (this renderer builds geometry
+from its own primitive kit -- `ellipsoid`/`tube`/`torus` -- same as
+every other body part here, not from a hand-rolled triangle mesh, so a
+1:1 code port would be foreign to the file's own conventions).
+
+**Deliberately NOT a schema change:** `BRAIN_TIERS`, `BRAIN_AXES`, and
+`BRAIN_SIZE` (`site/lib/genome.js`, mirrored in `packages/genome-core`)
+are untouched -- this is a pure rendering swap keyed off the tier value
+that already exists, so `packages/genome-core/tests/golden.txt` (which
+pins RNG draws, including `rng.choice(BRAIN_TIERS)`) needed no update,
+and docs 06/07/08's normative-schema rule doesn't apply (nothing about
+the genome schema itself changed). `site/creature-renderer.js` lives
+directly in `site/`, not `site/lib/` (the vendored genome-core
+compile), so no vendored-copy sync step was needed either.
+
+**Honest limits:** no automated visual regression test exists for this
+renderer (none existed before this change either). Verified for real:
+`node --check` on the edited file; a standalone Playwright smoke test
+(Chromium, this environment's pre-installed browser) served `site/`
+over a real local HTTP server (module scripts need one, `file://`
+can't load them), constructed a `mastermind`-tier genome directly via
+`randomGenome(rng, {tier:'mastermind'})`, called the real exported
+`initRenderer`, and screenshotted the live WebGL canvas -- confirmed no
+console/page errors, and a before/after screenshot comparison against
+the pre-change code (same seed) shows the intended change: a flat
+single pink mass under `TILE.slick` before, a mottled twin-lobe veined
+brain after.
