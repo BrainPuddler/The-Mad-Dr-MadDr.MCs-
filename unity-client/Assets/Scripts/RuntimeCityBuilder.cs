@@ -66,6 +66,19 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
     private SimBridge _simBridge;
 
+    // 2026-07 (creator direction: harvester monsters "navigate back to
+    // the factory dumping their load there"): a monster's OWN per-unit
+    // SimBridge field (MonsterAgent's `_simBridge`) is only ever set via
+    // EnableSimDriven -- true for at most one demo unit today, null for
+    // the rest of the roster (docs/27's own still-limited opt-in scope).
+    // BeginMatch's own match/SimBridge, by contrast, always exists once a
+    // match has started (task #115: "unify BeginMatch to always create
+    // MatchState") -- exposed here so any Unity-side script holding a
+    // plain RuntimeCityBuilder reference (which every MonsterAgent
+    // already does, sim-driven or not) can query buildings without
+    // needing its own separate SimBridge wiring.
+    public SimBridge SimBridge { get { return _simBridge; } }
+
     [Tooltip("Traffic field: the target fraction of the fleet actively driving at any moment. The rest sit parked at the curb between bounded trips (drive N hops, park a while, repeat). 1 = every car always driving, never parks. Long-run average, not a per-frame guarantee -- see HudStatus for the live measured percentage.")]
     [Range(0.05f, 1f)]
     public float trafficMovingPercent = 0.55f;
@@ -1982,7 +1995,21 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     private void SpawnStartingBases()
     {
         if (_simBridge == null) return;
-        var blocked = BlockedFor(false);
+
+        // 2026-07 fix (creator report: "the factory and central base is
+        // in the middle of a road"): BlockedFor(false) only ever carries
+        // water/rubble/standing-building footprints (BattlefieldState.
+        // BlockedToGround -- roads are DELIBERATELY passable to units, so
+        // they were never in that set), and FindOpenHexWide had nothing
+        // else checking road overlap either -- a starting base could
+        // genuinely land square on a road hex, no bug in the ring-search
+        // itself, just a missing exclusion. Road (and bridge-deck) hexes
+        // are unbuildable ground the same way water already is for this
+        // specific placement, so they're unioned into `blocked` here
+        // rather than touching BlockedToGround's own broader "can a unit
+        // WALK here" contract, which must stay road-permissive.
+        var blocked = new HashSet<HexCoord>(BlockedFor(false));
+        blocked.UnionWith(RoadNetworkHexes());
         var claimed = new HashSet<HexCoord>();
         var center = _city.CenterHex;
 

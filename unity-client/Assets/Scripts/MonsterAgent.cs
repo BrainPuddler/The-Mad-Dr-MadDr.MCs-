@@ -127,10 +127,23 @@ public class MonsterAgent : MonoBehaviour
     // profile; it only matters for creatures actually built to harvest --
     // a lamprey maw + a storage tank. Carried load slows the carrier
     // (weight, floored per docs/22 so it never strands anyone), doubly so
-    // for flyers; it banks to the wallet when the unit idles near home.
+    // for flyers; it banks to the wallet when the unit idles near its
+    // unload point.
+    //
+    // 2026-07 creator direction: "monster units with backpacks should act
+    // as harvesters and collect resources then navigate back to the
+    // factory dumping their load there and go back to harvesting." This
+    // REVERSES an earlier deliberate choice (docs/22: "auto-first, but
+    // the HAULING is the player's decision -- no unprompted walk-off")
+    // -- a full harvester now autonomously walks itself to the player's
+    // own Factory once idle (see AcquireTarget's own new branch), instead
+    // of waiting for the player to walk it home. `_homeHex` (the spawn
+    // point, a Vat stand-in) is kept as the fallback unload target for
+    // the edge case where the player has no Complete Factory at all
+    // (early game, or one just got destroyed) -- see FindOwnFactory.
     private HarvestProfile _harvest;
     private float _carriedLoad;       // 0.._harvest.Capacity, pooled resource units
-    private HexCoord _homeHex;         // spawn = this harvester's unload point (a Vat stand-in)
+    private HexCoord _homeHex;         // spawn = this harvester's fallback unload point (a Vat stand-in) when no Factory exists
 
     public string DisplayName { get; private set; } = "";
     public bool Selected { get; private set; }
@@ -905,17 +918,21 @@ public class MonsterAgent : MonoBehaviour
         // tank chase); attack it manually to send it back into the fight.
         if (_order == OrderKind.Idle && !Perched) AcquireTarget();
 
-        // unload the harvest tank when idle near home (docs/22): the
-        // player hauls a laden harvester back toward its spawn -- its Vat
-        // stand-in -- and it banks automatically on arrival, no button,
-        // and its speed recovers. Auto-first, but the HAULING is the
-        // player's decision (no unprompted walk-off), so it never yanks a
-        // unit away from where it was parked.
+        // unload the harvest tank when idle near its unload point --
+        // 2026-07: now the player's own Factory (AcquireTarget's own new
+        // branch autonomously walks a FULL harvester there), falling back
+        // to `_homeHex` (the spawn point, a Vat stand-in) only if no
+        // Complete Factory exists at all -- see FindOwnFactory. Still
+        // fires for a PARTIALLY-loaded harvester that merely happens to
+        // wander near its unload point on its own (e.g. player-driven, or
+        // idle-eating nearby), same "auto-bank on arrival, no button"
+        // convenience the original docs/22 design already had.
         if (_order == OrderKind.Idle && _carriedLoad > 0.01f && _builder != null)
         {
-            var toHome = _builder.WorldOf(_homeHex) - transform.position;
-            toHome.y = 0f;
-            if (toHome.magnitude < 2.5f * (float)HexCoord.HexMeters)
+            var unloadHex = FindOwnFactory() ?? _homeHex;
+            var toUnload = _builder.WorldOf(unloadHex) - transform.position;
+            toUnload.y = 0f;
+            if (toUnload.magnitude < 2.5f * (float)HexCoord.HexMeters)
             {
                 _builder.BankHarvestLoad(_carriedLoad);
                 _carriedLoad = 0f;
@@ -1030,6 +1047,24 @@ public class MonsterAgent : MonoBehaviour
             if (attacker != null && attacker.Alive) { OrderAttackUnit(attacker); return; }
             var enemy = _builder.NearestEnemyOf(_fighter, AggroRangeMeters);
             if (enemy != null) { OrderAttackUnit(enemy); return; }
+        }
+
+        // 2026-07 creator direction: "act as harvesters and collect
+        // resources then navigate back to the factory dumping their load
+        // there and go back to harvesting." Combat still wins (the
+        // retaliate/engage block above already returned if there's a
+        // real fight); a FULL tank takes priority over the idle-eat
+        // fallback below, since eating more once at capacity gains
+        // nothing (CreditHarvestForEatenCitizen already clamps to
+        // Capacity) -- better to start the haul than keep eating for
+        // zero marginal gain. Once OrderMove below fires, `_order`
+        // leaves Idle, so this branch naturally stops re-firing every
+        // frame without any extra "already hauling" flag -- same
+        // self-gating every other order-issuing branch here relies on.
+        if (_harvest != null && _harvest.Capacity > 0.01f && _carriedLoad >= (float)_harvest.Capacity - 0.01f)
+        {
+            var factory = FindOwnFactory();
+            if (factory.HasValue) { OrderMove(factory.Value, false); return; }
         }
 
         // 2026-07 creator direction: "if not attacking and humans are
@@ -1566,6 +1601,36 @@ public class MonsterAgent : MonoBehaviour
             _carriedLoad = Mathf.Min((float)_harvest.Capacity,
                 _carriedLoad + 3f * (float)_harvest.GatherBlood);
         }
+    }
+
+    /// <summary>2026-07 (creator direction: harvesters "navigate back to
+    /// the factory dumping their load there"): the nearest Complete
+    /// Factory belonging to the local human player, or null if none
+    /// exists yet. Reads `_builder.SimBridge` (the match's OWN bridge,
+    /// always available once a match exists -- task #115 -- unlike this
+    /// unit's OWN `_simBridge` field, which stays null unless THIS
+    /// specific monster was individually opted into docs/27's sim-driven
+    /// pipeline) rather than assuming this monster is sim-driven itself.
+    /// Player index 0 is hardcoded, the same "local human player"
+    /// convention every other Unity-side script already uses (e.g.
+    /// GrabCursor.localPlayerIndex's own default) -- MonsterAgent has no
+    /// general per-unit ownership field of its own to read instead (see
+    /// this class's own `_simPlayerIndex`, which is likewise only ever
+    /// set for a sim-driven unit).</summary>
+    private HexCoord? FindOwnFactory()
+    {
+        var bridge = _builder != null ? _builder.SimBridge : null;
+        if (bridge == null || !bridge.HasMatch) return null;
+        HexCoord? best = null;
+        var bestDist = float.MaxValue;
+        for (var i = 0; i < bridge.BuildingCount; i++)
+        {
+            var b = bridge.BuildingAt(i);
+            if (b.PlayerIndex != 0 || b.Kind != BuildingKind.Factory || b.State != BuildingState.Complete) continue;
+            var dist = (_builder.WorldOf(b.Hex) - transform.position).sqrMagnitude;
+            if (dist < bestDist) { bestDist = dist; best = b.Hex; }
+        }
+        return best;
     }
 
     /// <summary>docs/26 follow-up: called by a Citizen this unit captured

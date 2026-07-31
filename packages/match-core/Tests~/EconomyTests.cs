@@ -165,9 +165,12 @@ public class EconomyTests
     private static HexCoord FindOpenHex(CityModel city, HexCoord center)
     {
         var blocked = BattlefieldState.FreshFrom(city).BlockedToGround();
+        // 2026-07: CanPlaceBuilding now rejects road hexes too -- see
+        // BuildingTests.FindOpenHex's own comment for the full story.
+        var roads = new HashSet<HexCoord>(city.Roads);
         for (var r = 0; r <= 30; r++)
             foreach (var h in center.Ring(r))
-                if (city.Contains(h) && !blocked.Contains(h)) return h;
+                if (city.Contains(h) && !blocked.Contains(h) && !roads.Contains(h)) return h;
         throw new InvalidOperationException("no open hex found");
     }
 }

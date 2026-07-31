@@ -69,6 +69,18 @@ namespace MadDr.MatchCore
         /// one).</summary>
         private readonly HashSet<HexCoord>? _blockedToGround;
 
+        /// <summary>2026-07 fix (creator report: "the factory and central
+        /// base is in the middle of a road"): road hexes are deliberately
+        /// NOT in <see cref="_blockedToGround"/> (units must be able to
+        /// walk/drive on them), but that also meant <see
+        /// cref="CanPlaceBuilding"/> had no reason to reject one as a
+        /// building site -- a real gap, not a placement-search bug. Built
+        /// once here (city.Roads is only an IReadOnlyList, not something
+        /// safe to `.Contains()` every frame from a UI) rather than
+        /// touching BlockedToGround's own broader "can a unit walk here"
+        /// contract, which must stay road-permissive.</summary>
+        private readonly HashSet<HexCoord>? _roadHexes;
+
         /// <summary>Units in entity-ID allocation order -- the ONLY order
         /// this class ever iterates them in for Tick/Hash (docs/23 §0:
         /// "never by object reference or hash-set order"). A parallel
@@ -127,6 +139,7 @@ namespace MadDr.MatchCore
             _rng = rng;
             _city = city;
             _blockedToGround = city != null ? BattlefieldState.FreshFrom(city).BlockedToGround() : null;
+            _roadHexes = city != null ? new HashSet<HexCoord>(city.Roads) : null;
 
             if (city != null)
                 foreach (var landmark in city.Landmarks)
@@ -1179,6 +1192,7 @@ namespace MadDr.MatchCore
             if (kind == BuildingKind.Hq || (int)kind < 0 || (int)kind >= BuildingDef.AllDefs.Count) return false;
             if (playerIndex < 0 || playerIndex >= _players.Length) return false;
             if (!_city.Contains(hex) || _blockedToGround.Contains(hex)) return false;
+            if (_roadHexes != null && _roadHexes.Contains(hex)) return false;
 
             var def = BuildingDef.Get(kind);
             var player = _players[playerIndex];

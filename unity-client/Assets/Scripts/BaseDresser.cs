@@ -225,6 +225,9 @@ public class BaseDresser : MonoBehaviour
             case BuildingKind.Hq:
                 BuildHqShape(root, fullScale);
                 break;
+            case BuildingKind.BigBrain:
+                BuildBigBrainShape(root, fullScale);
+                break;
             default:
                 BuildGenericBoxShape(root, fullScale);
                 break;
@@ -326,6 +329,84 @@ public class BaseDresser : MonoBehaviour
         builder.SpawnPrim(PrimitiveType.Cube,
             root.transform.position + Vector3.right * (fullScale.x * 0.18f) + Vector3.up * (bodyH + turretH * 0.5f),
             new Vector3(fullScale.x * 0.3f, turretH, fullScale.z * 0.3f), Placeholder(), root.transform);
+    }
+
+    /// <summary>BigBrain -- creator direction, 2026-07: "The big brain
+    /// base... should have a big brain in a glass jar on it." A squat
+    /// owner-tinted pedestal (same "shape=kind, color=owner" language
+    /// every other silhouette here follows) topped by a glass jar with a
+    /// glowing organic brain suspended inside it -- the jar assembly is
+    /// deliberately NOT owner-tinted (unlike the pedestal underneath):
+    /// it's parented under a plain holder transform with no `Renderer`
+    /// of its own, so `TintShape`'s single-level `GetChild` sweep (which
+    /// only ever touches `root`'s DIRECT children) never reaches these
+    /// grandchildren and overwrites their glass/brain materials with the
+    /// flat owner color the way it would if they sat directly under
+    /// `root`. Same live-in-code placeholder this whole roster's numbers
+    /// are (CLAUDE.md's standing v0.1 policy) -- "used for tech
+    /// upgrades" per the creator's own framing is a real, NOT-yet-
+    /// designed system (no tech-tree/upgrade mechanic exists anywhere in
+    /// match-core today, confirmed by a fresh grep before writing this)
+    /// -- this method is the visual half only, flagged rather than
+    /// silently invented.</summary>
+    private void BuildBigBrainShape(GameObject root, Vector3 fullScale)
+    {
+        var radius = Mathf.Min(fullScale.x, fullScale.z) * 0.26f;
+        var pedestalH = fullScale.y * 0.4f;
+        builder.SpawnPrim(PrimitiveType.Cylinder, root.transform.position + Vector3.up * (pedestalH * 0.5f),
+            new Vector3(radius * 2.3f, pedestalH * 0.5f, radius * 2.3f), Placeholder(), root.transform);
+
+        var jarHolder = new GameObject("BrainJar");
+        jarHolder.transform.SetParent(root.transform, false);
+
+        var jarBaseY = pedestalH;
+        var jarH = fullScale.y * 0.45f;
+        var jarCenter = root.transform.position + Vector3.up * (jarBaseY + jarH * 0.5f);
+
+        var glassMat = new Material(ShaderUtil.FindRenderableShader());
+        glassMat.color = new Color(0.75f, 0.88f, 0.85f, 0.28f);
+        LabMeshBuilder.MakeTransparent(glassMat);
+        builder.SpawnPrim(PrimitiveType.Cylinder, jarCenter,
+            new Vector3(radius * 1.9f, jarH * 0.5f, radius * 1.9f), glassMat, jarHolder.transform);
+
+        var fluidMat = new Material(ShaderUtil.FindRenderableShader());
+        var fluidColor = new Color(0.35f, 0.85f, 0.6f);
+        fluidMat.color = new Color(fluidColor.r, fluidColor.g, fluidColor.b, 0.55f);
+        LabMeshBuilder.MakeTransparent(fluidMat);
+        fluidMat.EnableKeyword("_EMISSION");
+        fluidMat.SetColor("_EmissionColor", fluidColor * 0.6f);
+        builder.SpawnPrim(PrimitiveType.Cylinder, jarCenter,
+            new Vector3(radius * 1.7f, jarH * 0.46f, radius * 1.7f), fluidMat, jarHolder.transform);
+
+        // the brain itself: a cluster of overlapping lobes rather than one
+        // sphere, so it silhouettes as an organic mass, not a ball -- same
+        // "primitive-kit clustering" idiom RubblePileFx/etc already use
+        // elsewhere in this codebase for irregular organic/debris shapes.
+        var brainMat = new Material(ShaderUtil.FindRenderableShader());
+        var brainColor = new Color(0.85f, 0.62f, 0.68f);
+        brainMat.color = brainColor;
+        brainMat.EnableKeyword("_EMISSION");
+        brainMat.SetColor("_EmissionColor", brainColor * 0.5f);
+        var brainRadius = radius * 0.62f;
+        var lobeOffsets = new[]
+        {
+            new Vector3(0f, 0f, 0f),
+            new Vector3(brainRadius * 0.55f, brainRadius * 0.15f, brainRadius * 0.2f),
+            new Vector3(-brainRadius * 0.5f, brainRadius * 0.1f, brainRadius * 0.25f),
+            new Vector3(0f, brainRadius * 0.2f, -brainRadius * 0.5f),
+            new Vector3(0f, -brainRadius * 0.3f, brainRadius * 0.1f),
+        };
+        foreach (var offset in lobeOffsets)
+            builder.SpawnPrim(PrimitiveType.Sphere, jarCenter + offset,
+                Vector3.one * (brainRadius * 0.85f), brainMat, jarHolder.transform);
+
+        // chrome lid, sealing the jar -- deliberately a fixed metal color
+        // (not owner-tinted, not glass) rather than a third arbitrary
+        // material choice, since a real jar lid IS just plain metal.
+        var lidMat = new Material(ShaderUtil.FindRenderableShader());
+        lidMat.color = new Color(0.72f, 0.74f, 0.78f);
+        builder.SpawnPrim(PrimitiveType.Cylinder, jarCenter + Vector3.up * (jarH * 0.52f),
+            new Vector3(radius * 2f, jarH * 0.06f, radius * 2f), lidMat, jarHolder.transform);
     }
 
     /// <summary>Defensive fallback only -- every real `BuildingKind`

@@ -19,10 +19,13 @@ public class TrainUnitTests
     private static HexCoord FindOpenHex(CityModel city, HexCoord center)
     {
         var blocked = BattlefieldState.FreshFrom(city).BlockedToGround();
-        foreach (var h in center.Ring(0)) if (city.Contains(h) && !blocked.Contains(h)) return h;
+        // 2026-07: CanPlaceBuilding now rejects road hexes too -- see
+        // BuildingTests.FindOpenHex's own comment for the full story.
+        var roads = new HashSet<HexCoord>(city.Roads);
+        foreach (var h in center.Ring(0)) if (city.Contains(h) && !blocked.Contains(h) && !roads.Contains(h)) return h;
         for (var r = 1; r <= 30; r++)
             foreach (var h in center.Ring(r))
-                if (city.Contains(h) && !blocked.Contains(h)) return h;
+                if (city.Contains(h) && !blocked.Contains(h) && !roads.Contains(h)) return h;
         throw new InvalidOperationException("no open hex found");
     }
 

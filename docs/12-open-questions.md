@@ -7772,3 +7772,114 @@ now visibly sits at the true curb. Verified for real: `RuntimeCityBuilder.cs`/
 `CityLightingProfile.cs` braces balanced; flightcheck harness (including
 the newly-fixed `Vector3.Lerp`/`Slerp`/`Mathf.Acos` stubs) compiles the
 whole Unity gameplay layer clean with every change in place.
+
+## 2026-07: starting bases off roads, a Big Brain glass-jar silhouette, and autonomous harvester hauling
+
+Creator, four items in one message: "The factory and central base is in
+the middle of a road" (bug); "The big brain base... should have a big
+brain in a glass jar on it. And used for tech upgrades"; "Any monster
+units with backpacks should act as harvesters and collect resources then
+navigate back to the factory dumping their load there and go back to
+harvesting"; and, flagged as background/future rather than an immediate
+ask, "human workers controlled big brain that build structures... to add
+tech wings on the base for upgrades of units." Researched all four
+before writing any code (a dedicated Explore pass across match-core and
+Unity) to separate "quick bug fix" from "large undesigned feature."
+
+**1. Starting-base-on-road: a genuine, previously-unflagged gap, not a
+placement-search bug.** Roads are deliberately NOT in `BattlefieldState.
+BlockedToGround()` (units must be able to walk/drive on them), but
+nothing else ever excluded them from BUILDING placement either --
+`RuntimeCityBuilder.FindOpenHexWide`/`SpawnStartingBases` and match-core's
+own `MatchState.CanPlaceBuilding` both only ever checked `_city.Contains`
++ the same road-permissive blocked set. `BuildingTests.cs`'s own class
+doc comment even already named "roads/water/occupied rejected" as the
+Phase 2 acceptance bar -- this was a real gap between the documented
+contract and what the code actually enforced, not new behavior invented
+here. Fixed on both sides: `SpawnStartingBases` now unions
+`RoadNetworkHexes()` into its own local `blocked` copy (doesn't touch
+`BlockedToGround`'s own broader, deliberately road-permissive "can a
+unit walk here" contract); match-core's `CanPlaceBuilding` gained a new
+lazily-built `_roadHexes` `HashSet<HexCoord>` (mirroring `_blockedToGround`'s
+own construction) so PLAYER-issued builds later are held to the same
+rule, not just the two starting buildings. Six match-core test files'
+own `FindOpenHex` helpers (`BuildingTests`/`AttackBuildingTests`/
+`EconomyTests`/`TrainUnitTests`/`MixedFactionTests`) needed the identical
+road-exclusion added -- 19 tests were silently relying on the old
+gap (picking a hex that happened to be a road, which used to
+"work" only because nothing checked) and failed once the real bug was
+fixed; all 268 pass again after updating the shared helper pattern.
+
+**2. Big Brain: visual dressing only, "tech upgrades" flagged as a real,
+NOT-yet-designed system.** The building already exists fully at the
+data layer (`BuildingKind.BigBrain`, 20 Brains cost -- the creator's own
+exact number, called out in `BuildingDef.cs` as deliberately non-
+placeholder -- Large tier, raises Supply cap), but `BaseDresser.
+BuildCompleteShape` had no case for it, falling through to the generic
+box every other unhandled kind gets. New `BuildBigBrainShape`: an owner-
+tinted pedestal (keeping the roster's own "shape=kind, color=owner"
+language) topped by a glass jar -- transparent shell, a faintly glowing
+green fluid, a cluster of overlapping emissive-pink sphere "lobes"
+reading as an organic brain mass rather than one ball, a plain chrome
+lid. The jar assembly is parented under its own holder transform with no
+`Renderer` of its own, specifically so `TintShape`'s single-level
+`GetChild` sweep (owner-tint overwrite) never reaches these grandchildren
+and flattens the glass/brain materials to the plain owner color the way
+it would if they sat directly under `root`. Confirmed via a fresh grep
+before writing anything: no tech-tree/upgrade mechanic exists ANYWHERE
+in match-core today -- "used for tech upgrades" is real, unimplemented
+design intent, not a request this pass silently built or silently
+dropped; it's the visual half only.
+
+**3. Harvester backpacks now autonomously haul to the Factory --
+deliberately REVERSES an earlier design decision, not an extension of
+it.** docs/22's original design was explicit: "auto-first, but the
+HAULING is the player's decision -- no unprompted walk-off" (a laden
+harvester only banked its load if the PLAYER happened to walk it near
+its home spawn point). The creator's new direction -- "collect
+resources then navigate back to the factory dumping their load there
+and go back to harvesting" -- is a real behavior change, not a
+misunderstanding of the old design, so it's implemented as one: once a
+harvester's tank reaches capacity (eating more once full gains nothing,
+since `CreditHarvestForEatenCitizen` already clamps there), `AcquireTarget`
+now autonomously issues a real `OrderMove` to the player's own nearest
+Complete Factory, ahead of the idle-eat fallback but still behind real
+combat retaliation/engagement (self-defense still wins). New
+`MonsterAgent.FindOwnFactory` reads a NEW `RuntimeCityBuilder.SimBridge`
+accessor -- this monster's OWN per-unit `_simBridge` field is only ever
+set for a docs/27 sim-driven unit (at most one today), but the MATCH's
+own bridge always exists once a match has started (task #115), so this
+works for the whole roster, not just that one demo unit. Player index 0
+is hardcoded as "the local human player," the same convention every
+other Unity-side script (`GrabCursor.localPlayerIndex`, etc.) already
+uses, since MonsterAgent has no general per-unit ownership field to read
+instead. The existing auto-bank-on-idle-near-unload-point check now
+targets the Factory too (falling back to the old `_homeHex`/spawn-point
+"Vat stand-in" only if no Complete Factory exists yet), so both halves
+of the loop -- the autonomous walk AND the eventual bank -- agree on the
+same destination.
+
+**4. SCV-style Worker construction of "tech wings" -- explicitly NOT
+attempted this round, flagged rather than guessed at.** Confirmed:
+`Worker.cs` performs zero construction of its own (its own doc comment
+says so explicitly -- v0.1 scope is "the unit itself, not yet the job");
+the existing worker-GATE (`BuildGhostCursor.RequiresWorker`) only covers
+`Factory`, is Unity-side/cosmetic only (match-core's own
+`ApplyBuildStructure` has no concept of a Worker at all); and there is no
+concept anywhere of a building "add-on"/"wing" that upgrades an EXISTING
+building -- `CommandKind.BuildStructure` can only ever target a fresh,
+unoccupied hex, never an existing building's entity ID. Genuinely
+inventing this system's mechanics (what tech wings exist, what they
+unlock, a new command shape for "attach to an existing building" instead
+of "place at a hex") without real design input risks building the wrong
+thing and needing a redo -- surfaced as a real, scoped question rather
+than silently built or silently dropped.
+
+**Honest limits:** no Unity Editor here to confirm starting bases now
+visibly clear every road, that the glass jar reads as intended at real
+render scale, or that the autonomous haul-to-Factory walk looks natural
+rather than abrupt. Verified for real: match-core's full 268-test suite
+passes (the genuine behavior change from item 1, not just a compile
+check); `RuntimeCityBuilder.cs`/`BaseDresser.cs`/`MonsterAgent.cs`/
+`MatchState.cs` braces balanced; flightcheck harness compiles the whole
+Unity gameplay layer clean against the freshly rebuilt match-core DLL.

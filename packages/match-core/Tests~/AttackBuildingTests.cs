@@ -21,10 +21,15 @@ public class AttackBuildingTests
     private static HexCoord FindOpenHex(CityModel city, HexCoord center)
     {
         var blocked = BattlefieldState.FreshFrom(city).BlockedToGround();
-        foreach (var h in center.Ring(0)) if (city.Contains(h) && !blocked.Contains(h)) return h;
+        // 2026-07: CanPlaceBuilding now rejects road hexes too (creator
+        // report: "the factory and central base is in the middle of a
+        // road") -- excluded here so this picker never hands a test a
+        // hex that would silently fail to build on.
+        var roads = new HashSet<HexCoord>(city.Roads);
+        foreach (var h in center.Ring(0)) if (city.Contains(h) && !blocked.Contains(h) && !roads.Contains(h)) return h;
         for (var r = 1; r <= 30; r++)
             foreach (var h in center.Ring(r))
-                if (city.Contains(h) && !blocked.Contains(h)) return h;
+                if (city.Contains(h) && !blocked.Contains(h) && !roads.Contains(h)) return h;
         throw new InvalidOperationException("no open hex found");
     }
 

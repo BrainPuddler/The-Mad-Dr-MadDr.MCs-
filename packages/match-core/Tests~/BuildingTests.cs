@@ -21,10 +21,17 @@ public class BuildingTests
     private static HexCoord FindOpenHex(CityModel city, HexCoord center)
     {
         var blocked = BattlefieldState.FreshFrom(city).BlockedToGround();
-        foreach (var h in center.Ring(0)) if (city.Contains(h) && !blocked.Contains(h)) return h;
+        // 2026-07: roads are now correctly rejected by CanPlaceBuilding
+        // too (creator report: "the factory and central base is in the
+        // middle of a road") -- this helper's own class doc comment
+        // already named "roads/water/occupied rejected" as the Phase 2
+        // acceptance bar, so excluding them here just makes this picker
+        // match what was always the documented contract.
+        var roads = new HashSet<HexCoord>(city.Roads);
+        foreach (var h in center.Ring(0)) if (city.Contains(h) && !blocked.Contains(h) && !roads.Contains(h)) return h;
         for (var r = 1; r <= 30; r++)
             foreach (var h in center.Ring(r))
-                if (city.Contains(h) && !blocked.Contains(h)) return h;
+                if (city.Contains(h) && !blocked.Contains(h) && !roads.Contains(h)) return h;
         throw new InvalidOperationException("no open hex found");
     }
 
