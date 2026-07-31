@@ -196,9 +196,19 @@ public class LumenCycleController : MonoBehaviour
     // lift, not global) now does more of the actual readability work,
     // which is what the brief is asking for by name ("shadows and
     // contrast," "avoid flattening").
-    [Tooltip("Ambient light at full night. 0.02 (the original default) was near-black, deliberately, so the lamps would pool against real darkness -- raise this if the UNLIT parts of the night are too dark to read at all; lower it if the lamp 'pools of light' look gets washed out. Hard-floored at MinNightAmbient regardless of what's set here. Distinct from nightFillLift below (a post-process grade, doesn't affect actual scene lighting) -- prefer raising THAT first, since it's the tool that doesn't also brighten the lamp pools themselves.")]
+    // 2026-07 CORRECTION, first real screenshot of this system: the row-31
+    // combination (this at 0.35, Contrast 24, PostExposure -0.4) rendered
+    // as near-TOTAL BLACK -- roads/terrain/buildings invisible, only the
+    // HQ/Factory tint squares and unit blips legible at all. That's not
+    // "moody," it's broken. Creator confirmed goal, plainly: "visibility/
+    // playability." Raised back up, now past every prior round (0.24 ->
+    // 0.45 -> 0.35 -> 0.55) -- readability is no longer being traded
+    // against mood; the Contrast/PostExposure counterweight that likely
+    // did the actual crushing is rolled back separately, in BuildGrades'
+    // Night keyframe below.
+    [Tooltip("Ambient light at full night. 0.02 (the original default) was near-black, deliberately, so the lamps would pool against real darkness -- raise this if the UNLIT parts of the night are too dark to read at all; lower it if the lamp 'pools of light' look gets washed out. Hard-floored at MinNightAmbient regardless of what's set here. Distinct from nightFillLift below (a post-process grade, doesn't affect actual scene lighting).")]
     [Range(0.12f, 1f)]
-    public float nightAmbient = 0.35f;
+    public float nightAmbient = 0.55f;
 
     // 2026-07 creator: "the middle of the night is unplayable, it needs to
     // be significantly lighter, which is what actually happens due to
@@ -221,8 +231,14 @@ public class LumenCycleController : MonoBehaviour
     // both legible and still feel like night. Back to cool, now
     // deliberately (not the same as the pre-this-session default: this
     // is a moodier teal-blue skyglow, not the old moonlight-blue).
-    [Tooltip("Color tint multiplied onto nightAmbient's brightness at full night. Default is a cool blue-teal -- day-for-night skyglow/moonlight, deliberately COOL so the warm practical lights (streetlamps/windows/neon) read as contrast against it rather than the whole frame washing one color. Raise B, lower R/G for a colder/moodier night; the reverse trends toward a (less cinematic, flatter) warm wash.")]
-    public Color nightAmbientTint = new Color(0.55f, 0.72f, 1f);
+    // 2026-07 correction (same screenshot-driven round as nightAmbient
+    // above): kept the cool cast (still the right cinematic call -- see
+    // the long comment above this field) but lightened it so it doesn't
+    // multiply the now-higher nightAmbient magnitude back down toward
+    // black. A deep, saturated tint at 0.55/0.72/1 was fighting the very
+    // brightness increase it's applied to.
+    [Tooltip("Color tint multiplied onto nightAmbient's brightness at full night. Default is a cool blue-teal -- day-for-night skyglow/moonlight, deliberately COOL so the warm practical lights (streetlamps/windows/neon) read as contrast against it rather than the whole frame washing one color. Raise B, lower R/G for a colder/moodier night; the reverse trends toward a (less cinematic, flatter) warm wash. Keep this reasonably close to (1,1,1) rather than deeply saturated -- a strong tint multiplies DOWN whatever nightAmbient's magnitude is, fighting visibility.")]
+    public Color nightAmbientTint = new Color(0.68f, 0.8f, 1f);
 
     private const float MinNightAmbient = 0.12f;
 
@@ -251,9 +267,15 @@ public class LumenCycleController : MonoBehaviour
     // window/monster stays exactly as bright relative to its surroundings
     // as before, while the previously-crushed unlit gaps between them
     // gain real detail.
+    // 2026-07 correction, same screenshot-driven round: raised further,
+    // 0.6 -> 0.75, alongside nightAmbient above -- the actual crushing
+    // culprit was very likely the Contrast/PostExposure bump in
+    // BuildGrades' Night keyframe (rolled back below), not this field,
+    // but pushing this higher too gives more margin now that visibility
+    // is the stated priority.
     [Tooltip("HDR-style shadow lift at night: raises the floor of near-black areas (unlit streets, building shadows) without touching bright areas, so the picture doesn't read as crushed black -- unlike nightAmbient, which brightens EVERYTHING uniformly and can wash out the lamp 'pools of light' look. THIS is the primary night-readability knob -- prefer raising it over nightAmbient. 0 = no lift (old behavior).")]
     [Range(0f, 1f)]
-    public float nightFillLift = 0.6f;
+    public float nightFillLift = 0.75f;
 
     private const float TimeLapseMultiplier = 20f;
     private static readonly double TickInterval = 1.0 / MatchState.TicksPerSecond;
@@ -808,16 +830,28 @@ public class LumenCycleController : MonoBehaviour
             // above -- a shadow lift alone reduces apparent contrast (it
             // literally raises the black point), so without this the
             // extra readability would come at the cost of the "deep
-            // shadows" half of the brief. Net effect: darks get detail
-            // (fill lift) AND stay punchy (contrast/exposure), instead of
-            // the whole image reading as uniformly gray.
+            // shadows" half of the brief. **ROLLED BACK the same session,
+            // once a real screenshot showed the combined effect (this +
+            // the previous nightAmbient/nightFillLift/tint round) was
+            // near-TOTAL BLACK, not moody -- roads/terrain/buildings
+            // invisible.** A steeper contrast curve stacked with a darker
+            // exposure baseline was almost certainly crushing the shadow
+            // lift's gains right back down. Creator confirmed the goal
+            // plainly: "visibility/playability" -- this is the prime
+            // suspect for the regression, so it's reverted first, past
+            // even its ORIGINAL 18/-0.35 (down to 10/-0.15), leaving
+            // nightAmbient (0.55) and nightFillLift (0.75) above to do
+            // the readability work without a same-frame contrast fight.
+            // VignetteIntensity also eased 0.42 -> 0.3 in the same pass --
+            // a strong vignette darkens the frame edges on top of
+            // everything else, working against the same visibility goal.
             new PhaseGrade
             {
                 SunColor = new Color(0.35f, 0.4f, 0.65f), SunIntensity = 0.05f, SunElevationDeg = -8f, SunYawDeg = 285f,
                 Ambient = new Color(0.02f, 0.02f, 0.05f), Fog = new Color(0.18f, 0.15f, 0.28f), FogDensity = fogDensityNight,
                 NeonBoost = 2.2f, LampBoost = 1f,
-                PostExposure = -0.4f, Saturation = 22f, ColorFilter = new Color(0.85f, 0.85f, 1.05f), Contrast = 24f,
-                VignetteIntensity = 0.42f, BloomIntensity = 1.3f, FilmGrainIntensity = 0.3f,
+                PostExposure = -0.15f, Saturation = 22f, ColorFilter = new Color(0.85f, 0.85f, 1.05f), Contrast = 10f,
+                VignetteIntensity = 0.3f, BloomIntensity = 1.3f, FilmGrainIntensity = 0.3f,
             },
         };
 

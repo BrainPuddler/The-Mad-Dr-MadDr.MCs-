@@ -33,7 +33,7 @@ using UnityEngine;
 ///   * lights don't dim in fog    -> DynamicLightBudget.fogDimReferenceDensity
 ///   * fog too thin/thick overall -> LumenCycleController.fogDensityScale (live)
 ///   * fog wrong at one time of day -> LumenCycleController.fogDensityDawn/Day/Dusk/Night (rebuild city)
-///   * night lacks light-pollution glow -> LumenCycleController.nightAmbient/nightAmbientTint
+///   * night reads as near-total black (not just moody) -> check the Night PhaseGrade's own Contrast/PostExposure in LumenCycleController.BuildGrades FIRST -- a steep contrast curve or dark exposure baseline can crush nightFillLift's gains right back down; confirmed by a real screenshot once in this project's own history (docs/28 row 31/32)
 /// </summary>
 [CreateAssetMenu(fileName = "CityLightingProfile", menuName = "MadDr/City Lighting Profile")]
 public class CityLightingProfile : ScriptableObject
@@ -106,16 +106,16 @@ public class CityLightingProfile : ScriptableObject
     [Range(0f, 2f)]
     public float BloomThreshold = 0.6f;
 
-    [Tooltip("Ambient light brightness at full Night -- 0.02 (near-black), then 0.08, then 0.24, then 0.45, all reported too dark or too flat/globally-brightened; 0.35 is the current default. Prefer raising NightFillLift below first -- it's the tool that doesn't also wash out the lamp 'pools of light' look. Hard-floored at 0.12 by LumenCycleController.MinNightAmbient regardless of what's set here.")]
+    [Tooltip("Ambient light brightness at full Night -- 0.02, 0.08, 0.24, 0.45, then 0.35 all reported too dark or too flat/globally-brightened at various rounds; a real screenshot then showed the 0.35 round (combined with a Contrast/PostExposure bump elsewhere) rendering near-total black. 0.55 is the current default, with that Contrast/PostExposure bump reverted -- see LumenCycleController's own Night keyframe comment. Prefer raising NightFillLift below first -- it's the tool that doesn't also wash out the lamp 'pools of light' look. Hard-floored at 0.12 by LumenCycleController.MinNightAmbient regardless of what's set here.")]
     [Range(0.12f, 1f)]
-    public float NightAmbientBrightness = 0.35f;
+    public float NightAmbientBrightness = 0.55f;
 
-    [Tooltip("Color tint multiplied onto NightAmbientBrightness -- default is a cool blue-teal (day-for-night skyglow/moonlight), deliberately cool so the warm practical lights (streetlamps/windows/neon) read as contrast against it rather than washing the whole frame one color. See LumenCycleController.nightAmbientTint.")]
-    public Color NightAmbientTint = new Color(0.55f, 0.72f, 1f);
+    [Tooltip("Color tint multiplied onto NightAmbientBrightness -- default is a cool blue-teal (day-for-night skyglow/moonlight), deliberately cool so the warm practical lights (streetlamps/windows/neon) read as contrast against it rather than washing the whole frame one color. Lightened toward (1,1,1) from an earlier, more deeply-saturated round -- a strong tint multiplies DOWN whatever NightAmbientBrightness is, fighting visibility. See LumenCycleController.nightAmbientTint.")]
+    public Color NightAmbientTint = new Color(0.68f, 0.8f, 1f);
 
     [Tooltip("HDR-style shadow lift at full Night -- raises the floor of near-black areas without touching bright ones (unlike NightAmbientBrightness, which is a flat uniform light). THIS is the primary night-readability knob. See LumenCycleController.nightFillLift.")]
     [Range(0f, 1f)]
-    public float NightFillLift = 0.6f;
+    public float NightFillLift = 0.75f;
 
     [Header("Fog density per phase")]
     [Tooltip("Fog density at Dawn. See LumenCycleController.fogDensityDawn.")]

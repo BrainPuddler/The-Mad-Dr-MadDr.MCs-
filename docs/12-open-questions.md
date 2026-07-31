@@ -7535,3 +7535,65 @@ exactly the kind of visual-feel judgment docs/28 §5 says this
 environment can't verify. Verified for real: both files' braces/parens
 balanced; flightcheck harness compiles the whole Unity gameplay layer
 clean with these changes in place.
+
+## 2026-07 follow-up: the first real screenshot of this whole system -- and it was broken, not moody
+
+Creator sent an actual Editor screenshot for the first time in this
+entire lighting saga -- at Dusk, "13s to next" phase. The result: roads,
+terrain, and buildings were essentially invisible, near-total black,
+with only the HQ/Factory tint squares and a couple of unit blips
+legible at all. Asked directly: "does this look visible, playable to
+you?" Answer given plainly: no -- this reads as broken, not
+atmospheric. Confirmed it was the latest push; creator's goal stated
+without qualification: "visibility/playability."
+
+**Diagnosis:** because `nightAmount` (the day/night blend weight) ramps
+to its held value well before Dusk itself ends (rows 12/29 in docs/28),
+a screenshot at "13s to next" is already running essentially full-NIGHT
+lighting values -- so this is a direct, real consequence of the
+previous entry's numbers, not a mid-transition artifact. The prime
+suspect: that entry's `Contrast` 18->24 + `PostExposure` -0.35->-0.4
+counterweight, added specifically to keep the raised `nightFillLift`
+from "flattening" the image. A steeper contrast curve stacked with a
+darker exposure baseline can crush a shadow lift's gains right back
+toward black -- and this is the first claim in the whole thread with
+actual visual proof behind it rather than reasoning/reflection alone.
+
+**Fix, prioritizing the stated goal over strict mood-preservation:**
+
+- Night's baked `Contrast`/`PostExposure`/`VignetteIntensity` reverted
+  PAST their pre-previous-round baseline: `Contrast` 24 -> 10 (below
+  the original 18), `PostExposure` -0.4 -> -0.15 (less dark than the
+  original -0.35), `VignetteIntensity` 0.42 -> 0.3 (a strong vignette
+  also darkens frame edges, same problem).
+- `nightAmbient` raised past every prior round in this saga -- 0.35 ->
+  0.55 -- no longer traded against mood, since the creator's own
+  stated goal is now visibility first.
+- `nightFillLift` raised further, 0.6 -> 0.75, still the primary
+  readability tool (unchanged reasoning from the prior entry).
+- `nightAmbientTint` KEPT cool (that direction is still the right
+  cinematic call) but lightened `(0.55,0.72,1)` -> `(0.68,0.8,1)` --
+  a deeply-saturated tint multiplies DOWN whatever `nightAmbient`'s
+  magnitude is, which was fighting the very increase it's applied to.
+- All five mirrored onto `CityLightingProfile`; its own "where to
+  tune" quick-reference gained a new "reads as near-total black, not
+  just moody -> check Night's Contrast/PostExposure first" entry
+  pointing straight at this round's own root cause, so a future
+  session doesn't have to re-diagnose it from scratch.
+
+Full row (32) added to docs/28's bug-history table, explicitly marked
+as "diagnosed and corrected" rather than "confirmed fixed" -- this is a
+reasoned response to real evidence, not a verified result, since
+there's still no way to render it here.
+
+**Honest limits:** no Unity Editor here to confirm this correction
+actually restores visibility rather than just changing WHICH way it's
+broken, or that 0.55 ambient + 0.75 fill lift + the reverted contrast
+lands somewhere between "unplayable black" and "washed-out daytime."
+This is the first round in the whole saga with real photographic
+evidence of a problem, but the FIX itself is still unverified the same
+way every prior round was -- a follow-up screenshot is the only way to
+actually close this out. Verified for real: `LumenCycleController.cs`/
+`CityLightingProfile.cs` braces/parens balanced; flightcheck harness
+compiles the whole Unity gameplay layer clean with these changes in
+place.
