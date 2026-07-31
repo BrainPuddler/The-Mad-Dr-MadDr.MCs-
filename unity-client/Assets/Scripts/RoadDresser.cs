@@ -407,8 +407,26 @@ public static class RoadDresser
         var curbLineOffset = (hexRoadWidth + 3.4f) * 0.5f + 0.75f;
         var axisAngle = Mathf.Atan2(axis.x, axis.z) * Mathf.Rad2Deg;
 
+        // 2026-07 fix (creator report: "cars... park across the road
+        // instead of parallel to the road"): `connectors.Count == 2` was
+        // treated as "a true straight" unconditionally, but it also
+        // matches a genuine 90-degree BEND (e.g. an E arm + an N arm,
+        // never opposite) -- exactly the "bend" case IsRoadCorner already
+        // has to detect elsewhere in this codebase (RuntimeCityBuilder,
+        // for citizen crossings). `axis` above is just `connectors[0].dir`,
+        // whichever of the two arms happened to be checked first (E, W,
+        // N, S in that fixed order) -- for a bend that's an arbitrary
+        // choice of ONE of the two roads meeting here, so a car oriented
+        // along it reads as sitting across the OTHER one. Only spawn the
+        // parked car when the two arms are actually roughly opposite (a
+        // real straight run) -- same -0.5 dot threshold IsRoadCorner uses
+        // to call a hex a "bend" -- and skip decorative parking at a
+        // corner entirely, same as this block already skips it at a
+        // junction (3+ arms) or a dead end (0 arms) just above.
+        var isStraightThrough = connectors.Count == 2 && Vector3.Dot(connectors[0].dir, connectors[1].dir) < -0.5f;
+
         // parked car on true straights, hugging the curb lane
-        if (connectors.Count == 2 && h % 3 == 0)
+        if (isStraightThrough && h % 3 == 0)
             SpawnCar(b, hex, center + side * (h % 2 == 0 ? parkOffset : -parkOffset), axisAngle, host);
 
         // pole or hydrant or trash can on the sidewalk line. `curbLineOffset`

@@ -607,6 +607,34 @@ public class TrafficCar : MonoBehaviour
         return RoadDresser.CardinalAnchor(_builder, hex, vertical);
     }
 
+    /// <summary>Whether `hex` is a genuine straight-through road segment
+    /// (exactly two road arms, roughly opposite) rather than a junction
+    /// or a 90-degree bend -- same "not roughly opposite" test
+    /// RuntimeCityBuilder.IsRoadCorner already uses for citizen crossings,
+    /// reused here for a different reason: a car's steering target JUMPS
+    /// straight from one hop's lane-offset point to the next's with no
+    /// real turn arc, so it cuts a straight line across a junction/bend
+    /// instead of curving through it on its own side. That's harmless for
+    /// ordinary following/slowing, but PASSING assumes a simple two-lane
+    /// straight with a coherent "opposite lane" to swerve into -- there's
+    /// no such thing at a turn, and a car committing a full-lane swerve
+    /// while corner-cutting can cross directly into another car's own
+    /// corner-cut path (creator report, 2026-07: "cars turn the wrong way
+    /// to avoid each other"). See the one call site below: this only
+    /// gates STARTING a new pass, never the ordinary follow/slow-down
+    /// behavior, which stays exactly as safe as before at every corner.</summary>
+    private bool IsStraightRoad(HexCoord hex)
+    {
+        var card = RoadDresser.CardinalNeighbors(hex, _network);
+        if (card.Count != 2) return false;
+        var dirs = new List<Vector3>(2);
+        if (card.E) dirs.Add(new Vector3(1f, 0f, 0f));
+        if (card.W) dirs.Add(new Vector3(-1f, 0f, 0f));
+        if (card.N) dirs.Add(new Vector3(0f, 0f, -1f));
+        if (card.S) dirs.Add(new Vector3(0f, 0f, 1f));
+        return Vector3.Dot(dirs[0], dirs[1]) < -0.5f;
+    }
+
     /// <summary>The world point a car aims at to sit ON the drawn road,
     /// in its own lane: the target hex's cardinal-corrected anchor (see
     /// CardinalAnchorOf), nudged to the RIGHT of travel by LaneOffset so
@@ -922,8 +950,11 @@ public class TrafficCar : MonoBehaviour
                 // following, of something genuinely slow (not just a
                 // momentary gap), commits to an overtake IF the opposite
                 // side of the road is clear far enough ahead to actually
-                // complete one.
-                if (!_passing && _blockedTimer > PassBlockedTriggerTime && clear < FollowRange * PassTriggerClearFraction)
+                // complete one. Restricted to a genuine straight (see
+                // IsStraightRoad's own doc comment) -- committing a full-
+                // lane swerve while corner-cutting a junction/bend is
+                // exactly what was crossing cars into each other's path.
+                if (!_passing && _blockedTimer > PassBlockedTriggerTime && clear < FollowRange * PassTriggerClearFraction && IsStraightRoad(_to))
                 {
                     var passSideClear = _builder.DistanceAhead(transform.position - right * PassLaneOffset, fwd, PassLaneCheckRange, LaneHalfWidth, this);
                     if (passSideClear >= PassLaneCheckRange)

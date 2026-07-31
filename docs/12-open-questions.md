@@ -7597,3 +7597,83 @@ actually close this out. Verified for real: `LumenCycleController.cs`/
 `CityLightingProfile.cs` braces/parens balanced; flightcheck harness
 compiles the whole Unity gameplay layer clean with these changes in
 place.
+
+## 2026-07: two real traffic bugs, both root-caused to the same gap -- no real turn ARC through a corner, just a straight-line jump
+
+Creator report, scoped explicitly to driving/parking: "Cars turn the
+wrong way to avoid each other and park across the road instead of
+parallel to the road... maybe because of the hex nature of navigation
+vs not using cardinal geometry." Investigated both symptoms in
+`TrafficCar.cs`/`RoadDresser.cs` before touching anything.
+
+**Bug 1 (confirmed, fixed): `RoadDresser`'s STATIC decorative parked
+cars mis-orient at corners.** This is a DIFFERENT code path than the
+row-108 fix (that one was the DYNAMIC `TrafficCar.ParkHere`, which was
+already confirmed correct -- it derives its direction from the actual
+hop a specific car just drove, not a hex-level classification). `DressHex`'s
+`connectors.Count == 2` branch, though, was treated as "a true straight"
+unconditionally -- but Count==2 ALSO matches a genuine 90-degree bend
+(e.g. an E arm + an N arm, never opposite). `axis = connectors[0].dir`
+then picks whichever of the two arms happened to be checked first (E,
+W, N, S, that fixed order) -- for a bend that's an arbitrary choice of
+ONE of the two roads meeting there, so the 5.2m parked-car chassis
+(and any furniture using the same `axis`) gets oriented along only one
+of them, reading as sitting across the other. The exact "is this hex a
+bend" concept ALREADY existed elsewhere in this codebase
+(`RuntimeCityBuilder.IsRoadCorner`, used for citizen crossings) but
+RoadDresser's own car-spawn condition never used it. Fixed: a new
+`isStraightThrough` check (same `Vector3.Dot(...) < -0.5f` "roughly
+opposite" threshold `IsRoadCorner` already established) gates the
+parked-car spawn -- corners now simply don't get a decorative parked
+car, same as junctions/dead-ends already didn't, rather than getting a
+misoriented one.
+
+**Bug 2 (root cause of "turn the wrong way to avoid each other"):
+no code path here ever draws a real curved arc through an
+intersection.** A car's steering target jumps straight from one hop's
+lane-offset point directly to the next hop's, and `MoveToward` drives
+in a straight line toward it -- meaning a car literally cuts a
+diagonal chord across a junction or bend instead of curving through it
+on its own side of the road. That's harmless for the ordinary follow/
+slow-down behavior (still just "is something ahead of me, in my
+lane"), but the aggressive-passing system (2026-07, "some aggressive
+passing to slow cars") assumes a simple two-lane straight with a
+coherent "opposite lane" to fully swerve into -- there IS no such
+concept at a turn, and a car committing that full-lane swerve while
+also corner-cutting can swing directly into another car's own
+corner-cut path. This is the most plausible mechanism for "turn the
+wrong way to avoid each other": both symptoms are two different
+surface effects of the SAME underlying gap the creator's own hypothesis
+named (hex-hop navigation with no real cardinal-geometry arc through a
+turn), not two unrelated bugs.
+
+**Fix (a scoped mitigation, not the full turn-arc rewrite):** new
+`TrafficCar.IsStraightRoad(hex)`, the identical "exactly two arms,
+roughly opposite" test as Bug 1's fix, gates STARTING a new pass --
+`if (!_passing && ... && IsStraightRoad(_to))`. A car approaching or
+sitting at a junction/bend now just follows/slows through it (unchanged,
+safe behavior) instead of ever committing a full-lane swerve there. An
+already-in-progress pass isn't interrupted by this check (it only gates
+the initial commit), and ordinary driving/lane-offset through corners
+is completely untouched -- this doesn't fix the missing turn-arc
+itself, only stops the ONE maneuver (a full committed swerve) that
+turns "cutting a corner" into "swerving into oncoming/crossing
+traffic."
+
+**Scope note:** a real fix for the underlying gap (an actual curved
+path through every junction/bend, so a car's `fwd` continuously points
+along its own side of the road even mid-turn) would be a genuinely
+bigger change -- flagged here as the deeper structural item this
+session's fix does NOT attempt, in case the corner-cutting itself
+(as opposed to the passing-through-it behavior) is still visible/
+undesirable after this round.
+
+**Honest limits:** no Unity Editor here to confirm parked cars now
+read as sitting flush at every corner (rather than just "not
+diagonally placed by the old bug"), or that the passing gate actually
+eliminates the wrong-way-swerve symptom rather than just reducing how
+often it can happen. Verified for real: both `RoadDresser.cs`/
+`TrafficCar.cs` braces/parens balanced (modulo a comment-text grep
+artifact, resolved by an actual compile); flightcheck harness compiles
+the whole Unity gameplay layer clean with both files' changes in
+place.
