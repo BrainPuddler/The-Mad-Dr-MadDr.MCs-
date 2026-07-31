@@ -7387,3 +7387,76 @@ harness catch-up above, plus a targeted isolated-DLL check confirming
 `CommandKind.AttackBuilding`/`TrainUnit` and `MatchState.
 SpawnFactoryForPlayer` resolve correctly outside the harness's own
 (now-fixed) reference-resolution bug.
+
+### 2026-07: per-phase + global fog density knobs, and a real fix for "the middle of the night is unplayable"
+
+Creator asked two things at once: "Give me both per phase and a
+multiplier fog density," plus a diagnostic question -- "Is the fog
+density the reason the night is so dark or is it just the lack of
+ambient light? ... it needs to be significantly lighter which is what
+actually happens due to light pollution."
+
+**The diagnosis, stated plainly before touching code:** fog is a minor
+contributor at most. URP's Exp2 fog blends toward `RenderSettings.
+fogColor` by DISTANCE -- it only visibly darkens/hazes geometry far from
+the camera, and even Night's fog color (`(0.18, 0.15, 0.28)`) isn't
+pure black. The actual "how lit does the whole picture look" lever has
+always been the ambient-light system: `nightAmbient` (a flat uniform
+light) and `nightFillLift` (an HDR shadow floor lift), both already
+built and documented in docs/28 for exactly this recurring complaint.
+Bumping fog density would not have fixed "unplayably dark" -- it would
+have made distant objects hazier without touching the actual brightness
+of anything nearby.
+
+**Fog (the literal ask):** `FogDensity` previously lived only as four
+hardcoded literals inside `BuildGrades`'s per-phase `PhaseGrade` table,
+with no live global scale the way `bloomScale`/`emissiveScale` already
+give every other per-phase-authored value. Promoted to four public
+`fogDensityDawn`/`Day`/`Dusk`/`Night` Inspector fields (`BuildGrades`
+changed from `private static` to an instance method specifically so it
+can read them -- bakes in at Init/city-build time, same "rebuild to see
+it" caveat every other `BuildGrades`-authored number already has) plus a
+new `fogDensityScale` (`[Range(0,3)]`, default 1) that multiplies the
+already-blended curve LIVE every frame in `ApplyBlend`, same model as
+`bloomScale`. Both mirrored onto `CityLightingProfile` (`FogDensityDawn`/
+etc, `FogDensityScale`) and wired through `ApplyProfile`, consistent
+with how every other dual component-field/profile-override pair in this
+file already works.
+
+**Night brightness (the actual fix, not fog):** two changes, matching
+what the creator explicitly named as the target -- real light pollution,
+not moonlight. (1) `nightAmbient`'s default raised 0.24 -> 0.45 (a
+genuine "significantly lighter" jump, still under the 1.0 ceiling --
+this field's own history is a long series of "still too dark" bumps:
+0.02 -> 0.08 -> 0.24, each one previously reported insufficient too, so
+this is not assumed to be the last word either). (2) A real color-
+accuracy miss, not just a magnitude one: the OLD formula (`new
+Color(flooredNightAmbient, flooredNightAmbient, flooredNightAmbient *
+2f)`) put double weight on BLUE only -- a cool moonlight tint, not the
+warm amber/orange skyglow real urban light pollution actually produces
+(scattered sodium-vapor/LED streetlight color). New `nightAmbientTint`
+field (default `(1.2, 0.95, 0.65)`, warm) is multiplied onto
+`nightAmbient`'s brightness instead of the old hardcoded blue-boost
+formula, so the COLOR is now a live tunable knob too, not just the
+brightness -- matching this project's own "everything editable live"
+convention for every other post-2026-07 lighting field. `nightFillLift`
+(the crushed-black floor lift, the OTHER half of what real light
+pollution actually does -- scattered light means true black shadows
+basically don't exist in a lit city) bumped 0.35 -> 0.45 alongside it.
+Both mirrored onto `CityLightingProfile` (`NightAmbientTint` new,
+`NightAmbientBrightness`/`NightFillLift` defaults updated to match) and
+the profile's own "where to tune" doc-comment quick-reference updated
+with the new fog/ambient-tint entries.
+
+**Honest limits:** no Unity Editor here to confirm 0.45 ambient + the
+warm tint actually reads as "light pollution" rather than just "flatter/
+duller night," or that the lamp "pools of light" contrast (the whole
+reason `nightAmbient` was dropped near-zero several rounds back in this
+same file's own history) survives a near-doubled ambient floor -- this
+is exactly the kind of visual-feel tradeoff docs/28 §5 says has no
+meaningful pass/fail math, stated honestly rather than invented.
+Verified for real: `LumenCycleController.cs`/`CityLightingProfile.cs`
+braces/parens balanced across each whole file; the flightcheck harness
+(fixed for real last entry, not just papered over) compiles the whole
+Unity gameplay layer clean against the rebuilt DLL with both files'
+changes in place.

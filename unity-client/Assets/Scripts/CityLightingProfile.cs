@@ -30,6 +30,9 @@ using UnityEngine;
 ///   * lit ground area too strong -> DynamicLightBudget.pointIntensityMax/spotIntensityMax
 ///   * lit ground area too wide   -> DynamicLightBudget.range
 ///   * lights don't dim in fog    -> DynamicLightBudget.fogDimReferenceDensity
+///   * fog too thin/thick overall -> LumenCycleController.fogDensityScale (live)
+///   * fog wrong at one time of day -> LumenCycleController.fogDensityDawn/Day/Dusk/Night (rebuild city)
+///   * night lacks light-pollution glow -> LumenCycleController.nightAmbient/nightAmbientTint
 /// </summary>
 [CreateAssetMenu(fileName = "CityLightingProfile", menuName = "MadDr/City Lighting Profile")]
 public class CityLightingProfile : ScriptableObject
@@ -102,13 +105,37 @@ public class CityLightingProfile : ScriptableObject
     [Range(0f, 2f)]
     public float BloomThreshold = 0.6f;
 
-    [Tooltip("Ambient light brightness at full Night -- 0.02 (near-black), then 0.08, both reported too dark to see the unlit parts of the city; 0.24 is the current default. Hard-floored at 0.12 by LumenCycleController.MinNightAmbient regardless of what's set here.")]
+    [Tooltip("Ambient light brightness at full Night -- 0.02 (near-black), then 0.08, then 0.24, all reported too dark to see the unlit parts of the city; 0.45 is the current default. Hard-floored at 0.12 by LumenCycleController.MinNightAmbient regardless of what's set here.")]
     [Range(0.12f, 1f)]
-    public float NightAmbientBrightness = 0.24f;
+    public float NightAmbientBrightness = 0.45f;
+
+    [Tooltip("Color tint multiplied onto NightAmbientBrightness -- default is a warm amber/orange, matching real urban light-pollution skyglow (scattered sodium-vapor/LED streetlight color) rather than cool blue moonlight. See LumenCycleController.nightAmbientTint.")]
+    public Color NightAmbientTint = new Color(1.2f, 0.95f, 0.65f);
 
     [Tooltip("HDR-style shadow lift at full Night -- raises the floor of near-black areas without touching bright ones (unlike NightAmbientBrightness, which is a flat uniform light). See LumenCycleController.nightFillLift.")]
     [Range(0f, 1f)]
-    public float NightFillLift = 0.35f;
+    public float NightFillLift = 0.45f;
+
+    [Header("Fog density per phase")]
+    [Tooltip("Fog density at Dawn. See LumenCycleController.fogDensityDawn.")]
+    [Range(0f, 0.1f)]
+    public float FogDensityDawn = 0.010f;
+
+    [Tooltip("Fog density at Day. See LumenCycleController.fogDensityDay.")]
+    [Range(0f, 0.1f)]
+    public float FogDensityDay = 0.005f;
+
+    [Tooltip("Fog density at Dusk. See LumenCycleController.fogDensityDusk.")]
+    [Range(0f, 0.1f)]
+    public float FogDensityDusk = 0.014f;
+
+    [Tooltip("Fog density at full Night. See LumenCycleController.fogDensityNight.")]
+    [Range(0f, 0.1f)]
+    public float FogDensityNight = 0.022f;
+
+    [Tooltip("Multiplies the blended fog density curve at EVERY time of day, live. See LumenCycleController.fogDensityScale.")]
+    [Range(0f, 3f)]
+    public float FogDensityScale = 1f;
 
     [Header("Flicker (windows, occasional neon dropout)")]
     [Tooltip("Per-instance flicker cycle speed range (Hz-ish) -- each registered light picks its own speed in this range so hundreds of windows don't flicker in lockstep.")]

@@ -138,6 +138,38 @@ public class LumenCycleController : MonoBehaviour
     [Range(0f, 2f)]
     public float bloomThreshold = 0.6f;
 
+    // 2026-07 creator: "Give me both per phase and a multiplier fog
+    // density." Fog density previously existed only as hardcoded literals
+    // inside BuildGrades' per-phase PhaseGrade table (each phase's own
+    // Exp2 fog thickness, cross-fading same as everything else in
+    // ApplyBlend) -- not Inspector-editable, and with no live global
+    // scale over the whole curve the way bloomScale/emissiveScale already
+    // give every OTHER per-phase-authored value. These four now feed
+    // BuildGrades directly (read once at Init/ApplyProfile time, same as
+    // every other authored keyframe number) and fogDensityScale below
+    // multiplies the already-blended result live every frame, same model
+    // as bloomScale.
+    [Header("Fog density per phase -- editable live in Play mode (rebuild the city for the per-phase values to take effect; the multiplier applies live)")]
+    [Tooltip("Fog density at Dawn.")]
+    [Range(0f, 0.1f)]
+    public float fogDensityDawn = 0.010f;
+
+    [Tooltip("Fog density at Day.")]
+    [Range(0f, 0.1f)]
+    public float fogDensityDay = 0.005f;
+
+    [Tooltip("Fog density at Dusk.")]
+    [Range(0f, 0.1f)]
+    public float fogDensityDusk = 0.014f;
+
+    [Tooltip("Fog density at full Night.")]
+    [Range(0f, 0.1f)]
+    public float fogDensityNight = 0.022f;
+
+    [Tooltip("Multiplies the blended fog density curve at EVERY time of day, live -- the quick 'more/less fog overall' knob, same model as bloomScale. 1 = the per-phase values above, unchanged.")]
+    [Range(0f, 3f)]
+    public float fogDensityScale = 1f;
+
     // 2026-07 creator, after the shadow-lift addition below: "still need
     // an ambient light so we can see in the darkest part of the night."
     // nightFillLift only touches the FINAL rendered pixel's color (a
@@ -157,7 +189,26 @@ public class LumenCycleController : MonoBehaviour
     // asset.
     [Tooltip("Ambient light at full night. 0.02 (the original default) was near-black, deliberately, so the lamps would pool against real darkness -- raise this if the UNLIT parts of the night are too dark to read at all; lower it if the lamp 'pools of light' look gets washed out. Hard-floored at MinNightAmbient regardless of what's set here. Distinct from nightFillLift below (a post-process grade, doesn't affect actual scene lighting).")]
     [Range(0.12f, 1f)]
-    public float nightAmbient = 0.24f;
+    public float nightAmbient = 0.45f;
+
+    // 2026-07 creator: "the middle of the night is unplayable, it needs to
+    // be significantly lighter, which is what actually happens due to
+    // light pollution." Two separate fixes bundled here, NOT a fog
+    // change -- fog only hazes distant geometry toward its own (dark)
+    // color; the actual "how lit does everything look" lever has always
+    // been nightAmbient/nightFillLift below. First: nightAmbient's
+    // default raised 0.24 -> 0.45 (still comfortably under the 1.0
+    // ceiling). Second, and the more important miss: the OLD ambient
+    // formula (flooredNightAmbient, flooredNightAmbient, x2 on blue only)
+    // reads as cool blue MOONLIGHT, not the warm amber/orange skyglow
+    // real urban light pollution actually produces (scattered sodium-
+    // vapor/LED streetlight color bouncing off low cloud/haze) -- exactly
+    // the effect the creator named. nightAmbientTint now carries that
+    // color explicitly (multiplied onto nightAmbient's brightness) instead
+    // of a hardcoded blue-boost formula, so the color itself is a live,
+    // tunable knob too, not just the brightness.
+    [Tooltip("Color tint multiplied onto nightAmbient's brightness at full night. Default is a warm amber/orange -- real urban light-pollution skyglow (scattered sodium-vapor/LED streetlight color), not cool blue moonlight. Raise R/G, lower B for a warmer glow; the reverse for a colder one.")]
+    public Color nightAmbientTint = new Color(1.2f, 0.95f, 0.65f);
 
     private const float MinNightAmbient = 0.12f;
 
@@ -178,7 +229,7 @@ public class LumenCycleController : MonoBehaviour
     // of flattening it.
     [Tooltip("HDR-style shadow lift at night: raises the floor of near-black areas (unlit streets, building shadows) without touching bright areas, so the picture doesn't read as crushed black -- unlike nightAmbient, which brightens EVERYTHING uniformly and can wash out the lamp 'pools of light' look. 0 = no lift (old behavior).")]
     [Range(0f, 1f)]
-    public float nightFillLift = 0.35f;
+    public float nightFillLift = 0.45f;
 
     private const float TimeLapseMultiplier = 20f;
     private static readonly double TickInterval = 1.0 / MatchState.TicksPerSecond;
@@ -218,7 +269,13 @@ public class LumenCycleController : MonoBehaviour
         fogDiffusionBoost = profile.FogDiffusionBoost;
         bloomThreshold = profile.BloomThreshold;
         nightAmbient = profile.NightAmbientBrightness;
+        nightAmbientTint = profile.NightAmbientTint;
         nightFillLift = profile.NightFillLift;
+        fogDensityDawn = profile.FogDensityDawn;
+        fogDensityDay = profile.FogDensityDay;
+        fogDensityDusk = profile.FogDensityDusk;
+        fogDensityNight = profile.FogDensityNight;
+        fogDensityScale = profile.FogDensityScale;
     }
 
     private void Start()
@@ -446,9 +503,16 @@ public class LumenCycleController : MonoBehaviour
 
         var ambient = Color.Lerp(a.Ambient, b.Ambient, blend);
         var flooredNightAmbient = Mathf.Max(nightAmbient, MinNightAmbient);
-        var nightAmbientColor = new Color(flooredNightAmbient, flooredNightAmbient, flooredNightAmbient * 2f);
+        var nightAmbientColor = new Color(
+            flooredNightAmbient * nightAmbientTint.r,
+            flooredNightAmbient * nightAmbientTint.g,
+            flooredNightAmbient * nightAmbientTint.b);
         RenderSettings.ambientLight = Color.Lerp(ambient, nightAmbientColor, nightAmount);
-        var fogDensity = Mathf.Lerp(a.FogDensity, b.FogDensity, blend);
+        // fogDensityScale is a true multiplier on the whole per-phase
+        // curve, live every frame -- same model as bloomScale/
+        // emissiveScale, not blended toward like the phase keyframes
+        // themselves.
+        var fogDensity = Mathf.Lerp(a.FogDensity, b.FogDensity, blend) * fogDensityScale;
         RenderSettings.fog = fogDensity > 0.0005f;
         RenderSettings.fogColor = Color.Lerp(a.Fog, b.Fog, blend);
         RenderSettings.fogDensity = fogDensity;
@@ -619,7 +683,7 @@ public class LumenCycleController : MonoBehaviour
         return Mathf.Lerp(nightTroughElev, dawnElev, Mathf.SmoothStep(0f, 1f, wrapProgress));
     }
 
-    private static PhaseGrade[] BuildGrades(CityRegion region)
+    private PhaseGrade[] BuildGrades(CityRegion region)
     {
         // 2026-07: FogDensity across all four phases bumped ~1.5-1.7x
         // (creator: "make it thicker/more present overall" -- half of a
@@ -629,6 +693,16 @@ public class LumenCycleController : MonoBehaviour
         // 0.022 against Exp2 falloff puts ~70% fog blend at a 50m view
         // distance, noticeably present without erasing the RTS camera's
         // own view of the action.
+        //
+        // 2026-07 follow-up: these four values (and the fogDensityScale
+        // multiplier applied later in ApplyBlend) are now the live
+        // fogDensityDawn/Day/Dusk/Night Inspector fields above instead of
+        // hardcoded literals -- BuildGrades became an instance method
+        // (was static) specifically so it can read them. Only takes
+        // effect at Init/city-build time (these bake into the per-phase
+        // keyframe table, unlike fogDensityScale which applies live every
+        // frame) -- same "rebuild to see it" caveat every other
+        // BuildGrades-baked value already has.
         //
         // 2026-07: SunYawDeg values below trace ONE continuous compass
         // sweep across the whole cycle (creator: "the sun to move across
@@ -654,7 +728,7 @@ public class LumenCycleController : MonoBehaviour
             new PhaseGrade
             {
                 SunColor = new Color(1f, 0.75f, 0.55f), SunIntensity = 0.6f, SunElevationDeg = 3f, SunYawDeg = 60f,
-                Ambient = new Color(0.35f, 0.32f, 0.38f), Fog = new Color(0.4f, 0.32f, 0.38f), FogDensity = 0.010f,
+                Ambient = new Color(0.35f, 0.32f, 0.38f), Fog = new Color(0.4f, 0.32f, 0.38f), FogDensity = fogDensityDawn,
                 NeonBoost = 0.9f, LampBoost = 0.5f,
                 PostExposure = 0f, Saturation = -5f, ColorFilter = new Color(1f, 0.93f, 0.85f), Contrast = 5f,
                 VignetteIntensity = 0.25f, BloomIntensity = 0.6f, FilmGrainIntensity = 0.15f,
@@ -663,7 +737,7 @@ public class LumenCycleController : MonoBehaviour
             new PhaseGrade
             {
                 SunColor = new Color(1f, 0.97f, 0.88f), SunIntensity = 1.1f, SunElevationDeg = 30f, SunYawDeg = 105f,
-                Ambient = new Color(0.55f, 0.53f, 0.5f), Fog = new Color(0.55f, 0.5f, 0.42f), FogDensity = 0.005f,
+                Ambient = new Color(0.55f, 0.53f, 0.5f), Fog = new Color(0.55f, 0.5f, 0.42f), FogDensity = fogDensityDay,
                 NeonBoost = 0.35f, LampBoost = 0.05f,
                 PostExposure = 0.15f, Saturation = -18f, ColorFilter = new Color(1.05f, 0.95f, 0.78f), Contrast = 8f,
                 VignetteIntensity = 0.15f, BloomIntensity = 0.4f, FilmGrainIntensity = 0.22f,
@@ -672,7 +746,7 @@ public class LumenCycleController : MonoBehaviour
             new PhaseGrade
             {
                 SunColor = new Color(0.95f, 0.5f, 0.35f), SunIntensity = 0.5f, SunElevationDeg = 3f, SunYawDeg = 240f,
-                Ambient = new Color(0.32f, 0.22f, 0.3f), Fog = new Color(0.35f, 0.22f, 0.28f), FogDensity = 0.014f,
+                Ambient = new Color(0.32f, 0.22f, 0.3f), Fog = new Color(0.35f, 0.22f, 0.28f), FogDensity = fogDensityDusk,
                 NeonBoost = 1.4f, LampBoost = 0.8f,
                 PostExposure = -0.1f, Saturation = 5f, ColorFilter = new Color(1f, 0.85f, 0.8f), Contrast = 10f,
                 VignetteIntensity = 0.3f, BloomIntensity = 0.9f, FilmGrainIntensity = 0.18f,
@@ -688,7 +762,7 @@ public class LumenCycleController : MonoBehaviour
             new PhaseGrade
             {
                 SunColor = new Color(0.35f, 0.4f, 0.65f), SunIntensity = 0.05f, SunElevationDeg = -8f, SunYawDeg = 285f,
-                Ambient = new Color(0.02f, 0.02f, 0.05f), Fog = new Color(0.18f, 0.15f, 0.28f), FogDensity = 0.022f,
+                Ambient = new Color(0.02f, 0.02f, 0.05f), Fog = new Color(0.18f, 0.15f, 0.28f), FogDensity = fogDensityNight,
                 NeonBoost = 2.2f, LampBoost = 1f,
                 PostExposure = -0.35f, Saturation = 22f, ColorFilter = new Color(0.85f, 0.85f, 1.05f), Contrast = 18f,
                 VignetteIntensity = 0.42f, BloomIntensity = 1.3f, FilmGrainIntensity = 0.3f,
