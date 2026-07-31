@@ -7883,3 +7883,92 @@ passes (the genuine behavior change from item 1, not just a compile
 check); `RuntimeCityBuilder.cs`/`BaseDresser.cs`/`MonsterAgent.cs`/
 `MatchState.cs` braces balanced; flightcheck harness compiles the whole
 Unity gameplay layer clean against the freshly rebuilt match-core DLL.
+
+## 2026-07: low-poly procedural brain mesh + PBR texture kit, replacing the pink-sphere-cluster placeholder -- and a from-scratch numeric verification harness that caught three real bugs before they ever reached the Editor
+
+Creator brief, verbatim in full: a stylized-but-believable low-poly
+(500-2,000 tri) human brain, geometry limited to the major anatomical
+landmarks (two hemispheres, central fissure, cerebellum, brainstem),
+all fine surface detail carried by a PBR material set -- normal map
+(broad/medium/fine folds), height/parallax map, AO darkening the
+grooves, mottled pale-gray/pink/cream/blue albedo with overlaid
+branching vessels, a roughness map that reads peaks smoother and
+valleys rougher, and "subtle subsurface scattering or translucency."
+
+**New files.** `BrainMesh.cs`: a hand-authored UV-sphere builder (not
+added to `ProceduralMeshKit` -- that file's own `FaceOutward` winding
+helper only works against a single shared centroid, which doesn't hold
+for a multi-lobe mesh with three lobes offset well away from one
+another). `BuildBrainMass` merges two flattened, offset hemisphere
+lobes (visible central-fissure groove between them) plus a smaller
+cerebellum lobe into one 646-triangle mesh; `BuildBrainstem` is a
+separate tapered-cylinder primitive (plain flesh tone, no detail
+texture needed). `BrainTextureKit.cs`: five 256x256 procedural maps
+(albedo, normal, occlusion, metallic/gloss-in-alpha, height) all
+derived from ONE shared multi-octave value-noise heightfield (broad +
+medium + fine frequency bands, amplitudes summing to 1) so the bump
+shading, AO shadowing, smoothness split, and albedo shading all agree
+with each other instead of drifting as independently-authored maps
+could. Branching blood vessels use the same "difference of two shifted
+noise fields, threshold near zero" technique this project already uses
+elsewhere for crack/vein networks. `BaseDresser.BuildBigBrainShape` now
+spawns the mesh (via `PropLibrary`, inheriting its established
+defensive `_Cull = Off` fix for unverifiable custom-mesh winding) with
+a new material wiring all five maps into URP/Lit's standard property
+names (`_BumpMap`/`_OcclusionMap`/`_MetallicGlossMap`/`_ParallaxMap`
+plus matching keywords), replacing the old 5-sphere lobe cluster.
+
+**Honest limit, stated rather than silently attempted: no real
+subsurface scattering.** URP's standard Lit shader has no SSS slot
+(that's HDRP-only); authoring a custom Shader Graph approximation blind,
+with no Editor here to compile or render it against, was judged too
+likely to ship something silently broken. Approximated instead with
+Lit's own existing levers -- a translucent-reading base palette,
+moderate smoothness, and a faint warm low-level emission -- the same
+"closest achievable approximation, plainly labeled as one" call already
+made for lighting elsewhere in this project.
+
+**The real story of this pass: a from-scratch numeric verification
+harness, separate from the usual flightcheck compile check, caught
+three concrete bugs that would otherwise have shipped silently broken
+-- exactly the docs/28 failure class ("winding disagreement causes
+back-face culling to vanish props," "double-winding cancels normals to
+zero") this project has been bitten by before.** A standalone
+`brainverify` console project (real `BrainMesh.cs`/`BrainTextureKit.cs`
+against the shared `UnityStub.cs`) independently recomputed each lobe's
+own centroid and checked every triangle's face normal points outward
+from it, checked for zero-area triangles, round-tripped the normal
+map's RGB encoding back to unit-length vectors, and checked every
+noise-driven map actually varies instead of reading flat. First run:
+**646/700 hemisphere/cerebellum triangles wound inward** (the per-quad
+UV-sphere triangulation had its winding backwards from the start;
+hand-verified via cross-product math and fixed by swapping the last two
+indices of each triangle), **24/48 brainstem triangles also wound
+inward** (a second, independent triangulation bug in the tapered-
+cylinder's side quads -- the cap triangles were already correct, only
+the two side triangles per segment were backwards), and **the AO map
+failed its own "not flat" check** (red channel only spanning 244-255 --
+the original 3-pixel blur radius was well inside a single fine-noise
+grid cell, so the "am I in a valley relative to my neighborhood" sample
+barely differed from the pixel itself; fixed by widening the blur to an
+8-point compass ring at a radius closer to the fine octave's own
+wavelength and raising the darkening gain). Re-running the harness
+after all three fixes: every check passes (the sphere's polar rows also
+left 6 duplicate wrap-seam vertices unreferenced by any triangle --
+harmless, since an unreferenced vertex is never rasterized, but the
+harness was extended to tell that apart from a REFERENCED vertex with a
+cancelled-to-zero normal, which would be the real bug).
+
+**Honest limits:** no Unity Editor here to confirm the brain reads as
+intended at real render scale/lighting, that the four newly-used URP/Lit
+property and keyword names (`_BumpMap`/`_OcclusionMap`/
+`_MetallicGlossMap`/`_ParallaxMap` and their `_NORMALMAP`/
+`_OCCLUSIONMAP`/`_METALLICSPECGLOSSMAP`/`_PARALLAXMAP` keywords) are
+exactly right against a real Editor (only `_BaseMap`/`_Smoothness` were
+previously proven working in this codebase), or that the parallax depth
+reads as intended at gameplay camera distance. Verified for real,
+beyond compile: the new `brainverify` numeric harness (winding,
+degeneracy, normal-map round-trip, map variation) passes clean after
+three genuine bug fixes; the main flightcheck harness still compiles
+the whole Unity gameplay layer against the real match-core DLL with
+these two new files included.

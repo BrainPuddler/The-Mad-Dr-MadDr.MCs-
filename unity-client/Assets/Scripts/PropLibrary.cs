@@ -25,6 +25,13 @@ public static class PropLibrary
     {
         Register("ornate-lamppost-pole", () => ProceduralMeshKit.Frustum(1f, 0.55f, 10));
         Register("market-stall-canopy", ProceduralMeshKit.Wedge);
+        // 2026-07 (Big Brain jar, replacing a pink-sphere-cluster
+        // placeholder): built at a fixed unit radius, same "centered,
+        // extends to a normalized size before the caller's own `scale`
+        // parameter sizes it" convention Frustum/Wedge already follow --
+        // see BrainMesh's own doc comment for the mesh itself.
+        Register("big-brain-mass", () => BrainMesh.BuildBrainMass(1f));
+        Register("big-brain-stem", () => BrainMesh.BuildBrainstem(12));
     }
 
     public static void Register(string key, MeshBuilder builder) { Registry[key] = builder; }

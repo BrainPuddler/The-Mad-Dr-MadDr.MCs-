@@ -378,27 +378,25 @@ public class BaseDresser : MonoBehaviour
         builder.SpawnPrim(PrimitiveType.Cylinder, jarCenter,
             new Vector3(radius * 1.7f, jarH * 0.46f, radius * 1.7f), fluidMat, jarHolder.transform);
 
-        // the brain itself: a cluster of overlapping lobes rather than one
-        // sphere, so it silhouettes as an organic mass, not a ball -- same
-        // "primitive-kit clustering" idiom RubblePileFx/etc already use
-        // elsewhere in this codebase for irregular organic/debris shapes.
-        var brainMat = new Material(ShaderUtil.FindRenderableShader());
-        var brainColor = new Color(0.85f, 0.62f, 0.68f);
-        brainMat.color = brainColor;
-        brainMat.EnableKeyword("_EMISSION");
-        brainMat.SetColor("_EmissionColor", brainColor * 0.5f);
-        var brainRadius = radius * 0.62f;
-        var lobeOffsets = new[]
-        {
-            new Vector3(0f, 0f, 0f),
-            new Vector3(brainRadius * 0.55f, brainRadius * 0.15f, brainRadius * 0.2f),
-            new Vector3(-brainRadius * 0.5f, brainRadius * 0.1f, brainRadius * 0.25f),
-            new Vector3(0f, brainRadius * 0.2f, -brainRadius * 0.5f),
-            new Vector3(0f, -brainRadius * 0.3f, brainRadius * 0.1f),
-        };
-        foreach (var offset in lobeOffsets)
-            builder.SpawnPrim(PrimitiveType.Sphere, jarCenter + offset,
-                Vector3.one * (brainRadius * 0.85f), brainMat, jarHolder.transform);
+        // 2026-07 (creator direction, replacing the pink-sphere-cluster
+        // placeholder above with a real low-poly brain + PBR material
+        // set): "geometry stays simple while the materials do the heavy
+        // lifting... 500-2,000 triangles... rely on textures to convey
+        // the intricate anatomy." See BrainMesh.cs (the mesh: two
+        // hemispheres + a central fissure + a cerebellum, ~700 tris) and
+        // BrainTextureKit.cs (the shared-heightfield normal/AO/
+        // smoothness/height set) for the actual technique -- this is
+        // just the placement + material wiring.
+        var brainRadius = radius * 0.75f;
+        var brainMat = BrainMaterial();
+        PropLibrary.Spawn(builder, "big-brain-mass", PrimitiveType.Sphere, jarCenter,
+            Vector3.one * brainRadius, brainMat, jarHolder.transform);
+
+        var stemMat = new Material(ShaderUtil.FindRenderableShader());
+        stemMat.color = new Color(0.68f, 0.55f, 0.55f);
+        var stemCenter = jarCenter - Vector3.up * (brainRadius * 0.85f);
+        PropLibrary.Spawn(builder, "big-brain-stem", PrimitiveType.Cylinder, stemCenter,
+            new Vector3(brainRadius * 0.28f, brainRadius * 0.5f, brainRadius * 0.28f), stemMat, jarHolder.transform);
 
         // chrome lid, sealing the jar -- deliberately a fixed metal color
         // (not owner-tinted, not glass) rather than a third arbitrary
@@ -440,6 +438,60 @@ public class BaseDresser : MonoBehaviour
             LabMeshBuilder.MakeTransparent(_scaffoldMat);
         }
         return _scaffoldMat;
+    }
+
+    /// <summary>The Big Brain jar's brain material: BrainTextureKit's
+    /// whole PBR set wired into URP/Lit's own standard property/keyword
+    /// names -- `_BaseMap` (albedo) and `_Smoothness` are already
+    /// verified working elsewhere in this file/RoadDresser, but
+    /// `_BumpMap`/`_NORMALMAP`, `_OcclusionMap`/`_OCCLUSIONMAP`,
+    /// `_MetallicGlossMap`/`_METALLICSPECGLOSSMAP`, and `_ParallaxMap`/
+    /// `_PARALLAXMAP`/`_Parallax` are all NEW here -- correct per Unity's
+    /// own long-stable URP Lit shader source, but genuinely unconfirmed
+    /// in THIS project (no prior usage to check against, and no Editor
+    /// here to compile/render it), same "flag a property, can't verify
+    /// the keyword string is exactly right" risk docs/28's whole bug
+    /// history is full of. Metallic stays 0 (organic tissue, no metal
+    /// response); a faint warm low-level emission approximates "soft,
+    /// organic, not plastic" -- URP's Lit shader has no real subsurface-
+    /// scattering slot at all (that's an HDRP-only feature), and a custom
+    /// Shader Graph approximation isn't attempted here for the same
+    /// "can't verify it compiles/renders blind" reason -- see
+    /// BrainTextureKit's own class header for the fuller account.</summary>
+    private static Material _brainMat;
+    private static Material BrainMaterial()
+    {
+        if (_brainMat != null) return _brainMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", BrainTextureKit.Albedo);
+        if (mat.HasProperty("_BumpMap"))
+        {
+            mat.SetTexture("_BumpMap", BrainTextureKit.Normal);
+            mat.EnableKeyword("_NORMALMAP");
+        }
+        if (mat.HasProperty("_OcclusionMap"))
+        {
+            mat.SetTexture("_OcclusionMap", BrainTextureKit.Occlusion);
+            if (mat.HasProperty("_OcclusionStrength")) mat.SetFloat("_OcclusionStrength", 1f);
+            mat.EnableKeyword("_OCCLUSIONMAP");
+        }
+        if (mat.HasProperty("_MetallicGlossMap"))
+        {
+            mat.SetTexture("_MetallicGlossMap", BrainTextureKit.MetallicGloss);
+            mat.EnableKeyword("_METALLICSPECGLOSSMAP");
+        }
+        if (mat.HasProperty("_ParallaxMap"))
+        {
+            mat.SetTexture("_ParallaxMap", BrainTextureKit.Height);
+            if (mat.HasProperty("_Parallax")) mat.SetFloat("_Parallax", 0.025f);
+            mat.EnableKeyword("_PARALLAXMAP");
+        }
+        if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", 0f);
+        var warmGlow = new Color(0.5f, 0.26f, 0.24f);
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", warmGlow * 0.1f);
+        _brainMat = mat;
+        return _brainMat;
     }
 
     /// <summary>A deliberate approximation of docs/17's own per-faction
