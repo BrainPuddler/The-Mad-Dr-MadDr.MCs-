@@ -8,7 +8,13 @@ using UnityEngine;
 /// (500-2,000 triangles)... Preserve a clean, recognizable silhouette by
 /// modeling only the major anatomical landmarks -- the two cerebral
 /// hemispheres, central longitudinal fissure, cerebellum, and brainstem
-/// -- while relying on textures to convey the intricate anatomy."
+/// -- while relying on textures to convey the intricate anatomy." A
+/// cerebellum lobe was built and shipped briefly, then dropped on
+/// creator review (2026-07 follow-up): tucked below and behind the
+/// hemispheres the way real anatomy has it, it read as sitting almost
+/// entirely below the visible hemisphere mass -- inside the jar's
+/// glass but out of frame from the angles that matter, not contributing
+/// to the silhouette. Cut rather than kept as dead geometry.
 ///
 /// Real generated geometry, not an imported asset -- this environment has
 /// no DCC/Editor pipeline to author one (same standing constraint
@@ -24,20 +30,20 @@ using UnityEngine;
 /// </summary>
 public static class BrainMesh
 {
-    /// <summary>The two hemispheres (flattened toward the central
-    /// fissure, offset apart to leave it visible as a groove) plus the
-    /// cerebellum, merged into ONE mesh sharing one equirectangular UV
-    /// layout per lobe -- so one material/texture set reads consistently
-    /// across the whole brain mass. The brainstem is deliberately NOT
-    /// included here (see BuildBrainstem below): it's plain flesh-toned
-    /// geometry, not brain-surface tissue, so it gets its own simple
-    /// primitive and material instead of sharing this mesh's detailed
-    /// PBR set for no visual benefit.
+    /// <summary>The two hemispheres, flattened toward the central
+    /// fissure and offset apart to leave it visible as a groove, merged
+    /// into ONE mesh sharing one equirectangular UV layout per lobe -- so
+    /// one material/texture set reads consistently across the whole
+    /// brain mass. No cerebellum lobe (see this file's own class header
+    /// for why it was cut). The brainstem is deliberately NOT included
+    /// here (see BuildBrainstem below): it's plain flesh-toned geometry,
+    /// not brain-surface tissue, so it gets its own simple primitive and
+    /// material instead of sharing this mesh's detailed PBR set for no
+    /// visual benefit.
     ///
     /// Triangle budget at the default segment counts: two hemispheres at
-    /// 14x10 (~280 tris each) + one cerebellum at 10x7 (~140 tris) =
-    /// ~700 tris total, comfortably inside the requested 500-2,000
-    /// range with room to spare for the brainstem's own handful.</summary>
+    /// 14x10 (~260 tris each) = ~520 tris total, comfortably inside the
+    /// requested 500-2,000 range.</summary>
     public static Mesh BuildBrainMass(float radius)
     {
         var verts = new List<Vector3>();
@@ -52,11 +58,6 @@ public static class BrainMesh
         var hemiRadii = new Vector3(radius * 0.62f, radius * 0.72f, radius * 0.82f);
         AddUvSphere(verts, uvs, tris, new Vector3(-gap - hemiRadii.x * 0.35f, radius * 0.05f, 0f), hemiRadii, 14, 10);
         AddUvSphere(verts, uvs, tris, new Vector3(gap + hemiRadii.x * 0.35f, radius * 0.05f, 0f), hemiRadii, 14, 10);
-
-        // cerebellum: a smaller, rounder lobe tucked at the back-bottom,
-        // where the real one sits beneath the occipital lobes.
-        var cerebellumRadii = new Vector3(radius * 0.4f, radius * 0.3f, radius * 0.32f);
-        AddUvSphere(verts, uvs, tris, new Vector3(0f, -radius * 0.55f, -radius * 0.55f), cerebellumRadii, 10, 7);
 
         var mesh = new Mesh();
         mesh.vertices = verts.ToArray();

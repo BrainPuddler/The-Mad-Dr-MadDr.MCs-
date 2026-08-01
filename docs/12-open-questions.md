@@ -8032,3 +8032,37 @@ console/page errors, and a before/after screenshot comparison against
 the pre-change code (same seed) shows the intended change: a flat
 single pink mass under `TILE.slick` before, a mottled twin-lobe veined
 brain after.
+
+## 2026-07 follow-up: cerebellum lobe cut from both brains -- tucked below the hemispheres, it wasn't contributing anything
+
+Creator, on review: "the cerebellum is below the hemispheres. so we can
+probably exclude them." Both the Big Brain base's `BrainMesh.cs`
+(Unity) and the Lab's `buildHead` mastermind branch
+(`site/creature-renderer.js`) positioned the cerebellum lobe below and
+behind the hemisphere mass, the real anatomical arrangement -- but
+posed vertically in a jar (Unity) or under a glass dome on top of a
+head (Lab), "below and behind" reads as "almost entirely out of frame,"
+not a visible secondary lobe. Geometry that never shows isn't buying
+anything, so it's cut from both rather than kept as dead triangles:
+
+- `BrainMesh.BuildBrainMass` (Unity): dropped the cerebellum
+  `AddUvSphere` call entirely. Triangle count drops from 646 to 520 --
+  still comfortably inside the requested 500-2,000 range, just two
+  hemisphere lobes now.
+- `buildHead`'s `mastermind` branch (Lab): dropped the cerebellum
+  `ellipsoid` call added in the prior follow-up, keeping the twin-lobe
+  veined hemispheres + central fissure.
+- The brainstem is untouched in both places -- it's a separate,
+  deliberately visible element (a stalk hanging below the jar / a
+  distinct head-to-neck taper), not subject to the same "posed
+  vertically, ends up hidden" problem the cerebellum had.
+
+**Verified for real:** the `brainverify` numeric harness (updated to
+drop its cerebellum-lobe centroid/vertex-range expectations) passes
+clean at the new 520-tri count, 0 winding failures, 0 degenerate
+triangles; the flightcheck harness still compiles the whole Unity
+gameplay layer clean; `node --check` plus a fresh Playwright/Chromium
+render of the Lab's `mastermind` tier confirms the visible silhouette
+is unchanged from before the cut (as expected, since the cerebellum
+was already occluded from the angles that matter) -- confirming the
+cut geometry really was dead weight, not a visible regression.

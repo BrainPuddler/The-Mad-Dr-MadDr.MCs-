@@ -1121,15 +1121,18 @@ function buildHead(mb, o, neckY, zOff) {
       [hR[0]*0.72, hR[1]*0.52, hR[2]*0.70], o.skin, 0.3, 0, 12, o.skinFn);
     topY = hC[1] + hR[1] * 1.04;
   } else if (t === 'mastermind') {
-    // the brain, sealed under glass -- two veined hemisphere lobes, a
-    // central longitudinal fissure between them, and a small cerebellum
-    // tucked low at the back. Reuses alienDetails' own proven veins/
-    // sulcus treatment (TILE.veins, the same "deep sulcus" tube trick)
-    // rather than the old single-mass-plus-highlights blob under the
-    // wrong TILE.slick (a smooth-skin texture, not a brain one) -- and
-    // adds the cerebellum lobe to match the Big Brain base's own
-    // procedural mesh (BrainMesh.cs/BrainTextureKit.cs, unity-client),
-    // so both places read as the same creature.
+    // the brain, sealed under glass -- two veined hemisphere lobes and a
+    // central longitudinal fissure between them. Reuses alienDetails'
+    // own proven veins/sulcus treatment (TILE.veins, the same "deep
+    // sulcus" tube trick) rather than the old single-mass-plus-
+    // highlights blob under the wrong TILE.slick (a smooth-skin texture,
+    // not a brain one). No cerebellum lobe: it was tried (matching the
+    // Big Brain base's own BrainMesh.cs), but tucked below and behind
+    // the hemispheres the way real anatomy has it, it sat almost
+    // entirely below the visible hemisphere mass -- inside the glass but
+    // out of frame, not contributing to the silhouette (creator review,
+    // 2026-07 follow-up). Cut on both sides rather than kept as
+    // unseen geometry.
     const bc = [hC[0], hC[1] + hR[1]*0.62, hC[2] - 0.15];
     const bTex = mb.tex;
     mb.setTex([...TILE.veins, 0.8, 0.65]);
@@ -1137,8 +1140,6 @@ function buildHead(mb, o, neckY, zOff) {
     for (const s of [-1, 1])
       ellipsoid(mb, [bc[0] + s*hR[0]*0.40, bc[1] + hR[1]*0.34, bc[2]],
         [hR[0]*0.44, hR[1]*0.30, hR[2]*0.55], sh(BRAINC, 0.92), 0.55, 0, 8);
-    ellipsoid(mb, [bc[0], bc[1] - hR[1]*0.42, bc[2] - hR[2]*0.55],
-      [hR[0]*0.34, hR[1]*0.22, hR[2]*0.3], sh(BRAINC, 0.85), 0.5, 0, 10);
     mb.setTex(TEX_NONE);
     tube(mb, [[bc[0], bc[1]+hR[1]*0.5, bc[2]-hR[2]*0.4], [bc[0], bc[1]-hR[1]*0.2, bc[2]+hR[2]*0.5]],
       [0.08, 0.08], sh(BRAINC, 0.7), 0.4, 0, 6);
