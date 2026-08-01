@@ -374,6 +374,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var commander = gameObject.GetComponent<WaypointCommander>();
         if (commander == null) commander = gameObject.AddComponent<WaypointCommander>();
         commander.Init(this);
+        grabCursor.commander = commander;
 
         var hud = gameObject.GetComponent<HudStatus>();
         if (hud == null) hud = gameObject.AddComponent<HudStatus>();
@@ -406,6 +407,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var battalionHud = gameObject.GetComponent<BattalionHud>();
         if (battalionHud == null) battalionHud = gameObject.AddComponent<BattalionHud>();
         battalionHud.Init(commander, minimap, recallHud, grabCursor);
+
+        var productionQueueHud = gameObject.GetComponent<ProductionQueueHud>();
+        if (productionQueueHud == null) productionQueueHud = gameObject.AddComponent<ProductionQueueHud>();
+        productionQueueHud.Init(grabCursor);
 
         var clock = gameObject.GetComponent<AnalogClockHud>();
         if (clock == null) gameObject.AddComponent<AnalogClockHud>();

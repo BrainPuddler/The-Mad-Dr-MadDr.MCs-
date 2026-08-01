@@ -176,6 +176,25 @@ public class MonsterAgent : MonoBehaviour
     public string DisplayName { get; private set; } = "";
     public bool Selected { get; private set; }
 
+    /// <summary>2026-08 (creator question: "why not just have a variable
+    /// in the object saying monster belongs to battalion group id"):
+    /// which battalion slot (0-9) this monster currently belongs to, or
+    /// null if none -- a MIRROR of `WaypointCommander`'s own `_battalions`
+    /// list membership (same relationship <see cref="Selected"/> already
+    /// has to that class's `_selected` list), kept in sync by <see
+    /// cref="SetBattalionSlot"/>, never written directly by this class.
+    /// Only ever reflects the MOST RECENT battalion this monster was
+    /// assigned to -- a monster can still be a live member of an OLDER
+    /// battalion's own list at the same time (this field doesn't enforce
+    /// exclusive membership, it's a convenience lookup, not a second
+    /// source of truth).</summary>
+    public int? BattalionSlot { get; private set; }
+
+    public void SetBattalionSlot(int? slot)
+    {
+        BattalionSlot = slot;
+    }
+
     /// <summary>This creature's combat state (health + genome-derived
     /// weapon). RuntimeCityBuilder registers it so tanks can target it and
     /// its health bar shows while it fights.</summary>

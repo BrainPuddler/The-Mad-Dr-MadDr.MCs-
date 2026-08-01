@@ -8982,3 +8982,101 @@ browser here to confirm any of this on screen -- same standing limit as
 ever, and unlike the C# side there's no automated test suite covering
 the Lab's own JS at all in this repo, so the Lab-side change is
 syntax-verified only, not behavior-verified.
+
+## 2026-08 follow-up: real Factory production queue -- clones and battalion builds now stagger over time instead of popping instantly, plus a mid-implementation architecture question answered in code
+
+Creator direction: "Factories, like in StarCraft make x number of
+units. So the same happens here in the build a battalion. The monsters
+line up at the cloning door of the factory and one at a time walk get
+cloned. When the battalion is done, it parks itself away from factory
+and assigned a name to it, adding it to the battalion list. There is a
+cued icons with numbers in the lower right hand corner that specify
+the number of units to make of each type that includes battalions and
+individual units. When the user clicks on the factory those cued items
+pop-up in the bar next to the mini map showing what's going to be made
+and in one order... a small icon will float over top with a number
+showing where we are in the build process. Click on the factory and
+can abort all builds."
+
+**What changed under the hood.** Both `GrabCursor.CloneOnto` (repeat-
+drop cloning) and `BuildBattalionAtOwnFactory` (battalion builds) used
+to spawn every clone in the same frame, in a tight loop. They now push
+a `QueueItem` (`SingleUnit`: one genome + a remaining count; or
+`Battalion`: a snapshot list of `(genome, radius)` pairs taken at queue
+time, so a battalion's later membership changes don't retroactively
+change what's mid-build) onto a shared `_queue`, and a new
+`TickProduction` advances the FRONT item's timer once per frame,
+spawning exactly one clone every `productionSecondsPerUnit` (4s, v0.1
+placeholder like every other economy number in this repo) via the
+SAME spend-Blood/`FindOpenHexNear`/`SpawnMonster`/`SetSettleTarget`
+mechanics the old instant-loop used -- "the monsters line up at the
+cloning door... and one at a time walk get cloned" falls straight out
+of staggering real spawns over real time, no separate queueing-
+animation state needed, since each clone's own existing walk-out-and-
+settle behavior already reads as "leaving the factory and going to
+park." A repeat drop of the same creature stacks onto the existing
+queued count rather than adding a duplicate entry. When a Battalion
+item finishes, `WaypointCommander.FormBattalionFromProduction` claims
+the first empty slot 0-9 and names it off the same running counter as
+manually-assigned battalions -- "parks itself away from factory and
+assigned a name to it, adding it to the battalion list," exactly as
+specced (a full slot bank of 10 just logs and drops the request rather
+than silently overwriting one).
+
+**Answered mid-implementation: "why not just have a variable in the
+object saying monster belongs to battalion group id?"** Both are now
+true, deliberately. `WaypointCommander` still OWNS membership (each
+`Battalion`'s `Members` list is the source of truth `Battalions`/
+`BattalionMembers`/`SelectBattalion` all read from) because a monster
+needs to belong to at most one battalion and the commander is what
+already tracks assignment identity end to end (Ctrl+digit, Alt+digit,
+auto-formed-from-production). But a monster asking "which battalion,
+if any, am I in" is a real, cheap, frequently-useful query (HUD
+display, this same production system's own battalion-build label), so
+`MonsterAgent` now also carries `int? BattalionSlot` +
+`SetBattalionSlot`, mirrored by `CreateBattalion` the exact same way
+`Selected`/`SetSelected` already mirrors `WaypointCommander._selected`
+onto each monster for the selection-ring visual -- same established
+pattern, not a new one. Reassigning a battalion slot clears the OLD
+members' mirrored field first (only if it still points at this slot,
+so a monster that's since moved to a different battalion isn't
+clobbered), then sets it on the new members.
+
+**The three UI pieces, and two honest scope calls on them.** New
+`ProductionQueueHud.cs`, anchored to the screen's bottom-right corner
+(the one corner nothing else in this project currently claims --
+minimap/RecallHud/BattalionHud own bottom-left, BuildMenuHud/
+BuildingNavHud own top-left/bottom-center): one tile per queued item in
+build order, each with a remaining-count corner badge, the FRONT tile
+showing a live fill-bar toward its next spawn, and a "Cancel All"
+button wired to a new `GrabCursor.CancelAllProduction`. A second
+billboard badge floats over the actual Factory (`GrabCursor.
+FindAnyOwnCompleteFactory`, made public for this) showing the front
+item's remaining count, using the same world-to-screen IMGUI idiom
+`HealthBars`/`HarvesterMarkerHud` already established -- this part is
+built exactly as described. Two pieces are folded into that same
+single panel rather than built as separate, literal features, because
+there is currently no click-to-select machinery for RTS/SimBuilding
+buildings at all (`RuntimeCityBuilder._buildingByCollider` only
+registers PROCEDURAL CityGen buildings for click detection, confirmed
+by reading that registration code, not assumed -- SimBuilding entries
+rendered by `BaseDresser` were never added to it): (1) "click the
+factory, queue pops up next to the minimap" becomes the same
+always-visible panel, since there is normally only ever one queue to
+show and a second copy gated behind a building click would just be a
+redundant path to the identical list; (2) "click the factory to abort
+all builds" becomes the panel's own Cancel All button instead of a 3D
+raycast against a building that isn't selectable yet. Flagging both
+here rather than presenting them as literal reads -- a future pass
+adding real RTS-building selection could revisit either.
+
+**Verified for real:** flightcheck recompiles the full edited/new set
+(`GrabCursor.cs`, `WaypointCommander.cs`, `MonsterAgent.cs`,
+`ProductionQueueHud.cs`, `RuntimeCityBuilder.cs`) clean against the
+real match-core/citygen-core DLLs, including catching (then fixing) a
+real stale two-argument call site left over from `CloneOnto`'s
+signature change (the factory lookup moved from queue-time to
+production-time, since a queue can outlive the drop that started it).
+No Unity Editor here to confirm the HUD panel or the walk-to-park
+animation on screen -- same standing limit as every other Unity-side
+change in this project's history.

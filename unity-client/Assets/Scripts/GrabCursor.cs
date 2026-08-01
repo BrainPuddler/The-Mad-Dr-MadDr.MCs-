@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using MadDr.CityGen;
 using MadDr.MatchCore;
+using MadDr.RosterClient;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -74,6 +76,12 @@ public class GrabCursor : MonoBehaviour
     [Tooltip("2026-08 (creator direction: \"increase the building no parking area to take into account the monster size\"): extra clearance, in meters, ADDED on top of a monster's own body radius when FindOpenHexNear checks a candidate parking spot's near edge against the building's real footprint -- the exact-fit geometric check alone leaves zero breathing room (a spot that JUST clears the wall still reads as uncomfortably tight once a body is actually standing there). Widening this widens the effective no-parking zone around every building for every monster size at once, without touching the per-monster radius math itself.")]
     public float buildingClearanceMargin = 2f;
 
+    [Header("Production queue (2026-08: \"factories, like in StarCraft, make x number of units\")")]
+    public WaypointCommander commander;
+
+    [Tooltip("Seconds of production time per clone, regardless of whether it's part of a single-unit run or a battalion build -- a real v0.1 placeholder (CLAUDE.md's standing policy), not sourced from any design doc.")]
+    public float productionSecondsPerUnit = 4f;
+
     private enum Mode { Off, Armed, Carrying }
     private Mode _mode = Mode.Off;
     private MonsterAgent _carried;
@@ -92,6 +100,177 @@ public class GrabCursor : MonoBehaviour
 
     private static Texture2D _clawTexture;
 
+    // ---- production queue (2026-08 creator direction: "Factories, like
+    // in StarCraft make x number of units. So the same happens here in
+    // the build a battalion... The monsters line up at the cloning door
+    // of the factory and one at a time walk get cloned... queued icons
+    // with numbers... specify the number of units to make of each type
+    // that includes battalions and individual units") -----------------
+
+    private enum QueueItemKind { SingleUnit, Battalion }
+
+    /// <summary>One queued production run. SingleUnit reproduces ONE
+    /// genome `RemainingCount` times (repeat drops of the SAME creature
+    /// onto the Factory stack onto this SAME item's count instead of
+    /// adding a second icon -- see <see cref="QueueSingleUnit"/>).
+    /// Battalion reproduces a SNAPSHOT of a squad's own genomes/radii,
+    /// taken at queue time (not read live later -- the original members
+    /// could die mid-queue without that changing what gets built), one
+    /// member per production tick; `Produced` accumulates the clones so
+    /// <see cref="WaypointCommander.FormBattalionFromProduction"/> can
+    /// gather them into a fresh battalion the instant the last one pops
+    /// out.</summary>
+    private sealed class QueueItem
+    {
+        public QueueItemKind Kind;
+        public StoredGenomeDto SingleGenome;
+        public float SingleRadius;
+        public int RemainingCount;
+        public System.Collections.Generic.List<(StoredGenomeDto Genome, float Radius)> BattalionRemaining;
+        public string Label;   // HUD display: genome Id for SingleUnit, the source battalion's own name for Battalion
+        public readonly System.Collections.Generic.List<MonsterAgent> Produced = new System.Collections.Generic.List<MonsterAgent>();
+    }
+
+    private readonly System.Collections.Generic.List<QueueItem> _queue = new System.Collections.Generic.List<QueueItem>();
+    private float _productionTimer;
+
+    /// <summary>Read-only view for <see cref="ProductionQueueHud"/> --
+    /// one entry per queued item, in build order, with a 0..1 progress
+    /// fraction (only meaningful, and only ever nonzero, for the FRONT
+    /// item -- everything behind it hasn't started).</summary>
+    public IEnumerable<(string Label, int Remaining, float Progress)> ProductionQueue
+    {
+        get
+        {
+            for (var i = 0; i < _queue.Count; i++)
+            {
+                var item = _queue[i];
+                var remaining = item.Kind == QueueItemKind.SingleUnit ? item.RemainingCount : item.BattalionRemaining.Count;
+                var progress = i == 0 ? Mathf.Clamp01(_productionTimer / Mathf.Max(0.01f, productionSecondsPerUnit)) : 0f;
+                yield return (item.Label, remaining, progress);
+            }
+        }
+    }
+
+    public bool HasQueuedProduction { get { return _queue.Count > 0; } }
+
+    /// <summary>2026-08: "click on the factory and can abort all
+    /// builds" -- clears every queued item outright. Nothing to refund:
+    /// Blood is only ever spent the instant a clone actually pops out
+    /// (see <see cref="TickProduction"/>), never reserved up front when
+    /// an item is queued, so there's nothing owed back for work that
+    /// never happened.</summary>
+    public void CancelAllProduction()
+    {
+        _queue.Clear();
+        _productionTimer = 0f;
+    }
+
+    /// <summary>Queues `count` more clones of `genome` -- stacks onto an
+    /// existing queued run of the SAME genome (by `Id`) anywhere in the
+    /// queue instead of adding a second entry, so "queued icons... one
+    /// per type" holds even across repeat drops. `radius` is captured
+    /// NOW (from whichever live agent is being dropped/queued), not
+    /// re-derived from the genome later -- see <see cref="QueueItem"/>'s
+    /// own doc for why.</summary>
+    private void QueueSingleUnit(StoredGenomeDto genome, float radius, int count)
+    {
+        if (genome == null || count <= 0) return;
+        foreach (var item in _queue)
+        {
+            if (item.Kind != QueueItemKind.SingleUnit || item.SingleGenome.Id != genome.Id) continue;
+            item.RemainingCount += count;
+            return;
+        }
+        _queue.Add(new QueueItem
+        {
+            Kind = QueueItemKind.SingleUnit,
+            SingleGenome = genome,
+            SingleRadius = radius,
+            RemainingCount = count,
+            Label = genome.Id,
+        });
+    }
+
+    /// <summary>One production tick per frame -- advances the FRONT
+    /// item's timer and, once it crosses `productionSecondsPerUnit`,
+    /// spawns exactly one clone (same spend/park mechanics <see
+    /// cref="CloneOnto"/> always used, just one at a time instead of a
+    /// tight while-loop) and hands it the same settle-creep walk-away
+    /// destination -- staggering real spawns over real time is what
+    /// gives "the monsters line up at the cloning door... and one at a
+    /// time walk get cloned" its read, with no separate queueing-
+    /// animation state needed: each clone's own existing walk-out-and-
+    /// park behavior IS the visual. Stalls (leaves the timer at its
+    /// current value, retries next frame) rather than dropping the item
+    /// if there's no own Factory right now, no parking room this
+    /// instant, or insufficient Blood -- production simply waits for
+    /// whichever condition is blocking it to clear.</summary>
+    private void TickProduction(float dt)
+    {
+        if (_queue.Count == 0) { _productionTimer = 0f; return; }
+        _productionTimer += dt;
+        if (_productionTimer < productionSecondsPerUnit) return;
+
+        var factory = FindAnyOwnCompleteFactory();
+        if (factory == null) return;
+
+        var item = _queue[0];
+        StoredGenomeDto genome;
+        float radius;
+        if (item.Kind == QueueItemKind.SingleUnit) { genome = item.SingleGenome; radius = item.SingleRadius; }
+        else { var next = item.BattalionRemaining[0]; genome = next.Genome; radius = next.Radius; }
+
+        var parkSpot = FindOpenHexNear(factory.Hex, new System.Collections.Generic.HashSet<HexCoord>(), radius);
+        if (parkSpot == null) return;   // no room this instant -- try again next frame
+        if (!builder.TrySpendBlood(cloneCostBlood)) return;   // can't afford yet -- try again next frame
+
+        _productionTimer = 0f;
+        var clone = builder.SpawnMonster(genome, factory.Hex);
+        clone.SetSettleTarget(builder.WorldOf(parkSpot.Value));
+
+        if (item.Kind == QueueItemKind.SingleUnit)
+        {
+            item.RemainingCount--;
+            if (item.RemainingCount <= 0) _queue.RemoveAt(0);
+        }
+        else
+        {
+            item.Produced.Add(clone);
+            item.BattalionRemaining.RemoveAt(0);
+            if (item.BattalionRemaining.Count == 0)
+            {
+                if (commander != null) commander.FormBattalionFromProduction(item.Produced);
+                _queue.RemoveAt(0);
+            }
+        }
+    }
+
+    /// <summary>Nearest of the player's own Complete Factories to the
+    /// city center -- "nearest to what" doesn't have a clean answer for
+    /// a QUEUE (unlike a single drop/battalion build, which has a real
+    /// drop point/group position to be nearest TO), so this just picks
+    /// consistently rather than arbitrarily; most games only ever have
+    /// one Factory anyway. Null if the player has none yet. Public so
+    /// <see cref="ProductionQueueHud"/> can anchor the floating build-
+    /// progress badge over the same Factory this queue actually drains
+    /// into, instead of re-deriving its own notion of "the" factory.</summary>
+    public SimBuilding FindAnyOwnCompleteFactory()
+    {
+        if (bridge == null || !bridge.HasMatch || builder == null) return null;
+        SimBuilding best = null;
+        var bestDist = float.MaxValue;
+        var center = builder.WorldOf(builder.City.CenterHex);
+        for (var i = 0; i < bridge.BuildingCount; i++)
+        {
+            var b = bridge.BuildingAt(i);
+            if (b.PlayerIndex != localPlayerIndex || b.Kind != BuildingKind.Factory || b.State != BuildingState.Complete) continue;
+            var dist = (builder.WorldOf(b.Hex) - center).sqrMagnitude;
+            if (dist < bestDist) { bestDist = dist; best = b; }
+        }
+        return best;
+    }
+
     public void Init(SimBridge simBridge, RuntimeCityBuilder cityBuilder, int playerIndex)
     {
         bridge = simBridge;
@@ -101,6 +280,12 @@ public class GrabCursor : MonoBehaviour
 
     private void Update()
     {
+        // production runs regardless of grab-mode state or where the
+        // mouse happens to be -- a queue building in the background
+        // shouldn't pause just because the player isn't currently
+        // dragging a monster.
+        if (builder != null) TickProduction(Time.deltaTime);
+
         var keyboard = Keyboard.current;
         var mouse = Mouse.current;
         if (keyboard == null || mouse == null || builder == null) return;
@@ -211,7 +396,7 @@ public class GrabCursor : MonoBehaviour
             var factory = FindOwnFactoryNear(dropHex);
             if (factory != null)
             {
-                CloneOnto(agent, factory.Hex);
+                CloneOnto(agent);
 
                 // creator direction: "when a new monster is dropped on a
                 // factory, the current monster is booted to the next
@@ -276,102 +461,53 @@ public class GrabCursor : MonoBehaviour
         return null;
     }
 
-    /// <summary>Spend down `builder.WalletBlood` one clone at a time, each
-    /// an exact copy of `original`'s own genome. Creator direction: "when
-    /// clones pop out they should emerge and park themselves around the
-    /// factory" -- each clone SPAWNS at the Factory's own hex (it visibly
-    /// comes out of the building that made it) and is immediately handed
-    /// a settle-creep destination to a nearby open hex via <see
-    /// cref="MonsterAgent.SetSettleTarget"/>, the SAME direct-line "walk
-    /// to a point and stop" mechanism group-move arrival already uses --
-    /// reused rather than reinvented. Each clone claims a distinct parking
-    /// hex so N of them fan out around the Factory instead of walking to
-    /// the same spot and stacking.</summary>
-    private void CloneOnto(MonsterAgent original, HexCoord factoryHex)
+    /// <summary>2026-08 (creator direction: "Factories, like in StarCraft
+    /// make x number of units... the monsters line up at the cloning
+    /// door of the factory and one at a time walk get cloned"): queues
+    /// `maxClonesPerDrop` more clones of `original`'s own genome for
+    /// <see cref="TickProduction"/> to work through one at a time, rather
+    /// than instantly spawning them all in one frame the way this used
+    /// to. A repeat drop of the SAME creature stacks onto the existing
+    /// queued count instead of adding a second entry -- see <see
+    /// cref="QueueSingleUnit"/>'s own doc.</summary>
+    private void CloneOnto(MonsterAgent original)
     {
         var creature = original.Creature;
         if (creature == null || builder == null) return;
-
-        var claimed = new System.Collections.Generic.HashSet<HexCoord>();
-        var spawned = 0;
-        while (spawned < maxClonesPerDrop)
-        {
-            // find the parking spot BEFORE spending -- an unaffordable-or-
-            // nowhere-to-park check must never debit Blood for a clone
-            // that then has nowhere to go.
-            var parkSpot = FindOpenHexNear(factoryHex, claimed, original.Radius);
-            if (parkSpot == null) break;
-            if (!builder.TrySpendBlood(cloneCostBlood)) break;
-            claimed.Add(parkSpot.Value);
-
-            var clone = builder.SpawnMonster(creature, factoryHex);
-            clone.SetSettleTarget(builder.WorldOf(parkSpot.Value));
-            spawned++;
-        }
-
-        if (spawned > 0)
-            Debug.Log("Cloned " + spawned + "x " + creature.Id + " at the Factory (" + cloneCostBlood * spawned + " Blood spent).");
+        QueueSingleUnit(creature, original.Radius, maxClonesPerDrop);
     }
 
     /// <summary>2026-08 (creator direction: "battalion grouping system...
-    /// I can make the factory build that battalion group of monsters"):
-    /// clones ONE new specimen per LIVE battalion member (not deduped by
-    /// genome -- "build that battalion GROUP" reads as reproducing the
-    /// whole squad's own composition/proportions, e.g. 3 Tetrapods + 2
-    /// Winged makes 3 more Tetrapods + 2 more Winged, not just one of
-    /// each distinct type), at whichever of the player's own Complete
-    /// Factories sits nearest the battalion's own average position (most
-    /// games only ever have one; nearest-to-the-group is the sane
-    /// tiebreak if there happen to be more). Same per-clone economy and
-    /// parking as <see cref="CloneOnto"/> above, generalized from "N
-    /// copies of one held specimen's genome" to "one copy of each
-    /// member's own genome" -- reuses the exact same spend/park call
-    /// shape, not a parallel implementation. Running out of Blood stops
-    /// the whole build (further members definitely can't afford it
-    /// either); running out of PARKING ROOM for one member skips just
-    /// that one and keeps trying the rest, so a crowded factory doesn't
-    /// abort an otherwise-affordable build. Silent no-op if the player
-    /// has no own Complete Factory yet, or the battalion is empty/all
-    /// members have since died.</summary>
+    /// I can make the factory build that battalion group of monsters",
+    /// then "Factories, like in StarCraft make x number of units. So the
+    /// same happens here in the build a battalion"): queues a snapshot
+    /// of the battalion's own genomes/radii (NOT deduped -- "build that
+    /// battalion GROUP" reads as reproducing the whole squad's own
+    /// composition/proportions, e.g. 3 Tetrapods + 2 Winged queues 3
+    /// more Tetrapods + 2 more Winged, not just one of each distinct
+    /// type) for <see cref="TickProduction"/> to produce one member per
+    /// tick. The instant the LAST member of this run pops out, <see
+    /// cref="WaypointCommander.FormBattalionFromProduction"/> gathers
+    /// everything this queue item produced into a fresh battalion --
+    /// "when the battalion is done, it parks itself away from factory
+    /// and assigned a name to it, adding it to the battalion list."
+    /// Silent no-op if the battalion is empty/all members have since
+    /// died -- nothing queued means nothing to build.</summary>
     public void BuildBattalionAtOwnFactory(System.Collections.Generic.IReadOnlyList<MonsterAgent> battalion)
     {
-        if (battalion == null || battalion.Count == 0 || builder == null || bridge == null || !bridge.HasMatch) return;
+        if (battalion == null || battalion.Count == 0) return;
 
-        var avg = Vector3.zero;
-        var n = 0;
-        foreach (var m in battalion) { if (m == null) continue; avg += m.transform.position; n++; }
-        if (n == 0) return;
-        avg /= n;
-
-        SimBuilding factory = null;
-        var bestDist = float.MaxValue;
-        for (var i = 0; i < bridge.BuildingCount; i++)
-        {
-            var b = bridge.BuildingAt(i);
-            if (b.PlayerIndex != localPlayerIndex || b.Kind != BuildingKind.Factory || b.State != BuildingState.Complete) continue;
-            var dist = (builder.WorldOf(b.Hex) - avg).sqrMagnitude;
-            if (dist < bestDist) { bestDist = dist; factory = b; }
-        }
-        if (factory == null) return;
-
-        var claimed = new System.Collections.Generic.HashSet<HexCoord>();
-        var spawned = 0;
+        var snapshot = new System.Collections.Generic.List<(StoredGenomeDto Genome, float Radius)>();
+        var label = "Battalion build";
         foreach (var m in battalion)
         {
             if (m == null || m.Creature == null) continue;
-
-            var parkSpot = FindOpenHexNear(factory.Hex, claimed, m.Radius);
-            if (parkSpot == null) continue;
-            if (!builder.TrySpendBlood(cloneCostBlood)) break;
-            claimed.Add(parkSpot.Value);
-
-            var clone = builder.SpawnMonster(m.Creature, factory.Hex);
-            clone.SetSettleTarget(builder.WorldOf(parkSpot.Value));
-            spawned++;
+            snapshot.Add((m.Creature, m.Radius));
+            if (m.BattalionSlot.HasValue) label = "Battalion " + m.BattalionSlot.Value + " build";
         }
+        if (snapshot.Count == 0) return;
 
-        if (spawned > 0)
-            Debug.Log("Built " + spawned + "x for the battalion at the Factory (" + cloneCostBlood * spawned + " Blood spent).");
+        _queue.Add(new QueueItem { Kind = QueueItemKind.Battalion, BattalionRemaining = snapshot, Label = label });
     }
 
     /// <summary>2026-08 (creator direction: "increase the boundary around

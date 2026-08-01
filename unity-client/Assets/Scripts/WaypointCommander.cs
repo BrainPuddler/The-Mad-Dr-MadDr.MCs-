@@ -137,7 +137,7 @@ public class WaypointCommander : MonoBehaviour
         // docked above the minimap (2026-08), and the battalion list
         // docked above THAT (2026-08).
         if (Minimap.PointerOver || BuildingNavHud.PointerOver || SelectionHud.PointerOver
-            || RecallHud.PointerOver || BattalionHud.PointerOver) return;
+            || RecallHud.PointerOver || BattalionHud.PointerOver || ProductionQueueHud.PointerOver) return;
 
         var mouse = Mouse.current;
         if (mouse == null || _builder == null) return;
@@ -200,10 +200,66 @@ public class WaypointCommander : MonoBehaviour
     {
         PruneSelection();
         if (_selected.Count == 0) return;
+        CreateBattalion(_selected, slot);
+    }
+
+    /// <summary>2026-08 (creator direction: "when the battalion is done,
+    /// it parks itself away from factory and assigned a name to it,
+    /// adding it to the battalion list"): called by <see
+    /// cref="GrabCursor"/>'s production queue the instant a queued
+    /// battalion build finishes producing every member -- auto-forms the
+    /// freshly-cloned squad into a NEW battalion, same auto-incrementing
+    /// name as a manual Ctrl+digit bind, just triggered by production
+    /// completing instead of a keypress. Picks the first currently-EMPTY
+    /// slot (0-9) rather than requiring the player to have picked one in
+    /// advance -- if all 10 are already bound to something else, this is
+    /// a silent no-op (logged, not crashed): the produced monsters still
+    /// exist and are still selectable/orderable normally, they just don't
+    /// get a hotkey until a slot frees up. A no-op on an empty/all-dead
+    /// list too.</summary>
+    public void FormBattalionFromProduction(List<MonsterAgent> members)
+    {
+        if (members == null) return;
+        members.RemoveAll(m => m == null);
+        if (members.Count == 0) return;
+
+        for (var slot = 0; slot < _battalions.Length; slot++)
+        {
+            if (_battalions[slot] != null) continue;
+            CreateBattalion(members, slot);
+            return;
+        }
+        Debug.Log("Battalion production finished, but all 10 battalion slots are already bound -- the new squad exists, just without a hotkey.");
+    }
+
+    /// <summary>2026-08 (creator question: "why not just have a variable
+    /// in the object saying monster belongs to battalion group id"):
+    /// the LIST stays the source of truth here (rebinding a slot means
+    /// replacing its whole member list in one shot; an ID-only model
+    /// would need a full scan of every monster in the game to find
+    /// whoever currently holds the OLD id before it could be cleared),
+    /// but each member's own `MonsterAgent.BattalionSlot` is kept in
+    /// sync as a mirror -- same relationship `MonsterAgent.Selected`
+    /// already has to this class's own `_selected` list, just for
+    /// battalion membership instead of the live selection. Clears the
+    /// mirror on whoever held this slot before (only if THIS slot is
+    /// still what their own field says -- a monster moved to a second
+    /// battalion since shouldn't have ITS membership yanked out from
+    /// under it by the FIRST battalion's own rebind).</summary>
+    private void CreateBattalion(List<MonsterAgent> members, int slot)
+    {
+        var old = _battalions[slot];
+        if (old != null)
+            foreach (var m in old.Members)
+                if (m != null && m.BattalionSlot == slot) m.SetBattalionSlot(null);
+
         var battalion = new Battalion { Name = "Battalion " + _nextBattalionNumber };
-        battalion.Members.AddRange(_selected);
+        battalion.Members.AddRange(members);
         _battalions[slot] = battalion;
         _nextBattalionNumber++;
+
+        foreach (var m in members)
+            if (m != null) m.SetBattalionSlot(slot);
     }
 
     /// <summary>Re-selects a bound battalion's live members -- public so
