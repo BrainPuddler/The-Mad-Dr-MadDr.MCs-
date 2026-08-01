@@ -8249,3 +8249,41 @@ targeted compile check of the new surface, not the full flightcheck
 harness (this session's cached copy of that harness predates several
 HUD systems `RuntimeCityBuilder.cs` now references and would need
 real reconstruction work to catch up, out of scope for this change).
+
+## 2026-08: flightcheck harness reconstruction -- the gap SelectionHud's own entry flagged, closed for real
+
+The scratch flightcheck harness this whole session has leaned on had
+quietly drifted: `BuildGhostCursor.cs`, `BuildMenuHud.cs`,
+`BuildingNavHud.cs`, `FactionPickerHud.cs`, `LumenHud.cs`,
+`RegionPickerHud.cs`, `ResourceHud.cs`, `TramCar.cs`, `TramDresser.cs`
+(and `SelectionHud.cs`, `HexGridGizmo.cs`, `MixedFactionUnlock.cs`) were
+never actually in its compile set -- a separate `MissingPeerStubs.cs`
+hand-stubbed each one's public `Init` signature instead, satisfying
+`RuntimeCityBuilder.cs`/`WaypointCommander.cs`'s references without
+ever compiling those files' own real bodies. Several past entries in
+this very log claimed "flightcheck + docs update" for exactly these
+files -- true of whatever the harness looked like AT THE TIME, but the
+scratch copy itself apparently never kept pace, so by now those claims
+were quietly checking less than they said.
+
+**Fixed for real:** every one of those files now compiles as its
+actual real body in `FlightCheck.csproj` (RosterFetcher.cs stays
+hand-stubbed in `ProjStub.cs`, on purpose -- it needs
+`UnityEngine.Networking`, explicitly out of scope). `MissingPeerStubs.cs`
+emptied out (kept as a file, its own header now explains why). Real,
+newly-found stub gaps this surfaced in `UnityStub.cs` (fixed, not
+routed around): `TextAnchor`, `GUIContent`/`GUIStyle`/`GUISkin` +
+`GUI.skin`/`GUI.Button`/`GUI.enabled` (several HUD panels' shared
+`DrawShadowedLabel`/button idiom), nine more `Keyboard` digit/
+punctuation/escape keys (`BuildMenuHud`'s 1-9 hotkeys, `BuildingNavHud`'s
+`,`/`.` cycle keys, `BuildGhostCursor`'s Esc-cancel), and an in-memory
+`PlayerPrefs` stand-in (`MixedFactionUnlock`'s persistent-unlock flag --
+real persistence is out of scope for a headless compile check, only the
+shape mattered here).
+
+**Honest limits:** same as always -- no Unity Editor here, so this
+confirms the whole Unity gameplay layer compiles as one coherent
+program against the real match-core DLL, not that any of it renders or
+behaves correctly on screen. Verified for real: full `dotnet build`
+clean, 0 errors, 0 warnings, every file in the list above now compiled
+from its actual repo path rather than a hand-written stand-in.
