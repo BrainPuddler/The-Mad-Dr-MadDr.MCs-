@@ -910,23 +910,35 @@ public class MonsterAgent : MonoBehaviour
             return;
         }
 
-        // idle units auto-acquire -- retaliate against whoever hit them, or
-        // engage the nearest enemy in aggro range -- so the tank fight is
-        // self-driving without the player microing every unit. A PERCHED
-        // unit deliberately does NOT: it holds the roost the player chose
-        // (auto-engaging would make every perch instantly dissolve into a
-        // tank chase); attack it manually to send it back into the fight.
-        if (_order == OrderKind.Idle && !Perched) AcquireTarget();
-
-        // unload the harvest tank when idle near its unload point --
-        // 2026-07: now the player's own Factory (AcquireTarget's own new
-        // branch autonomously walks a FULL harvester there), falling back
-        // to `_homeHex` (the spawn point, a Vat stand-in) only if no
-        // Complete Factory exists at all -- see FindOwnFactory. Still
-        // fires for a PARTIALLY-loaded harvester that merely happens to
-        // wander near its unload point on its own (e.g. player-driven, or
-        // idle-eating nearby), same "auto-bank on arrival, no button"
-        // convenience the original docs/22 design already had.
+        // unload the harvest tank when idle near its unload point -- 2026-07:
+        // now the player's own Factory (AcquireTarget's own full-tank branch
+        // below autonomously walks a FULL harvester there), falling back to
+        // `_homeHex` (the spawn point, a Vat stand-in) only if no Complete
+        // Factory exists at all -- see FindOwnFactory. Still fires for a
+        // PARTIALLY-loaded harvester that merely happens to wander near its
+        // unload point on its own (e.g. player-driven, or idle-eating
+        // nearby), same "auto-bank on arrival, no button" convenience the
+        // original docs/22 design already had.
+        //
+        // MUST run BEFORE AcquireTarget below, not after (a real bug this
+        // ordering fixes, found while investigating "monsters don't go back
+        // to searching after they deliver"): AcquireTarget's own full-tank
+        // branch unconditionally re-issues OrderMove(factory) every time
+        // this unit goes Idle with a still-full tank, which flips `_order`
+        // away from Idle before a check running AFTER it would ever see
+        // `_order == Idle` and `_carriedLoad > 0` true at the same time --
+        // GoIdle() only fires at the END of the arrival frame (inside
+        // TickMove, called by the switch below), so the earliest a
+        // check up here could observe Idle is the FOLLOWING frame, by
+        // which point AcquireTarget has ALREADY run first and re-armed
+        // Move again. Net effect with the old ordering: a harvester
+        // parked at its own Factory would perpetually re-order itself to
+        // the same hex forever, never actually banking. Running this
+        // check first breaks the cycle: once banked, `_carriedLoad` is 0
+        // by the time AcquireTarget runs later THIS SAME frame, so its
+        // full-tank branch no longer fires and it naturally falls through
+        // to the empty-tank search below -- "go searching for more"
+        // happens in the very same frame the load gets banked.
         if (_order == OrderKind.Idle && _carriedLoad > 0.01f && _builder != null)
         {
             var unloadHex = FindOwnFactory() ?? _homeHex;
@@ -938,6 +950,14 @@ public class MonsterAgent : MonoBehaviour
                 _carriedLoad = 0f;
             }
         }
+
+        // idle units auto-acquire -- retaliate against whoever hit them, or
+        // engage the nearest enemy in aggro range -- so the tank fight is
+        // self-driving without the player microing every unit. A PERCHED
+        // unit deliberately does NOT: it holds the roost the player chose
+        // (auto-engaging would make every perch instantly dissolve into a
+        // tank chase); attack it manually to send it back into the fight.
+        if (_order == OrderKind.Idle && !Perched) AcquireTarget();
 
         // destruction can change the surface under a standing flyer (the
         // roof it perched on collapses to rubble): re-sync the body's
@@ -1024,6 +1044,21 @@ public class MonsterAgent : MonoBehaviour
     // looks for something to engage
     private const float AggroRangeMeters = 130f;
 
+    // 2026-07 creator direction: "once a monster delivers the supply it
+    // should go searching for more." A harvester with room left in its
+    // tank doesn't just react to whoever happens to wander within
+    // AggroRangeMeters -- it actively forages the whole map for the
+    // nearest citizen instead of standing idle forever at the Factory
+    // (often far from any citizen) waiting for one to wander close.
+    // 100km comfortably covers every city preset (effectively unbounded
+    // for this game's map scale) without the float-overflow edge case
+    // `float.MaxValue` squared would risk in NearestCitizenTo's own
+    // `within * within` bound. Deliberately NOT applied to non-
+    // harvesters -- a defender standing idle stays reactive-only, so
+    // this doesn't turn every idle monster into a map-wide citizen
+    // hunter, just the units whose own job is to go find more.
+    private const float ForageRangeMeters = 100000f;
+
     private void AcquireTarget()
     {
         if (_fighter == null) return;
@@ -1077,9 +1112,18 @@ public class MonsterAgent : MonoBehaviour
         // all, so a weaponless (or on-cooldown) monster still gets to
         // eat -- gating this behind the weapon check would silently
         // starve exactly the units least able to also fight back.
+        //
+        // 2026-07 follow-up ("once a monster delivers the supply it
+        // should go searching for more"): a harvester with room left in
+        // its tank searches the whole map (ForageRangeMeters), not just
+        // the ordinary AggroRangeMeters -- otherwise a harvester that
+        // just banked its load at the Factory (often nowhere near any
+        // citizen) simply stands there forever instead of going back out.
         if (_builder != null)
         {
-            var citizen = _builder.NearestCitizenTo(transform.position, AggroRangeMeters);
+            var isForagingHarvester = _harvest != null && _harvest.Capacity > 0.01f;
+            var searchRadius = isForagingHarvester ? ForageRangeMeters : AggroRangeMeters;
+            var citizen = _builder.NearestCitizenTo(transform.position, searchRadius);
             if (citizen != null) OrderEat(citizen);
         }
     }

@@ -8115,3 +8115,68 @@ new). The flightcheck harness recompiled the whole Unity gameplay layer
 against a freshly rebuilt match-core DLL clean, confirming
 `RuntimeCityBuilder.cs`/`SimBridge.cs` actually compile against the new
 API, not just that match-core's own tests pass in isolation.
+
+## 2026-07 follow-up: FIX -- a full harvester could never actually unload, and an empty one just stood there instead of "going searching for more"
+
+Creator: "once a monster delivers the supply it should go searching for
+more." Investigating turned up a real control-flow bug, not just a
+missing feature -- `MonsterAgent.Update()` (`MonsterAgent.cs`) called
+`AcquireTarget()` (line 919, at the time) BEFORE the harvest-tank bank
+check (line 930). `AcquireTarget`'s own full-tank branch unconditionally
+re-issues `OrderMove(factory)` every single frame this unit is Idle
+with a still-full tank -- and `GoIdle()` (which flips `_order` back to
+`Idle` on arrival) only fires at the END of the arrival frame, inside
+`TickMove`, called by the switch statement AFTER both checks. So the
+EARLIEST the bank check could ever see `_order == Idle` was the frame
+AFTER arrival -- and on that very frame, `AcquireTarget` (running
+first, per the old ordering) had ALREADY re-armed `OrderMove` to the
+same hex before the bank check's own `_order == Idle` condition got
+evaluated. Net effect: a harvester that arrived at its own Factory
+would perpetually re-order itself to the exact same spot, forever,
+never once seeing `_order == Idle` and `_carriedLoad > 0` true at the
+same time -- so `BankHarvestLoad` (and therefore last follow-up's
+match-core wallet credit) may never have actually fired via this
+autonomous path in real play at all, only the small residual "player-
+driven, wanders near the unload point" case the original docs/22 design
+covered.
+
+**Fix: swap the two checks' order.** The bank check now runs BEFORE
+`AcquireTarget`, breaking the cycle -- once banked, `_carriedLoad` is
+already 0 by the time `AcquireTarget` runs later THIS SAME frame, so
+its full-tank branch no longer fires and control falls straight through
+to the empty-tank search. Verified this doesn't reorder combat
+priority: the bank check never touches `_order`, so whether it runs
+before or after `AcquireTarget` doesn't change whether a freshly-
+attacked unit still retaliates the same frame -- the only thing the
+swap changes is that the harvest-move branch can no longer perpetually
+win the race against banking.
+
+**"Go searching for more," the actual feature ask:** even with delivery
+fixed, an empty-tank harvester's only search was the same
+`AggroRangeMeters` (130m) every idle unit uses for its opportunistic
+idle-eat -- fine for a unit reacting to whoever wanders close, useless
+for a harvester standing at the Factory (often nowhere near a citizen)
+that's supposed to actively go looking. Added `ForageRangeMeters`
+(100km, functionally the whole map at this game's scale) used ONLY when
+`_harvest != null && _harvest.Capacity > 0.01f` -- a harvester with room
+in its tank now searches map-wide for the nearest citizen instead of
+standing idle; non-harvesters are untouched, still purely reactive
+within `AggroRangeMeters` (a defender shouldn't abandon its post to
+chase a citizen across the map). `TickEat`/`ComputePath` already do
+real pathfinding over long distances (confirmed by reading -- the
+existing 130m fallback already required routing around buildings), so
+widening the search radius alone was enough; no new movement machinery
+needed.
+
+**Honest limits:** no Unity Editor here to actually watch a harvester
+complete this loop on screen -- the fix is derived from a careful,
+statement-by-statement trace of `Update()`'s synchronous execution
+order within a single frame (not a runtime observation), the same kind
+of reasoning that has been wrong before in this project's own history
+(docs/28's winding bugs looked right by inspection too, which is why
+this session leans on numeric harnesses where one is practical -- a
+full `MonsterAgent` simulation harness wasn't, given how deeply it's
+coupled to `UnityEngine.MonoBehaviour`/`transform`/`_builder`/`_fighter`
+state a headless harness would have to fake most of anyway). Verified
+for real: `MonsterAgent.cs` brace-balanced; flightcheck recompiles the
+whole Unity gameplay layer clean.
