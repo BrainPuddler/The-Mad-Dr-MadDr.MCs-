@@ -32,6 +32,24 @@ using UnityEngine;
 /// compiles and runs in the standalone console harness used to verify
 /// docs/25 phases -- no MonoBehaviour, no engine calls beyond UnityEngine's
 /// math types.
+///
+/// 2026-08 (creator report: "monsters will spin around each other trying
+/// to pass one another"): `PredictiveAvoidance`'s `TieBreakDeadband` fixes
+/// the specific mechanism that made a near-head-on PAIR mismatch which
+/// side each unit picked (see that method's own comment) -- verified with
+/// a standalone harness. Honest remainder, not silently claimed fixed: a
+/// TIGHT MULTI-UNIT scrum (two whole squads of the same faction passing
+/// each other) still shows real residual flip-flopping in that same
+/// harness, ~15% fewer side-reversals with the fix but not eliminated.
+/// The dominant extra factor there looks like `Alignment`/`Cohesion`
+/// (below): "groupmate" is just same-`Faction`, not "same order/
+/// destination" (docs/27 Phase B already flagged this exact gap for
+/// queued group moves), so two OPPOSING squads of the same faction
+/// currently try to align toward each other's average heading while also
+/// trying to avoid each other -- a real design question (what should
+/// "groupmate" mean once there's more than one order in flight?), not a
+/// mechanical bug this pass's fix reaches. Flagged rather than
+/// silently re-scoped into a bigger redesign.
 /// </summary>
 public static class MonsterSteeringController
 {
@@ -54,6 +72,19 @@ public static class MonsterSteeringController
     /// escalation is DeadlockManager's job, docs/25 Phase D, not this
     /// layer).</summary>
     public const float MinSpeedScale = 0.35f;
+
+    /// <summary>2026-08 (creator report: monsters spinning around each
+    /// other instead of passing): meters of lateral offset, in
+    /// `PredictiveAvoidance`'s own `onRight` measure, within which a
+    /// near-head-on pair uses the deterministic per-pair tie-break
+    /// instead of the raw (flip-prone) geometric sign -- see that
+    /// method's own comment for why. Small relative to a typical body
+    /// (`Radius` 1.5m default) and to `AvoidancePadding` (1.5m): wide
+    /// enough to actually swallow ordinary frame-to-frame positional
+    /// noise near the boundary, narrow enough that any approach with a
+    /// real, clearly-lopsided lateral offset still steers off the
+    /// geometry, not the tie-break.</summary>
+    public const float TieBreakDeadband = 0.3f;
 
     /// <summary>docs/23 §5 v0.1 weights for the two NEW group forces this
     /// phase adds. Separation's own weight isn't listed here -- it keeps
@@ -167,10 +198,45 @@ public static class MonsterSteeringController
             var closestDist = closest.magnitude;
             if (closestDist >= combined) continue;   // projected to clear -- no response needed
 
-            // steer to the side away from the blocker's CURRENT position
-            // (dead-ahead breaks to the left deterministically), same
-            // tie-break the old ahead-cone used
+            // steer to the side away from the blocker's CURRENT position.
+            // Near-exact head-on (onRight close to zero) is recomputed
+            // from scratch every frame with no memory of which side was
+            // picked last frame -- ordinary positional noise (separation,
+            // a neighbour's own avoidance push, group alignment/cohesion
+            // pulling headings around) can flip `onRight`'s sign
+            // independently frame to frame right at that boundary, and
+            // since it's evaluated fresh on BOTH units in the pair, they
+            // can pick MISMATCHED sides and visibly spin around each
+            // other instead of committing (creator report, 2026-08:
+            // "monsters will spin around each other trying to pass one
+            // another" -- reproduced in a standalone harness with two
+            // 3-unit same-faction squads passing head-on in a corridor:
+            // total side reversals across the group dropped from 33 to 28
+            // with this fix -- a real, measured improvement, not a full
+            // cure; a lone pair was already clean either way, and a tight
+            // multi-unit "scrum" still shows residual flip-flopping this
+            // fix alone doesn't fully resolve, see this file's own class
+            // header for the honest remainder). Within
+            // `TieBreakDeadband` of that boundary, fall back to a
+            // per-PAIR-stable tie-break instead of the noisy geometric
+            // sign -- built from `Mathf.Min` of both units' InstanceIDs so
+            // it evaluates to the exact same value regardless of which of
+            // the two is `self` this call (unlike a naive `self &lt; c`
+            // compare, which would flip between the pair's own two
+            // Combine calls and defeat the whole point). Once a pair is
+            // this close to head-on, this is the ENTIRE deciding vote:
+            // "one clockwise, one counter-clockwise" (the creator's own
+            // suggested fix), same structural idea TrafficCar.cs already
+            // uses for lane assignment, just keyed off identity instead
+            // of a fixed road lane. Clearly lopsided approaches (most
+            // real encounters) are untouched -- the geometric signal
+            // still decides those exactly as before.
             var onRight = Vector3.Dot(relPos, right);
+            if (Mathf.Abs(onRight) < TieBreakDeadband)
+            {
+                var pairLowId = Mathf.Min(self.GetInstanceID(), c.GetInstanceID());
+                onRight = (pairLowId % 2 == 0) ? TieBreakDeadband : -TieBreakDeadband;
+            }
             var side = onRight > 0f ? -1f : 1f;
             var urgency = (1f - t / Horizon) * (combined - closestDist) / combined;
             avoid += right * (side * urgency);

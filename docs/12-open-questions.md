@@ -8287,3 +8287,82 @@ program against the real match-core DLL, not that any of it renders or
 behaves correctly on screen. Verified for real: full `dotnet build`
 clean, 0 errors, 0 warnings, every file in the list above now compiled
 from its actual repo path rather than a hand-written stand-in.
+
+## 2026-08: monsters spinning around each other while trying to pass -- partial fix, honest remainder documented
+
+Creator: "monsters will spin around each other trying to pass one
+another. Possible solution, make one turn clockwise the other counter
+clockwise. Or make one stop while the other passes." A real avoidance
+bug, root-caused rather than guessed at.
+
+**Root cause: `MonsterSteeringController.PredictiveAvoidance`'s side
+tie-break has no memory.** For each closing neighbour it picks a pass
+side from `onRight = Vector3.Dot(relPos, right)`'s sign, recomputed
+from scratch every frame. For a near-exact head-on pair `onRight`
+hovers close to zero, and since it's evaluated independently on BOTH
+units (once as `self`, once as `c`), ordinary per-frame noise --
+`ApplySeparation`'s own hard positional correction re-centering the
+pair, a neighbour's own avoidance push, group alignment pulling
+headings around -- can flip its sign on one unit but not the other,
+producing mismatched sides that visibly spin instead of committing.
+
+**Built a standalone numeric harness first** (`steerverify`, same
+pattern as `brainverify`) rather than trusting code-reading alone --
+this exact class of "looks right by inspection" bug is the one docs/28
+has bitten this project on before. A lone pair, even started
+near-perfectly symmetric, resolved cleanly either way (2-4 lateral
+side-reversals over a 16m approach, not "spinning"). It took a REALISTIC
+scenario to reproduce the reported symptom: two 3-unit same-faction
+squads passing head-on down a corridor -- 33 total side-reversals
+across the group, one unit reversing 8 times before finally getting
+through. (Also found and fixed a harness gap of its own along the way:
+the first version only simulated `Combine`'s SOFT separation blend, not
+`ApplySeparation`'s separate HARD positional correction that also runs
+unconditionally every real frame -- adding that second stage was
+necessary to reproduce the bug at all; a pair-only, single-stage
+harness had stayed clean regardless of the fix.)
+
+**The fix -- the creator's own suggested "one clockwise, one counter-
+clockwise," made stable rather than reactive:** within a new
+`TieBreakDeadband` (0.3m) of the ambiguous `onRight≈0` boundary, fall
+back to a per-PAIR-stable decision built from `Mathf.Min` of both
+units' `GetInstanceID()`s -- evaluates identically regardless of which
+of the two is `self` this call (unlike a naive `self &lt; c` compare,
+which would itself flip between the pair's own two calls and defeat
+the point), so it can never mismatch between the two units the way the
+raw geometric sign could. Same structural idea `TrafficCar.cs` already
+uses for lane assignment (a fixed per-car offset, not reactive to the
+other car), just keyed off identity instead of a road lane -- and the
+same idiom (`GetInstanceID()` as a stable per-unit deterministic input)
+`TrafficCar.cs` already leans on elsewhere. A deadband sweep (0.3-2.0m,
+all identical results; 3.0m made things WORSE by overriding real
+geometric signal on clearly-lopsided approaches) confirmed 0.3m is a
+reasonable, conservative choice, not an arbitrary one.
+
+**Honest result, not oversold:** the 3v3-squad harness scenario
+improved from 33 to 28 total side-reversals with the fix -- real,
+measured, not a full cure. Isolating JUST avoidance+separation (zeroing
+Alignment/Cohesion's contribution) was already far cleaner (8
+reversals) even WITHOUT the tie-break fix, pointing at a second,
+separate contributor this pass does not fix: `Alignment`/`Cohesion`
+treat "groupmate" as same-`Faction`, not "same order/destination" (the
+exact gap docs/27 Phase B already flagged for queued group moves) --
+so two OPPOSING squads of the same faction currently try to align
+toward each other's blended average heading while also trying to avoid
+each other. Fixing that is a real design question (what should
+"groupmate" mean once more than one order is in flight?), not a
+mechanical bug, and is flagged in `MonsterSteeringController`'s own
+class header rather than silently re-scoped into this pass or silently
+left undocumented. The creator's second suggested fix ("make one
+stop") already exists as a slower fallback --
+`DeadlockManager`'s yield-grant mechanism -- but only triggers after a
+2.5s stall window, well after a fast oscillation would already read as
+"spinning" on screen; not touched this pass.
+
+**Verified for real:** the `steerverify` harness (isolated pair,
+realistic 3v3 squad, and an Alignment/Cohesion-ablated variant) backs
+every number above; the fix does not regress the already-clean pair
+case (byte-identical flip counts before/after). Flightcheck recompiles
+the whole Unity gameplay layer clean. No Unity Editor here to confirm
+how this actually reads on screen -- same standing limit as every
+other Unity-side entry in this log.
