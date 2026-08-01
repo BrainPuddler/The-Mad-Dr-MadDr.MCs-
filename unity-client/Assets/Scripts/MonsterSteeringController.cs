@@ -86,13 +86,52 @@ public static class MonsterSteeringController
     /// `PredictiveAvoidance`'s own `onRight` measure, within which a
     /// near-head-on pair uses the deterministic per-pair tie-break
     /// instead of the raw (flip-prone) geometric sign -- see that
-    /// method's own comment for why. Small relative to a typical body
+    /// method's own comment for why. Sized relative to a typical body
     /// (`Radius` 1.5m default) and to `AvoidancePadding` (1.5m): wide
     /// enough to actually swallow ordinary frame-to-frame positional
     /// noise near the boundary, narrow enough that any approach with a
     /// real, clearly-lopsided lateral offset still steers off the
-    /// geometry, not the tie-break.</summary>
+    /// geometry, not the tie-break.
+    ///
+    /// 2026-08 CORRECTION (creator follow-up: "monsters are still
+    /// circling each other... seems to happen with larger monster"):
+    /// this used to be a flat 0.3m regardless of the pair's actual size
+    /// -- fine for the default 1.5m-radius test units this was tuned
+    /// against (a ~4.5m `combined` envelope, so 0.3m is a real ~7%
+    /// slice of it), but a fixed METERS threshold doesn't scale with a
+    /// bigger body's own proportionally bigger `combined`. A large pair
+    /// (say 5m radius each, ~11.5m `combined`) got the SAME 0.3m
+    /// window -- under 3% of their own envelope -- so a much WIDER
+    /// range of "almost but not quite head-on" approaches fell OUTSIDE
+    /// the deadband and back onto the noisy raw geometric sign this
+    /// whole mechanism exists to avoid. `TieBreakDeadbandFor` below
+    /// replaces the flat constant with one scaled to the ACTUAL pair's
+    /// `combined`, floored at this same original 0.3m so the
+    /// already-verified small-pair behavior (0 reversals in
+    /// `steerverify`) doesn't regress.</summary>
     public const float TieBreakDeadband = 0.3f;
+
+    /// <summary>Fraction of a pair's own `combined` collision envelope
+    /// the tie-break deadband should cover -- see `TieBreakDeadband`'s
+    /// own CORRECTION for why a flat meters value doesn't scale. 1/15
+    /// chosen so it's the EXACT crossover point for the default 1.5m-
+    /// radius case (`combined` = 4.5m, and 4.5 * 1/15 = 0.3 = the
+    /// original flat constant) -- the default/small-body case is thus
+    /// byte-for-byte unregressed (still exactly 0.3m, verified against
+    /// `steerverify`'s own small-radius scenarios), while anything
+    /// LARGER than default gets a proportionally wider deadband instead
+    /// of staying pinned at a small body's scale.</summary>
+    public const float TieBreakDeadbandFraction = 1f / 15f;
+
+    /// <summary>The actual deadband to use for one pair, given their
+    /// `combined` collision envelope (`PredictiveAvoidance`'s own
+    /// `bodyRadius + AvoidancePadding`) -- `Max` against the original
+    /// flat `TieBreakDeadband` so a small pair is never worse off than
+    /// before this fix, only larger pairs get a wider window.</summary>
+    public static float TieBreakDeadbandFor(float combined)
+    {
+        return Mathf.Max(TieBreakDeadband, combined * TieBreakDeadbandFraction);
+    }
 
     /// <summary>docs/23 §5 v0.1 weights for the two NEW group forces this
     /// phase adds. Separation's own weight isn't listed here -- it keeps
@@ -242,26 +281,30 @@ public static class MonsterSteeringController
             // tie-break still measurably helps once separation/avoidance
             // are the only forces at play (a tight multi-unit "scrum"
             // with flocking bypassed), and helps somewhat even with
-            // flocking active. Within
-            // `TieBreakDeadband` of that boundary, fall back to a
-            // per-PAIR-stable tie-break instead of the noisy geometric
-            // sign -- built from `Mathf.Min` of both units' InstanceIDs so
-            // it evaluates to the exact same value regardless of which of
-            // the two is `self` this call (unlike a naive `self &lt; c`
-            // compare, which would flip between the pair's own two
-            // Combine calls and defeat the whole point). Once a pair is
-            // this close to head-on, this is the ENTIRE deciding vote:
-            // "one clockwise, one counter-clockwise" (the creator's own
-            // suggested fix), same structural idea TrafficCar.cs already
-            // uses for lane assignment, just keyed off identity instead
-            // of a fixed road lane. Clearly lopsided approaches (most
-            // real encounters) are untouched -- the geometric signal
-            // still decides those exactly as before.
+            // flocking active. Within `TieBreakDeadbandFor(combined)`
+            // (2026-08 CORRECTION: scaled to THIS pair's own size, not a
+            // flat constant -- see that method's own doc for why a fixed
+            // meters value under-covered larger monsters) of that
+            // boundary, fall back to a per-PAIR-stable tie-break instead
+            // of the noisy geometric sign -- built from `Mathf.Min` of
+            // both units' InstanceIDs so it evaluates to the exact same
+            // value regardless of which of the two is `self` this call
+            // (unlike a naive `self &lt; c` compare, which would flip
+            // between the pair's own two Combine calls and defeat the
+            // whole point). Once a pair is this close to head-on, this
+            // is the ENTIRE deciding vote: "one clockwise, one counter-
+            // clockwise" (the creator's own suggested fix), same
+            // structural idea TrafficCar.cs already uses for lane
+            // assignment, just keyed off identity instead of a fixed
+            // road lane. Clearly lopsided approaches (most real
+            // encounters) are untouched -- the geometric signal still
+            // decides those exactly as before.
+            var deadband = TieBreakDeadbandFor(combined);
             var onRight = Vector3.Dot(relPos, right);
-            if (Mathf.Abs(onRight) < TieBreakDeadband)
+            if (Mathf.Abs(onRight) < deadband)
             {
                 var pairLowId = Mathf.Min(self.GetInstanceID(), c.GetInstanceID());
-                onRight = (pairLowId % 2 == 0) ? TieBreakDeadband : -TieBreakDeadband;
+                onRight = (pairLowId % 2 == 0) ? deadband : -deadband;
             }
             var side = onRight > 0f ? -1f : 1f;
             var urgency = (1f - t / Horizon) * (combined - closestDist) / combined;

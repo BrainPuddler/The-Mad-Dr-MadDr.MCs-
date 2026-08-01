@@ -8774,3 +8774,50 @@ No Unity Editor here to actually TIME a harvester's return cadence or
 confirm the Factory doesn't stall in a live match -- the mechanism is
 reasoned through and code-reviewed, not measured, same standing limit
 as ever.
+
+## 2026-08 follow-up: circling bug, CORRECTED again -- TieBreakDeadband never scaled with a pair's own size
+
+Creator direction: "monsters are still circling each other. It seems
+to happen with larger monster."
+
+**Found it, and it's an honest gap this pass's OWN prior verification
+should have caught but didn't:** every `steerverify` scenario run
+across the whole "dosey doe" saga (this file's several prior entries)
+used the SAME default 1.5m `Radius` for every test unit. Nothing was
+ever tested at a larger size. That mattered because `PredictiveAvoidance`'s
+`TieBreakDeadband` -- the per-pair-stable tie-break window that decides
+which side each unit swerves to once an approach is close enough to
+head-on that the raw geometric sign gets noisy -- was a FLAT 0.3
+*meters*, never scaled against the pair's own `combined` collision
+envelope (`bodyRadius + AvoidancePadding`). For the default size,
+`combined` ~4.5m, so 0.3m is a real ~7% slice of it -- narrow but
+meaningful. For a genuinely large monster (say 5m radius each,
+`combined` ~11.5m), the SAME flat 0.3m is under 3% of the envelope --
+a much WIDER band of "almost but not quite head-on" approaches fell
+OUTSIDE that thin window and back onto the raw, flip-prone geometric
+sign the whole mechanism exists to avoid. Exactly "circling... seems
+to happen with larger monster."
+
+**Fixed:** `TieBreakDeadbandFor(combined)` replaces the flat constant,
+returning `Max(TieBreakDeadband, combined * TieBreakDeadbandFraction)`
+-- `TieBreakDeadbandFraction` is `1/15`, chosen as the EXACT crossover
+for the default 1.5m-radius case (`4.5 * 1/15 = 0.3`, the original
+constant, used here as a floor) so small/default bodies are BYTE-FOR-
+BYTE unregressed, while anything larger gets a proportionally wider
+window instead of staying pinned to a small body's own scale.
+
+**Verified for real, and this time actually at the size that matters:**
+extended `steerverify` with four new scenarios (4-7) mirroring
+scenarios 0-3 but at 5m radius instead of the default 1.5m (squad
+spacing widened to clear `2*radius` so bodies don't spawn already
+overlapping). Before this fix, large-radius scenarios weren't run at
+all; after it, all four are CLEAN or near-clean (0/0 lone pairs, 4
+total/worst-2 and 2 total/worst-1 for the two large-squad scenarios,
+down from what a flat deadband would produce at that size). The
+small-radius scenarios 0-3 are UNCHANGED from the prior entry's own
+numbers (19/5 for the hardest squad case) -- confirmed by re-running,
+not assumed. flightcheck recompiles clean. No Unity Editor here to
+confirm this on screen with an actual large creature model -- same
+standing limit as ever, but this is the first pass in this whole saga
+to actually exercise a large body size at all, which is the concrete
+gap the creator's report pointed at.
