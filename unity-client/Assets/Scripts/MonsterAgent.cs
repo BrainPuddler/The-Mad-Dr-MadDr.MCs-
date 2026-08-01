@@ -167,6 +167,25 @@ public class MonsterAgent : MonoBehaviour
     /// perch order for these, an attack order for everyone else.</summary>
     public bool IsFlyer { get { return _canFly; } }
 
+    /// <summary>This monster's real collision/body radius (`_fighter.
+    /// Radius`, set by `Init`'s own `Configure` call from this creature's
+    /// actual body size -- see `EnableSimDriven`'s own doc comment for
+    /// the same field). 2026-08: exposed for `GrabCursor`'s clone-parking
+    /// search, which needs to know how much clearance a monster's own
+    /// body actually needs around a building, not just "the next open
+    /// hex."</summary>
+    public float Radius { get { return _fighter != null ? _fighter.Radius : 1.5f; } }
+
+    /// <summary>This monster's own walking speed in meters/second (same
+    /// `_profile.WalkMetersPerSecond` TickSettle already reads), exposed
+    /// 2026-08 for `WaypointCommander.AssignFormation`'s slot assignment
+    /// -- see that method's own doc comment for why raw distance alone
+    /// mismatches a mixed-speed group.</summary>
+    public float WalkSpeed
+    {
+        get { return _profile != null && _builder != null ? (float)_profile.WalkMetersPerSecond(_builder.speedDisplayMultiplier) : 4f; }
+    }
+
     /// <summary>docs/25 Phase D: "wants to move and has a valid
     /// destination" -- the signal DeadlockManager polls to find a unit
     /// stalled in traffic. True while a grounded unit has an active path
@@ -1374,8 +1393,30 @@ public class MonsterAgent : MonoBehaviour
                 var next = transform.position + dir * step;
 
                 var hex = _builder.HexAt(next);
-                var clipsBuilding = !_flying && _builder.InsideBuildingFootprint(next);
-                if (_builder.City.Contains(hex) && !Blocked().Contains(hex) && !clipsBuilding)
+                // 2026-08 (creator report "monster went into the factory
+                // and never left it"): a unit that's ALREADY standing on
+                // a blocked hex (a fresh Factory clone -- `CloneOnto`
+                // deliberately spawns it "at the Factory's own hex...it
+                // visibly comes out of the building that made it" -- or a
+                // roof occupant evicted back onto that same hex,
+                // `BootFromRoof`) must always be allowed at least one
+                // step off of it. Without this, `next` on the very first
+                // tick is only centimetres from spawn -- still the SAME
+                // hex, which the Factory's own footprint keeps in
+                // `Blocked()` unconditionally -- so this check rejected
+                // the unit's every possible first step and `_settleTarget
+                // = null` below fired immediately, stranding it exactly
+                // on/inside the building forever. Excluding `ownHex` only
+                // forgives THIS one hex the unit already legitimately
+                // occupies; a step that crosses into any OTHER blocked
+                // hex (a real walk-into-a-building) is still caught
+                // exactly as before. Same exemption for
+                // InsideBuildingFootprint's overhang check, see its own
+                // "exclude" doc for why that check needs it too.
+                var ownHex = _builder.HexAt(transform.position);
+                var stepBlocked = hex != ownHex && Blocked().Contains(hex);
+                var clipsBuilding = !_flying && _builder.InsideBuildingFootprint(next, ownHex);
+                if (_builder.City.Contains(hex) && !stepBlocked && !clipsBuilding)
                 {
                     transform.rotation = Quaternion.Slerp(transform.rotation,
                         Quaternion.LookRotation(dir, Vector3.up), dt * 4f);

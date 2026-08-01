@@ -221,7 +221,7 @@ public class GrabCursor : MonoBehaviour
                 // search CloneOnto's own fan-out already uses.
                 if (_roofOccupant.TryGetValue(factory.EntityId, out var evicted) && evicted != null && evicted != agent)
                 {
-                    var bootSpot = FindOpenHexNear(factory.Hex, new System.Collections.Generic.HashSet<HexCoord>());
+                    var bootSpot = FindOpenHexNear(factory.Hex, new System.Collections.Generic.HashSet<HexCoord>(), evicted.Radius);
                     if (bootSpot != null) evicted.BootFromRoof(builder.WorldOf(bootSpot.Value));
                 }
 
@@ -296,7 +296,7 @@ public class GrabCursor : MonoBehaviour
             // find the parking spot BEFORE spending -- an unaffordable-or-
             // nowhere-to-park check must never debit Blood for a clone
             // that then has nowhere to go.
-            var parkSpot = FindOpenHexNear(factoryHex, claimed);
+            var parkSpot = FindOpenHexNear(factoryHex, claimed, original.Radius);
             if (parkSpot == null) break;
             if (!builder.TrySpendBlood(cloneCostBlood)) break;
             claimed.Add(parkSpot.Value);
@@ -310,12 +310,49 @@ public class GrabCursor : MonoBehaviour
             Debug.Log("Cloned " + spawned + "x " + creature.Id + " at the Factory (" + cloneCostBlood * spawned + " Blood spent).");
     }
 
-    private HexCoord? FindOpenHexNear(HexCoord from, System.Collections.Generic.HashSet<HexCoord> claimed)
+    /// <summary>2026-08 (creator direction: "increase the boundary around
+    /// building so parking spots take into account monster size"): a hex
+    /// not being individually `IsBlocked` doesn't mean a body `bodyRadius`
+    /// wide actually clears the building once it's standing there --
+    /// small/medium creatures were fine at ring 1 (a hex's ~20m step
+    /// comfortably clears the building's own ~9m footprint half-extent),
+    /// but a big-bodied monster's own collision radius could still reach
+    /// back into the building's real rendered footprint (corner overhang
+    /// included -- same `InsideBuildingFootprint` geometry `TickSettle`
+    /// checks) or crowd an already-claimed neighbour closer than both
+    /// bodies actually need. Checks the NEAR EDGE of where this monster's
+    /// body would sit (`world` offset `bodyRadius` back toward the
+    /// building), not just the hex's own centre point, so the effective
+    /// search boundary grows with the monster automatically instead of a
+    /// fixed ring count -- a small monster still parks at ring 1 exactly
+    /// as before (byte-identical for `bodyRadius` well under the
+    /// clearance ring-1 already has), a huge one is pushed out to
+    /// whichever ring first has genuine room.</summary>
+    private HexCoord? FindOpenHexNear(HexCoord from, System.Collections.Generic.HashSet<HexCoord> claimed, float bodyRadius)
     {
-        if (builder.CityContains(from) && !builder.IsBlocked(from) && !claimed.Contains(from)) return from;
-        for (var ring = 1; ring <= 6; ring++)
+        var buildingWorld = builder.WorldOf(from);
+        var minGap = bodyRadius * 2f + builder.groupSpacing;
+        var minGapSq = minGap * minGap;
+        for (var ring = 1; ring <= 8; ring++)
             foreach (var n in from.Ring(ring))
-                if (builder.CityContains(n) && !builder.IsBlocked(n) && !claimed.Contains(n)) return n;
+            {
+                if (!builder.CityContains(n) || builder.IsBlocked(n) || claimed.Contains(n)) continue;
+                var world = builder.WorldOf(n);
+
+                var towardBuilding = buildingWorld - world;
+                towardBuilding.y = 0f;
+                var nearEdge = towardBuilding.sqrMagnitude > 1e-4f
+                    ? world + towardBuilding.normalized * bodyRadius
+                    : world;
+                if (builder.InsideBuildingFootprint(nearEdge)) continue;
+
+                var tooCloseToClaimed = false;
+                foreach (var c in claimed)
+                {
+                    if ((builder.WorldOf(c) - world).sqrMagnitude < minGapSq) { tooCloseToClaimed = true; break; }
+                }
+                if (!tooCloseToClaimed) return n;
+            }
         return null;
     }
 

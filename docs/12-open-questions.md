@@ -8442,3 +8442,88 @@ before it was caught. Verified for real this time: four labeled
 both) with `LastVelocity` correctly published, matching `MonsterAgent.
 Update()`'s own real per-frame publish point; flightcheck recompiles
 the whole Unity gameplay layer clean.
+
+## 2026-08 follow-up: "monster went into the factory and never left it" -- found and fixed; plus monster-size-aware parking + ETA-based formation slots
+
+Creator report, then follow-up direction: "increase the boundary around
+building so parking spots take into account monster size, monster are
+circling each other less but not solved. See if the speed based
+solution with coordinate their landing spots is viable."
+
+**Root cause of the stuck-in-factory report, found and fixed:**
+`MonsterAgent.TickSettle`'s per-step validity check
+(`InsideBuildingFootprint` + `Blocked().Contains(hex)`) has no notion of
+"the hex I'm already standing on" -- it just asks "is the NEXT step's
+hex/footprint clear," unconditionally. A freshly-cloned monster
+(`GrabCursor.CloneOnto` deliberately spawns it AT the Factory's own hex
+-- "it visibly comes out of the building that made it") or a roof
+occupant just evicted back onto that hex (`BootFromRoof`) starts its
+very first settle-creep step only centimetres from where it's already
+standing -- still the SAME hex, which the Factory's own footprint keeps
+permanently blocked. The check rejected literally every possible first
+step, `_settleTarget` got nulled before the unit ever moved, and it sat
+exactly on/inside the Factory's rendered footprint forever -- an exact
+match for the report. Fixed by excluding the unit's own current hex
+from both the blocked-hex check and `RuntimeCityBuilder.
+InsideBuildingFootprint`'s overhang check (new optional `exclude`
+param) -- forgives only the ONE hex a unit already legitimately
+occupies; a real walk-into-a-building step from open ground is still
+caught exactly as before.
+
+**Monster-size-aware parking boundary:** `GrabCursor.FindOpenHexNear`
+(clone parking around a Factory, and the eviction "boot to nearest open
+spot" path) used to accept the first hex that merely wasn't
+`IsBlocked`, regardless of the monster's own body radius -- fine for
+most creatures (a hex's ~20m step already clears the building's ~9m
+footprint half-extent), but a big-bodied monster's collision radius
+could still reach back into the building's real footprint (corner
+overhang included) or crowd an already-claimed neighbour. Now checks
+the NEAR EDGE of where the monster's body would actually sit (offset
+`bodyRadius` back toward the building) against the real footprint
+geometry, plus a `2*bodyRadius + groupSpacing` minimum gap between
+claimed spots -- the effective search boundary grows with the monster
+automatically instead of a fixed ring count. `MonsterAgent.Radius` is
+now a public passthrough of `_fighter.Radius` for this (and any future)
+caller to read.
+
+**ETA-based formation slot assignment, viability confirmed and
+shipped, scoped honestly:** `WaypointCommander.AssignFormation`'s
+greedy nearest-slot-to-nearest-unit pick now ranks by ETA (distance /
+`MonsterAgent.WalkSpeed`, a new public passthrough of
+`_profile.WalkMetersPerSecond`) instead of raw distance -- in a
+mixed-speed group, a slow unit that merely started nearer a slot than a
+faster unit could still take longer to actually reach it, so the two
+crossed paths converging on their (mismatched) slots. Viable and real,
+shipped for ground formations (`AssignFormation`); NOT applied to roof
+perch assignment (`AssignPerch`) this pass -- flyers separate by
+altitude far more than ground units cross paths, lower payoff for the
+same change, left as a clean follow-up if it turns out to matter.
+**Honest scope note:** this is a DESTINATION-assignment fix, not a
+moment-to-moment steering one. It doesn't touch, and isn't expected to
+fix, the residual close-quarters circling the previous entry above
+already measured for a tight multi-squad scrum (19 reversals, down from
+20, still not a full cure) -- that's steering-time
+`Alignment`/`PredictiveAvoidance` territory, a different mechanism from
+"which slot did this unit get assigned to."
+
+**Also found, NOT fixed this pass (scoped out, tracked separately):**
+a real, independent bug in the harvester full-tank auto-delivery path.
+`MonsterAgent.FindOwnFactory` returns the Factory's own (permanently
+blocked) hex; the full-tank branch in `AcquireTarget` orders a Move
+straight at it; `HexPathfinder`'s pathfinding rejects a blocked goal hex
+instantly; `TickMove`'s failure path collapses to a plain `GoIdle()` for
+an ordinary (non-attack-move) order; next frame `AcquireTarget` sees
+`Idle` with a still-full tank and reissues the exact same doomed order.
+A harvester that tops off its tank more than the ~2.5-hex bank radius
+from its Factory (very possible -- `ForageRangeMeters` is effectively
+unbounded) freezes in place forever, spinning through Move/Idle, never
+delivering and never resuming foraging. Independent of the settle-creep
+fix above; not what the creator's literal report reproduced (that one
+strands a unit AT the Factory, this one strands a unit wherever it
+happened to fill up), but real and worth a dedicated pass.
+
+**Verified for real:** flightcheck recompiles the whole edited set
+(`RuntimeCityBuilder.cs`, `MonsterAgent.cs`, `GrabCursor.cs`,
+`WaypointCommander.cs`) clean against the real Unity project files. No
+Unity Editor here to confirm any of this on screen -- same standing
+limit as ever.

@@ -256,7 +256,24 @@ public class WaypointCommander : MonoBehaviour
     /// which is exactly what this replaces. A single GroupFacing token is
     /// shared across the whole group so they settle facing one direction
     /// -- whichever unit gets to its slot first (creator direction,
-    /// 2026-07).</summary>
+    /// 2026-07).
+    ///
+    /// 2026-08 (creator direction: "see if the speed based solution with
+    /// coordinate their landing spots is viable"): the greedy pick below
+    /// ranks by ETA (distance / this unit's own `WalkSpeed`), not raw
+    /// distance -- a mixed-speed group (a lumbering tank-bodied monster
+    /// next to a sprinter) previously could get assigned by pure
+    /// proximity to a slot the SLOW unit happens to start nearer to but
+    /// would take longer to actually reach than a faster unit starting
+    /// slightly farther away, so the two crossed paths converging on
+    /// their (mismatched) slots. This is a real, worthwhile improvement
+    /// for exactly that mismatch, but it's a DESTINATION-assignment fix,
+    /// not a moment-to-moment steering one -- it doesn't touch (and isn't
+    /// expected to fix) the residual close-quarters circling docs/12's
+    /// 2026-08 follow-up entry documents for a tight multi-squad scrum
+    /// already converged on nearby, non-conflicting destinations; that's
+    /// `MonsterSteeringController.Alignment`/`PredictiveAvoidance`
+    /// territory, a different mechanism entirely.</summary>
     private void AssignFormation(System.Collections.Generic.List<MadDr.CityGen.HexCoord> slots, bool queue,
         Vector3 clusterPoint)
     {
@@ -268,13 +285,15 @@ public class WaypointCommander : MonoBehaviour
             if (remaining.Count == 0) break;
             var slotW = _builder.WorldOf(slot);
             var best = -1;
-            var bestSq = float.MaxValue;
+            var bestEtaSq = float.MaxValue;
             for (var i = 0; i < remaining.Count; i++)
             {
                 if (remaining[i] == null) continue;
                 var d = remaining[i].transform.position - slotW;
                 d.y = 0f;
-                if (d.sqrMagnitude < bestSq) { bestSq = d.sqrMagnitude; best = i; }
+                var speed = Mathf.Max(0.1f, remaining[i].WalkSpeed);
+                var etaSq = d.sqrMagnitude / (speed * speed);
+                if (etaSq < bestEtaSq) { bestEtaSq = etaSq; best = i; }
             }
             if (best < 0) break;
             var unit = remaining[best];

@@ -1055,14 +1055,34 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// corner overhang without the step's own hex ever being flagged
     /// blocked. Cheap (<=7 dictionary lookups), meant for occasional
     /// spot-picking/step-validation call sites, not a per-frame-per-unit
-    /// hot path.</summary>
-    public bool InsideBuildingFootprint(Vector3 worldPos)
+    /// hot path.
+    ///
+    /// `exclude` (2026-08, creator report "monster went into the factory
+    /// and never left it"): the ONE hex this check should never flag,
+    /// even if a building genuinely covers it -- for a unit that's
+    /// already standing there. Without it, a clone spawned directly on
+    /// the Factory's own hex (`GrabCursor.CloneOnto`'s "it visibly comes
+    /// out of the building that made it") or a roof occupant evicted back
+    /// onto that same hex (`MonsterAgent.BootFromRoof`) fails THIS
+    /// footprint check on its own first settle-creep step: `next` is only
+    /// centimetres from where it's already standing, still well inside
+    /// the SAME building's `BuildingFootprintHalfExtent` square it just
+    /// spawned in, so `TickSettle` reads its own spawn point as "walked
+    /// into a building" and nulls the settle target before a single step
+    /// ever lands -- the unit is stranded exactly on/inside the Factory's
+    /// rendered footprint forever, matching the report exactly. Excluding
+    /// the unit's own current hex only forgives THAT specific hex for
+    /// THIS step; every other building (including this one's OTHER
+    /// footprint hexes, and its neighbour-overhang reach from elsewhere)
+    /// is still checked exactly as before, so a real walk-into-a-building
+    /// step from open ground is still caught.</summary>
+    public bool InsideBuildingFootprint(Vector3 worldPos, HexCoord? exclude = null)
     {
         EnsureRoofCache();
         var hex = HexAt(worldPos);
-        if (BuildingCovers(hex, worldPos)) return true;
+        if (hex != exclude && BuildingCovers(hex, worldPos)) return true;
         foreach (var n in hex.Neighbors())
-            if (BuildingCovers(n, worldPos)) return true;
+            if (n != exclude && BuildingCovers(n, worldPos)) return true;
         return false;
     }
 
