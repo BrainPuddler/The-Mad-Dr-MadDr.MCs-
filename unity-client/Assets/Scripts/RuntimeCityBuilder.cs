@@ -395,6 +395,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (selectionHud == null) selectionHud = gameObject.AddComponent<SelectionHud>();
         selectionHud.Init(commander, minimap);
 
+        var recallHud = gameObject.GetComponent<RecallHud>();
+        if (recallHud == null) recallHud = gameObject.AddComponent<RecallHud>();
+        recallHud.Init(commander, minimap);
+
         var clock = gameObject.GetComponent<AnalogClockHud>();
         if (clock == null) gameObject.AddComponent<AnalogClockHud>();
 
@@ -1932,6 +1936,18 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 DamageFx.DustBurst(WorldOf(building.Footprint[0]), _buildingsHost);
                 SpawnScorchDecal(building, _buildingsHost);
             }
+            // 2026-08 (creator report: "I don't see people fleeing from
+            // the wreckage of the building"): disgorge was wired ONLY to
+            // the separate RTS-building roster (BaseDresser watching
+            // SimBuilding.State) -- a PROCEDURAL building (this method's
+            // own kind, the vast majority of the map, and fully
+            // attackable via TickAttack) never disgorged anyone at all.
+            // Same "when they are destroyed they disgorge their human
+            // occupants that flee" contract, same SpawnFleeingOccupant
+            // call BaseDresser already uses, just from the destruction
+            // path a house/shop actually dies through.
+            for (var occ = 0; occ < BuildingStats.Occupants(building.Tier); occ++)
+                SpawnFleeingOccupant(building.Footprint[0]);
             _cityVersion++;
             Debug.Log("Building destroyed -- rubble is now walkable.");
         }
@@ -2024,11 +2040,18 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
     /// <summary>Spawns a single Citizen at `hex`, already in its forced
     /// panic-flee state (2026-07: a destroyed base building "disgorges
-    /// its human occupants that flee"). Called once per occupant by <see
-    /// cref="BaseDresser"/> the instant a <see cref="SimBuilding"/> flips
-    /// to Destroyed -- same Citizen creation shape as <see
-    /// cref="SpawnCitizens"/>'s match-start scatter, just triggered
-    /// mid-match at a specific point instead of scattered at start.</summary>
+    /// its human occupants that flee"). Called once per occupant by
+    /// EITHER of this game's two separate building systems' own
+    /// destruction path: <see cref="BaseDresser"/> the instant an RTS
+    /// <see cref="SimBuilding"/> flips to Destroyed, or (2026-08, creator
+    /// report: "I don't see people fleeing from the wreckage of the
+    /// building" -- the gap was that only the RTS path called this)
+    /// <see cref="ApplyBuildingDamage"/> the instant a PROCEDURAL
+    /// civilian `Building` does, using `BuildingStats.Occupants` for the
+    /// count instead of `BuildingDef.Occupants`. Same Citizen creation
+    /// shape as <see cref="SpawnCitizens"/>'s match-start scatter, just
+    /// triggered mid-match at a specific point instead of scattered at
+    /// start.</summary>
     public Citizen SpawnFleeingOccupant(HexCoord hex)
     {
         var blocked = BlockedFor(false);

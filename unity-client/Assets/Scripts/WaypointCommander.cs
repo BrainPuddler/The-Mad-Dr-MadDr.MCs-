@@ -68,9 +68,10 @@ public class WaypointCommander : MonoBehaviour
         // the New Input System's Mouse.current (read below) has no idea
         // OnGUI already claimed the click, so a minimap click would ALSO
         // fire a world-space select/order underneath it. Same reasoning
-        // for the building-nav icon bar (2026-07) and the selection-panel
-        // icon row next to the minimap (2026-08).
-        if (Minimap.PointerOver || BuildingNavHud.PointerOver || SelectionHud.PointerOver) return;
+        // for the building-nav icon bar (2026-07), the selection-panel
+        // icon row next to the minimap (2026-08), and the recall button
+        // docked above the minimap (2026-08).
+        if (Minimap.PointerOver || BuildingNavHud.PointerOver || SelectionHud.PointerOver || RecallHud.PointerOver) return;
 
         var mouse = Mouse.current;
         if (mouse == null || _builder == null) return;
@@ -240,6 +241,69 @@ public class WaypointCommander : MonoBehaviour
         if (_selected.Count == 1) _selected[0].OrderMove(hex, queue);
         else AssignFormation(_builder.FormationHexes(hex, _selected.Count), queue, worldPoint);
         _builder.SpawnWaypointMarker(_builder.WorldOf(hex));
+    }
+
+    /// <summary>2026-08 (creator direction: "give me a monster recall
+    /// button that will gather my troupes in one place"): selects and
+    /// orders EVERY currently-alive monster to rally at the player's own
+    /// base in one shot. Selecting the group first (rather than leaving
+    /// whatever was selected before untouched) doubles this as "select my
+    /// whole army" -- the natural next thing a player does right after
+    /// mashing a recall button anyway, and it's what makes `AssignFormation`
+    /// below (which reads `_selected`, same as every other multi-unit
+    /// order path in this file) actually apply to the recalled group
+    /// instead of whatever was selected beforehand.
+    ///
+    /// Rallies to the player's own Factory (the same "home" a laden
+    /// harvester's own auto-delivery already walks to --
+    /// `MonsterAgent.FindOwnFactory`), falling back to the HQ if no
+    /// Factory exists yet. A no-op if the player has neither (an
+    /// intentionally silent no-op, matching every other "nothing to do
+    /// yet" branch in this file, rather than walking a whole army toward
+    /// an arbitrary point). Spreads the group via the SAME
+    /// `FormationHexes`/`AssignFormation` machinery a manual multi-select
+    /// order already uses, not a plain single shared destination -- a
+    /// big army stacking onto one hex is exactly the kind of crowding
+    /// this project's whole steering-fix history has been fighting.</summary>
+    public void RecallAll()
+    {
+        if (_builder == null) return;
+        var home = FindOwnRallyHex();
+        if (!home.HasValue) return;
+
+        var monsters = new List<MonsterAgent>();
+        foreach (var m in _builder.Monsters)
+            if (m != null) monsters.Add(m);
+        if (monsters.Count == 0) return;
+
+        SetSelection(monsters);
+        var worldHome = _builder.WorldOf(home.Value);
+        if (monsters.Count == 1) monsters[0].OrderMove(home.Value, false);
+        else AssignFormation(_builder.FormationHexes(home.Value, monsters.Count), false, worldHome);
+        _builder.SpawnWaypointMarker(worldHome);
+    }
+
+    /// <summary>The local human player's own Factory hex, falling back to
+    /// their own HQ -- same "player index 0 is the local human" convention
+    /// every other Unity-side script already uses (e.g. `MonsterAgent.
+    /// FindOwnFactory`'s own doc comment, `GrabCursor.localPlayerIndex`'s
+    /// default). Null if neither exists yet (no match, or both destroyed)
+    /// -- `RecallAll` treats that as "nothing to rally to," not a
+    /// fallback to some arbitrary point.</summary>
+    private HexCoord? FindOwnRallyHex()
+    {
+        var bridge = _builder.SimBridge;
+        if (bridge == null || !bridge.HasMatch) return null;
+        HexCoord? factory = null;
+        HexCoord? hq = null;
+        for (var i = 0; i < bridge.BuildingCount; i++)
+        {
+            var b = bridge.BuildingAt(i);
+            if (b.PlayerIndex != 0 || b.State != MadDr.MatchCore.BuildingState.Complete) continue;
+            if (b.Kind == MadDr.MatchCore.BuildingKind.Factory && !factory.HasValue) factory = b.Hex;
+            else if (b.Kind == MadDr.MatchCore.BuildingKind.Hq && !hq.HasValue) hq = b.Hex;
+        }
+        return factory ?? hq;
     }
 
     /// <summary>Hand out formation slots to the selected group,

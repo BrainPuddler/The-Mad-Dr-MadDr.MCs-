@@ -16,6 +16,30 @@ public class DestructionTests
         Assert.Equal(expected, DamageStaging.StageFor(currentHp, maxHp));
     }
 
+    // 2026-08 (creator report: "I don't see people fleeing from the
+    // wreckage of the building"): procedural buildings previously had no
+    // occupant concept at all -- RuntimeCityBuilder.ApplyBuildingDamage
+    // now disgorges BuildingStats.Occupants(tier) fleeing Citizens on the
+    // Destroyed transition, same as the separate RTS-building roster
+    // already did.
+    [Theory]
+    [InlineData(BuildingTier.Small)]
+    [InlineData(BuildingTier.Medium)]
+    [InlineData(BuildingTier.Large)]
+    [InlineData(BuildingTier.Landmark)]
+    public void Occupants_is_positive_for_every_tier(BuildingTier tier)
+    {
+        Assert.True(BuildingStats.Occupants(tier) > 0);
+    }
+
+    [Fact]
+    public void Occupants_scales_monotonically_with_tier()
+    {
+        Assert.True(BuildingStats.Occupants(BuildingTier.Small) < BuildingStats.Occupants(BuildingTier.Medium));
+        Assert.True(BuildingStats.Occupants(BuildingTier.Medium) < BuildingStats.Occupants(BuildingTier.Large));
+        Assert.True(BuildingStats.Occupants(BuildingTier.Large) < BuildingStats.Occupants(BuildingTier.Landmark));
+    }
+
     [Fact]
     public void FullyIntact_starts_at_max_hp_for_its_tier()
     {

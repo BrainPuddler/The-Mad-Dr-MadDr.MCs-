@@ -8821,3 +8821,66 @@ confirm this on screen with an actual large creature model -- same
 standing limit as ever, but this is the first pass in this whole saga
 to actually exercise a large body size at all, which is the concrete
 gap the creator's report pointed at.
+
+## 2026-08 follow-up: procedural-building disgorge gap, and a monster recall button
+
+Creator direction: "I don't see people fleeing from the wreckage of the
+building. So monsters can chase them. Also give me a monster recall
+button that will gather my troupes in one place."
+
+**Found the gap: occupant disgorge only ever fired for the RTS building
+roster, never for procedural civilian buildings -- the vast majority of
+the map, and fully attackable/destructible.** This codebase has two
+separate building systems: `MadDr.MatchCore.SimBuilding` (the RTS
+roster -- HQ/Factory/storage, tracked via `SimBridge`) and `MadDr.
+CityGen.Building` (the procedural civilian city -- houses/shops/
+landmarks, tracked via `RuntimeCityBuilder`'s own `_battlefield`).
+Occupant disgorge (`RuntimeCityBuilder.SpawnFleeingOccupant`, "when
+they are destroyed they disgorge their human occupants that flee") was
+wired ONLY into `BaseDresser`'s per-frame watch of `SimBuilding.State`
+-- confirmed by `SpawnFleeingOccupant`'s own doc comment, and by
+`ApplyBuildingDamage` (the PROCEDURAL destruction path, reached via
+`MonsterAgent.TickAttack` -> `OrderAttack(Building)`, the ordinary way
+a player actually smashes most of the city) having zero Citizen-related
+code in its entire `Destroyed` branch -- rubble, dust, scorch decal,
+nothing else. `MadDr.CityGen.Building` also had no `Occupants` concept
+of its own at all; that field only ever existed on `BuildingDef`, the
+RTS-only table.
+
+**Fixed:** added `BuildingStats.Occupants(BuildingTier)` (`packages/
+citygen-core/src/BuildingTier.cs`), a parallel small-flat-count-by-tier
+table alongside the existing `StructureHp`/`Armor` (3/5/10/15 for
+Small/Medium/Large/Landmark -- a real v0.1 placeholder, not sourced
+from any doc, same standing policy as `BuildingDef.Occupants`'s own).
+`RuntimeCityBuilder.ApplyBuildingDamage`'s `Destroyed` branch now loops
+that count and calls the SAME `SpawnFleeingOccupant` the RTS path
+already uses, right alongside the existing rubble/dust/decal calls --
+a house or shop dying now disgorges fleeing citizens exactly like an
+RTS base already did. 5 new citygen-core tests cover the new method
+(positive for every tier, monotonically increasing by tier); all 173
+citygen-core tests pass.
+
+**Also shipped: a recall button.** `WaypointCommander.RecallAll()`
+selects every currently-alive monster and orders them to rally at the
+player's own Factory (falling back to the HQ if no Factory exists yet;
+a silent no-op if neither exists -- never walks the army toward an
+arbitrary point). Uses the SAME `FormationHexes`/`AssignFormation`
+machinery a manual multi-select order already uses, so a big recalled
+army spreads out around the rally point instead of stacking onto one
+hex -- exactly the class of crowding this whole steering-fix history
+has been fighting, so the recall button doesn't reintroduce it. New
+`RecallHud.cs` (IMGUI, matching every other HUD panel's own style)
+docks a single "Recall" button directly above the minimap; wired into
+`WaypointCommander`'s existing click-guard list (`Minimap.PointerOver`
+et al.) so clicking it doesn't also fire a world-space order
+underneath, same pattern `SelectionHud`/`BuildingNavHud` already
+established.
+
+**Verified for real:** flightcheck recompiles the whole edited/new set
+(`RuntimeCityBuilder.cs`, `WaypointCommander.cs`, `RecallHud.cs`)
+clean against fresh `MadDr.CityGen.dll`. citygen-core's full 173-test
+suite passes (168 prior + 5 new). No Unity Editor here to confirm
+either change on screen -- same standing limit as ever, but the
+disgorge fix is traced to an exact, confirmed root cause (not a
+guess), and the recall button reuses machinery already exercised by
+every other multi-unit order path in this file.
