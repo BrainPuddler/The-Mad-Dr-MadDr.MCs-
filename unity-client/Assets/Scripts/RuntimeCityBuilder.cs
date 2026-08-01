@@ -2075,15 +2075,26 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return best;
     }
 
-    /// <summary>A harvester unloads its onboard tank into the session
-    /// wallet (docs/22): the carried load is banked as Blood (fuel), the
-    /// dominant lane a harvest tool draws. Called when a laden harvester
-    /// idles near its home/Vat.</summary>
+    /// <summary>A harvester unloads its onboard tank (docs/22): the
+    /// carried load is banked as Blood (fuel), the dominant lane a
+    /// harvest tool draws. Called when a laden harvester idles near its
+    /// home/Vat or (per the newer Factory-delivery loop) its own
+    /// Factory. Credits match-core's real per-player wallet via a queued
+    /// <see cref="SimBridge.QueueBankHarvestLoadCommand"/> -- ResourceHud
+    /// reads THAT wallet, not this class's own <see cref="WalletBlood"/>,
+    /// so a fix here was required for a delivered load to ever show up
+    /// on screen (2026-07, creator report: "the list under the clock,
+    /// never seems to change" -- traced to this call incrementing only
+    /// the legacy field below, never match-core's). `WalletBlood` itself
+    /// is left updated too, purely because <see cref="HudStatus"/> still
+    /// reads it as a separate legacy debug line -- not because anything
+    /// downstream of THIS method needs it anymore.</summary>
     public void BankHarvestLoad(float load)
     {
         var banked = Mathf.RoundToInt(load);
         if (banked <= 0) return;
         WalletBlood += banked;
+        if (_simBridge != null && _simBridge.HasMatch) _simBridge.QueueBankHarvestLoadCommand(0, banked);
         Debug.Log("Harvester banked " + banked + " blood. Wallet: " + WalletBlood + " blood.");
     }
 

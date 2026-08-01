@@ -95,6 +95,15 @@ namespace MadDr.MatchCore
         /// anomalies. Silently a no-op for a Destroyed building, matching
         /// every other command kind's "bad input is a no-op" contract.</summary>
         AttackBuilding = 9,
+        /// <summary>2026-07 (harvester-to-Factory delivery loop, docs/22):
+        /// grant PlayerIndex's own wallet ArgA Blood -- a harvester
+        /// monster isn't itself a <see cref="SimUnit"/> (its movement/AI
+        /// is still Unity-side, not yet ported into the sim per docs/27's
+        /// migration plan), so unlike every other command kind there is
+        /// no source entity to validate against; TargetEntity/ArgB are
+        /// unused. Bad input (ArgA &lt;= 0) is a silent no-op, same
+        /// contract as every other command kind.</summary>
+        BankHarvestLoad = 10,
     }
 
     /// <summary>

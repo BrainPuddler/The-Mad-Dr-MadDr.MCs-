@@ -237,6 +237,21 @@ public class SimBridge : MonoBehaviour
         _pending.Add(new Command(playerIndex, CommandKind.AttackBuilding, targetEntity: attackerEntityId, argA: unchecked((int)buildingEntityId)));
     }
 
+    /// <summary>2026-07 (harvester-to-Factory delivery loop, docs/22):
+    /// queue a BankHarvestLoad command for the NEXT tick boundary -- same
+    /// one-tick-latency contract as every other queued command here.
+    /// Unlike the others there's no source entity to validate against (a
+    /// harvester monster isn't itself a SimUnit yet -- see <see
+    /// cref="MadDr.MatchCore.CommandKind.BankHarvestLoad"/>'s own doc
+    /// comment), so this is the correct wallet-mutating path rather than
+    /// a Unity-side-only counter: it's what makes a delivered load
+    /// actually show up in <see cref="PlayerWallet"/> (and therefore in
+    /// ResourceHud), not just in a log line.</summary>
+    public void QueueBankHarvestLoadCommand(int playerIndex, int amount)
+    {
+        _pending.Add(new Command(playerIndex, CommandKind.BankHarvestLoad, argA: amount));
+    }
+
     private void Update() => Pump(Time.deltaTime);
 
     /// <summary>The actual fixed-timestep accumulator logic, taking `dt`

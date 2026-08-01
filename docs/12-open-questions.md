@@ -8066,3 +8066,52 @@ render of the Lab's `mastermind` tier confirms the visible silhouette
 is unchanged from before the cut (as expected, since the cerebellum
 was already occluded from the angles that matter) -- confirming the
 cut geometry really was dead weight, not a visible regression.
+
+## 2026-07: FIX -- harvester deliveries banked into a legacy field ResourceHud never reads, so "the list under the clock" genuinely never updated
+
+Creator: "the list under the clock, never seems to change, fill up are
+monsters delivering supplies to factory?" -- a real bug, not a
+perception issue. `ResourceHud.cs` (the panel `topOffsetPixels = 210f`
+below `AnalogClockHud`, i.e. "the list under the clock") polls
+`SimBridge.PlayerWallet` fresh every `OnGUI()` -- a live poll, not a
+cached snapshot, so it wasn't a display/refresh bug. The harvester-
+to-Factory delivery loop itself was also genuinely completing every
+time (load carried, arrival detected, `RuntimeCityBuilder.
+BankHarvestLoad` called, log line fired). The break was in between:
+`BankHarvestLoad` only ever did `WalletBlood += banked` on
+`RuntimeCityBuilder`'s own plain auto-property -- a legacy field that
+predates match-core's real economy and was never wired to it. Every
+successful harvest run was banking into a pool `ResourceHud` never
+reads (`SimBridge.PlayerWallet` reads match-core's real
+`PlayerState.Wallet`, credited only via `PlayerState.Grant`), so the
+list was stuck at 0 no matter how many deliveries happened.
+
+**The fix, matching match-core's own established command-queue
+discipline rather than reaching in and calling `PlayerState.Grant`
+directly:** a new `CommandKind.BankHarvestLoad` (`Command.cs`) +
+`MatchState.ApplyBankHarvestLoad` (`Grant(ResourceKind.Blood, ArgA)`,
+silent no-op on a non-positive amount or an out-of-range player index,
+same bad-input contract every other command kind already follows) +
+`SimBridge.QueueBankHarvestLoadCommand`, mirroring `QueueTrainCommand`/
+`QueueAttackBuildingCommand` exactly. One genuine architectural
+wrinkle, called out rather than glossed over: every other command kind
+validates against a real match-core entity (`TargetEntity`); a
+harvester monster isn't itself a `SimUnit` yet (its movement/AI is
+still Unity-side, docs/27's migration not yet reached this system), so
+there's no source entity to check -- the command carries only
+`PlayerIndex` and the amount. `RuntimeCityBuilder.BankHarvestLoad` now
+queues this command IN ADDITION TO its old `WalletBlood +=` line (left
+in place only because `HudStatus.cs` still reads that field as a
+separate legacy debug display -- not because the real fix depends on
+it), so the actual gameplay-visible economy is now match-core's, and
+the stray legacy counter is flagged as genuinely obsolete rather than
+silently duplicated forever.
+
+**Verified for real:** a new `BankHarvestLoadTests.cs` (grant amount,
+repeated-delivery accumulation, per-player isolation, non-positive-
+amount and out-of-range-player-index no-ops, same-seed determinism)
+plus the full existing suite -- `274/274` passing (268 baseline + 6
+new). The flightcheck harness recompiled the whole Unity gameplay layer
+against a freshly rebuilt match-core DLL clean, confirming
+`RuntimeCityBuilder.cs`/`SimBridge.cs` actually compile against the new
+API, not just that match-core's own tests pass in isolation.

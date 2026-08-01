@@ -776,6 +776,20 @@ namespace MadDr.MatchCore
             }
         }
 
+        /// <summary>2026-07 (harvester-to-Factory delivery loop, docs/22):
+        /// grant PlayerIndex's wallet ArgA <see cref="ResourceKind.Blood"/>
+        /// -- see <see cref="CommandKind.BankHarvestLoad"/>'s own doc
+        /// comment for why this has no source entity to validate against
+        /// (a harvester monster isn't itself a <see cref="SimUnit"/> yet).
+        /// Silent no-op for an out-of-range player index or a non-positive
+        /// amount, same bad-input contract as every other command kind.</summary>
+        private void ApplyBankHarvestLoad(Command cmd)
+        {
+            if (cmd.PlayerIndex < 0 || cmd.PlayerIndex >= _players.Length) return;
+            if (cmd.ArgA <= 0) return;
+            _players[cmd.PlayerIndex].Grant(ResourceKind.Blood, cmd.ArgA);
+        }
+
         /// <summary>Which of `from`'s 6 edges `to` lies beyond -- `to` must
         /// be exactly adjacent (same precondition as
         /// <see cref="Facing.ArcOf"/>, which this mirrors for the
@@ -1034,6 +1048,9 @@ namespace MadDr.MatchCore
                     break;
                 case CommandKind.AttackBuilding:
                     ApplyAttackBuilding(cmd);
+                    break;
+                case CommandKind.BankHarvestLoad:
+                    ApplyBankHarvestLoad(cmd);
                     break;
                 case CommandKind.None:
                 default:
