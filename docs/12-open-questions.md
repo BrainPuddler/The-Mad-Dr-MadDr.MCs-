@@ -8366,3 +8366,79 @@ case (byte-identical flip counts before/after). Flightcheck recompiles
 the whole Unity gameplay layer clean. No Unity Editor here to confirm
 how this actually reads on screen -- same standing limit as every
 other Unity-side entry in this log.
+
+## 2026-08 follow-up: CORRECTION -- the previous entry's own numbers were wrong, from a real bug in the verification harness itself, not just the game
+
+Creator, following up on the same "spin around each other" bug: "monsters
+in a groupmate should pick parking spots around and near the target but
+not the same target, based on their ETA, speed. verify if this a viable
+solution to the dosey doe problem." Investigated first (see below), then
+implemented the actual fix this surfaced -- and in the process, caught
+that the PREVIOUS entry's own "already clean either way" claim about a
+lone pair was flat wrong, from a bug in `steerverify` itself.
+
+**Part 1 -- was ETA/speed-based parking-spot assignment viable?** No,
+and not because it's a bad idea -- it targets a different, real problem.
+`WaypointCommander.AssignFormation`/`RingTarget` already give every unit
+in a single ordered GROUP a distinct destination hex (creator's own
+earlier direction: "distribute themselves around the waypoint NOT ON
+the waypoint") -- greedy-nearest, not ETA-aware, but already solved for
+the case of "many units converging on one shared point." The reported
+"dosey doe" bug reproduces with two SQUADS already headed to opposite,
+distinct destinations, just crossing paths mid-corridor -- distinct
+parking spots don't touch a mid-transit crossing problem. The real gap
+this surfaced: `FormationHexes` only dedupes destinations WITHIN one
+`AssignFormation` call -- two SEPARATELY issued orders to the same
+target (e.g. two squads independently sent to attack the same building)
+don't coordinate at all. That's a genuine, different bug worth its own
+pass; not built this round (scoped, not silently skipped).
+
+**Part 2 -- finishing the flagged Alignment/Cohesion fix turned up a
+much bigger correction.** Added `OpposingHeadingCutoff`: `Alignment`/
+`Cohesion` now exclude a same-`Faction` neighbour whose velocity is
+`Vector3.Dot(velocity, fwd) < 0` (more than 90 degrees off THIS unit's
+own intended heading) from the "groupmate" pool, instead of same-
+`Faction`-alone. Re-ran `steerverify` to confirm it helped -- and got
+BYTE-IDENTICAL numbers to the unfixed baseline. Tracing it down: the
+harness never published a moved unit's `LastVelocity` between frames
+(a real bug in the TEST, not the game) -- `MonsterAgent.Update()`
+publishes it every real frame (line ~989), but `steerverify` just moved
+`transform.position` and left `LastVelocity` at its default `Vector3.
+zero` forever. `PredictiveAvoidance`'s math still degraded plausibly
+with a "stationary" neighbour (so the previous entry's tie-break
+findings for THAT function held up), but `Alignment` explicitly skips
+near-zero velocity -- it was a complete, silent no-op for the ENTIRE
+previous verification pass, which is exactly why the earlier "a lone
+pair was already clean either way" conclusion was wrong: with
+`LastVelocity` never contributing, that pass could never have observed
+what Alignment does to a real, moving encounter.
+
+**Corrected, with LastVelocity now actually published:** a lone pair
+walking straight at each other was NOT clean -- the worst unit reversed
+its pass side roughly 19-21 times over one approach, the single worst
+result across every scenario tested. `OpposingHeadingCutoff` alone
+fixes this completely (0 reversals); `TieBreakDeadband` alone does
+NOTHING for it (byte-identical to no-fix baseline) -- the previous
+entry's claim that the tie-break was "the fix" for the reported symptom
+had the two mechanisms' real contributions backwards. For the tougher
+3v3-squad scenario, both fixes together (19 reversals) beat either one
+alone (Alignment-only: 27; tie-break-only: 17) or neither (20) -- genuine
+improvement, still not a full cure for a dense multi-unit scrum.
+
+| Config | Lone pair (worst unit) | 3v3 squad (total) |
+|---|---|---|
+| Neither fix | 19-21 reversals | 20 |
+| `TieBreakDeadband` only | 19-21 (unchanged) | 17 |
+| `OpposingHeadingCutoff` only | **0** | 27 |
+| Both (shipped) | **0** | **19** |
+
+**Honest limits, same as ever:** no Unity Editor to confirm this reads
+right on screen. This correction itself is the argument for why this
+project leans on numeric harnesses at all -- and also the reminder that
+a harness is only as trustworthy as its own fidelity to the real
+per-frame order of operations; this one had a real gap for two rounds
+before it was caught. Verified for real this time: four labeled
+`steerverify` configurations (neither/tie-break-only/alignment-only/
+both) with `LastVelocity` correctly published, matching `MonsterAgent.
+Update()`'s own real per-frame publish point; flightcheck recompiles
+the whole Unity gameplay layer clean.

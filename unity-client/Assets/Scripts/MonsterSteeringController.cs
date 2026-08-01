@@ -34,22 +34,30 @@ using UnityEngine;
 /// math types.
 ///
 /// 2026-08 (creator report: "monsters will spin around each other trying
-/// to pass one another"): `PredictiveAvoidance`'s `TieBreakDeadband` fixes
-/// the specific mechanism that made a near-head-on PAIR mismatch which
-/// side each unit picked (see that method's own comment) -- verified with
-/// a standalone harness. Honest remainder, not silently claimed fixed: a
-/// TIGHT MULTI-UNIT scrum (two whole squads of the same faction passing
-/// each other) still shows real residual flip-flopping in that same
-/// harness, ~15% fewer side-reversals with the fix but not eliminated.
-/// The dominant extra factor there looks like `Alignment`/`Cohesion`
-/// (below): "groupmate" is just same-`Faction`, not "same order/
-/// destination" (docs/27 Phase B already flagged this exact gap for
-/// queued group moves), so two OPPOSING squads of the same faction
-/// currently try to align toward each other's average heading while also
-/// trying to avoid each other -- a real design question (what should
-/// "groupmate" mean once there's more than one order in flight?), not a
-/// mechanical bug this pass's fix reaches. Flagged rather than
-/// silently re-scoped into a bigger redesign.
+/// to pass one another"): two real fixes, `PredictiveAvoidance`'s
+/// `TieBreakDeadband` and `Alignment`/`Cohesion`'s `OpposingHeadingCutoff`
+/// (both below, see their own comments). CORRECTION to this pass's own
+/// first verification: the original `steerverify` harness never
+/// published a moved unit's `LastVelocity` between frames, so every
+/// neighbour was silently tested as if PERMANENTLY STATIONARY --
+/// `PredictiveAvoidance`'s closing-speed math still degraded gracefully
+/// enough to look plausible, but `Alignment` (which skips near-zero
+/// velocity) never contributed AT ALL, so the harness could never have
+/// caught what turned out to be the DOMINANT cause for the simple,
+/// most-common case. Fixed and re-verified: with real velocities
+/// published, a lone pair walking straight at each other was NOT already
+/// clean (it spun violently -- worst unit reversed side ~20 TIMES over
+/// one approach) and `OpposingHeadingCutoff` alone fixes it completely
+/// (0 reversals); `TieBreakDeadband` alone does nothing for a lone pair
+/// (same-`Faction` Alignment, pulling a unit's own heading toward an
+/// oncoming neighbour's OPPOSING velocity, was the real mechanism, not
+/// the avoidance side-tie-break). For a tight multi-squad scrum both
+/// fixes together still beat either alone, but even combined it's a
+/// real, measured improvement (20 -&gt; 19 total side-reversals in the
+/// harness's 3v3 scenario), not a full cure -- dense multi-unit combat
+/// likely needs real hysteresis/state this file's own "Stateless"
+/// design deliberately doesn't have yet, flagged rather than silently
+/// claimed solved.
 /// </summary>
 public static class MonsterSteeringController
 {
@@ -102,6 +110,25 @@ public static class MonsterSteeringController
     /// <summary>docs/23 §5: "match average heading of groupmates within
     /// 12 m."</summary>
     public const float GroupmateRadius = 12f;
+
+    /// <summary>2026-08 (creator report, "monsters spin around each other
+    /// trying to pass"; see this file's own class header for the full
+    /// writeup): dot-product threshold, against THIS unit's own intended
+    /// heading (`fwd`), below which a same-Faction neighbour is excluded
+    /// from `Alignment`/`Cohesion`'s "groupmate" pool. 0 means "more than
+    /// 90 degrees off my own direction of travel" -- same-Faction ALONE
+    /// was too loose a "groupmate" definition: two squads walking OPPOSITE
+    /// directions through one corridor are both "monster" faction, so
+    /// each squad was pulling every member of the OTHER toward its own
+    /// average heading/position (Alignment/Cohesion) while simultaneously
+    /// trying to avoid it (PredictiveAvoidance/SeparationForce) -- two
+    /// systems fighting each other over the same pair, every frame. A
+    /// neighbour with negligible velocity (idle, captured/possessed) is
+    /// NEVER excluded by this check -- only a neighbour with a real,
+    /// meaningfully-diverging-or-opposing heading is cut, so a squad
+    /// gently curving around an obstacle (well within 90 degrees of each
+    /// other) still flocks exactly as before.</summary>
+    public const float OpposingHeadingCutoff = 0f;
 
     /// <summary>Combine's output: a steering direction plus how much of the
     /// caller's intended speed to actually use this frame.</summary>
@@ -206,17 +233,16 @@ public static class MonsterSteeringController
             // pulling headings around) can flip `onRight`'s sign
             // independently frame to frame right at that boundary, and
             // since it's evaluated fresh on BOTH units in the pair, they
-            // can pick MISMATCHED sides and visibly spin around each
-            // other instead of committing (creator report, 2026-08:
-            // "monsters will spin around each other trying to pass one
-            // another" -- reproduced in a standalone harness with two
-            // 3-unit same-faction squads passing head-on in a corridor:
-            // total side reversals across the group dropped from 33 to 28
-            // with this fix -- a real, measured improvement, not a full
-            // cure; a lone pair was already clean either way, and a tight
-            // multi-unit "scrum" still shows residual flip-flopping this
-            // fix alone doesn't fully resolve, see this file's own class
-            // header for the honest remainder). Within
+            // can pick MISMATCHED sides. Real, but NOT the dominant
+            // mechanism for the reported "spin" symptom in the common
+            // case -- see this file's own class header's 2026-08
+            // CORRECTION for the full story: for a lone pair,
+            // `Alignment`'s `OpposingHeadingCutoff` (below) is what
+            // actually fixes it, this deadband alone does nothing. This
+            // tie-break still measurably helps once separation/avoidance
+            // are the only forces at play (a tight multi-unit "scrum"
+            // with flocking bypassed), and helps somewhat even with
+            // flocking active. Within
             // `TieBreakDeadband` of that boundary, fall back to a
             // per-PAIR-stable tie-break instead of the noisy geometric
             // sign -- built from `Mathf.Min` of both units' InstanceIDs so
@@ -251,15 +277,20 @@ public static class MonsterSteeringController
     /// deferred for queued group moves; same-Faction is the existing,
     /// already-used stand-in -- `UnitCombat.Faction` is how the codebase
     /// already tells "monster" from "human" everywhere else, e.g.
-    /// `NearestEnemyOf`) neighbour within <see cref="GroupmateRadius"/>.
-    /// Each groupmate's heading is its own published `LastVelocity`
-    /// (the same field <see cref="PredictiveAvoidance"/> already reads,
-    /// no new per-frame publish needed) -- a stationary groupmate
-    /// contributes nothing (no heading to align to), matching
-    /// `PredictiveAvoidance`'s own "not closing -- nothing to predict"
-    /// idiom. Returns a normalized direction, or zero if there's nobody to
-    /// align with or their headings cancel out.</summary>
-    public static Vector3 Alignment(UnitCombat self, List<UnitCombat> neighbours)
+    /// `NearestEnemyOf`) neighbour within <see cref="GroupmateRadius"/> --
+    /// 2026-08: AND not moving opposed to `fwd` (<see
+    /// cref="OpposingHeadingCutoff"/>'s own comment explains why:
+    /// same-Faction alone let two OPPOSING squads pull each other's
+    /// headings together while fighting to avoid each other). Each
+    /// groupmate's heading is its own published `LastVelocity` (the same
+    /// field <see cref="PredictiveAvoidance"/> already reads, no new
+    /// per-frame publish needed) -- a stationary groupmate contributes
+    /// nothing (no heading to align to, and never excluded by the
+    /// opposing-heading check either), matching `PredictiveAvoidance`'s
+    /// own "not closing -- nothing to predict" idiom. Returns a
+    /// normalized direction, or zero if there's nobody to align with or
+    /// their headings cancel out.</summary>
+    public static Vector3 Alignment(UnitCombat self, Vector3 fwd, List<UnitCombat> neighbours)
     {
         var sum = Vector3.zero;
         var counted = 0;
@@ -274,7 +305,9 @@ public static class MonsterSteeringController
             var v = c.LastVelocity;
             v.y = 0f;
             if (v.sqrMagnitude < 1e-6f) continue;
-            sum += v.normalized;
+            var vDir = v.normalized;
+            if (Vector3.Dot(vDir, fwd) < OpposingHeadingCutoff) continue;
+            sum += vDir;
             counted++;
         }
         if (counted == 0) return Vector3.zero;
@@ -285,15 +318,20 @@ public static class MonsterSteeringController
     /// <summary>docs/23 §5: "gentle pull toward group centroid, capped so
     /// it never fights the path." Same groupmate definition as
     /// <see cref="Alignment"/> (same-Faction, within
-    /// <see cref="GroupmateRadius"/>). Always returns a UNIT-length
-    /// direction (or zero) regardless of how far away the centroid
-    /// actually is -- the cap docs/23 asks for is
+    /// <see cref="GroupmateRadius"/>, 2026-08: and not moving opposed to
+    /// `fwd` -- see <see cref="OpposingHeadingCutoff"/>'s own comment;
+    /// pulling toward an oncoming squad's centroid is exactly as wrong as
+    /// aligning toward its heading was). A stationary neighbour is never
+    /// excluded by the heading check (no heading to be opposed WITH), so
+    /// an idle same-Faction unit still pulls the centroid same as before.
+    /// Always returns a UNIT-length direction (or zero) regardless of how
+    /// far away the centroid actually is -- the cap docs/23 asks for is
     /// <see cref="CohesionWeight"/>'s small blend weight in
     /// <see cref="Combine"/>, not a distance-dependent magnitude here (the
     /// same "return a bounded unit vector, let the weighted blend limit
     /// it" shape <see cref="PredictiveAvoidance"/>'s own `avoid` term and
     /// `Combine`'s `sepBias` already use).</summary>
-    public static Vector3 Cohesion(UnitCombat self, List<UnitCombat> neighbours)
+    public static Vector3 Cohesion(UnitCombat self, Vector3 fwd, List<UnitCombat> neighbours)
     {
         var centroidSum = Vector3.zero;
         var counted = 0;
@@ -305,6 +343,9 @@ public static class MonsterSteeringController
             var d = c.transform.position - self.transform.position;
             d.y = 0f;
             if (d.sqrMagnitude > radiusSq) continue;
+            var v = c.LastVelocity;
+            v.y = 0f;
+            if (v.sqrMagnitude > 1e-6f && Vector3.Dot(v.normalized, fwd) < OpposingHeadingCutoff) continue;
             centroidSum += c.transform.position;
             counted++;
         }
@@ -342,8 +383,8 @@ public static class MonsterSteeringController
         var sepBias = sepPush.sqrMagnitude > 1e-6f
             ? sepPush.normalized * Mathf.Min(1f, sepPush.magnitude / Mathf.Max(0.01f, self.Radius))
             : Vector3.zero;
-        var alignBias = Alignment(self, neighbours);
-        var cohesionBias = Cohesion(self, neighbours);
+        var alignBias = Alignment(self, fwd, neighbours);
+        var cohesionBias = Cohesion(self, fwd, neighbours);
 
         var dir = avoid.sqrMagnitude < 1e-6f && sepBias.sqrMagnitude < 1e-6f
             && alignBias.sqrMagnitude < 1e-6f && cohesionBias.sqrMagnitude < 1e-6f
