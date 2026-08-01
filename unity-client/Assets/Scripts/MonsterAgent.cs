@@ -164,6 +164,15 @@ public class MonsterAgent : MonoBehaviour
     /// before the load was split into per-resource lanes.</summary>
     private float TotalCarriedLoad { get { return _carriedBlood + _carriedBones + _carriedBrains; } }
 
+    /// <summary>0..1 tank fill -- public for <see cref="HarvesterMarkerHud"/>'s
+    /// own badge fill-bar, same data <see cref="LoadFactor"/> already
+    /// derives its speed penalty from, just exposed as a plain fraction
+    /// instead of a speed multiplier.</summary>
+    public float HarvestFillFraction
+    {
+        get { return _harvest != null && _harvest.Capacity > 0.01f ? Mathf.Clamp01(TotalCarriedLoad / (float)_harvest.Capacity) : 0f; }
+    }
+
     public string DisplayName { get; private set; } = "";
     public bool Selected { get; private set; }
 
@@ -181,6 +190,27 @@ public class MonsterAgent : MonoBehaviour
     /// to spawn copies of, the same way <see cref="RuntimeCityBuilder.
     /// SpawnMonster"/> already builds any monster from one.</summary>
     public StoredGenomeDto Creature { get { return _creature; } }
+
+    /// <summary>2026-08 (creator direction: "a quick way for the player
+    /// to recognize a monster is a collection unit"): true when this
+    /// creature actually has real onboard harvest capacity -- a hand
+    /// tool AND/OR a storage vessel expressed at all (`HarvestProfile.
+    /// Capacity` is body-bulk-plus-vessel per `Harvest.Profile`, so it's
+    /// never literally zero, but a creature with no hand tool and no
+    /// vessel slot -- `IgnoredSlots`/vestigial families -- still has
+    /// `GatherBlood/Bone/Brain` all at 0, meaning it can walk into a
+    /// citizen forever and never fill a single unit). `HarvesterMarkerHud`
+    /// reads this to badge only creatures that would actually DO
+    /// something useful as a harvester, not every monster with a
+    /// nonzero-but-meaningless base capacity.</summary>
+    public bool IsHarvester
+    {
+        get
+        {
+            return _harvest != null
+                && (_harvest.GatherBlood > 0.001 || _harvest.GatherBone > 0.001 || _harvest.GatherBrain > 0.001);
+        }
+    }
 
     /// <summary>Winged plan -- the commander routes a roof-click to a
     /// perch order for these, an attack order for everyone else.</summary>

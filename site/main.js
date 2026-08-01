@@ -14,7 +14,7 @@ import {
   viability, upkeep, heartCapacity, circulatoryLoad, partUpkeep,
   originOf, isVestigial, homologOf, brainSize, bodyAxis, brainAxis, heartVigor,
   capacity as controlCapacity, controlCost, controlRadius, berserkThreshold,
-  secondaryAttackForGenome,
+  secondaryAttackForGenome, harvestProfile,
 } from "./lib/index.js";
 import { initRenderer, updateGenome, destroyRenderer, locomotionProfile, setLabFaction, renderThumbnail, renderPartThumbnail } from "./creature-renderer.js";
 
@@ -774,6 +774,20 @@ function render() {
   }
 }
 
+// 2026-08 (creator direction: "a quick way for the player to recognize a
+// monster is a collection unit in both the lab and game"): real onboard
+// harvest capacity -- a hand tool AND/OR a storage vessel actually
+// expressed, not just a nonzero-but-meaningless base capacity every
+// genome technically has (harvestProfile's own `capacity` is body-bulk-
+// plus-vessel, never literally zero, but a creature with no hand tool
+// and no vessel slot still gathers 0 of everything). Same threshold the
+// Unity side's `MonsterAgent.IsHarvester` uses, so a genome reads as a
+// harvester (or doesn't) consistently in both places.
+function isHarvesterGenome(g) {
+  const p = harvestProfile(g);
+  return p.gather.blood > 0.001 || p.gather.bone > 0.001 || p.gather.brain > 0.001;
+}
+
 function renderRoster() {
   const el = document.getElementById("roster");
   const list = labCreatures();
@@ -782,8 +796,9 @@ function renderRoster() {
     const v = viability(c.genome);
     const badge = c.alive ? `<span class="badge ${v.state}">${v.state}</span>` : `<span class="badge dead">DEAD</span>`;
     const star = isSaved(c.id) ? "⭐ " : "";
+    const harvesterMark = isHarvesterGenome(c.genome) ? `<span class="badge harvester" title="Collector unit -- real onboard harvest capacity">🪣</span>` : "";
     return `<div class="card ${c.id === local.selectedId ? "selected" : ""} ${c.alive ? "" : "dead"}" data-id="${c.id}">
-      <div class="name">${star}${c.alive ? "" : "💀 "}${esc(c.name)}${badge}</div>
+      <div class="name">${star}${c.alive ? "" : "💀 "}${esc(c.name)}${harvesterMark}${badge}</div>
       <div class="meta">${esc(c.genome.body.plan)} · ${esc(c.genome.brain.tier)} brain · ${esc(c.genome.heart.tier)} heart</div>
     </div>`;
   }).join("");
@@ -1205,8 +1220,9 @@ function renderStable() {
   grid.innerHTML = saved.map(c => {
     const fac = factionOfCreature(c);
     if (!thumbCache[c.id]) { try { thumbCache[c.id] = renderThumbnail(c.genome, fac); } catch { thumbCache[c.id] = ""; } }
+    const harvesterMark = isHarvesterGenome(c.genome) ? `<span class="sc-harvester" title="Collector unit -- real onboard harvest capacity">🪣</span>` : "";
     return `<div class="stable-card ${c.id === local.selectedId ? "selected" : ""}" data-id="${c.id}">
-      <div class="sc-thumb">${thumbCache[c.id] ? `<img src="${thumbCache[c.id]}" alt="">` : ""}<span class="sc-fac">${FACTION_GLYPH[fac]}</span></div>
+      <div class="sc-thumb">${thumbCache[c.id] ? `<img src="${thumbCache[c.id]}" alt="">` : ""}<span class="sc-fac">${FACTION_GLYPH[fac]}</span>${harvesterMark}</div>
       <div class="sc-name">⭐ ${esc(c.name)}${c.alive ? "" : " 💀"}</div>
       <div class="sc-meta">${esc(c.genome.body.plan)} · ${esc(c.genome.heart.tier)} heart</div>
     </div>`;

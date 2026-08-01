@@ -8884,3 +8884,101 @@ either change on screen -- same standing limit as ever, but the
 disgorge fix is traced to an exact, confirmed root cause (not a
 guess), and the recall button reuses machinery already exercised by
 every other multi-unit order path in this file.
+
+## 2026-08 follow-up: in-game battalion control groups + Factory production, StarCraft-style build icons, Collector/harvester marker -- and an honest scope line on the Lab half
+
+Creator direction, across several messages: "Build me a Battalion
+grouping system. One where I can group select using drag highlight. Or
+one where in lab but the stable area. Where can shift plus quick
+select monsters and hit G key. It will then pop up with the name
+requester those will show up in the game that battalion group and I
+can make the factory build that battalion group of monsters. Naming of
+in game battalion groups is automatic with an incremental number. We
+can assign battalion groups to the number keys zero through 9 for
+quick selection." Then: "Let's use menu icon system for which building
+to build. Like in StarCraft." Then: "I need a quick way for the player
+to recognize a monster is a collection unit in both the lab and game."
+
+**Investigated first: does a named-battalion-template "stable" concept
+already exist anywhere?** Real, but narrower than described. `site/`
+(the Lab) already has a "Stable" view (`local.stable`, `PUT
+/menagerie`) -- but it's ONE unnamed flat list of individual creature
+IDs per account (12-cap), explicitly documented in `main.js` as "no
+separate 'pick which of your saved creatures are active' UI yet." No
+naming, no multiple groups, no shift-select. `packages/mutator-
+service`'s `Store` interface has no "named group of genomes" entity at
+all -- `Menagerie` is `{accountId, creatureIds[], updatedAt}`,
+singular. A repo-wide search for "battalion" returns zero hits
+anywhere, ever. Building the FULL Lab half as described -- shift-
+select in the stable, G-key name-requester popup, multiple named
+templates, and a real path for those templates to "show up in the
+game" -- would touch four separate layers (Lab JS UI, mutator-service
+store + new HTTP routes, roster-client DTOs, a new Unity-side
+production UI) that don't currently share any "named group" concept at
+all. That's real, substantial, cross-stack work, not a quick add-on.
+**Scoped OUT of this pass, flagged rather than half-built** -- happy to
+take it on as its own dedicated pass if wanted.
+
+**What WAS built: the in-game half, which had solid existing scaffolding
+(`WaypointCommander`'s live `_selected` list + marquee box-select) to
+build directly on top of.**
+
+- **Battalion control groups.** `WaypointCommander` now tracks up to 10
+  battalions (one per digit 0-9). Ctrl+[0-9] binds the CURRENT selection
+  to that slot, auto-named "Battalion N" off one running counter (never
+  reused, never restarts per-slot) -- "naming of in game battalion
+  groups is automatic with an incremental number," exactly as specced.
+  **Could NOT use plain [0-9] to reselect** (the classic RTS
+  convention) -- confirmed by reading `BuildMenuHud.Update()` directly
+  that its own build-roster hotkeys already claim plain digit1Key
+  through digit9Key, unconditionally, any time a match exists. Used
+  Alt+[0-9] to select instead; both modifiers were otherwise free in
+  this file. New `BattalionHud.cs` lists every defined battalion (digit,
+  name, live count) docked above `RecallHud`, each row clickable to
+  reselect.
+- **Factory builds a battalion.** New `GrabCursor.
+  BuildBattalionAtOwnFactory` clones ONE new specimen per LIVE battalion
+  member (not deduped by genome -- reproduces the squad's own
+  proportions, e.g. 3 Tetrapods + 2 Winged makes 3 more + 2 more, not
+  just "one of each type") at whichever of the player's own Complete
+  Factories sits nearest the battalion's average position. Reuses
+  `CloneOnto`'s exact spend/park mechanics, generalized from "N copies
+  of one held specimen" to "one copy of each member's own genome."
+  Triggered via a "Build" button on each `BattalionHud` row.
+- **StarCraft-style build menu.** `BuildMenuHud` rebuilt from a
+  hotkey-numbered TEXT LIST to a command-card ICON GRID -- fixed-size
+  colored-swatch tiles (this project has no real icon sprite art
+  anywhere, so a colored square + abbreviation IS the established
+  "icon" idiom, per `SelectionHud`/`BuildingNavHud`) with the hotkey
+  digit badged in the corner, full name + cost now shown in one info
+  line below the grid for whichever tile is currently hovered (SC2's
+  own command card has the same "hover for detail" shape). Reuses
+  `BuildingNavHud.IconColorFor`/`IconAbbrevFor` directly (made public)
+  instead of inventing a second, possibly-drifting color mapping for
+  the same building kinds.
+- **Collector/harvester visual marker, Lab + game.** New `MonsterAgent.
+  IsHarvester` (true when a creature's hand tool actually yields
+  nonzero Blood/Bone/Brain -- not just "has a nonzero base capacity,"
+  which every genome technically has even with no hand tool at all) and
+  `HarvestFillFraction`. New `HarvesterMarkerHud.cs`: an ALWAYS-visible
+  (not battle-gated like `HealthBars`) floating badge over every
+  on-screen harvester, with a small fill-bar underneath showing tank
+  level -- same IMGUI world-to-screen billboard idiom `HealthBars.cs`
+  already established. Lab side: new `isHarvesterGenome(g)` in
+  `main.js` (same threshold as the Unity side, via the already-vendored
+  `harvestProfile` from `lib/harvest.js`) adds a 🪣 badge to both the
+  main lab roster cards AND the Stable grid cards -- the two places a
+  creature already shows up as a gallery item.
+
+**Verified for real:** flightcheck recompiles the whole edited/new
+Unity set (`WaypointCommander.cs`, `BattalionHud.cs`, `GrabCursor.cs`,
+`BuildMenuHud.cs`, `BuildingNavHud.cs`, `MonsterAgent.cs`,
+`HarvesterMarkerHud.cs`, `RuntimeCityBuilder.cs`) clean -- including two
+real gaps in the local flightcheck harness's own input stub
+(`leftAltKey`/`rightAltKey`/`digit0Key` were simply never needed before
+this pass), fixed in that stub, not worked around. `site/main.js`
+passes `node --check` (syntax-valid ES module). No Unity Editor or
+browser here to confirm any of this on screen -- same standing limit as
+ever, and unlike the C# side there's no automated test suite covering
+the Lab's own JS at all in this repo, so the Lab-side change is
+syntax-verified only, not behavior-verified.

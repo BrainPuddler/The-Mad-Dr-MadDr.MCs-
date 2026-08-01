@@ -383,6 +383,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (bars == null) bars = gameObject.AddComponent<HealthBars>();
         bars.Init(this);
 
+        var harvesterMarkers = gameObject.GetComponent<HarvesterMarkerHud>();
+        if (harvesterMarkers == null) harvesterMarkers = gameObject.AddComponent<HarvesterMarkerHud>();
+        harvesterMarkers.Init(this);
+
         var fog = gameObject.GetComponent<FogOfWar>();
         if (fog == null) fog = gameObject.AddComponent<FogOfWar>();
         fog.Init(this);
@@ -398,6 +402,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var recallHud = gameObject.GetComponent<RecallHud>();
         if (recallHud == null) recallHud = gameObject.AddComponent<RecallHud>();
         recallHud.Init(commander, minimap);
+
+        var battalionHud = gameObject.GetComponent<BattalionHud>();
+        if (battalionHud == null) battalionHud = gameObject.AddComponent<BattalionHud>();
+        battalionHud.Init(commander, minimap, recallHud, grabCursor);
 
         var clock = gameObject.GetComponent<AnalogClockHud>();
         if (clock == null) gameObject.AddComponent<AnalogClockHud>();

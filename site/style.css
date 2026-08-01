@@ -74,6 +74,9 @@ select {
 .badge.tech { color: var(--fuel); }
 .badge.biotech { color: var(--ichor); }
 .badge.stump { color: var(--dead); }
+/* 2026-08 (creator direction: "a quick way for the player to recognize a
+   monster is a collection unit in both the lab and game") */
+.badge.harvester { color: var(--ichor); border-color: var(--ichor); padding: 1px 4px; }
 
 #portrait-wrap {
   display: none; flex-direction: column; align-items: center; gap: 10px;
@@ -280,6 +283,9 @@ body[data-faction="alien"] button { border-radius: 12px; }
 .sc-thumb { position: relative; aspect-ratio: 1; background: #05070c; }
 .sc-thumb img { width: 100%; height: 100%; display: block; }
 .sc-fac { position: absolute; top: 4px; right: 6px; font-size: 15px; }
+/* 2026-08 (creator direction: "a quick way for the player to recognize a
+   monster is a collection unit in both the lab and game") */
+.sc-harvester { position: absolute; top: 4px; left: 6px; font-size: 14px; }
 .sc-name { padding: 6px 8px 2px; font-weight: bold; font-size: 13px; }
 .sc-meta { padding: 0 8px 8px; font-size: 11px; color: var(--dim); text-transform: capitalize; }
 

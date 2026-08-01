@@ -237,8 +237,12 @@ public class BuildingNavHud : MonoBehaviour
     /// identity" swatch idiom <see cref="RegionPickerHud"/>/<see
     /// cref="FactionPickerHud"/> already use for their own option rows --
     /// this project has no real icon sprite art, so a colored square plus
-    /// a short abbreviation IS this codebase's established "icon."</summary>
-    private static Color IconColorFor(BuildingKind kind)
+    /// a short abbreviation IS this codebase's established "icon."
+    /// Public (2026-08): <see cref="BuildMenuHud"/>'s own StarCraft-style
+    /// icon grid reuses this exact mapping rather than inventing a second,
+    /// possibly-drifting one -- the same building should read as the same
+    /// color everywhere it shows up as an "icon" in this project.</summary>
+    public static Color IconColorFor(BuildingKind kind)
     {
         switch (kind)
         {
@@ -255,7 +259,10 @@ public class BuildingNavHud : MonoBehaviour
         }
     }
 
-    private static string IconAbbrevFor(BuildingKind kind)
+    /// <summary>Public (2026-08): shared with <see cref="BuildMenuHud"/>'s
+    /// icon grid, same reasoning as <see cref="IconColorFor"/>'s own doc
+    /// comment.</summary>
+    public static string IconAbbrevFor(BuildingKind kind)
     {
         switch (kind)
         {

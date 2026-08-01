@@ -28,6 +28,17 @@ using UnityEngine.InputSystem;
 ///   J                    : glide the camera to the unit nearest the cursor
 ///                            (2026-07: moved off G -- see GrabCursor.cs's
 ///                            own header for what G does now)
+///   Ctrl + [0-9]         : battalion control group -- bind the CURRENT
+///                            selection to that slot, auto-named
+///                            "Battalion N" (N increments globally, never
+///                            reused). Rebinding a slot replaces whatever
+///                            was there with a fresh battalion.
+///   Alt + [0-9]          : quick-select that battalion (2026-08: plain
+///                            [0-9] is already permanently claimed by
+///                            BuildMenuHud's own always-on build hotkeys
+///                            -- see AssignBattalion's own comment for why
+///                            this couldn't use the classic bare-digit-to-
+///                            select convention)
 /// </summary>
 public class WaypointCommander : MonoBehaviour
 {
@@ -45,6 +56,59 @@ public class WaypointCommander : MonoBehaviour
     // double-click detection
     private float _lastClickTime = -1f;
     private Vector2 _lastClickPos;
+
+    // ---- battalions (2026-08 creator direction: "battalion grouping
+    // system... group select using drag highlight... assign battalion
+    // groups to the number keys zero through 9 for quick selection") ------
+
+    private sealed class Battalion
+    {
+        public string Name;
+        public readonly List<MonsterAgent> Members = new List<MonsterAgent>();
+    }
+
+    // slots 0-9, index == the bound digit key. Null = unbound.
+    private readonly Battalion[] _battalions = new Battalion[10];
+
+    // "Naming of in game battalion groups is automatic with an incremental
+    // number" -- ONE running counter shared across every slot, so rebinding
+    // slot 3 twice gives "Battalion 1" then later "Battalion 5" (whatever
+    // the count was at THAT moment), never reusing a name or restarting
+    // from the slot's own digit.
+    private int _nextBattalionNumber = 1;
+
+    /// <summary>Every currently-defined battalion, for
+    /// <see cref="BattalionHud"/> to list -- pruned of dead/despawned
+    /// members and empty slots on read, same "prune lazily when read, not
+    /// eagerly every frame" discipline <see cref="PruneSelection"/>
+    /// already uses for the plain selection.</summary>
+    public IEnumerable<(int Slot, string Name, int Count)> Battalions
+    {
+        get
+        {
+            for (var i = 0; i < _battalions.Length; i++)
+            {
+                var b = _battalions[i];
+                if (b == null) continue;
+                PruneBattalion(b);
+                if (b.Members.Count == 0) { _battalions[i] = null; continue; }
+                yield return (i, b.Name, b.Members.Count);
+            }
+        }
+    }
+
+    /// <summary>The live, pruned member list for one battalion slot (used
+    /// by <see cref="GrabCursor.BuildBattalionAtOwnFactory"/> to read what
+    /// to reproduce), or null if that slot is unbound/now empty.</summary>
+    public IReadOnlyList<MonsterAgent> BattalionMembers(int slot)
+    {
+        if (slot < 0 || slot >= _battalions.Length) return null;
+        var b = _battalions[slot];
+        if (b == null) return null;
+        PruneBattalion(b);
+        if (b.Members.Count == 0) { _battalions[slot] = null; return null; }
+        return b.Members;
+    }
 
     /// <summary>The selection's lead unit (first picked) -- what the HUD
     /// details. Null when nothing is selected.</summary>
@@ -69,9 +133,11 @@ public class WaypointCommander : MonoBehaviour
         // OnGUI already claimed the click, so a minimap click would ALSO
         // fire a world-space select/order underneath it. Same reasoning
         // for the building-nav icon bar (2026-07), the selection-panel
-        // icon row next to the minimap (2026-08), and the recall button
-        // docked above the minimap (2026-08).
-        if (Minimap.PointerOver || BuildingNavHud.PointerOver || SelectionHud.PointerOver || RecallHud.PointerOver) return;
+        // icon row next to the minimap (2026-08), the recall button
+        // docked above the minimap (2026-08), and the battalion list
+        // docked above THAT (2026-08).
+        if (Minimap.PointerOver || BuildingNavHud.PointerOver || SelectionHud.PointerOver
+            || RecallHud.PointerOver || BattalionHud.PointerOver) return;
 
         var mouse = Mouse.current;
         if (mouse == null || _builder == null) return;
@@ -95,8 +161,87 @@ public class WaypointCommander : MonoBehaviour
         var attackMoveHeld = keyboard != null && keyboard.aKey.isPressed;
         var patrolHeld = keyboard != null && keyboard.pKey.isPressed;
 
+        if (keyboard != null) HandleBattalionHotkeys(keyboard, ctrlHeld);
+
         HandleSelection(cam, mouse, keyboard, ctrlHeld, attackMoveHeld, patrolHeld);
         HandleOrders(cam, mouse, keyboard, ctrlHeld, attackMoveHeld, patrolHeld);
+    }
+
+    // ---- battalions -----------------------------------------------------------
+
+    /// <summary>Ctrl+[0-9] assigns, Alt+[0-9] selects -- see this class's
+    /// own header for the full key table and why plain [0-9] couldn't be
+    /// reused (BuildMenuHud's build hotkeys already claim it, unconditionally,
+    /// any time a match exists -- confirmed by reading that class's own
+    /// Update(), not assumed). Both modifiers are otherwise free in this
+    /// file: `ctrlHeld` (passed in, already computed once per frame by the
+    /// caller) is a mouse-click stand-in elsewhere, never checked against a
+    /// bare key press, so reusing it here for Ctrl+digit doesn't collide;
+    /// Alt isn't bound to anything else in this project at all.</summary>
+    private void HandleBattalionHotkeys(Keyboard keyboard, bool ctrlHeld)
+    {
+        var altHeld = keyboard.leftAltKey.isPressed || keyboard.rightAltKey.isPressed;
+        if (!ctrlHeld && !altHeld) return;   // cheap early-out: no digit check needed most frames
+
+        for (var slot = 0; slot <= 9; slot++)
+        {
+            if (!DigitKeyPressed(keyboard, slot)) continue;
+            if (ctrlHeld) AssignBattalion(slot);
+            else if (altHeld) SelectBattalion(slot);
+        }
+    }
+
+    /// <summary>Binds the CURRENT selection to `slot`, replacing whatever
+    /// battalion was there before with a freshly-named one -- "naming of
+    /// in game battalion groups is automatic with an incremental number"
+    /// (creator direction, 2026-08). A no-op on an empty selection (never
+    /// creates/overwrites a slot with zero members).</summary>
+    private void AssignBattalion(int slot)
+    {
+        PruneSelection();
+        if (_selected.Count == 0) return;
+        var battalion = new Battalion { Name = "Battalion " + _nextBattalionNumber };
+        battalion.Members.AddRange(_selected);
+        _battalions[slot] = battalion;
+        _nextBattalionNumber++;
+    }
+
+    /// <summary>Re-selects a bound battalion's live members -- public so
+    /// <see cref="BattalionHud"/>'s own row buttons can trigger the exact
+    /// same effect as the Alt+digit hotkey for players who forget the
+    /// binding or prefer the mouse. A no-op (leaves the current selection
+    /// untouched) if that slot was never bound, or every member has since
+    /// died/despawned.</summary>
+    public void SelectBattalion(int slot)
+    {
+        var b = _battalions[slot];
+        if (b == null) return;
+        PruneBattalion(b);
+        if (b.Members.Count == 0) { _battalions[slot] = null; return; }
+        SetSelection(b.Members);
+    }
+
+    private static void PruneBattalion(Battalion b)
+    {
+        for (var i = b.Members.Count - 1; i >= 0; i--)
+            if (b.Members[i] == null) b.Members.RemoveAt(i);
+    }
+
+    private static bool DigitKeyPressed(Keyboard keyboard, int digit)
+    {
+        switch (digit)
+        {
+            case 0: return keyboard.digit0Key.wasPressedThisFrame;
+            case 1: return keyboard.digit1Key.wasPressedThisFrame;
+            case 2: return keyboard.digit2Key.wasPressedThisFrame;
+            case 3: return keyboard.digit3Key.wasPressedThisFrame;
+            case 4: return keyboard.digit4Key.wasPressedThisFrame;
+            case 5: return keyboard.digit5Key.wasPressedThisFrame;
+            case 6: return keyboard.digit6Key.wasPressedThisFrame;
+            case 7: return keyboard.digit7Key.wasPressedThisFrame;
+            case 8: return keyboard.digit8Key.wasPressedThisFrame;
+            default: return keyboard.digit9Key.wasPressedThisFrame;
+        }
     }
 
     // ---- selection (left button) --------------------------------------------

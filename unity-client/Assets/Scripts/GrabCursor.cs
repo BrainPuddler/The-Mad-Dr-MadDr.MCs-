@@ -313,6 +313,67 @@ public class GrabCursor : MonoBehaviour
             Debug.Log("Cloned " + spawned + "x " + creature.Id + " at the Factory (" + cloneCostBlood * spawned + " Blood spent).");
     }
 
+    /// <summary>2026-08 (creator direction: "battalion grouping system...
+    /// I can make the factory build that battalion group of monsters"):
+    /// clones ONE new specimen per LIVE battalion member (not deduped by
+    /// genome -- "build that battalion GROUP" reads as reproducing the
+    /// whole squad's own composition/proportions, e.g. 3 Tetrapods + 2
+    /// Winged makes 3 more Tetrapods + 2 more Winged, not just one of
+    /// each distinct type), at whichever of the player's own Complete
+    /// Factories sits nearest the battalion's own average position (most
+    /// games only ever have one; nearest-to-the-group is the sane
+    /// tiebreak if there happen to be more). Same per-clone economy and
+    /// parking as <see cref="CloneOnto"/> above, generalized from "N
+    /// copies of one held specimen's genome" to "one copy of each
+    /// member's own genome" -- reuses the exact same spend/park call
+    /// shape, not a parallel implementation. Running out of Blood stops
+    /// the whole build (further members definitely can't afford it
+    /// either); running out of PARKING ROOM for one member skips just
+    /// that one and keeps trying the rest, so a crowded factory doesn't
+    /// abort an otherwise-affordable build. Silent no-op if the player
+    /// has no own Complete Factory yet, or the battalion is empty/all
+    /// members have since died.</summary>
+    public void BuildBattalionAtOwnFactory(System.Collections.Generic.IReadOnlyList<MonsterAgent> battalion)
+    {
+        if (battalion == null || battalion.Count == 0 || builder == null || bridge == null || !bridge.HasMatch) return;
+
+        var avg = Vector3.zero;
+        var n = 0;
+        foreach (var m in battalion) { if (m == null) continue; avg += m.transform.position; n++; }
+        if (n == 0) return;
+        avg /= n;
+
+        SimBuilding factory = null;
+        var bestDist = float.MaxValue;
+        for (var i = 0; i < bridge.BuildingCount; i++)
+        {
+            var b = bridge.BuildingAt(i);
+            if (b.PlayerIndex != localPlayerIndex || b.Kind != BuildingKind.Factory || b.State != BuildingState.Complete) continue;
+            var dist = (builder.WorldOf(b.Hex) - avg).sqrMagnitude;
+            if (dist < bestDist) { bestDist = dist; factory = b; }
+        }
+        if (factory == null) return;
+
+        var claimed = new System.Collections.Generic.HashSet<HexCoord>();
+        var spawned = 0;
+        foreach (var m in battalion)
+        {
+            if (m == null || m.Creature == null) continue;
+
+            var parkSpot = FindOpenHexNear(factory.Hex, claimed, m.Radius);
+            if (parkSpot == null) continue;
+            if (!builder.TrySpendBlood(cloneCostBlood)) break;
+            claimed.Add(parkSpot.Value);
+
+            var clone = builder.SpawnMonster(m.Creature, factory.Hex);
+            clone.SetSettleTarget(builder.WorldOf(parkSpot.Value));
+            spawned++;
+        }
+
+        if (spawned > 0)
+            Debug.Log("Built " + spawned + "x for the battalion at the Factory (" + cloneCostBlood * spawned + " Blood spent).");
+    }
+
     /// <summary>2026-08 (creator direction: "increase the boundary around
     /// building so parking spots take into account monster size", then
     /// "increase the building no parking area to take into account the
