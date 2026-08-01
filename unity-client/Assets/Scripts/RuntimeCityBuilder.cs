@@ -111,6 +111,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     private HashSet<HexCoord> _blockedGroundCache;
     private HashSet<HexCoord> _blockedAmphibiousCache;
     private int _blockedCacheVersion = -1;
+    private HashSet<HexCoord> _blockedGroundWithSimCache;
+    private HashSet<HexCoord> _blockedAmphibiousWithSimCache;
+    private int _blockedSimCacheVersion = -1;
+    private long _blockedSimSignature = long.MinValue;
 
     private readonly Dictionary<Collider, Building> _buildingByCollider = new Dictionary<Collider, Building>();
     private readonly Dictionary<Building, List<GameObject>> _cubesByBuilding = new Dictionary<Building, List<GameObject>>();
@@ -812,7 +816,46 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     }
 
     /// <summary>Current blocked set for a movement class, cached per
-    /// city version (each BlockedTo*() call walks every building).</summary>
+    /// city version (each BlockedTo*() call walks every building).
+    ///
+    /// 2026-08 (creator direction: "fix that bug", following up on a
+    /// report investigation that found ground units can walk straight
+    /// through a Factory/HQ): `_battlefield` is built ONCE from the
+    /// procedural `_city` at `BeginMatch` and only ever updated for
+    /// EXISTING procedural buildings taking damage
+    /// (`ApplyBuildingDamage` -&gt; `WithBuildingDamage`) -- an RTS
+    /// building placed mid-match via `SimBridge`/`MatchState`
+    /// (`SpawnHqForPlayer`/`SpawnFactoryForPlayer`/worker construction)
+    /// was NEVER added to it, so it had zero footprint in every
+    /// pathfinding/collision query this file answers (a real,
+    /// architectural gap, not a narrow bug -- `SpawnStartingBases`'s own
+    /// doc comment already flagged half of this: "match-core's own
+    /// building-blocked set... isn't visible to Unity's own BlockedFor
+    /// query," but nothing had closed the gap it named).
+    ///
+    /// Standing (non-`Destroyed`) `SimBuilding`s are now unioned in on
+    /// top of the cached procedural set -- same "destruction reopens the
+    /// hex" policy `BattlefieldState.BlockedToGround`'s own doc already
+    /// states for procedural buildings, applied consistently. Kept as a
+    /// SEPARATE cache layer (not merged into `_blockedGroundCache`
+    /// itself) so the common no-active-match case (menus, the Lab, any
+    /// caller before `BeginMatch`) stays the exact original zero-copy
+    /// cached-reference return; once a match exists, a cheap signature
+    /// over every `SimBuilding`'s (EntityId, State) -- NOT `BuildingCount`
+    /// alone, which wouldn't change when a building merely transitions
+    /// UnderConstruction -&gt; Complete -&gt; Destroyed -- decides whether the
+    /// (real, but still small: a handful to dozens of bases, not
+    /// hundreds) combined-set rebuild is actually needed this call.
+    ///
+    /// Honest scope boundary: only ground/amphibious blocking. Flight
+    /// blocking (`BlockedForFlight`) and the footprint-overhang/roof-
+    /// height systems (`InsideBuildingFootprint`, `_roofCache`) are
+    /// UNTOUCHED -- flyers still cruise over RTS buildings exactly as
+    /// before, and TickSettle's corner-overhang check still only reasons
+    /// about procedural buildings. Extending either is a real, separate,
+    /// larger design question (does a flyer treat an RTS building's roof
+    /// like any other perchable roof? unanswered), not silently folded in
+    /// here.</summary>
     public HashSet<HexCoord> BlockedFor(bool amphibious)
     {
         if (_blockedCacheVersion != _cityVersion)
@@ -821,7 +864,42 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             _blockedAmphibiousCache = _battlefield.BlockedToAmphibious();
             _blockedCacheVersion = _cityVersion;
         }
-        return amphibious ? _blockedAmphibiousCache : _blockedGroundCache;
+        if (_simBridge == null || !_simBridge.HasMatch)
+            return amphibious ? _blockedAmphibiousCache : _blockedGroundCache;
+
+        var sig = SimBuildingBlockedSignature();
+        if (_blockedSimCacheVersion != _cityVersion || _blockedSimSignature != sig)
+        {
+            _blockedGroundWithSimCache = new HashSet<HexCoord>(_blockedGroundCache);
+            _blockedAmphibiousWithSimCache = new HashSet<HexCoord>(_blockedAmphibiousCache);
+            for (var i = 0; i < _simBridge.BuildingCount; i++)
+            {
+                var b = _simBridge.BuildingAt(i);
+                if (b.State == BuildingState.Destroyed) continue;
+                _blockedGroundWithSimCache.Add(b.Hex);
+                _blockedAmphibiousWithSimCache.Add(b.Hex);
+            }
+            _blockedSimCacheVersion = _cityVersion;
+            _blockedSimSignature = sig;
+        }
+        return amphibious ? _blockedAmphibiousWithSimCache : _blockedGroundWithSimCache;
+    }
+
+    /// <summary>Cheap change-detector for <see cref="BlockedFor"/>'s sim-
+    /// building union: folds every building's (EntityId, State) into one
+    /// running value so a construction completing, a building being
+    /// destroyed, or a brand-new one appearing all change the result --
+    /// `BuildingCount` alone would miss the first two (the count doesn't
+    /// change when a building merely changes STATE).</summary>
+    private long SimBuildingBlockedSignature()
+    {
+        long sig = _simBridge.BuildingCount;
+        for (var i = 0; i < _simBridge.BuildingCount; i++)
+        {
+            var b = _simBridge.BuildingAt(i);
+            sig = sig * 1000003L + b.EntityId * 3L + (int)b.State;
+        }
+        return sig;
     }
 
     // docs/25 Phase D: IHexObstacleQuery, the narrow slice DeadlockManager

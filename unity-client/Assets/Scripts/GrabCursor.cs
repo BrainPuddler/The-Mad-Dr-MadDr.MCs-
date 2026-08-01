@@ -71,6 +71,9 @@ public class GrabCursor : MonoBehaviour
     [Tooltip("How many hex-rings out from the Factory's own hex a drop still counts as \"on it\" -- some forgiveness, same idea as any real drag-and-drop target having a hit margin bigger than its exact pixel bounds.")]
     public int dropRangeHexes = 1;
 
+    [Tooltip("2026-08 (creator direction: \"increase the building no parking area to take into account the monster size\"): extra clearance, in meters, ADDED on top of a monster's own body radius when FindOpenHexNear checks a candidate parking spot's near edge against the building's real footprint -- the exact-fit geometric check alone leaves zero breathing room (a spot that JUST clears the wall still reads as uncomfortably tight once a body is actually standing there). Widening this widens the effective no-parking zone around every building for every monster size at once, without touching the per-monster radius math itself.")]
+    public float buildingClearanceMargin = 2f;
+
     private enum Mode { Off, Armed, Carrying }
     private Mode _mode = Mode.Off;
     private MonsterAgent _carried;
@@ -311,26 +314,30 @@ public class GrabCursor : MonoBehaviour
     }
 
     /// <summary>2026-08 (creator direction: "increase the boundary around
-    /// building so parking spots take into account monster size"): a hex
-    /// not being individually `IsBlocked` doesn't mean a body `bodyRadius`
-    /// wide actually clears the building once it's standing there --
-    /// small/medium creatures were fine at ring 1 (a hex's ~20m step
-    /// comfortably clears the building's own ~9m footprint half-extent),
-    /// but a big-bodied monster's own collision radius could still reach
-    /// back into the building's real rendered footprint (corner overhang
-    /// included -- same `InsideBuildingFootprint` geometry `TickSettle`
-    /// checks) or crowd an already-claimed neighbour closer than both
-    /// bodies actually need. Checks the NEAR EDGE of where this monster's
-    /// body would sit (`world` offset `bodyRadius` back toward the
-    /// building), not just the hex's own centre point, so the effective
-    /// search boundary grows with the monster automatically instead of a
-    /// fixed ring count -- a small monster still parks at ring 1 exactly
-    /// as before (byte-identical for `bodyRadius` well under the
-    /// clearance ring-1 already has), a huge one is pushed out to
-    /// whichever ring first has genuine room.</summary>
+    /// building so parking spots take into account monster size", then
+    /// "increase the building no parking area to take into account the
+    /// monster size"): a hex not being individually `IsBlocked` doesn't
+    /// mean a body `bodyRadius` wide actually clears the building once
+    /// it's standing there -- small/medium creatures were fine at ring 1
+    /// (a hex's ~20m step comfortably clears the building's own ~9m
+    /// footprint half-extent), but a big-bodied monster's own collision
+    /// radius could still reach back into the building's real rendered
+    /// footprint (corner overhang included -- same
+    /// `InsideBuildingFootprint` geometry `TickSettle` checks) or crowd
+    /// an already-claimed neighbour closer than both bodies actually
+    /// need. Checks the NEAR EDGE of where this monster's body would sit
+    /// (`world` offset `bodyRadius + buildingClearanceMargin` back toward
+    /// the building), not just the hex's own centre point, so the
+    /// effective search boundary grows with the monster automatically
+    /// instead of a fixed ring count -- and the added margin means a spot
+    /// has real daylight around it, not just an exact, zero-tolerance
+    /// fit. `buildingClearanceMargin` widens the zone for every monster
+    /// size at once; a huge body is pushed out further still on top of
+    /// that, to whichever ring first has genuine room.</summary>
     private HexCoord? FindOpenHexNear(HexCoord from, System.Collections.Generic.HashSet<HexCoord> claimed, float bodyRadius)
     {
         var buildingWorld = builder.WorldOf(from);
+        var edgeClearance = bodyRadius + buildingClearanceMargin;
         var minGap = bodyRadius * 2f + builder.groupSpacing;
         var minGapSq = minGap * minGap;
         for (var ring = 1; ring <= 8; ring++)
@@ -342,7 +349,7 @@ public class GrabCursor : MonoBehaviour
                 var towardBuilding = buildingWorld - world;
                 towardBuilding.y = 0f;
                 var nearEdge = towardBuilding.sqrMagnitude > 1e-4f
-                    ? world + towardBuilding.normalized * bodyRadius
+                    ? world + towardBuilding.normalized * edgeClearance
                     : world;
                 if (builder.InsideBuildingFootprint(nearEdge)) continue;
 

@@ -1117,7 +1117,7 @@ public class MonsterAgent : MonoBehaviour
         // self-gating every other order-issuing branch here relies on.
         if (_harvest != null && _harvest.Capacity > 0.01f && _carriedLoad >= (float)_harvest.Capacity - 0.01f)
         {
-            var factory = FindOwnFactory();
+            var factory = FindOwnFactoryApproachHex();
             if (factory.HasValue) { OrderMove(factory.Value, false); return; }
         }
 
@@ -1716,6 +1716,41 @@ public class MonsterAgent : MonoBehaviour
             if (dist < bestDist) { bestDist = dist; best = b.Hex; }
         }
         return best;
+    }
+
+    /// <summary>2026-08: `FindOwnFactory`'s own hex now genuinely blocks
+    /// ground pathfinding (`RuntimeCityBuilder.BlockedFor`'s own doc
+    /// comment explains why -- RTS buildings previously had zero
+    /// footprint in Unity's blocked-hex set at all). A full-tank
+    /// harvester's delivery `OrderMove` needs somewhere it can actually
+    /// PATH TO AND STAND ON, not the building's own hex -- same
+    /// "approach the rim, not the center" idea `ComputeApproachPath`/
+    /// `HexPathfinder.FindPathToBuilding` already use for attack orders,
+    /// just inlined here since a `SimBuilding`'s footprint is always
+    /// exactly one hex (its own class's doc comment says so directly),
+    /// so "nearest open neighbour" is the whole algorithm -- no need for
+    /// `FindPathToBuilding`'s multi-hex-footprint machinery. Falls back
+    /// to the Factory's own hex if every neighbour is somehow blocked too
+    /// (a token best-effort answer, matching this class's other "give
+    /// the best available spot" fallbacks, rather than silently
+    /// returning null and stranding the harvester with no order at
+    /// all).</summary>
+    private HexCoord? FindOwnFactoryApproachHex()
+    {
+        var factoryHex = FindOwnFactory();
+        if (!factoryHex.HasValue || _builder == null) return factoryHex;
+        var blocked = Blocked();
+        if (!blocked.Contains(factoryHex.Value)) return factoryHex;
+
+        HexCoord? best = null;
+        var bestDist = float.MaxValue;
+        foreach (var n in factoryHex.Value.Neighbors())
+        {
+            if (!_builder.City.Contains(n) || blocked.Contains(n)) continue;
+            var dist = (_builder.WorldOf(n) - transform.position).sqrMagnitude;
+            if (dist < bestDist) { bestDist = dist; best = n; }
+        }
+        return best ?? factoryHex;
     }
 
     /// <summary>docs/26 follow-up: called by a Citizen this unit captured

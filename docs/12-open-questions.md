@@ -8527,3 +8527,98 @@ happened to fill up), but real and worth a dedicated pass.
 `WaypointCommander.cs`) clean against the real Unity project files. No
 Unity Editor here to confirm any of this on screen -- same standing
 limit as ever.
+
+## 2026-08 follow-up: CORRECTION -- the harvester "infinite loop" diagnosis was wrong; the REAL gap was RTS buildings having zero footprint in Unity's own pathfinding
+
+Creator direction: "fix that bug" (the harvester full-tank pathing bug
+flagged above), followed a beat later by "increase the building no
+parking area to take into account the monster size" (a follow-up
+widening the parking-boundary fix, see below).
+
+**The harvester bug as originally diagnosed does not reproduce.**
+Reading `HexPathfinder.FindPath`/`MonsterAgent.ComputePath` to actually
+implement the fix surfaced the load-bearing assumption underneath it:
+that `Blocked().Contains(factoryHex)` is true, so the pathfinder rejects
+the Factory as a goal. Tracing `Blocked()` -&gt; `RuntimeCityBuilder.
+BlockedFor` -&gt; `_battlefield` all the way down: `_battlefield` is built
+ONCE from the procedural `_city` at `BeginMatch` (`BattlefieldState.
+FreshFrom`) and only ever updated for EXISTING procedural buildings
+taking damage (`WithBuildingDamage`). A `grep` across every `.cs` file
+in the repo for anything mutating `_city.Buildings`/`BattlefieldState.
+Buildings` turned up nothing -- an RTS building placed via
+`SimBridge`/`MatchState` (`SpawnHqForPlayer`/`SpawnFactoryForPlayer`,
+or mid-match worker construction) was NEVER added to it. `SpawnStarting
+Bases`'s own doc comment already said as much ("match-core's own
+building-blocked set... isn't visible to Unity's own BlockedFor
+query") -- missed on the first read. So the Factory's hex was never
+actually blocked, `FindPath` never rejected it as a goal, and (tracing
+the rest of the flow) a full-tank harvester should already path onto
+it and bank successfully regardless of distance. The originally-
+reported "monster went into the factory and never left it" bug (fixed
+in the prior entry, `TickSettle`'s self-block on a unit's own current
+hex) is ALSO now uncertain to have been caused by the Factory's own hex
+being blocked/footprint-covered specifically -- that fix is still a
+real, correct, harmless improvement (any hex genuinely blocked for
+other reasons is handled right), just possibly not proof positive of
+the reported symptom's exact mechanism. Told the creator directly
+rather than shipping a fix for a bug that doesn't exist.
+
+**The real gap, found in the process and now fixed: RTS buildings had
+ZERO footprint in Unity's own collision/pathfinding at all.** A ground
+unit could walk straight through a standing Factory or HQ -- nothing
+in `BlockedFor`/`HexPathfinder` knew it was there. Fixed in
+`RuntimeCityBuilder.BlockedFor`: every standing (non-`Destroyed`)
+`SimBuilding` is now unioned into the ground/amphibious blocked set on
+top of the existing procedural-only cache, same "destruction reopens
+the hex" policy `BattlefieldState.BlockedToGround`'s own doc already
+states for procedural buildings. Kept as a separate cache layer (not
+merged into the base cache) so the no-active-match case (menus, the
+Lab) stays a zero-copy cached-reference return exactly as before; once
+a match exists, a cheap signature over every building's (EntityId,
+State) -- not `BuildingCount` alone, which wouldn't change on a
+Complete/Destroyed transition -- decides whether the small combined-set
+rebuild is actually needed. Scoped to ground/amphibious only: flight
+blocking and the footprint-overhang/roof-height systems
+(`BlockedForFlight`, `InsideBuildingFootprint`, `_roofCache`) are
+untouched -- flyers still cruise over RTS buildings exactly as before,
+a real, separate design question (does a flyer treat an RTS building's
+roof like any other perchable roof?) left open rather than guessed at.
+
+**Necessary companion fix, or this would have shipped the EXACT bug
+originally (mis)diagnosed:** once the Factory's own hex genuinely
+blocks, `MonsterAgent.FindOwnFactory`'s existing callers -- which
+target that hex DIRECTLY -- would have started failing for real. Added
+`FindOwnFactoryApproachHex`: same "approach the rim, not the centre"
+idea `ComputeApproachPath`/`HexPathfinder.FindPathToBuilding` already
+use for attack orders, simplified since a `SimBuilding`'s footprint is
+always exactly one hex (its own class doc says so) -- nearest open
+neighbour of the Factory's hex, falling back to the hex itself if
+every neighbour is somehow also blocked. The full-tank delivery
+`OrderMove` now targets this instead of the Factory's own hex. This
+also RETROACTIVELY VALIDATES the prior entry's `TickSettle` fix: a
+Factory clone/evicted roof occupant spawns ON the Factory's own hex,
+which is now genuinely blocked going forward -- the "exclude the hex
+I'm already standing on" exemption that fix added is exactly what
+keeps that still working.
+
+**Also shipped, same pass (creator follow-up: "increase the building
+no parking area to take into account the monster size"):** a new
+`GrabCursor.buildingClearanceMargin` Inspector field (default 2m),
+added on top of a monster's own body radius in `FindOpenHexNear`'s
+near-edge check -- the prior pass's exact-geometric-fit boundary left
+zero breathing room; this widens the effective no-parking zone around
+every building for every monster size at once, independent of the
+per-monster radius math.
+
+**Verified for real:** flightcheck recompiles the whole edited set
+(`RuntimeCityBuilder.cs`, `MonsterAgent.cs`, `GrabCursor.cs`) clean
+against the real Unity project files, including the new `MadDr.
+MatchCore.BuildingState`/`SimBuilding` reads in `BlockedFor`. No Unity
+Editor here to confirm any of this on screen. One real, checked knock-on
+effect: `Citizen.cs` calls `_builder.BlockedFor(false)` three times of
+its own (flee-hex validation, destination picking) -- these now also
+correctly avoid RTS building hexes (a citizen fleeing INTO a standing
+Factory wall was arguably already wrong), a believed-benign side effect
+of the same fix, not a separate change, but not independently verified
+in a live match either. `TrafficCar.cs` routes off the road network
+instead and doesn't call `BlockedFor` at all -- unaffected.
