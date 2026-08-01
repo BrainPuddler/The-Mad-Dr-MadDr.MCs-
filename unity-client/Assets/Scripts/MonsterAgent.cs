@@ -1159,14 +1159,61 @@ public class MonsterAgent : MonoBehaviour
         // the ordinary AggroRangeMeters -- otherwise a harvester that
         // just banked its load at the Factory (often nowhere near any
         // citizen) simply stands there forever instead of going back out.
+        //
+        // 2026-08 (creator direction: "need a balance between filling the
+        // tank and chasing humans for a long time vs getting resources to
+        // the factory so it can build units... players are not starved"):
+        // that map-wide search alone had no notion of "good enough" --
+        // a harvester sitting on more than half a tank would still trek
+        // to the far side of the map for ONE more citizen rather than
+        // bank what it's already carrying, so the Factory's production
+        // queue could stall for however long that one trek took. Once
+        // carrying at least `PartialLoadReturnFraction` of capacity, the
+        // search shrinks to the ordinary `AggroRangeMeters` (the same
+        // "nearby" a non-harvester already uses) instead of the whole
+        // map -- still tops off eagerly from whatever's actually close,
+        // but stops treating a distant straggler as worth the delay.
+        // Below that fraction (empty or barely started), it still
+        // searches map-wide exactly as before -- nothing lost by
+        // continuing to hunt when a return trip would deliver next to
+        // nothing anyway. Either way, if the search comes up empty and
+        // the tank isn't literally empty, deliver the partial load now
+        // instead of idling with it forever (mirrors the exact reasoning
+        // ForageRangeMeters itself already established for "don't just
+        // stand there") -- covers both "nothing worth chasing nearby"
+        // and the rare late-match case where no citizens remain
+        // anywhere at all.
         if (_builder != null)
         {
             var isForagingHarvester = _harvest != null && _harvest.Capacity > 0.01f;
-            var searchRadius = isForagingHarvester ? ForageRangeMeters : AggroRangeMeters;
-            var citizen = _builder.NearestCitizenTo(transform.position, searchRadius);
-            if (citizen != null) OrderEat(citizen);
+            if (isForagingHarvester)
+            {
+                var fillFraction = TotalCarriedLoad / (float)_harvest.Capacity;
+                var searchRadius = fillFraction >= PartialLoadReturnFraction ? AggroRangeMeters : ForageRangeMeters;
+                var citizen = _builder.NearestCitizenTo(transform.position, searchRadius);
+                if (citizen != null) { OrderEat(citizen); return; }
+
+                if (TotalCarriedLoad > 0.01f)
+                {
+                    var factory = FindOwnFactoryApproachHex();
+                    if (factory.HasValue) OrderMove(factory.Value, false);
+                }
+                return;
+            }
+
+            var nearby = _builder.NearestCitizenTo(transform.position, AggroRangeMeters);
+            if (nearby != null) OrderEat(nearby);
         }
     }
+
+    /// <summary>docs/22 economy-starvation guard (2026-08): fraction of
+    /// `_harvest.Capacity` at which a harvester stops treating a distant
+    /// citizen as worth the trip and instead only pursues within ordinary
+    /// `AggroRangeMeters` -- see the `AcquireTarget` fallback's own
+    /// comment for the full reasoning. Half a tank is a real, working
+    /// v0.1 number, not sourced from any design doc -- same standing
+    /// placeholder policy as every other economy constant (CLAUDE.md).</summary>
+    private const float PartialLoadReturnFraction = 0.5f;
 
     /// <summary>docs/26 Phase 8: picks the best ready special attack +
     /// anchor target to use right now, or false if none clears its own

@@ -8726,3 +8726,51 @@ CityGen.dll` builds (not the stale pre-built ones it normally
 references) clean. No Unity Editor here to confirm the multi-resource
 HUD readout or the disgorge/flee/harvest loop on screen -- same
 standing limit as ever.
+
+## 2026-08 follow-up: harvester "fill the tank vs deliver now" starvation guard
+
+Creator direction: "will need a balance between filling the tank and
+chasing humans for a long time vs getting resources to the factory so
+it can build units, this needs to be thought out so players are not
+starved."
+
+**The gap:** `AcquireTarget`'s foraging fallback had exactly two modes
+-- literally FULL (deliver, unconditionally) or NOT full (search the
+WHOLE MAP, `ForageRangeMeters` = 100km, for the nearest citizen,
+however far). Nothing in between: a harvester sitting on, say, 80% of
+its tank would still trek across the entire map for one more citizen
+rather than bank what it already had, so the Factory's production
+queue could stall for however long that one trek took -- exactly the
+starvation risk named.
+
+**Fix:** a new `PartialLoadReturnFraction` (0.5, a real v0.1 number,
+not sourced from any doc -- same placeholder policy as every other
+economy constant) gates the search radius. Below half a tank, behavior
+is UNCHANGED -- search the whole map, since a return trip would
+deliver next to nothing anyway, nothing lost by continuing to hunt.
+At or above half a tank, the search shrinks to the ordinary
+`AggroRangeMeters` (130m, the same "nearby" radius a non-harvester
+already uses) -- still eagerly tops off from whatever's actually
+close, but stops treating a distant straggler as worth delaying
+delivery for. Either way, if the search (at whichever radius applies)
+comes up empty and the tank isn't literally empty, the harvester now
+delivers its partial load immediately instead of standing idle with it
+-- covers both "nothing worth chasing nearby" and the rare late-match
+case where no citizens remain anywhere at all, the same "don't just
+stand there" reasoning `ForageRangeMeters` itself was originally added
+for.
+
+**Honest scope:** this is a structural fix (WHEN to stop hunting and
+go deliver), not a numeric-balance pass -- `PartialLoadReturnFraction`
+and `AggroRangeMeters` are both placeholders, real tuning is the
+Phase-2 sandbox pass CLAUDE.md already calls for. No new player-facing
+control was added (no Inspector slider) -- kept as a private const,
+matching how `ForageRangeMeters`/`AggroRangeMeters` are already
+declared in this file, not a new tunability surface inconsistent with
+the rest of the class.
+
+**Verified for real:** flightcheck recompiles `MonsterAgent.cs` clean.
+No Unity Editor here to actually TIME a harvester's return cadence or
+confirm the Factory doesn't stall in a live match -- the mechanism is
+reasoned through and code-reviewed, not measured, same standing limit
+as ever.
