@@ -8180,3 +8180,72 @@ coupled to `UnityEngine.MonoBehaviour`/`transform`/`_builder`/`_fighter`
 state a headless harness would have to fake most of anyway). Verified
 for real: `MonsterAgent.cs` brace-balanced; flightcheck recompiles the
 whole Unity gameplay layer clean.
+
+## 2026-08: SelectionHud.cs -- per-type creature icons docked beside the minimap
+
+Creator: "the game needs icons of the different creature next to the
+minimap." docs/23 §13 amendment G already flagged the SC2 "control
+groups" gap, and this is that same family of missing HUD verb --
+confirmed with the creator as the SC2-style selection panel (one icon
+per distinct creature TYPE currently selected, with a count badge),
+not a production-queue widget or the pre-RTS Menagerie loadout screen.
+
+**"Type" was already a defined concept, not a new one to invent.**
+`MonsterAgent.BodyPlan`'s own doc comment already calls itself "the
+type for SC2-style double-click 'select all of this type on screen,'"
+and `WaypointCommander`'s double-click handler already groups by it
+(`UnitsOfTypeOnScreen(cam, agent.BodyPlan)`). `SelectionHud.cs` buckets
+the live selection (`WaypointCommander.Selected`, a new public pruned
+accessor over the existing private `_selected` list) by that exact same
+`BodyPlan` string, so a mixed army reads as N icons (one per body plan
+present), each showing a count badge once >1. Clicking an icon calls
+the also-newly-public `WaypointCommander.SetSelection` to narrow the
+current selection down to just that type -- useful the instant a mixed
+selection needs a type-specific order.
+
+**Icon idiom: reuses `BuildingNavHud`'s established colored-swatch-plus-
+abbreviation "icon," not new art.** This repo still has no icon sprite/
+texture assets anywhere. The swatch color is a new `MonsterBody.
+PlanColor(plan)` -- a one-line wrapper around the EXISTING private
+`SkinColor(plan, creatureId)` the real creature bodies already render
+with, passing `plan` itself as the hash seed instead of a creature id so
+every plan (listed or not in `SkinColor`'s switch) gets one fixed,
+stable color instead of `SkinColor`'s per-INDIVIDUAL hash -- a type-
+level HUD icon can't use a per-instance color without being
+misleading about what it's grouping. This also means a plan's HUD icon
+color and its in-world body color always agree for the 8 named plans
+(crab/serpentine/winged/avian/arachnid/treant/floater/blob); tetrapod
+(the unnamed default case) gets its own stable hash-derived color too,
+just not a hand-picked one.
+
+**Placement: docked to the minimap's actual live rect, not a hardcoded
+corner.** New `Minimap.ScreenRect` (a one-line public wrapper over the
+existing private `GetScreenRect()`) lets `SelectionHud` sit immediately
+right of the minimap's right edge, bottom-aligned with it, regardless of
+which corner the developer has the (fully repositionable, per its own
+existing Inspector fields) minimap parked in.
+
+**Wired into the existing `PointerOver` guard chain.** Same "OnGUI's
+event queue and the New Input System's `Mouse.current` don't talk to
+each other" problem every other HUD panel here already solves --
+`SelectionHud.PointerOver` added alongside `Minimap.PointerOver`/
+`BuildingNavHud.PointerOver` at all three existing guard call sites
+(`WaypointCommander.Update`, `BuildGhostCursor.Update`, `GrabCursor.
+Update`) so clicking a selection-panel icon doesn't ALSO fire a
+world-space select/order/placement click underneath it. Wired into the
+match the same way `BuildingNavHud`/`Minimap` already are, in
+`RuntimeCityBuilder`'s existing HUD-wiring block, right after
+`minimap.Init`.
+
+**Honest limits:** no Unity Editor here to confirm the icons render at a
+legible size/position next to the minimap, or that the count badge
+doesn't clip at the corner -- same standing posture as every other
+Unity-side entry in this log. Verified for real: every touched file
+brace-balanced; `SelectionHud.cs` itself compiled clean (`dotnet build`,
+net8.0) against hand-written stubs that mirror the exact new public
+signatures added this session (`WaypointCommander.Selected`/
+`SetSelection`, `Minimap.ScreenRect`, `MonsterBody.PlanColor`) -- a
+targeted compile check of the new surface, not the full flightcheck
+harness (this session's cached copy of that harness predates several
+HUD systems `RuntimeCityBuilder.cs` now references and would need
+real reconstruction work to catch up, out of scope for this change).

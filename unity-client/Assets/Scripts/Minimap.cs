@@ -68,6 +68,12 @@ public class Minimap : MonoBehaviour
     /// input paths).</summary>
     public static bool PointerOver { get; private set; }
 
+    /// <summary>Current on-screen rect (corner/margin/custom-position all
+    /// resolved) -- lets other bottom-left HUD elements (SelectionHud) dock
+    /// against the minimap's actual live position instead of duplicating
+    /// its placement math.</summary>
+    public Rect ScreenRect { get { return GetScreenRect(); } }
+
     private const int TerrainTexRes = 256;
     private const int FogTexRes = 128;
     private const float FogRepaintInterval = 0.4f;

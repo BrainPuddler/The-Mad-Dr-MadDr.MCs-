@@ -51,6 +51,11 @@ public class WaypointCommander : MonoBehaviour
     public MonsterAgent SelectedAgent { get { return _selected.Count > 0 ? _selected[0] : null; } }
     public int SelectedCount { get { return _selected.Count; } }
 
+    /// <summary>The live selection set, pruned of any agent that despawned
+    /// since last frame -- read by SelectionHud to group/count/re-select by
+    /// creature type (<see cref="MonsterAgent.BodyPlan"/>).</summary>
+    public IReadOnlyList<MonsterAgent> Selected { get { PruneSelection(); return _selected; } }
+
     public void Init(RuntimeCityBuilder builder)
     {
         _builder = builder;
@@ -63,8 +68,9 @@ public class WaypointCommander : MonoBehaviour
         // the New Input System's Mouse.current (read below) has no idea
         // OnGUI already claimed the click, so a minimap click would ALSO
         // fire a world-space select/order underneath it. Same reasoning
-        // for the building-nav icon bar (2026-07).
-        if (Minimap.PointerOver || BuildingNavHud.PointerOver) return;
+        // for the building-nav icon bar (2026-07) and the selection-panel
+        // icon row next to the minimap (2026-08).
+        if (Minimap.PointerOver || BuildingNavHud.PointerOver || SelectionHud.PointerOver) return;
 
         var mouse = Mouse.current;
         if (mouse == null || _builder == null) return;
@@ -355,7 +361,10 @@ public class WaypointCommander : MonoBehaviour
 
     // ---- selection set management -------------------------------------------
 
-    private void SetSelection(List<MonsterAgent> agents)
+    /// <summary>Replaces the current selection outright -- also called
+    /// externally by SelectionHud when the player clicks one of its
+    /// per-type icons, to narrow the selection down to just that type.</summary>
+    public void SetSelection(List<MonsterAgent> agents)
     {
         foreach (var a in _selected) if (a != null) a.SetSelected(false);
         _selected.Clear();

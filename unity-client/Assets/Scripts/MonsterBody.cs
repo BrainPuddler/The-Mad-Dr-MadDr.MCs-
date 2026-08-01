@@ -1097,6 +1097,20 @@ public class MonsterBody : MonoBehaviour
 
     // ---- colors -------------------------------------------------------------
 
+    /// <summary>Per-plan color only, no per-individual hash -- for HUD
+    /// panels (SelectionHud) that group creatures by TYPE (<see
+    /// cref="MonsterAgent.BodyPlan"/>, this codebase's own established
+    /// "type" concept -- see its doc comment) rather than by individual
+    /// identity, where <see cref="SkinColor"/>'s per-creature hash would
+    /// give every individual of an unlisted plan a different color instead
+    /// of one stable color for the whole group. Passing `plan` itself as
+    /// the hash seed (instead of a creature id) means every plan --
+    /// listed or not -- gets one fixed, stable color.</summary>
+    internal static Color PlanColor(string plan)
+    {
+        return SkinColor(plan, plan);
+    }
+
     private static Color SkinColor(string plan, string creatureId)
     {
         switch (plan)

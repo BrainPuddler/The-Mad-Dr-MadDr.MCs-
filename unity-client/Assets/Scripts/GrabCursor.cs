@@ -116,8 +116,8 @@ public class GrabCursor : MonoBehaviour
 
         // same "OnGUI already claimed this click" guard every other
         // click-handling script in this project applies for Minimap/
-        // BuildMenuHud/BuildingNavHud.
-        if (Minimap.PointerOver || BuildingNavHud.PointerOver) return;
+        // BuildMenuHud/BuildingNavHud/SelectionHud.
+        if (Minimap.PointerOver || BuildingNavHud.PointerOver || SelectionHud.PointerOver) return;
 
         if (_mode == Mode.Armed)
         {
