@@ -79,4 +79,54 @@ public class BankHarvestLoadTests
         }
         Assert.Equal(Run(), Run());
     }
+
+    // 2026-08 (creator direction: "humans have all the resources, make
+    // sure those are properly being harvested... all harvesters can
+    // collect all resources"): ArgB now selects WHICH resource a
+    // BankHarvestLoad command grants, instead of always meaning Blood.
+
+    [Fact]
+    public void ArgB_selects_the_credited_resource()
+    {
+        var m = FreshMatch(6u);
+        m.Tick(new List<Command> { new Command(0, CommandKind.BankHarvestLoad, argA: 30, argB: (int)ResourceKind.Bones) });
+        Assert.Equal(0, m.Player(0).Wallet(ResourceKind.Blood));
+        Assert.Equal(30, m.Player(0).Wallet(ResourceKind.Bones));
+    }
+
+    [Fact]
+    public void Omitting_ArgB_still_means_Blood_backward_compatibly()
+    {
+        // ResourceKind.Blood is enum value 0, the same value ArgB
+        // carried implicitly before this parameter existed -- every
+        // pre-existing call site (and this test's own sibling tests
+        // above) never had to change.
+        var m = FreshMatch(7u);
+        m.Tick(new List<Command> { new Command(0, CommandKind.BankHarvestLoad, argA: 15) });
+        Assert.Equal(15, m.Player(0).Wallet(ResourceKind.Blood));
+    }
+
+    [Fact]
+    public void Different_resources_can_be_banked_in_the_same_tick_independently()
+    {
+        var m = FreshMatch(8u);
+        m.Tick(new List<Command>
+        {
+            new Command(0, CommandKind.BankHarvestLoad, argA: 9, argB: (int)ResourceKind.Blood),
+            new Command(0, CommandKind.BankHarvestLoad, argA: 4, argB: (int)ResourceKind.Bones),
+            new Command(0, CommandKind.BankHarvestLoad, argA: 2, argB: (int)ResourceKind.Brains),
+        });
+        Assert.Equal(9, m.Player(0).Wallet(ResourceKind.Blood));
+        Assert.Equal(4, m.Player(0).Wallet(ResourceKind.Bones));
+        Assert.Equal(2, m.Player(0).Wallet(ResourceKind.Brains));
+    }
+
+    [Fact]
+    public void Out_of_range_ArgB_is_a_silent_no_op_not_a_crash()
+    {
+        var m = FreshMatch(9u);
+        m.Tick(new List<Command> { new Command(0, CommandKind.BankHarvestLoad, argA: 25, argB: 999) });
+        for (var kind = 0; kind < Resources.Count; kind++)
+            Assert.Equal(0, m.Player(0).Wallet((ResourceKind)kind));
+    }
 }

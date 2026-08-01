@@ -127,15 +127,20 @@ namespace MadDr.MatchCore
             SupplyCapBonus = supplyCapBonus;
         }
 
-        // docs/18 §3 tiers as a base, bumped 50% (2026-07 creator
-        // direction: "buildings need larger hitpoints") -- armor unchanged,
-        // only HP grows, so a building takes more hits to fell without
-        // becoming any harder to actually damage per hit. v0.1 rebalance,
-        // same placeholder policy as every other number in this file.
-        private const int SmallHp = 450, SmallArmor = 2;     // house
-        private const int MediumHp = 900, MediumArmor = 4;   // storefront
-        private const int LargeHp = 2200, LargeArmor = 6;    // block/tower
-        private const int LandmarkHp = 4500, LandmarkArmor = 8;
+        // docs/18 §3 tiers as a base, bumped 50% in an earlier pass
+        // (2026-07: "buildings need larger hitpoints"), then bumped AGAIN
+        // here, roughly 2.2x on top of that (2026-08 creator direction:
+        // "give buildings much larger hit points" -- a stronger ask than
+        // the first pass, so a bigger jump than the first pass's own 50%).
+        // ~5x the original docs/18 baseline overall. Armor still
+        // unchanged, only HP grows -- same reasoning as the first bump:
+        // more hits to fell, no harder to actually damage per hit. v0.1
+        // rebalance, same placeholder policy as every other number in
+        // this file.
+        private const int SmallHp = 1000, SmallArmor = 2;     // house
+        private const int MediumHp = 2000, MediumArmor = 4;   // storefront
+        private const int LargeHp = 5000, LargeArmor = 6;    // block/tower
+        private const int LandmarkHp = 10000, LandmarkArmor = 8;
 
         private static readonly BuildingDef[] All =
         {

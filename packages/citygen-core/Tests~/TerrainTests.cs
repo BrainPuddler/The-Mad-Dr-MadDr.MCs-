@@ -103,7 +103,9 @@ public class TerrainTests
         foreach (var b in m.Bridges)
         {
             Assert.Equal(BuildingTier.Large, b.Tier);
-            Assert.Equal(1500, BuildingStats.StructureHp(b.Tier));
+            // 2026-08: BuildingStats.StructureHp's Large tier was bumped
+            // 1500 -> 5000 (see BuildingTier.cs's own doc comment).
+            Assert.Equal(5000, BuildingStats.StructureHp(b.Tier));
             Assert.Equal(6, BuildingStats.Armor(b.Tier));
         }
     }

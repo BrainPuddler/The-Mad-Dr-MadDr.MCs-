@@ -142,8 +142,27 @@ public class MonsterAgent : MonoBehaviour
     // the edge case where the player has no Complete Factory at all
     // (early game, or one just got destroyed) -- see FindOwnFactory.
     private HarvestProfile _harvest;
-    private float _carriedLoad;       // 0.._harvest.Capacity, pooled resource units
+    // 2026-08 (creator direction: "humans have all the resources, make
+    // sure those are properly being harvested... all harvesters can
+    // collect all resources"): was a single pooled float banked entirely
+    // as Blood regardless of what a citizen actually yielded. Now three
+    // separate running totals, one per HarvestProfile lane -- every
+    // harvester's hand tool already produces all three (Toolless and
+    // every named tool in Harvest.cs have nonzero Blood/Bone/Brain
+    // rates, just at different weights), the bug was that only Blood
+    // ever got tracked/delivered. Their SUM is still gated to
+    // `_harvest.Capacity`, same single onboard-tank fiction as before --
+    // see TotalCarriedLoad.
+    private float _carriedBlood;
+    private float _carriedBones;
+    private float _carriedBrains;
     private HexCoord _homeHex;         // spawn = this harvester's fallback unload point (a Vat stand-in) when no Factory exists
+
+    /// <summary>Sum of every carried resource lane, gated to `_harvest.
+    /// Capacity` -- the single "how full is the onboard tank" figure
+    /// every distance/speed/full-tank check already reasoned about
+    /// before the load was split into per-resource lanes.</summary>
+    private float TotalCarriedLoad { get { return _carriedBlood + _carriedBones + _carriedBrains; } }
 
     public string DisplayName { get; private set; } = "";
     public bool Selected { get; private set; }
@@ -945,7 +964,7 @@ public class MonsterAgent : MonoBehaviour
         // branch unconditionally re-issues OrderMove(factory) every time
         // this unit goes Idle with a still-full tank, which flips `_order`
         // away from Idle before a check running AFTER it would ever see
-        // `_order == Idle` and `_carriedLoad > 0` true at the same time --
+        // `_order == Idle` and `TotalCarriedLoad > 0` true at the same time --
         // GoIdle() only fires at the END of the arrival frame (inside
         // TickMove, called by the switch below), so the earliest a
         // check up here could observe Idle is the FOLLOWING frame, by
@@ -953,20 +972,22 @@ public class MonsterAgent : MonoBehaviour
         // Move again. Net effect with the old ordering: a harvester
         // parked at its own Factory would perpetually re-order itself to
         // the same hex forever, never actually banking. Running this
-        // check first breaks the cycle: once banked, `_carriedLoad` is 0
+        // check first breaks the cycle: once banked, `TotalCarriedLoad` is 0
         // by the time AcquireTarget runs later THIS SAME frame, so its
         // full-tank branch no longer fires and it naturally falls through
         // to the empty-tank search below -- "go searching for more"
         // happens in the very same frame the load gets banked.
-        if (_order == OrderKind.Idle && _carriedLoad > 0.01f && _builder != null)
+        if (_order == OrderKind.Idle && TotalCarriedLoad > 0.01f && _builder != null)
         {
             var unloadHex = FindOwnFactory() ?? _homeHex;
             var toUnload = _builder.WorldOf(unloadHex) - transform.position;
             toUnload.y = 0f;
             if (toUnload.magnitude < 2.5f * (float)HexCoord.HexMeters)
             {
-                _builder.BankHarvestLoad(_carriedLoad);
-                _carriedLoad = 0f;
+                _builder.BankHarvestLoad(_carriedBlood, _carriedBones, _carriedBrains);
+                _carriedBlood = 0f;
+                _carriedBones = 0f;
+                _carriedBrains = 0f;
             }
         }
 
@@ -1115,7 +1136,7 @@ public class MonsterAgent : MonoBehaviour
         // leaves Idle, so this branch naturally stops re-firing every
         // frame without any extra "already hauling" flag -- same
         // self-gating every other order-issuing branch here relies on.
-        if (_harvest != null && _harvest.Capacity > 0.01f && _carriedLoad >= (float)_harvest.Capacity - 0.01f)
+        if (_harvest != null && _harvest.Capacity > 0.01f && TotalCarriedLoad >= (float)_harvest.Capacity - 0.01f)
         {
             var factory = FindOwnFactoryApproachHex();
             if (factory.HasValue) { OrderMove(factory.Value, false); return; }
@@ -1673,19 +1694,42 @@ public class MonsterAgent : MonoBehaviour
     /// <summary>Harvest the onboard tank's share of an eaten citizen
     /// (docs/22): a real harvest tool strips far more per body than teeth
     /// do -- the gathered load is the citizen's yield scaled by this
-    /// creature's blood-gather rate, capped at what its vessel can hold.
-    /// This is what makes a lamprey-and-tank build a hauler and slows it
-    /// as it fills. Shared by TickEat (a direct chase-and-eat order) and
+    /// creature's gather rates, capped at what its vessel can hold. This
+    /// is what makes a lamprey-and-tank build a hauler and slows it as it
+    /// fills. Shared by TickEat (a direct chase-and-eat order) and
     /// <see cref="NotifyCapturedCitizenEaten"/> (docs/26 follow-up: a web-
     /// captured citizen eaten on arrival) so both count as the same real
-    /// kill instead of a web catch being a silently lesser one.</summary>
+    /// kill instead of a web catch being a silently lesser one.
+    ///
+    /// 2026-08 (creator direction: "humans have all the resources...
+    /// all harvesters can collect all resources"): credits all THREE
+    /// `HarvestProfile` lanes (Blood/Bones/Brains) at once, each at this
+    /// creature's own gather rate for that lane -- previously only
+    /// `GatherBlood` was ever read, so a Bone- or Brain-favoring hand
+    /// tool (`bone_saw`, `lamprey_maw`, ...) gathered almost nothing
+    /// USEFUL despite `HarvestProfile` computing real Bone/Brain rates
+    /// for it all along. Capacity still gates the TOTAL across all three
+    /// lanes (one onboard tank, not three separate ones) -- if this
+    /// eat's combined yield would overflow the remaining room, every
+    /// lane is scaled down by the same factor rather than filling
+    /// whichever lane happens to be credited first, so the resulting mix
+    /// still reflects this creature's own gather-rate ratios.</summary>
     private void CreditHarvestForEatenCitizen()
     {
-        if (_harvest != null && _harvest.Capacity > 0.01f)
-        {
-            _carriedLoad = Mathf.Min((float)_harvest.Capacity,
-                _carriedLoad + 3f * (float)_harvest.GatherBlood);
-        }
+        if (_harvest == null || _harvest.Capacity <= 0.01f) return;
+        var room = (float)_harvest.Capacity - TotalCarriedLoad;
+        if (room <= 0f) return;
+
+        var gainBlood = 3f * (float)_harvest.GatherBlood;
+        var gainBones = 3f * (float)_harvest.GatherBone;
+        var gainBrains = 3f * (float)_harvest.GatherBrain;
+        var gainTotal = gainBlood + gainBones + gainBrains;
+        if (gainTotal <= 0f) return;
+
+        var scale = gainTotal > room ? room / gainTotal : 1f;
+        _carriedBlood += gainBlood * scale;
+        _carriedBones += gainBones * scale;
+        _carriedBrains += gainBrains * scale;
     }
 
     /// <summary>2026-07 (creator direction: harvesters "navigate back to
@@ -1807,8 +1851,8 @@ public class MonsterAgent : MonoBehaviour
     /// isn't hauling a full tank.</summary>
     private float LoadFactor()
     {
-        if (_harvest == null || _carriedLoad <= 0.01f || _harvest.Capacity <= 0.01f) return 1f;
-        var fill = _carriedLoad / (float)_harvest.Capacity;
+        if (_harvest == null || TotalCarriedLoad <= 0.01f || _harvest.Capacity <= 0.01f) return 1f;
+        var fill = TotalCarriedLoad / (float)_harvest.Capacity;
         return (float)(_flying ? Harvest.FlightSpeedFactor(fill) : Harvest.GroundSpeedFactor(fill));
     }
 

@@ -96,13 +96,25 @@ namespace MadDr.MatchCore
         /// every other command kind's "bad input is a no-op" contract.</summary>
         AttackBuilding = 9,
         /// <summary>2026-07 (harvester-to-Factory delivery loop, docs/22):
-        /// grant PlayerIndex's own wallet ArgA Blood -- a harvester
-        /// monster isn't itself a <see cref="SimUnit"/> (its movement/AI
-        /// is still Unity-side, not yet ported into the sim per docs/27's
-        /// migration plan), so unlike every other command kind there is
-        /// no source entity to validate against; TargetEntity/ArgB are
-        /// unused. Bad input (ArgA &lt;= 0) is a silent no-op, same
-        /// contract as every other command kind.</summary>
+        /// grant PlayerIndex's own wallet ArgA of the resource ArgB names
+        /// -- a harvester monster isn't itself a <see cref="SimUnit"/>
+        /// (its movement/AI is still Unity-side, not yet ported into the
+        /// sim per docs/27's migration plan), so unlike every other
+        /// command kind there is no source entity to validate against;
+        /// TargetEntity is unused. Bad input (ArgA &lt;= 0, or ArgB
+        /// outside <see cref="ResourceKind"/>'s range) is a silent
+        /// no-op, same contract as every other command kind.
+        ///
+        /// 2026-08 (creator direction: "humans have all the resources,
+        /// make sure those are properly being harvested... all
+        /// harvesters can collect all resources"): ArgB was previously
+        /// unused and every call implicitly meant Blood -- `ResourceKind.
+        /// Blood` is enum value 0, so `argB: 0` (the old default) still
+        /// means exactly what it always did; existing callers/replays are
+        /// unaffected. Unity now queues one command per nonzero resource
+        /// lane a harvester actually carries (Blood/Bones/Brains, per
+        /// `HarvestProfile`'s own three gather rates) instead of folding
+        /// everything into Blood.</summary>
         BankHarvestLoad = 10,
     }
 

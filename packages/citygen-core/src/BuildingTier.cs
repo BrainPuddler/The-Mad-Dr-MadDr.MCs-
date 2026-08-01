@@ -14,17 +14,27 @@ namespace MadDr.CityGen
     }
 
     /// <summary>The docs/18 SS3 tier table, verbatim. v0.1 numbers -- the
-    /// tuning source of truth is the doc's table; change there first.</summary>
+    /// tuning source of truth is the doc's table; change there first.
+    ///
+    /// 2026-08 (creator direction: "give buildings much larger hit
+    /// points"): bumped from the original 300/600/1500/3000 baseline to
+    /// land on the SAME absolute HP figures `MadDr.MatchCore.BuildingDef`
+    /// uses for its own (separate) RTS-building roster after its own
+    /// bump -- a procedural house/landmark a player attacks mid-match now
+    /// feels comparably tough to a base of the same tier, instead of the
+    /// two building systems drifting to different HP scales for "Small"/
+    /// "Large"/etc. Armor unchanged, same "more hits to fell, no harder
+    /// to actually damage per hit" reasoning.</summary>
     public static class BuildingStats
     {
         public static int StructureHp(BuildingTier tier)
         {
             switch (tier)
             {
-                case BuildingTier.Small: return 300;
-                case BuildingTier.Medium: return 600;
-                case BuildingTier.Large: return 1500;
-                case BuildingTier.Landmark: return 3000;
+                case BuildingTier.Small: return 1000;
+                case BuildingTier.Medium: return 2000;
+                case BuildingTier.Large: return 5000;
+                case BuildingTier.Landmark: return 10000;
                 default: throw new ArgumentOutOfRangeException(nameof(tier));
             }
         }

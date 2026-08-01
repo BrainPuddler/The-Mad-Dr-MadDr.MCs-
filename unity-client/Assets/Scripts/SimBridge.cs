@@ -246,10 +246,18 @@ public class SimBridge : MonoBehaviour
     /// comment), so this is the correct wallet-mutating path rather than
     /// a Unity-side-only counter: it's what makes a delivered load
     /// actually show up in <see cref="PlayerWallet"/> (and therefore in
-    /// ResourceHud), not just in a log line.</summary>
-    public void QueueBankHarvestLoadCommand(int playerIndex, int amount)
+    /// ResourceHud), not just in a log line.
+    ///
+    /// 2026-08: `resource` selects which wallet lane grows (defaults to
+    /// Blood, matching every call site before this parameter existed --
+    /// `ResourceKind.Blood` is enum value 0, the same value ArgB carried
+    /// implicitly when it was unused). `RuntimeCityBuilder.
+    /// BankHarvestLoad` now calls this once per nonzero resource lane a
+    /// harvester actually carried, instead of only ever banking
+    /// Blood.</summary>
+    public void QueueBankHarvestLoadCommand(int playerIndex, int amount, ResourceKind resource = ResourceKind.Blood)
     {
-        _pending.Add(new Command(playerIndex, CommandKind.BankHarvestLoad, argA: amount));
+        _pending.Add(new Command(playerIndex, CommandKind.BankHarvestLoad, argA: amount, argB: (int)resource));
     }
 
     private void Update() => Pump(Time.deltaTime);

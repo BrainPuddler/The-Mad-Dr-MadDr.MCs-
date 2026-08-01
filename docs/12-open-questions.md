@@ -8622,3 +8622,107 @@ Factory wall was arguably already wrong), a believed-benign side effect
 of the same fix, not a separate change, but not independently verified
 in a live match either. `TrafficCar.cs` routes off the road network
 instead and doesn't call `BlockedFor` at all -- unaffected.
+
+## 2026-08 follow-up: building HP bumped again, and all three harvest resource lanes now actually get banked
+
+Creator direction: "give buildings much larger hit points. And when I
+building disgorges it's large number of humans, the humans should
+spawn and flee. Any collecting units will try to grab as many of them
+as it can and then unload to the factory. Humans have all the
+resources. make sure that those are properly being harvested as well.
+Specialized harvesting units is not viable in this game, all
+harvesters can collect all resources."
+
+**Building HP, bumped again.** There were TWO parallel HP tables for
+two separate building systems, and only one had ever been bumped
+before: `MadDr.MatchCore.BuildingDef` (the RTS-buildable roster --
+HQ/Factory/storage/etc.) got a 50% bump in an earlier pass
+(300/600/1500/3000 -> 450/900/2200/4500), but `MadDr.CityGen.
+BuildingStats` (the SEPARATE table for the procedural CIVILIAN city --
+houses, shops, landmarks a player attacks mid-match) was still at the
+ORIGINAL, never-touched docs/18 baseline. Bumped BOTH tables to the
+SAME absolute figures this time -- 1000/2000/5000/10000 (Small/Medium/
+Large/Landmark), armor unchanged on both, same "more hits to fell, no
+harder to actually damage per hit" reasoning as the first pass. Bridges
+share `BuildingStats.StructureHp` too (Large tier), so a bridge is now
+5000 HP as a side effect -- correct per the same table, not a separate
+decision. docs/18's own tier table (the file's own doc comment names it
+as the tuning source of truth) updated to match, including the bridge
+stats line. Five citygen-core tests asserted the old hardcoded numbers
+as "the docs/18 table" -- updated to the new numbers, not deleted or
+loosened; all 168 citygen-core tests and all 274 match-core tests pass.
+
+**Disgorge-flee-harvest pipeline: verified already built, not
+re-invented.** Traced the full chain the creator described and confirmed
+each link already exists from earlier phases: a building's `Occupants`
+count (BuildingDef/BuildingRuntimeState) disgorges that many fleeing
+Citizens the instant it flips to Destroyed (`BaseDresser` ->
+`RuntimeCityBuilder.SpawnFleeingOccupant`, task #96); each one starts a
+forced panic sprint away from the wreck before falling back to normal
+citizen AI (`Citizen.InitFleeingFrom`, task #97); an idle harvester with
+tank room forages the WHOLE MAP for the nearest citizen (unbounded
+`ForageRangeMeters`, task #126) and chains from one kill straight into
+searching for the next (docs/22's "once a monster delivers the supply
+it should go searching for more"), which is exactly what "grab as many
+of them as it can" looks like against a fresh burst of disgorged
+citizens without any new swarm-specific code. No changes made here --
+flagged as verified-not-invented rather than silently claimed as new
+work.
+
+**The real gap, and the one actually acted on: only Blood was EVER
+banked, regardless of what a harvester's own tool actually gathered.**
+`HarvestProfile` (`packages/roster-client/src/Harvest.cs`, ported from
+genome-core's harvest.ts) already computes THREE separate gather rates
+per creature -- `GatherBlood`/`GatherBone`/`GatherBrain`, weighted by
+hand-tool family (a `bone_saw` yields 3.0 Bone but only 0.5 Blood; a
+`lamprey_maw` the reverse) -- exactly the "every harvester collects
+everything, just at different RATES" design docs/22 already describes.
+But `MonsterAgent.CreditHarvestForEatenCitizen` only ever read
+`GatherBlood`, and `RuntimeCityBuilder.BankHarvestLoad` banked the
+WHOLE pooled load as pure Blood -- so a Bone/Brain-favoring build
+wasn't "specialized," it was just BAD at the one thing that mattered,
+with zero offsetting benefit. That's the real "specialized harvesting
+isn't viable" bug, not the existence of different gather rates per
+tool (which is the intended design and stays).
+
+Fixed end to end:
+- `MonsterAgent`'s single pooled `_carriedLoad` float is now three
+  separate running totals (`_carriedBlood`/`_carriedBones`/
+  `_carriedBrains`), summed via a new `TotalCarriedLoad` property for
+  every place that used to read the old pooled field (capacity gate,
+  full-tank check, idle bank-check, load-speed-penalty). `Credit
+  HarvestForEatenCitizen` now credits all three lanes from one eaten
+  citizen at once, at this creature's own three gather rates, still
+  capped to the tank's total `Capacity` -- if the combined yield would
+  overflow the remaining room, every lane scales down by the SAME
+  factor rather than filling whichever lane happens to be credited
+  first, so the banked mix still reflects this creature's own
+  gather-rate ratios (a lamprey-handed harvester still comes home
+  mostly Blood, just with real Bone/Brain too, not exclusively Blood).
+- `RuntimeCityBuilder.BankHarvestLoad(blood, bones, brains)` now banks
+  each nonzero lane separately.
+- `SimBridge.QueueBankHarvestLoadCommand` gained a `ResourceKind
+  resource = ResourceKind.Blood` parameter (default preserves every
+  untouched call site's old meaning, since `Blood` is enum value 0 --
+  the same value `ArgB` carried implicitly when it was unused).
+- `MadDr.MatchCore.Command`'s `BankHarvestLoad` kind now reads `ArgB`
+  as the `ResourceKind` selector instead of leaving it unused;
+  `MatchState.ApplyBankHarvestLoad` validates it's in range (silent
+  no-op otherwise, same bad-input contract every other command kind
+  already has) and grants that specific resource. `Command`'s own
+  struct shape (still all-integer, still hashes byte-for-byte) is
+  unchanged -- this is a NEW MEANING for an already-existing, already-
+  serialized field, not a new field, so old replays/tests needed no
+  migration.
+
+**Verified for real:** four new `BankHarvestLoadTests` cases cover
+ArgB resource selection, backward-compatible Blood-default omission,
+multiple resources banked independently in one tick, and an
+out-of-range ArgB silent no-op -- all pass alongside the pre-existing
+six. Full match-core suite (278 tests including the new four) and full
+citygen-core suite (168 tests) both pass. flightcheck recompiles the
+whole edited Unity set against FRESH `MadDr.MatchCore.dll`/`MadDr.
+CityGen.dll` builds (not the stale pre-built ones it normally
+references) clean. No Unity Editor here to confirm the multi-resource
+HUD readout or the disgorge/flee/harvest loop on screen -- same
+standing limit as ever.

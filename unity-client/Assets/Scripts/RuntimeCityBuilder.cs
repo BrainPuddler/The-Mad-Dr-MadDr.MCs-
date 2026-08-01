@@ -2177,27 +2177,48 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return best;
     }
 
-    /// <summary>A harvester unloads its onboard tank (docs/22): the
-    /// carried load is banked as Blood (fuel), the dominant lane a
-    /// harvest tool draws. Called when a laden harvester idles near its
-    /// home/Vat or (per the newer Factory-delivery loop) its own
-    /// Factory. Credits match-core's real per-player wallet via a queued
-    /// <see cref="SimBridge.QueueBankHarvestLoadCommand"/> -- ResourceHud
-    /// reads THAT wallet, not this class's own <see cref="WalletBlood"/>,
-    /// so a fix here was required for a delivered load to ever show up
-    /// on screen (2026-07, creator report: "the list under the clock,
-    /// never seems to change" -- traced to this call incrementing only
-    /// the legacy field below, never match-core's). `WalletBlood` itself
-    /// is left updated too, purely because <see cref="HudStatus"/> still
-    /// reads it as a separate legacy debug line -- not because anything
-    /// downstream of THIS method needs it anymore.</summary>
-    public void BankHarvestLoad(float load)
+    /// <summary>A harvester unloads its onboard tank (docs/22). Called
+    /// when a laden harvester idles near its home/Vat or (per the newer
+    /// Factory-delivery loop) its own Factory. Credits match-core's real
+    /// per-player wallet via a queued <see
+    /// cref="SimBridge.QueueBankHarvestLoadCommand"/> per resource lane
+    /// -- ResourceHud reads THAT wallet, not this class's own <see
+    /// cref="WalletBlood"/>, so a fix here was required for a delivered
+    /// load to ever show up on screen (2026-07, creator report: "the
+    /// list under the clock, never seems to change" -- traced to this
+    /// call incrementing only the legacy field below, never
+    /// match-core's).
+    ///
+    /// 2026-08 (creator direction: "humans have all the resources, make
+    /// sure those are properly being harvested... all harvesters can
+    /// collect all resources"): previously banked the WHOLE pooled load
+    /// as pure Blood regardless of what actually filled the tank --
+    /// `HarvestProfile` already computes three separate gather rates
+    /// (Blood/Bones/Brains, per the creature's own hand-tool family), but
+    /// nothing downstream ever read the other two, so a `bone_saw`-handed
+    /// harvester (efficient at Bones, weak at Blood) still only ever
+    /// delivered a trickle of pure Blood -- a real "specialization tax"
+    /// with no offsetting benefit, not the intended "every harvester
+    /// collects everything, just at different rates" design. Now takes
+    /// each carried lane separately and banks whichever are actually
+    /// nonzero. `WalletBlood` itself is left tracking Blood only, purely
+    /// because <see cref="HudStatus"/> still reads it as a separate
+    /// legacy debug line -- not because anything downstream of THIS
+    /// method needs it anymore.</summary>
+    public void BankHarvestLoad(float blood, float bones, float brains)
     {
-        var banked = Mathf.RoundToInt(load);
-        if (banked <= 0) return;
-        WalletBlood += banked;
-        if (_simBridge != null && _simBridge.HasMatch) _simBridge.QueueBankHarvestLoadCommand(0, banked);
-        Debug.Log("Harvester banked " + banked + " blood. Wallet: " + WalletBlood + " blood.");
+        var bankedBlood = Mathf.RoundToInt(blood);
+        var bankedBones = Mathf.RoundToInt(bones);
+        var bankedBrains = Mathf.RoundToInt(brains);
+        if (bankedBlood <= 0 && bankedBones <= 0 && bankedBrains <= 0) return;
+
+        if (bankedBlood > 0) WalletBlood += bankedBlood;
+        var haveMatch = _simBridge != null && _simBridge.HasMatch;
+        if (bankedBlood > 0 && haveMatch) _simBridge.QueueBankHarvestLoadCommand(0, bankedBlood, ResourceKind.Blood);
+        if (bankedBones > 0 && haveMatch) _simBridge.QueueBankHarvestLoadCommand(0, bankedBones, ResourceKind.Bones);
+        if (bankedBrains > 0 && haveMatch) _simBridge.QueueBankHarvestLoadCommand(0, bankedBrains, ResourceKind.Brains);
+        Debug.Log("Harvester banked " + bankedBlood + " blood, " + bankedBones + " bones, " + bankedBrains
+            + " brains. Wallet: " + WalletBlood + " blood.");
     }
 
     /// <summary>docs/26 Phase 10 (Special Attacks System): draws down the

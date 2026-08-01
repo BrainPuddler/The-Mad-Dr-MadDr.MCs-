@@ -64,10 +64,12 @@ No new combat math: a building is a stat block with **Structure HP** (≡ Vitali
 
 | Tier | Structure HP | Armor | Example |
 | --- | --- | --- | --- |
-| Small (house) | 300 | 2 | residential |
-| Medium (storefront) | 600 | 4 | Main Street shop |
-| Large (block/tower) | 1500 | 6 | city block |
-| Landmark | 3000 | 8 | town hall, cathedral (often an emitter host, [03](03-mana-system.md); see Q16) |
+| Small (house) | 1000 | 2 | residential |
+| Medium (storefront) | 2000 | 4 | Main Street shop |
+| Large (block/tower) | 5000 | 6 | city block |
+| Landmark | 10000 | 8 | town hall, cathedral (often an emitter host, [03](03-mana-system.md); see Q16) |
+
+(2026-08 creator direction: "buildings need much larger hit points" -- bumped again from the 300/600/1500/3000 baseline this table originally shipped with, after an earlier 50% bump had already landed on 450/900/2200/4500 for the separate RTS-building roster. Both tables now share the same absolute HP figures per tier.)
 
 **Destruction staging** (perf-bounded, not physics simulation): **Intact → Damaged** (≤50% HP; cracked/broken-window visual; may spawn a rubble hazard) **→ Destroyed** (0 HP; a pre-authored collapse mesh; changes pathing and sightlines). 3–4 authored states per building *archetype*, not per instance — the same "author once, combine at runtime" doctrine as the part library.
 
@@ -110,7 +112,7 @@ No new engine decision is required — Unity is already the recommendation ([10]
 | Hex-to-meter scale | 1 hex = 20 m |
 | Village / Small Town / Big City footprint | ~1.4 km / ~2 km / up to 5 km |
 | Emitter density | 1–2 per km² of built area |
-| Building Structure HP (house/storefront/block/landmark) | 300 / 600 / 1500 / 3000 |
+| Building Structure HP (house/storefront/block/landmark) | 1000 / 2000 / 5000 / 10000 |
 | Building Armor (house/storefront/block/landmark) | 2 / 4 / 6 / 8 |
 | Damage-state threshold (Intact→Damaged) | ≤50% Structure HP |
 | Engagement / Local-city / Distant-skyline zone radius | 150–200 m / 1 km / beyond 1 km |
@@ -118,7 +120,7 @@ No new engine decision is required — Unity is already the recommendation ([10]
 | Collection Station radius / capture channel | 5 hex (100 m) / 8 s |
 | River width (Village / Small Town / Big City) | 1 / 2 / 3 hexes (20/40/60 m) |
 | Bridges per map (Village / Small Town / Big City) | 2 / 2 / 3 |
-| Bridge stats | Large tier: 1500 Structure HP / 6 Armor; destroyed → reverts to water |
+| Bridge stats | Large tier: 5000 Structure HP / 6 Armor; destroyed → reverts to water |
 | Ponds / hills per map | 2–5 / 3–6 blobs by preset |
 
 All values marked for validation in this track's own spike (Q14) before the Phase-3 netcode build ([11-roadmap.md](11-roadmap.md)).

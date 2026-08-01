@@ -245,18 +245,23 @@ public class CityGeneratorTests
         var m = CityGenerator.Generate(13u, PresetByName(presetName));
         var landmarkBuildings = m.Buildings.Where(b => b.Tier == BuildingTier.Landmark).ToList();
         Assert.Equal(m.Landmarks.Count, landmarkBuildings.Count);
-        Assert.Equal(3000, BuildingStats.StructureHp(BuildingTier.Landmark));
+        // 2026-08 (creator direction: "buildings need much larger hit
+        // points"): docs/18's own table was bumped to 1000/2000/5000/10000
+        // (BuildingTier.cs's own doc comment has the full history) --
+        // this test asserts against the doc's CURRENT numbers, same as
+        // it always has, not the original baseline.
+        Assert.Equal(10000, BuildingStats.StructureHp(BuildingTier.Landmark));
         Assert.Equal(8, BuildingStats.Armor(BuildingTier.Landmark));
     }
 
     [Fact]
     public void Building_tier_stats_match_the_docs18_table_exactly()
     {
-        Assert.Equal(300, BuildingStats.StructureHp(BuildingTier.Small));
+        Assert.Equal(1000, BuildingStats.StructureHp(BuildingTier.Small));
         Assert.Equal(2, BuildingStats.Armor(BuildingTier.Small));
-        Assert.Equal(600, BuildingStats.StructureHp(BuildingTier.Medium));
+        Assert.Equal(2000, BuildingStats.StructureHp(BuildingTier.Medium));
         Assert.Equal(4, BuildingStats.Armor(BuildingTier.Medium));
-        Assert.Equal(1500, BuildingStats.StructureHp(BuildingTier.Large));
+        Assert.Equal(5000, BuildingStats.StructureHp(BuildingTier.Large));
         Assert.Equal(6, BuildingStats.Armor(BuildingTier.Large));
     }
 
