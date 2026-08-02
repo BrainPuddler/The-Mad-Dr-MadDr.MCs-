@@ -9310,3 +9310,107 @@ same standing limit as every other Unity-side behavior change in this
 project's history; the fix is a small, targeted change to an existing,
 already-tested code path (only the search's ORIGIN point changed, not
 its logic), not a new untested mechanic.
+
+## 2026-08 follow-up: give-way -- "pick one to give way to the other" implemented per the creator's own design, measured (not assumed) to help
+
+Creator direction, a follow-up to the still-open circling report: "It
+might be if they are the same speed, and they can't get around, what if
+when you detect another monster near, the nav system picks one to give
+way to the other, until they are body size + X distance apart, then
+they can resume their normal speed to their destination."
+
+**Discovered while investigating:** `UnitCombat` already carries
+`YieldTarget`/`YieldUntil` fields, and `RuntimeCityBuilder.
+SteerFollowPath` already honours them -- but that whole mechanism
+belongs to `DeadlockManager` (docs/25 Phase D), which is deliberately
+"rare-path only": it grants a yield ONLY after a unit has made under 1m
+of net progress for a full 2.5 continuous seconds, polled periodically,
+not every frame. A unit actively circling (still moving, just not
+making NET progress toward its goal) can easily clear that 1m/2.5s bar
+without ever registering as "stalled," so the existing yield machinery
+was never actually engaging for the symptom being reported. The
+creator's proposed fix is structurally a DIFFERENT, faster, everyday
+mechanism -- exactly what this file's own header already flagged as
+the missing piece ("dense multi-unit combat likely needs real
+hysteresis/state this file's own 'Stateless' design deliberately
+doesn't have yet").
+
+**What got built: `MonsterSteeringController.GiveWaySpeedScale`/
+`IsYieldingTo`**, layered into `Combine`'s existing speed-modulation
+output (alongside, not replacing, the alignment-based easing already
+there). Implemented the creator's own design close to verbatim:
+
+- **"When you detect another monster near"** -- checked every single
+  frame per close pair, not gated behind any stall/timer detection.
+- **"Picks one to give way"** -- the exact same pairwise-stable
+  `GetInstanceID` comparison `PredictiveAvoidance`'s own tie-break
+  already relies on: the lower-ID unit of a pair always proceeds at
+  full speed, only the higher-ID one's speed drops.
+- **"Until they are body size + X distance apart, then resume normal
+  speed"** -- `X` = `AvoidancePadding`, the SAME personal-space buffer
+  `PredictiveAvoidance` already uses (one canonical buffer instead of a
+  second invented constant), and the release is real DISTANCE
+  re-checked fresh every frame, not a timer -- no stored grant/expiry
+  anywhere, matching this file's "Stateless" design instead of adding a
+  second `DeadlockManager`-style state machine for what should be the
+  everyday, first-line case.
+
+**Two things the design doc didn't spell out, settled by testing
+against `steerverify` rather than guessed:**
+
+1. **The trigger needs a heading-opposition gate.** A first cut
+   triggered on proximity + "is the neighbour actually moving" alone
+   (closer to a literal reading of "detect another monster near"). It
+   compiled clean and looked reasonable, but made `steerverify`'s
+   toughest scenario (two 3-unit squads passing head-on in a corridor)
+   measurably WORSE -- 19 total lateral-sign flips before, 30 after.
+   Root cause: squadmates marching shoulder-to-shoulder toward the
+   SAME destination sit well within the trigger's own proximity range
+   of EACH OTHER (2m squad spacing vs. a 4.5m default trigger radius),
+   so half of every squad was being randomly throttled against its own
+   packmates by `InstanceID` alone, for no reason at all -- pure
+   self-inflicted chaos. Adding the same `OpposingHeadingCutoff`
+   `Alignment`/`Cohesion` already use (only a neighbour whose own
+   heading actually opposes this unit's intended direction counts)
+   fixed it: 18 flips, a real (if modest) improvement over the 19
+   baseline, and zero regression anywhere else across all 8
+   `steerverify` scenarios (default AND large-radius bodies, lone
+   pairs AND squads, with AND without flocking).
+2. **Yielding should only throttle SPEED, not exclude the neighbour
+   from steering DIRECTION.** Tried excluding a yielded-to neighbour
+   from `PredictiveAvoidance`/`Alignment`/`Cohesion` entirely (the
+   yielding unit just holds `fwd`, no longer actively dodging, since
+   the OTHER unit is now "responsible" for routing around it) --
+   plausible in theory, measurably worse in practice: a previously
+   CLEAN large-radius squad scenario picked up new flips (4 -&gt; 6)
+   and took 40% longer to resolve (8.4s -&gt; 12.0s). A yielding unit
+   walking dead straight with zero avoidance input turned out to make
+   the actual geometry HARDER for the other unit to route around, not
+   easier. Reverted that half; a yielding unit keeps its normal
+   avoidance/separation/flocking steering, just throttled down to as
+   low as 0.15x speed (`GiveWayMinSpeedScale`, deliberately below the
+   ordinary 0.35x avoidance floor -- a much stronger "just wait" signal
+   than everyday easing).
+
+**Honest result, not oversold:** this is a real, measured improvement
+on top of the already-shipped `TieBreakDeadband`/`OpposingHeadingCutoff`
+fixes (lone pairs, already clean, stay clean; the toughest tested
+multi-squad scrum improves 19 -&gt; 18 flips with zero regression
+anywhere), not a claim that circling is now fully eliminated in every
+configuration -- the class header's own prior admission about dense
+multi-unit combat needing real hysteresis/state stands. If the creator
+still sees circling after this ships, the next diagnostic step is
+pinning down the SPECIFIC geometry (converging on one shared
+destination rather than crossing paths? near a building corner? three
+or more units at once?), since `steerverify`'s existing scenario set is
+now either clean or only marginally improved and doesn't obviously
+match a "still circling" report on its own.
+
+**Verified for real:** `steerverify` (the real `MonsterSteeringController.cs`
+compiled directly, not a re-implementation) re-run across all 8
+scenarios after each iteration of this fix, not just the final one --
+the two reverted approaches above were caught BECAUSE of this, not
+despite it. Flightcheck recompiles the real edited file clean against
+match-core/citygen-core. No Unity Editor here to watch this on screen
+-- same standing limit as every other Unity-side change in this
+project's history.

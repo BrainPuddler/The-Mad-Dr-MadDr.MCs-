@@ -58,6 +58,32 @@ using UnityEngine;
 /// likely needs real hysteresis/state this file's own "Stateless"
 /// design deliberately doesn't have yet, flagged rather than silently
 /// claimed solved.
+///
+/// 2026-08 follow-up (creator report: "monsters are still circling each
+/// other... if they are the same speed and they can't get around, what
+/// if... the nav system picks one to give way to the other, until they
+/// are body size + X distance apart, then they resume normal speed"):
+/// implemented close to verbatim as `GiveWaySpeedScale`/`IsYieldingTo`
+/// below -- a deterministic per-pair "who yields" (same `GetInstanceID`
+/// tie-break `PredictiveAvoidance` already uses) with NO stored grant;
+/// the release condition is real distance re-checked every frame, not a
+/// timer. Measured in `steerverify`: the toughest 3v3 scenario improves
+/// (19 -&gt; 18 total flips) with zero regression anywhere else. Two
+/// design choices were only settled by testing, not guessed up front:
+/// (1) the trigger REQUIRES the neighbour's heading to actually oppose
+/// `fwd` (`OpposingHeadingCutoff`, same threshold `Alignment`/`Cohesion`
+/// use) -- an earlier cut gated on proximity+moving alone and made the
+/// SAME scenario measurably WORSE (19 -&gt; 30 flips), because packed
+/// squadmates marching the same direction are well within the trigger
+/// radius of EACH OTHER too, and got randomly throttled against their
+/// own packmates for no reason; (2) yielding only throttles SPEED, never
+/// excludes the neighbour from the DIRECTION blend -- that was tried
+/// too, and also regressed a previously-clean scenario (a yielding unit
+/// walking dead straight with zero avoidance input turned out to make
+/// the geometry WORSE for the other unit routing around it, not
+/// better). Still not a full cure for the hardest multi-squad case, same
+/// honest limit as the paragraph above -- this is a real, measured
+/// improvement on top of it, not a claim of "fixed."
 /// </summary>
 public static class MonsterSteeringController
 {
@@ -131,6 +157,128 @@ public static class MonsterSteeringController
     public static float TieBreakDeadbandFor(float combined)
     {
         return Mathf.Max(TieBreakDeadband, combined * TieBreakDeadbandFraction);
+    }
+
+    /// <summary>2026-08 (creator follow-up: "monsters are still circling
+    /// each other... if they are the same speed and they can't get
+    /// around, what if when you detect another monster near, the nav
+    /// system picks one to give way to the other, until they are body
+    /// size + X distance apart, then they can resume their normal
+    /// speed"): the floor `GiveWaySpeedScale` can push a yielding unit's
+    /// speed down to -- deliberately BELOW `MinSpeedScale` (0.35), since
+    /// this is a much stronger "just stop and let them by" signal than
+    /// ordinary avoidance easing off. Not zero: a full stop is
+    /// DeadlockManager's own escalation path (docs/25 Phase D), never
+    /// this layer's job.</summary>
+    public const float GiveWayMinSpeedScale = 0.15f;
+
+    /// <summary>The actual per-neighbour speed multiplier for
+    /// `GiveWaySpeedScale` -- 1 at the trigger boundary (`combined +
+    /// AvoidancePadding`, "body size + X" in the creator's own words,
+    /// reusing avoidance's existing personal-space buffer as X rather
+    /// than inventing a second one), linearly down to
+    /// `GiveWayMinSpeedScale` as the two bodies get closer.</summary>
+    public static float GiveWayScaleFor(float dist, float combined)
+    {
+        var proximity = 1f - Mathf.Clamp01(dist / combined);
+        return Mathf.Lerp(1f, GiveWayMinSpeedScale, proximity);
+    }
+
+    /// <summary>The creator's own proposed fix: rather than only steering
+    /// AROUND a close neighbour (`PredictiveAvoidance`'s job -- WHICH way
+    /// to go), this decides WHETHER to keep pushing forward into the
+    /// contest at all right now. Two units of similar priority both
+    /// fighting an equal-and-opposite avoidance nudge is exactly the
+    /// symmetric standoff that produces a spin no amount of
+    /// steering-direction tie-breaking fully cures (this file's own
+    /// header already says so) -- breaking the SYMMETRY by making
+    /// exactly one of the pair yield removes the standoff instead of
+    /// just trying to out-guess it.
+    ///
+    /// Gated on `fwd` vs the neighbour's own `LastVelocity` opposing each
+    /// other (`OpposingHeadingCutoff`, the SAME threshold `Alignment`/
+    /// `Cohesion` already use to tell "an oncoming unit" from "a
+    /// squadmate going my way"), not just proximity+moving -- a FIRST cut
+    /// of this fix skipped that gate (proximity + "is the neighbour
+    /// moving at all" only) and made `steerverify`'s 3v3 corridor
+    /// scenario measurably WORSE (19 -&gt; 30 total flips): squadmates
+    /// marching shoulder-to-shoulder toward the SAME destination are well
+    /// within `combined`'s own reach (2m squad spacing versus a 4.5m
+    /// default `combined`), so without the heading gate this was
+    /// randomly throttling half of every squad's own members against
+    /// their own packmates by `InstanceID` alone, for no reason -- pure
+    /// self-inflicted chaos, not a fix. With the gate, only a neighbour
+    /// actually heading opposite (or crossing) `fwd` counts, which is
+    /// the genuine "in each other's way" case this exists for.
+    ///
+    /// `fwd` (not relative velocity) is deliberately what's tested: once
+    /// a pair is ALREADY mid-spin their relative velocity swings mostly
+    /// tangential (orbiting), which a closing-velocity gate (the way
+    /// `PredictiveAvoidance` itself is gated) could miss entirely right
+    /// when it matters most. `fwd` is each unit's own INTENDED heading,
+    /// undistorted by whatever avoidance is doing to it this frame, so
+    /// it stays a stable, correct signal for "are we actually contesting
+    /// the same ground" throughout an active spin, not just on the
+    /// initial approach.
+    ///
+    /// WHO yields uses the exact same pairwise-stable identity
+    /// comparison `PredictiveAvoidance`'s own tie-break already relies
+    /// on (`GetInstanceID`, so both units of a pair agree without
+    /// talking to each other): the lower-ID unit always proceeds at full
+    /// speed, only the higher-ID one's scale drops here. No stored
+    /// grant/timer anywhere -- the release condition ("body size + X
+    /// apart") is just real distance re-checked fresh every single
+    /// frame, so this needs no persistent state at all, matching this
+    /// whole file's "Stateless" design (unlike `DeadlockManager`'s
+    /// separate, much rarer stall-recovery path, which DOES carry state
+    /// but only ever engages after real, sustained lack of progress --
+    /// this is the everyday, first-line version of "someone gives
+    /// ground," checked every frame for every close, opposing pair, not
+    /// a rare fallback).</summary>
+    public static float GiveWaySpeedScale(UnitCombat self, Vector3 fwd, List<UnitCombat> neighbours)
+    {
+        var scale = 1f;
+        foreach (var c in neighbours)
+        {
+            if (!IsYieldingTo(self, fwd, c)) continue;
+            var dist = Distance2D(self, c);
+            var combined = self.Radius + c.Radius + AvoidancePadding;
+            var thisScale = GiveWayScaleFor(dist, combined);
+            if (thisScale < scale) scale = thisScale;
+        }
+        return scale;
+    }
+
+    /// <summary>True exactly when `self` is the (deterministically,
+    /// pairwise-stable) yielding half of a genuine give-way encounter
+    /// with `c` -- pulled out of `GiveWaySpeedScale` so the predicate has
+    /// exactly one definition. (An earlier version of this fix also used
+    /// this predicate to exclude a yielded-to neighbour from `Combine`'s
+    /// direction terms entirely -- measurably WORSE in `steerverify`, a
+    /// previously-clean scenario picked up more flips and took 40%
+    /// longer to resolve, so that half was reverted: a yielding unit
+    /// keeps steering normally, this predicate now only ever gates the
+    /// speed throttle below.) See `GiveWaySpeedScale`'s own header for
+    /// why each individual check here exists.</summary>
+    private static bool IsYieldingTo(UnitCombat self, Vector3 fwd, UnitCombat c)
+    {
+        if (c == null || c == self || !c.Alive) return false;
+
+        var v = c.LastVelocity;
+        v.y = 0f;
+        if (v.sqrMagnitude < 1e-4f) return false;   // stationary neighbour -- nothing to give way to
+        if (Vector3.Dot(v.normalized, fwd) >= OpposingHeadingCutoff) return false;   // heading my own way -- a squadmate, not a contest
+
+        if (self.GetInstanceID() < c.GetInstanceID()) return false;   // this pair's low-ID member always proceeds; only the high-ID one yields
+
+        return Distance2D(self, c) < self.Radius + c.Radius + AvoidancePadding;
+    }
+
+    private static float Distance2D(UnitCombat a, UnitCombat b)
+    {
+        var d = b.transform.position - a.transform.position;
+        d.y = 0f;
+        return d.magnitude;
     }
 
     /// <summary>docs/23 §5 v0.1 weights for the two NEW group forces this
@@ -442,6 +590,16 @@ public static class MonsterSteeringController
         // never fully stops here (DeadlockManager, Phase D, owns that).
         var alignment = Vector3.Dot(dir, fwd);
         var speedScale = Mathf.Clamp(alignment, MinSpeedScale, 1f);
+
+        // 2026-08 (creator follow-up: "monsters are still circling each
+        // other... pick one to give way to the other"): applied on top of
+        // (not instead of) the alignment-based easing above -- a give-way
+        // pair also gets the normal avoidance/separation steering nudge
+        // via `dir`, this only additionally throttles the yielding one's
+        // forward progress. See GiveWaySpeedScale's own header for why
+        // this exists alongside, rather than replacing, the tie-break
+        // already in PredictiveAvoidance.
+        speedScale = Mathf.Min(speedScale, GiveWaySpeedScale(self, fwd, neighbours));
 
         return new SteeringResult { Direction = dir, SpeedScale = speedScale };
     }
