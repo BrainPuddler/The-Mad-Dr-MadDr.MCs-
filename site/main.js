@@ -93,6 +93,13 @@ let blood     = 500;
 let battalions = [];               // [{ id, accountId, name, creatureIds, updatedAt }]
 let battalionSelection = new Set(); // shift-click staging buffer -- NOT persisted, same
                                      // "working selection" lifetime as a marquee box-select
+// 2026-08 follow-up (creator direction: "make a multi-select toggle
+// button, for mobile and normal web"): shift/ctrl/cmd-click need a
+// physical modifier key a touchscreen doesn't have. When this is on, a
+// PLAIN tap/click on a stable-card toggles its battalion pick instead
+// of driving the detail panel -- the modifier-click paths keep working
+// exactly as before regardless of this flag, this is purely additive.
+let battalionPickMode = false;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 function nextName()     { local.seq += 1; return `Specimen-${String(local.seq).padStart(2, "0")}`; }
@@ -757,13 +764,58 @@ function toggleBattalionPick(id, card) {
   card?.classList.toggle("battalion-selected", battalionSelection.has(id));
 }
 
+// 2026-08 follow-up (creator direction: "make a multi-select toggle
+// button, for mobile and normal web call it build Battalion+ and a
+// done button will allow you to name it. but pre-filled with a valid
+// entry. Airborn 1 for example. Crab 2 etc."): Battalion+ is the touch
+// equivalent of holding shift/ctrl while clicking.
+function toggleBattalionPickMode() {
+  battalionPickMode = !battalionPickMode;
+  renderStable();
+}
+
+// docs/15's real body-plan set (genome-core catalog.ts BODY_PLANS) --
+// "Airborn"/"Crab" are the creator's own two examples, matching
+// "winged"/"crab" here directly; the rest follow the same one-word,
+// title-case convention.
+const PLAN_DISPLAY_NAME = {
+  tetrapod: "Tetrapod", blob: "Blob", serpentine: "Serpent", winged: "Airborn",
+  crab: "Crab", arachnid: "Arachnid", avian: "Avian", treant: "Treant", floater: "Floater",
+};
+
+// The DOMINANT body plan among the staged picks names the suggestion
+// ("3 Crabs + 1 Avian" suggests "Crab N", not "Avian N") -- then the
+// lowest N not already used by an existing battalion name, so repeated
+// saves don't collide ("Crab 1", "Crab 2", ...).
+function suggestBattalionName(ids) {
+  const counts = {};
+  for (const id of ids) {
+    const c = byId(id);
+    if (!c) continue;
+    const plan = c.genome.body.plan;
+    counts[plan] = (counts[plan] ?? 0) + 1;
+  }
+  let bestPlan = null, bestCount = 0;
+  for (const [plan, n] of Object.entries(counts)) if (n > bestCount) { bestPlan = plan; bestCount = n; }
+  const label = PLAN_DISPLAY_NAME[bestPlan] ?? "Battalion";
+  const used = new Set(battalions.map(b => b.name.trim().toLowerCase()));
+  let n = 1;
+  while (used.has(`${label} ${n}`.toLowerCase())) n++;
+  return `${label} ${n}`;
+}
+
 async function doNameAndSaveBattalion() {
   if (battalionSelection.size === 0) return;
-  const name = prompt(`Name this battalion (${battalionSelection.size} monster${battalionSelection.size === 1 ? "" : "s"}):`);
+  const ids = [...battalionSelection];
+  const name = prompt(
+    `Name this battalion (${ids.length} monster${ids.length === 1 ? "" : "s"}):`,
+    suggestBattalionName(ids),
+  );
   if (!name || !name.trim()) return;
   try {
-    await api("POST", "/battalions", { name: name.trim(), creatureIds: [...battalionSelection] });
+    await api("POST", "/battalions", { name: name.trim(), creatureIds: ids });
     battalionSelection.clear();
+    battalionPickMode = false;
     logEntry(`🏴 Battalion "${name.trim()}" formed.`);
     const res = await api("GET", "/battalions");
     battalions = res.battalions ?? [];
@@ -1294,14 +1346,21 @@ function renderStable() {
       <div class="sc-meta">${esc(c.genome.body.plan)} · ${esc(c.genome.heart.tier)} heart</div>
     </div>`;
   }).join("");
-  // shift+click stages a monster for the next battalion (a G press below
-  // names and saves it); a plain click keeps its old job of driving the
-  // detail panel -- one click, two jobs, disambiguated by a modifier,
-  // the same shape WaypointCommander's own shift-select already uses
-  // in-game.
+  // shift-click / ctrl-click / cmd-click (metaKey, Mac's own modifier
+  // convention -- 2026-08 follow-up: "verify it works in all major
+  // browsers, PC, MAC and Linux") stages a monster for the next
+  // battalion (Done or G names and saves it); so does a PLAIN click
+  // while battalionPickMode is on (the "Battalion+" toggle button, for
+  // touch devices with no modifier key at all). Otherwise a plain click
+  // keeps its old job of driving the detail panel -- one click, two
+  // jobs, disambiguated by a modifier or an explicit mode, the same
+  // shape WaypointCommander's own shift-select already uses in-game.
   grid.querySelectorAll(".stable-card").forEach(card =>
     card.addEventListener("click", (e) => {
-      if (e.shiftKey) { toggleBattalionPick(card.dataset.id, card); return; }
+      if (battalionPickMode || e.shiftKey || e.ctrlKey || e.metaKey) {
+        toggleBattalionPick(card.dataset.id, card);
+        return;
+      }
       local.selectedId = card.dataset.id; saveLocal(); renderStable();
     }));
   const cur = saved.find(c => c.id === local.selectedId) ?? saved[0];
@@ -1312,8 +1371,18 @@ function renderBattalionsPanel() {
   const panel = document.getElementById("stable-battalions");
   if (!panel) return;
   const pickedNote = battalionSelection.size > 0
-    ? `<div class="battalion-hint">${battalionSelection.size} shift-selected — press <kbd>G</kbd> to name &amp; save as a battalion</div>`
-    : `<div class="battalion-hint">Shift-click monsters above, then press <kbd>G</kbd> to group them into a named battalion. A Factory in-game can build whichever one you pick.</div>`;
+    ? `<div class="battalion-hint">${battalionSelection.size} selected — tap <strong>Done</strong> (or press <kbd>G</kbd>) to name &amp; save as a battalion</div>`
+    : `<div class="battalion-hint">Shift-click, ctrl/cmd-click, or turn on <strong>Battalion+</strong> and tap monsters above, then save as a named battalion. A Factory in-game can build whichever one you pick.</div>`;
+  // 2026-08 follow-up: the Battalion+/Done toolbar -- Battalion+ is the
+  // touch-friendly stand-in for holding shift/ctrl (see
+  // toggleBattalionPickMode's own doc); Done is just doNameAndSaveBattalion
+  // with a button instead of the G hotkey, disabled until there's
+  // something to save.
+  const toolbar = `
+    <div class="battalion-toolbar">
+      <button class="bt-pickmode${battalionPickMode ? " active" : ""}">${battalionPickMode ? "✓ Battalion+" : "Battalion+"}</button>
+      <button class="bt-done"${battalionSelection.size === 0 ? " disabled" : ""}>Done</button>
+    </div>`;
   const rows = battalions.map(t => `
     <div class="battalion-row" data-id="${t.id}">
       <span class="battalion-name">${esc(t.name)}</span>
@@ -1321,7 +1390,9 @@ function renderBattalionsPanel() {
       <button class="bt-rename" title="Rename">🏷️</button>
       <button class="bt-delete danger" title="Delete">🗑️</button>
     </div>`).join("");
-  panel.innerHTML = `<h3>Battalions</h3>${pickedNote}${rows || `<div class="empty">No battalions yet.</div>`}`;
+  panel.innerHTML = `<h3>Battalions</h3>${toolbar}${pickedNote}${rows || `<div class="empty">No battalions yet.</div>`}`;
+  panel.querySelector(".bt-pickmode").addEventListener("click", toggleBattalionPickMode);
+  panel.querySelector(".bt-done").addEventListener("click", doNameAndSaveBattalion);
   panel.querySelectorAll(".battalion-row").forEach(row => {
     const t = battalions.find(b => b.id === row.dataset.id);
     if (!t) return;

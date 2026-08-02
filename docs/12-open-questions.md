@@ -9523,3 +9523,100 @@ confirm holding Ctrl/Alt no longer double-fires a build toggle on
 screen -- same standing limit as every other Unity-side change in this
 project's history; the fix itself is a single early-return guard on
 already-read keyboard state, not new untested logic.
+
+## 2026-08 follow-up: the Lab Stable shift-click bug was really a deploy gap, plus a real UI pass -- green highlight, Ctrl/Cmd-click, a Battalion+ toggle button, a pre-filled name prompt, and bottom-of-screen tutorial text
+
+Creator report: "Lab -> Stable -> shift+click is not working. it
+should green hi-lite the monster(s). Bug is click select deselects
+previous, with out without shift. Also should have some tutorial text
+on bottom of the screen. Make a multi-select toggle button, for mobile
+and normal web call it build Battalion+ and a done button will allow
+you to name it. but pre-filled with a valid entry. Airborn 1 for
+example. Crab 2 etc." Follow-ups: "on Website keep shift and control
+clicks as well" and "verify it works in all major browsers, PC, MAC
+and Linux."
+
+**The reported bug's real root cause: nothing was ever deployed.**
+The entire Lab battalion-template system (shift-click staging, the
+Battalions panel, `POST /battalions`) shipped on this session's own
+branch across two earlier passes -- but `main` (what GitHub Pages
+actually serves) was never fast-forwarded to include it. Checked
+directly: `git merge-base HEAD origin/main` equaled `origin/main`'s
+own HEAD, meaning the live site had been running code from BEFORE any
+of this work, whose Stable click handler was `() => { local.selectedId
+= ...}` with no shift-key check of any kind -- explaining the exact
+symptom reported ("deselects previous, with or without shift": shift
+was simply never read, so every click behaved identically). This pass
+fast-forward-merges the session branch into `main` (CLAUDE.md's own
+standing workflow: "session branches merge into main promptly...
+Merging to main = publishing"), the real fix for the bug as reported,
+independent of everything else below.
+
+**The UI pass, on top of that.**
+- **Green highlight, always.** `.battalion-selected` used to reuse
+  `--fuel` (amber); now a new, FIXED `--battalion-pick` (#33d17a)
+  defined once in the base `:root` and deliberately never redefined by
+  the Army/Hive faction-skin overrides (unlike `--acid`, which flips to
+  amber/violet under those skins) -- green every time, matching the
+  literal ask, not just under the default faction. A small ✓ badge
+  overlays the corner too, so a picked card reads clearly even next to
+  `.selected`'s own (still faction-tinted) detail-view border.
+- **Ctrl-click and Cmd-click, alongside shift-click** (creator
+  follow-up: "keep shift and control clicks as well"). `e.ctrlKey ||
+  e.metaKey` added next to the existing `e.shiftKey` check --
+  `metaKey` is the DOM's own name for whichever key a given OS calls
+  its primary modifier (Cmd on macOS, the Windows key on Windows), so
+  checking both `ctrlKey` and `metaKey` covers Windows/Linux (Ctrl) and
+  macOS (Cmd) with the SAME code path, nothing OS-specific to branch
+  on.
+- **A `Battalion+` toggle button**, for touch devices with no modifier
+  key at all: while active, a PLAIN tap on a stable-card battalion-
+  selects it instead of driving the detail panel; shift/ctrl/cmd-click
+  keep working identically regardless of this button's state, it's
+  purely additive.
+- **`Done` button**, next to `Battalion+`, doing exactly what the `G`
+  hotkey already did (disabled until something's picked) -- for anyone
+  who hasn't found the keyboard shortcut, or is on a device with no
+  keyboard.
+- **The name prompt is now pre-filled**, not blank -- new
+  `suggestBattalionName`: the DOMINANT body plan among the staged
+  picks (genome-core's real 9-plan `BODY_PLANS` set) names the
+  suggestion, mapped through a one-word display name (`winged` ->
+  "Airborn", `crab` -> "Crab" -- the creator's own two examples,
+  matched directly), then the lowest N not already used by an existing
+  battalion name (`Crab 1`, `Crab 2`, ... never colliding). Still just
+  `prompt(message, defaultValue)` -- the browser's own native
+  pre-filled-prompt parameter, no custom modal needed.
+- **A persistent tutorial strip** at the bottom of the Stable screen
+  (`.stable-tutorial`, `order: 99` in the flex layout so it always
+  lands last regardless of DOM position) explaining all of the above in
+  one line -- separate from the existing `.battalion-hint` inside the
+  Battalions panel (which changes text with selection state); this one
+  never changes, for a player who hasn't found that panel yet.
+
+**Verified for real, not just `node --check` this time:** a genuine
+Playwright-driven Chromium session, loaded against the ACTUAL
+`site/index.html`/`main.js`/`style.css` served locally, talking to a
+REAL local `mutator-service` instance (network-intercepted so the
+site's own hardcoded deployed-service URL never needed touching) --
+spawned and stabled 4 real creatures, then drove the exact reported
+bug scenario: shift-click card 1, ctrl-click card 2 (asserted card 1
+was STILL green -- the literal "deselects previous" bug, now proven
+NOT to reproduce), meta/cmd-click card 0 (three at once), turned on
+`Battalion+` and plain-clicked card 3 (all four at once, no modifier
+key touched at all), read the computed CSS `border-color` and
+confirmed it renders as literal `rgb(51, 209, 122)` (`#33d17a`, real
+green) not just "has the class," clicked `Done`, captured the native
+`prompt()`'s own `defaultValue` and confirmed it matched
+`suggestBattalionName`'s real output ("Tetrapod 1" for an all-tetrapod
+test roster) rather than blank, accepted it, and confirmed the saved
+battalion appeared in the panel under that exact name with the
+selection cleared. All 15 assertions passed. Honest limit: this sandbox
+only has Chromium available (`playwright install` is explicitly
+disallowed here per this environment's own setup) -- Firefox/WebKit
+were NOT independently driven. The code itself uses nothing
+browser-specific (`shiftKey`/`ctrlKey`/`metaKey` are baseline DOM
+`UIEvent` properties, CSS custom properties and flexbox `order` are
+universally supported), so there's no known reason it would behave
+differently there, but that's an engineering argument, not the same
+kind of proof the Chromium run provides.

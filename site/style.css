@@ -11,6 +11,13 @@
   --bones: #e8e4d0;
   --dead: #6b7a72;
   --line: #243430;
+  /* 2026-08 (creator direction: "should green hi-lite the monster(s)"):
+     deliberately NOT --acid -- that var flips to amber/violet under the
+     Army/Hive faction skins below, and the creator asked for green
+     specifically, every time, regardless of which faction is active.
+     Fixed here in the base :root only, never redefined in the faction
+     overrides, so the cascade leaves it untouched under any skin. */
+  --battalion-pick: #33d17a;
 }
 * { box-sizing: border-box; }
 body {
@@ -282,10 +289,23 @@ body[data-faction="alien"] button { border-radius: 12px; }
 .stable-card.selected { border-color: var(--acid); box-shadow: 0 0 0 1px var(--acid); }
 /* 2026-08 (creator direction: "in the lab, the stable area, where can
    shift plus quick select monsters" -- the Lab half of battalion
-   grouping): shift-click staging, distinct from .selected's acid-green
-   detail-panel highlight so a player can tell "the monster I'm looking
-   at" from "the monsters about to become a battalion" at a glance. */
-.stable-card.battalion-selected { border-color: var(--fuel); box-shadow: 0 0 0 1px var(--fuel); }
+   grouping; follow-up: "should green hi-lite the monster(s)"): a fixed
+   green (--battalion-pick, never redefined per faction skin, unlike
+   --acid) plus a corner checkmark badge, so a picked card reads clearly
+   even next to .selected's own (faction-tinted) detail-view border. */
+.stable-card.battalion-selected {
+  border-color: var(--battalion-pick); box-shadow: 0 0 0 2px var(--battalion-pick);
+  position: relative;
+}
+.stable-card.battalion-selected::after {
+  content: "✓"; position: absolute; top: 4px; right: 6px;
+  width: 18px; height: 18px; line-height: 18px; text-align: center;
+  border-radius: 50%; background: var(--battalion-pick); color: #06210f;
+  font-size: 12px; font-weight: bold;
+}
+/* the faction glyph (.sc-fac) already sits top-right -- move it aside
+   once the checkmark badge claims that corner, so they don't overlap. */
+.stable-card.battalion-selected .sc-fac { right: 26px; }
 .sc-thumb { position: relative; aspect-ratio: 1; background: #05070c; }
 .sc-thumb img { width: 100%; height: 100%; display: block; }
 .sc-fac { position: absolute; top: 4px; right: 6px; font-size: 15px; }
@@ -318,6 +338,18 @@ body[data-faction="alien"] button { border-radius: 12px; }
   background: var(--panel2); border: 1px solid var(--line); border-radius: 3px;
   padding: 0 4px; font-size: 10px;
 }
+/* 2026-08 (creator direction: "make a multi-select toggle button, for
+   mobile and normal web... a done button will allow you to name it"):
+   Battalion+ turns every plain tap/click on a stable-card into a pick
+   toggle -- shift-click/ctrl-click/cmd-click keep working the same way
+   regardless of this button's state, this is purely the touch-friendly
+   alternative to holding a modifier key that doesn't exist on a phone. */
+.battalion-toolbar { display: flex; gap: 6px; margin-bottom: 10px; }
+.battalion-toolbar button { flex: 1; font-size: 12px; padding: 6px 4px; }
+.battalion-toolbar .bt-pickmode.active {
+  background: var(--battalion-pick); color: #06210f; border-color: var(--battalion-pick);
+}
+.battalion-toolbar .bt-done:disabled { opacity: .4; cursor: default; }
 .battalion-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .battalion-row:last-child { border-bottom: none; }
 .battalion-name { flex: 1; font-weight: bold; }
@@ -333,6 +365,22 @@ body[data-faction="alien"] button { border-radius: 12px; }
 .sd-info .kv { grid-template-columns: 80px 1fr; font-size: 12px; }
 .sd-info .kv > div { text-transform: capitalize; }
 .sd-actions { display: flex; gap: 8px; margin-top: 12px; }
+/* 2026-08 (creator direction: "should have some tutorial text on bottom
+   of the screen"): a persistent one-line hint strip, separate from
+   .battalion-hint (which lives inside the Battalions panel and changes
+   with selection state) -- this one is a fixed how-to-use-this-screen
+   reminder, always the same text, for a player who hasn't found the
+   panel's own hint yet. */
+#view-stable { flex-wrap: wrap; }
+.stable-tutorial {
+  width: 100%; order: 99; margin-top: 4px; padding: 10px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  color: var(--dim); font-size: 11px; line-height: 1.5; text-align: center;
+}
+.stable-tutorial kbd {
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 3px;
+  padding: 0 4px; font-size: 10px;
+}
 @media (max-width: 720px) {
   #view-stable { flex-direction: column; }
   .stable-side { width: 100%; position: static; }
