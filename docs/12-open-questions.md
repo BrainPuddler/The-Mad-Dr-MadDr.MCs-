@@ -9860,3 +9860,14 @@ full edited set (`DamageFx.cs`, `ProceduralMeshKit.cs`) clean. No Unity
 Editor here to confirm the shard actually reads as "low-poly" the way
 the reference images do on a real screen -- same standing limit as
 every other Unity-side visual change in this project's history.
+
+## 2026-08 follow-up: resize fire + smoke 70%
+
+Creator direction: "resize it 70% and the smoke as well." A flat 0.7
+multiplier layered on top of both effects' existing geometry -- puff
+spawn scale, `InitFlame`'s growth/base-scale args, and `FirePlume`'s
+`Light` range/intensity -- NOT on `BuildingStats.SmokeScale`/`FireCount`
+themselves, so the per-tier scaling ratios (Small vs. Landmark) are
+unchanged; this is a flat trim of the whole effect's size, not a
+retune of how much bigger a Landmark's fire/smoke is than a Small
+building's. Flightcheck recompiles `DamageFx.cs` clean.

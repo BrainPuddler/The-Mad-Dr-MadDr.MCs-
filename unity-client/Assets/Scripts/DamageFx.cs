@@ -222,7 +222,13 @@ public class SmokePlume : MonoBehaviour
         go.name = "SmokePuff";
         go.transform.SetParent(transform, false);
         go.transform.position = transform.position;
-        var startSize = 1.1f * _scale;
+        // 2026-08 (creator direction: "resize it 70%"): a flat 0.7
+        // multiplier on top of the existing per-tier _scale, applied
+        // here rather than to BuildingStats.SmokeScale's own numbers --
+        // this is a size trim on the puff geometry itself, not a change
+        // to how much bigger one tier's smoke is than another's.
+        const float ResizePct = 0.7f;
+        var startSize = 1.1f * ResizePct * _scale;
         go.transform.localScale = new Vector3(startSize, startSize, startSize);
         var collider = go.GetComponent<Collider>();
         if (collider != null) Object.Destroy(collider);
@@ -237,7 +243,7 @@ public class SmokePlume : MonoBehaviour
         var renderer = go.GetComponent<Renderer>();
         if (renderer != null) renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, 3.6f * _scale, 0.88f);
+        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, 3.6f * ResizePct * _scale, 0.88f);
     }
 }
 
@@ -274,9 +280,10 @@ public class FirePlume : MonoBehaviour
         // 2026-08 (creator report: "the fire is too large"): a 6m-range,
         // 2.5-intensity point light was throwing a glow bigger than the
         // small low-poly flame it was supposed to be lighting up.
-        // Shrunk to match a contained shard, not a bonfire.
-        _glow.range = 3f;
-        _glow.intensity = 1.1f;
+        // Shrunk to match a contained shard, not a bonfire. Follow-up
+        // ("resize it 70%"): another flat 0.7 on top of that first trim.
+        _glow.range = 3f * 0.7f;
+        _glow.intensity = 1.1f * 0.7f;
         // no shadow-casting -- a handful of these across a burning
         // skyline would be a real per-frame cost for a purely cosmetic
         // beat, same "cheap is the point" reasoning every other FX class
@@ -291,7 +298,7 @@ public class FirePlume : MonoBehaviour
         // mechanical, not like fire)
         _flickerPhase += Time.deltaTime * 9f;
         var flicker = 0.7f + Mathf.Abs(Mathf.Sin(_flickerPhase) * 0.6f + Mathf.Sin(_flickerPhase * 2.3f) * 0.4f) * 0.5f;
-        _glow.intensity = 1.0f * flicker;
+        _glow.intensity = 0.7f * flicker;
 
         _timer -= Time.deltaTime;
         if (_timer > 0f) return;
@@ -316,7 +323,9 @@ public class FirePlume : MonoBehaviour
         // (below) overwrites it uniformly every frame off _baseScale, the
         // same "explicit spawn scale is cosmetically moot" precedent
         // SmokePlume/DustBurstFx's own spawn-time scale already sets.
-        var size = 0.28f;
+        // 2026-08 (creator direction: "resize it 70%"): another flat 0.7
+        // on top of the shard-mesh trim.
+        var size = 0.28f * 0.7f;
         go.transform.localScale = new Vector3(size, size, size);
 
         var meshFilter = go.AddComponent<MeshFilter>();
@@ -331,7 +340,7 @@ public class FirePlume : MonoBehaviour
         mat.SetColor("_EmissionColor", (warm ? new Color(0.95f, 0.35f, 0.05f) : new Color(1f, 0.65f, 0.1f)) * 2.5f);
         renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitFlame(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.25f, 0.9f, 0.32f);
+        go.AddComponent<SmokePuff>().InitFlame(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.25f * 0.7f, 0.9f, 0.32f * 0.7f);
     }
 }
 
