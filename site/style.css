@@ -280,6 +280,12 @@ body[data-faction="alien"] button { border-radius: 12px; }
 }
 .stable-card:hover { border-color: var(--dim); }
 .stable-card.selected { border-color: var(--acid); box-shadow: 0 0 0 1px var(--acid); }
+/* 2026-08 (creator direction: "in the lab, the stable area, where can
+   shift plus quick select monsters" -- the Lab half of battalion
+   grouping): shift-click staging, distinct from .selected's acid-green
+   detail-panel highlight so a player can tell "the monster I'm looking
+   at" from "the monsters about to become a battalion" at a glance. */
+.stable-card.battalion-selected { border-color: var(--fuel); box-shadow: 0 0 0 1px var(--fuel); }
 .sc-thumb { position: relative; aspect-ratio: 1; background: #05070c; }
 .sc-thumb img { width: 100%; height: 100%; display: block; }
 .sc-fac { position: absolute; top: 4px; right: 6px; font-size: 15px; }
@@ -289,12 +295,34 @@ body[data-faction="alien"] button { border-radius: 12px; }
 .sc-name { padding: 6px 8px 2px; font-weight: bold; font-size: 13px; }
 .sc-meta { padding: 0 8px 8px; font-size: 11px; color: var(--dim); text-transform: capitalize; }
 
+.stable-side {
+  width: 360px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px;
+  position: sticky; top: 12px;
+}
 .stable-detail {
-  width: 360px; flex-shrink: 0; position: sticky; top: 12px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   overflow: hidden;
 }
 .stable-detail:empty { display: none; }
+/* 2026-08 (creator direction, same battalion-grouping pass): the named-
+   template list this "Lab stable" half saves to mutator-service's new
+   /battalions -- a Factory in-game (BuildMenuHud) resolves one of these
+   into an actual production-queue build. */
+.stable-battalions {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; font-size: 12px;
+}
+.stable-battalions h3 { margin: 0 0 8px; font-size: 14px; color: var(--ink); letter-spacing: 1px; }
+.battalion-hint { color: var(--dim); font-size: 11px; line-height: 1.4; margin-bottom: 10px; }
+.battalion-hint kbd {
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 3px;
+  padding: 0 4px; font-size: 10px;
+}
+.battalion-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.battalion-row:last-child { border-bottom: none; }
+.battalion-name { flex: 1; font-weight: bold; }
+.battalion-count { color: var(--dim); min-width: 1.5em; text-align: right; }
+.battalion-row button { font-size: 12px; padding: 2px 6px; line-height: 1.4; }
 #stable-portrait {
   width: 100%; aspect-ratio: 320 / 200; height: auto; display: block;
   border-bottom: 1px solid var(--line); background: #05070c;
@@ -307,5 +335,5 @@ body[data-faction="alien"] button { border-radius: 12px; }
 .sd-actions { display: flex; gap: 8px; margin-top: 12px; }
 @media (max-width: 720px) {
   #view-stable { flex-direction: column; }
-  .stable-detail { width: 100%; position: static; }
+  .stable-side { width: 100%; position: static; }
 }

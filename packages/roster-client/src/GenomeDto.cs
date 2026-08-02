@@ -314,4 +314,54 @@ namespace MadDr.RosterClient
             return JsonValue.Of(obj);
         }
     }
+
+    /// <summary>2026-08 (docs/12 "Lab stable" half of the battalion-
+    /// grouping feature): a named, reusable group of creature ids, built
+    /// in the Lab and fetched here so a Factory can build the SAME
+    /// composition in-game. Mirrors mutator-service's BattalionTemplate
+    /// row exactly (store.ts). CreatureIds MAY repeat -- "3 Tetrapods + 2
+    /// Winged" is a real, intended shape (the service explicitly allows
+    /// it), matching how the in-game battalion feature already permits
+    /// multiple live clones of one genome in one control group.</summary>
+    public sealed class BattalionTemplateDto
+    {
+        public string Id { get; }
+        public string AccountId { get; }
+        public string Name { get; }
+        public string[] CreatureIds { get; }
+        public string UpdatedAt { get; }
+
+        public BattalionTemplateDto(string id, string accountId, string name, string[] creatureIds, string updatedAt)
+        {
+            Id = id;
+            AccountId = accountId;
+            Name = name;
+            CreatureIds = creatureIds;
+            UpdatedAt = updatedAt;
+        }
+
+        public static BattalionTemplateDto FromJson(JsonValue v)
+        {
+            var arr = v.Field("creatureIds").AsArray();
+            var ids = new string[arr.Count];
+            for (var i = 0; i < arr.Count; i++) ids[i] = arr[i].AsString();
+            return new BattalionTemplateDto(
+                v.Field("id").AsString(),
+                v.Field("accountId").AsString(),
+                v.Field("name").AsString(),
+                ids,
+                v.Field("updatedAt").AsString());
+        }
+
+        public JsonValue ToJson()
+        {
+            var obj = new Dictionary<string, JsonValue>();
+            obj["id"] = JsonValue.Of(Id);
+            obj["accountId"] = JsonValue.Of(AccountId);
+            obj["name"] = JsonValue.Of(Name);
+            obj["creatureIds"] = JsonValue.Of(JsonHelpers.StringsToJson(CreatureIds));
+            obj["updatedAt"] = JsonValue.Of(UpdatedAt);
+            return JsonValue.Of(obj);
+        }
+    }
 }

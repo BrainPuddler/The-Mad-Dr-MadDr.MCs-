@@ -107,7 +107,7 @@ public class GrabCursor : MonoBehaviour
     // with numbers... specify the number of units to make of each type
     // that includes battalions and individual units") -----------------
 
-    private enum QueueItemKind { SingleUnit, Battalion }
+    private enum QueueItemKind { SingleUnit, Battalion, LabBattalion }
 
     /// <summary>One queued production run. SingleUnit reproduces ONE
     /// genome `RemainingCount` times (repeat drops of the SAME creature
@@ -127,7 +127,12 @@ public class GrabCursor : MonoBehaviour
         public float SingleRadius;
         public int RemainingCount;
         public System.Collections.Generic.List<(StoredGenomeDto Genome, float Radius)> BattalionRemaining;
-        public string Label;   // HUD display: genome Id for SingleUnit, the source battalion's own name for Battalion
+        /// <summary>LabBattalion only -- a Lab-defined template's genomes,
+        /// with no per-member radius (unlike a live-selection Battalion,
+        /// a template has no fielded MonsterAgent to read a real radius
+        /// from before spawning; see <see cref="BuildLabBattalion"/>).</summary>
+        public System.Collections.Generic.List<StoredGenomeDto> LabBattalionRemaining;
+        public string Label;   // HUD display: genome Id for SingleUnit, the source battalion's own name for Battalion/LabBattalion
         public readonly System.Collections.Generic.List<MonsterAgent> Produced = new System.Collections.Generic.List<MonsterAgent>();
     }
 
@@ -145,7 +150,9 @@ public class GrabCursor : MonoBehaviour
             for (var i = 0; i < _queue.Count; i++)
             {
                 var item = _queue[i];
-                var remaining = item.Kind == QueueItemKind.SingleUnit ? item.RemainingCount : item.BattalionRemaining.Count;
+                var remaining = item.Kind == QueueItemKind.SingleUnit ? item.RemainingCount
+                    : item.Kind == QueueItemKind.Battalion ? item.BattalionRemaining.Count
+                    : item.LabBattalionRemaining.Count;
                 var progress = i == 0 ? Mathf.Clamp01(_productionTimer / Mathf.Max(0.01f, productionSecondsPerUnit)) : 0f;
                 yield return (item.Label, remaining, progress);
             }
@@ -219,7 +226,8 @@ public class GrabCursor : MonoBehaviour
         StoredGenomeDto genome;
         float radius;
         if (item.Kind == QueueItemKind.SingleUnit) { genome = item.SingleGenome; radius = item.SingleRadius; }
-        else { var next = item.BattalionRemaining[0]; genome = next.Genome; radius = next.Radius; }
+        else if (item.Kind == QueueItemKind.Battalion) { var next = item.BattalionRemaining[0]; genome = next.Genome; radius = next.Radius; }
+        else { genome = item.LabBattalionRemaining[0]; radius = DefaultParkSearchRadius; }
 
         var parkSpot = FindOpenHexNear(factory.Hex, new System.Collections.Generic.HashSet<HexCoord>(), radius);
         if (parkSpot == null) return;   // no room this instant -- try again next frame
@@ -234,7 +242,7 @@ public class GrabCursor : MonoBehaviour
             item.RemainingCount--;
             if (item.RemainingCount <= 0) _queue.RemoveAt(0);
         }
-        else
+        else if (item.Kind == QueueItemKind.Battalion)
         {
             item.Produced.Add(clone);
             item.BattalionRemaining.RemoveAt(0);
@@ -244,7 +252,27 @@ public class GrabCursor : MonoBehaviour
                 _queue.RemoveAt(0);
             }
         }
+        else
+        {
+            item.Produced.Add(clone);
+            item.LabBattalionRemaining.RemoveAt(0);
+            if (item.LabBattalionRemaining.Count == 0)
+            {
+                if (commander != null) commander.FormBattalionFromProduction(item.Produced);
+                _queue.RemoveAt(0);
+            }
+        }
     }
+
+    /// <summary>UnitCombat's own body-radius default (Fighter.Radius =
+    /// 1.5f) -- the best park-spot-search guess available for a
+    /// LabBattalion member before it's actually spawned and its real,
+    /// body-derived radius (<see cref="MonsterAgent.Radius"/>, only
+    /// known once the mesh is built) exists. Worst case a large
+    /// creature's real footprint parks a touch tighter than ideal --
+    /// never a correctness issue, since the search still confirms the
+    /// hex is open before spawning there.</summary>
+    private const float DefaultParkSearchRadius = 1.5f;
 
     /// <summary>Nearest of the player's own Complete Factories to the
     /// city center -- "nearest to what" doesn't have a clean answer for
@@ -508,6 +536,41 @@ public class GrabCursor : MonoBehaviour
         if (snapshot.Count == 0) return;
 
         _queue.Add(new QueueItem { Kind = QueueItemKind.Battalion, BattalionRemaining = snapshot, Label = label });
+    }
+
+    /// <summary>2026-08 (docs/12 "Lab stable" half of battalion grouping:
+    /// "in the lab, the stable area, where can shift plus quick select
+    /// monsters and hit G key... make the factory build that battalion
+    /// group of monsters"): the SAME production queue as <see
+    /// cref="BuildBattalionAtOwnFactory"/>, but built from a Lab-defined
+    /// TEMPLATE's genome ids resolved against the player's own fetched
+    /// roster (<see cref="RuntimeCityBuilder.RosterCreatures"/>) instead
+    /// of live fielded monsters. A creatureId that doesn't resolve --
+    /// removed from the Stable, or a fetch race -- is silently skipped,
+    /// same "don't crash on a stale reference" posture the Lab's own
+    /// template storage already takes; the rest of the battalion still
+    /// builds. Duplicate ids resolve to duplicate queue entries (the
+    /// template legitimately allows "3 Tetrapods + 2 Winged").</summary>
+    public void BuildLabBattalion(string name, string[] creatureIds)
+    {
+        if (string.IsNullOrEmpty(name) || creatureIds == null || creatureIds.Length == 0 || builder == null) return;
+
+        var byId = new System.Collections.Generic.Dictionary<string, StoredGenomeDto>();
+        foreach (var g in builder.RosterCreatures) byId[g.Id] = g;
+
+        var resolved = new System.Collections.Generic.List<StoredGenomeDto>();
+        var missing = 0;
+        foreach (var id in creatureIds)
+        {
+            if (byId.TryGetValue(id, out var g)) resolved.Add(g);
+            else missing++;
+        }
+        if (missing > 0)
+            Debug.LogWarning("GrabCursor: Lab battalion \"" + name + "\" has " + missing
+                + " creature id(s) that don't resolve against the fetched roster (removed from the Stable?) -- skipping them.");
+        if (resolved.Count == 0) return;
+
+        _queue.Add(new QueueItem { Kind = QueueItemKind.LabBattalion, LabBattalionRemaining = resolved, Label = name });
     }
 
     /// <summary>2026-08 (creator direction: "increase the boundary around

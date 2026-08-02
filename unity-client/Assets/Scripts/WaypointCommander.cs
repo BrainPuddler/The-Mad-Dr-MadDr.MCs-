@@ -137,7 +137,8 @@ public class WaypointCommander : MonoBehaviour
         // docked above the minimap (2026-08), and the battalion list
         // docked above THAT (2026-08).
         if (Minimap.PointerOver || BuildingNavHud.PointerOver || SelectionHud.PointerOver
-            || RecallHud.PointerOver || BattalionHud.PointerOver || ProductionQueueHud.PointerOver) return;
+            || RecallHud.PointerOver || BattalionHud.PointerOver || ProductionQueueHud.PointerOver
+            || LabBattalionHud.PointerOver) return;
 
         var mouse = Mouse.current;
         if (mouse == null || _builder == null) return;

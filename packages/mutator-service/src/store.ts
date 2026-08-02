@@ -70,6 +70,25 @@ export interface Menagerie {
   updatedAt: string;
 }
 
+/** A named, reusable group of creature IDs (docs/12: "Lab stable" half of
+ * the battalion-grouping feature -- the in-game half assigns LIVE fielded
+ * monsters to a control-group slot; this is its Lab-side counterpart, a
+ * template that survives between matches and drives what a Factory can be
+ * told to build). Deliberately NOT a field on Menagerie or a sub-list of
+ * it -- a template can reference creatures whether or not they're
+ * currently in the active ≤12-slot Menagerie, and one creature can appear
+ * in many templates (or repeated within the SAME template: "3 Tetrapods +
+ * 2 Winged" is a real, intended shape, mirroring how the in-game battalion
+ * feature already allows multiple live clones of one genome in one
+ * group). */
+export interface BattalionTemplate {
+  readonly id: string;
+  readonly accountId: string;
+  name: string;
+  creatureIds: string[];
+  updatedAt: string;
+}
+
 export interface Page<T> {
   readonly items: readonly T[];
   readonly nextCursor?: string;
@@ -107,6 +126,12 @@ export interface Store {
   getMenagerie(accountId: string): Menagerie;
   saveMenagerie(m: Menagerie): void;
 
+  // battalion templates (named creature groups, docs/12)
+  listBattalions(accountId: string): readonly BattalionTemplate[];
+  getBattalion(accountId: string, id: string): BattalionTemplate | undefined;
+  saveBattalion(t: BattalionTemplate): void;
+  deleteBattalion(accountId: string, id: string): void;
+
   // catalog discovery
   getCatalog(accountId: string): ReadonlySet<string>;
   discover(accountId: string, families: readonly string[]): void;
@@ -120,6 +145,7 @@ export class InMemoryStore implements Store {
   private wallets = new Map<string, Wallet>();
   private items = new Map<string, InventoryItem>();
   private menageries = new Map<string, Menagerie>();
+  private battalions = new Map<string, BattalionTemplate>();
   private catalogs = new Map<string, Set<string>>();
   private retired = new Set<string>();
 
@@ -189,6 +215,25 @@ export class InMemoryStore implements Store {
   }
   saveMenagerie(m: Menagerie): void {
     this.menageries.set(m.accountId, { ...m, creatureIds: [...m.creatureIds] });
+  }
+
+  listBattalions(accountId: string): readonly BattalionTemplate[] {
+    return [...this.battalions.values()]
+      .filter((t) => t.accountId === accountId)
+      .map((t) => ({ ...t, creatureIds: [...t.creatureIds] }))
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+  }
+  getBattalion(accountId: string, id: string): BattalionTemplate | undefined {
+    const t = this.battalions.get(id);
+    if (!t || t.accountId !== accountId) return undefined;
+    return { ...t, creatureIds: [...t.creatureIds] };
+  }
+  saveBattalion(t: BattalionTemplate): void {
+    this.battalions.set(t.id, { ...t, creatureIds: [...t.creatureIds] });
+  }
+  deleteBattalion(accountId: string, id: string): void {
+    const t = this.battalions.get(id);
+    if (t && t.accountId === accountId) this.battalions.delete(id);
   }
 
   getCatalog(accountId: string): ReadonlySet<string> {

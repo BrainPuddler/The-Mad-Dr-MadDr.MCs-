@@ -23,7 +23,7 @@ function setCors(req: IncomingMessage, res: ServerResponse): void {
   if (!origin || !CORS_ORIGINS.has(origin)) return;
   res.setHeader("access-control-allow-origin", origin);
   res.setHeader("vary", "Origin");
-  res.setHeader("access-control-allow-methods", "GET, POST, PUT, OPTIONS");
+  res.setHeader("access-control-allow-methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.setHeader("access-control-allow-headers", "content-type, x-account-id");
   res.setHeader("access-control-max-age", "86400");
 }
@@ -137,6 +137,15 @@ export function createApp(service: MutatorService): ReturnType<typeof createServ
   add("GET", "/creature/:id/lineage", (c) => ({ ancestors: service.lineage(c.accountId, c.params.id!) }));
   add("GET", "/menagerie", (c) => service.getMenagerie(c.accountId));
   add("PUT", "/menagerie", (c) => service.setMenagerie(c.accountId, c.body.creatureIds ?? []));
+  add("GET", "/battalions", (c) => ({ battalions: service.listBattalions(c.accountId) }));
+  add("POST", "/battalions", (c) => service.createBattalion(c.accountId, c.body.name, c.body.creatureIds ?? []));
+  add("PUT", "/battalions/:id", (c) =>
+    service.updateBattalion(c.accountId, c.params.id!, c.body.name, c.body.creatureIds ?? []),
+  );
+  add("DELETE", "/battalions/:id", (c) => {
+    service.deleteBattalion(c.accountId, c.params.id!);
+    return { ok: true };
+  });
   add("GET", "/wallet", (c) => service.getWallet(c.accountId));
   add("GET", "/tray", (c) => ({ items: service.listTray(c.accountId) }));
   add("GET", "/catalog", (c) => ({ families: service.getCatalog(c.accountId) }));

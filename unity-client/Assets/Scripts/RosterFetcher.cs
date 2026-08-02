@@ -51,6 +51,15 @@ public class RosterFetcher : MonoBehaviour
     /// fail -- e.g. first run, offline, with nothing cached yet.</summary>
     public event Action<string> OnRosterFailed;
 
+    /// <summary>2026-08 (docs/12 "Lab stable" half of battalion grouping):
+    /// fired once GET /battalions returns, with every named template this
+    /// account has saved in the Lab. No local-disk cache fallback like the
+    /// Menagerie fetch has -- a template is a convenience list, not a
+    /// creature's only record of existing, so a failed fetch just means
+    /// an empty Lab Battalions panel this session, logged, not a fallback
+    /// path worth the extra complexity.</summary>
+    public event Action<BattalionTemplateDto[]> OnBattalionsReady;
+
     private string CachePath
     {
         get { return Path.Combine(Application.persistentDataPath, "roster_cache_" + SafeFileName(accountId) + ".json"); }
@@ -136,6 +145,37 @@ public class RosterFetcher : MonoBehaviour
         var cache = new RosterCache(accountId, menagerie, creatures.ToArray(), DateTime.UtcNow.ToString("o"));
         WriteCache(cache);
         OnRosterReady?.Invoke(cache, false);
+    }
+
+    /// <summary>Independent of <see cref="FetchRoster"/> -- a battalion
+    /// template list failing to load shouldn't block spawning the
+    /// player's actual creatures, and vice versa.</summary>
+    public void FetchBattalions()
+    {
+        if (string.IsNullOrEmpty(accountId)) return;
+        StartCoroutine(FetchBattalionsCoroutine());
+    }
+
+    private IEnumerator FetchBattalionsCoroutine()
+    {
+        var result = new RequestResult();
+        yield return Get(baseUrl + "/battalions", result);
+        if (!result.Success)
+        {
+            Debug.LogWarning("RosterFetcher: battalions fetch failed: " + result.Error);
+            yield break;
+        }
+        try
+        {
+            var arr = JsonValue.Parse(result.Body).Field("battalions").AsArray();
+            var templates = new BattalionTemplateDto[arr.Count];
+            for (var i = 0; i < arr.Count; i++) templates[i] = BattalionTemplateDto.FromJson(arr[i]);
+            OnBattalionsReady?.Invoke(templates);
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning("RosterFetcher: malformed battalions response: " + e.Message);
+        }
     }
 
     private IEnumerator Get(string url, RequestResult result)

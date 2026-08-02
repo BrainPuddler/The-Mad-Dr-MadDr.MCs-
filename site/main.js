@@ -82,6 +82,17 @@ function saveLocal() { localStorage.setItem(LOCAL_KEY, JSON.stringify(local)); }
 let creatures = [];   // [{ id, name, alive, genome, signature }]
 let tray      = [];   // [{ itemId, item, from }]
 let blood     = 500;
+// 2026-08 (creator direction: "in the lab, the stable area, where can
+// shift plus quick select monsters and hit G key... pop up with the name
+// requester those will show up in the game that battalion group and I
+// can make the factory build that battalion group of monsters"): named,
+// server-persisted groups of creature ids (mutator-service's new
+// BattalionTemplate row), the Lab-side half of the battalion-grouping
+// feature -- the in-game half (control groups on live fielded monsters)
+// shipped earlier as WaypointCommander's Ctrl/Alt+[0-9] slots.
+let battalions = [];               // [{ id, accountId, name, creatureIds, updatedAt }]
+let battalionSelection = new Set(); // shift-click staging buffer -- NOT persisted, same
+                                     // "working selection" lifetime as a marquee box-select
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 function nextName()     { local.seq += 1; return `Specimen-${String(local.seq).padStart(2, "0")}`; }
@@ -160,13 +171,15 @@ async function api(method, path, body) {
 
 // ── sync from server ──────────────────────────────────────────────────────────
 async function sync() {
-  const [crRes, walletRes, trayRes] = await Promise.all([
+  const [crRes, walletRes, trayRes, battalionsRes] = await Promise.all([
     api("GET", "/creatures?limit=200"),
     api("GET", "/wallet"),
     api("GET", "/tray"),
+    api("GET", "/battalions").catch(() => ({ battalions: [] })), // never blocks the rest of sync
   ]);
 
   blood = walletRes.blood ?? 0;
+  battalions = battalionsRes.battalions ?? [];
 
   const deadSet = new Set(local.deadSet ?? []);
   creatures = (crRes.items ?? [])
@@ -732,6 +745,58 @@ function doUnsaveStable(id) {
   syncMenagerie();
 }
 
+// ── battalion templates (Lab-side "stable" half, docs/12) ───────────────────
+// Members can be ANY owned creature, not just ones currently in the
+// Stable/Menagerie -- a template just names a group of ids; a creature
+// leaving the Stable doesn't retroactively break a template that still
+// references it (the Unity-side build simply can't resolve that member
+// and skips it, same "don't crash on a stale reference" posture the
+// stableBackup/restore path already takes with a wiped server store).
+function toggleBattalionPick(id, card) {
+  if (battalionSelection.has(id)) battalionSelection.delete(id); else battalionSelection.add(id);
+  card?.classList.toggle("battalion-selected", battalionSelection.has(id));
+}
+
+async function doNameAndSaveBattalion() {
+  if (battalionSelection.size === 0) return;
+  const name = prompt(`Name this battalion (${battalionSelection.size} monster${battalionSelection.size === 1 ? "" : "s"}):`);
+  if (!name || !name.trim()) return;
+  try {
+    await api("POST", "/battalions", { name: name.trim(), creatureIds: [...battalionSelection] });
+    battalionSelection.clear();
+    logEntry(`🏴 Battalion "${name.trim()}" formed.`);
+    const res = await api("GET", "/battalions");
+    battalions = res.battalions ?? [];
+    renderStable();
+  } catch (e) {
+    alert(`Couldn't save that battalion: ${e.message}`);
+  }
+}
+
+async function doRenameBattalion(t) {
+  const name = prompt("Rename this battalion:", t.name);
+  if (!name || !name.trim() || name.trim() === t.name) return;
+  try {
+    await api("PUT", `/battalions/${t.id}`, { name: name.trim(), creatureIds: t.creatureIds });
+    const res = await api("GET", "/battalions");
+    battalions = res.battalions ?? [];
+    renderStable();
+  } catch (e) {
+    alert(`Couldn't rename that battalion: ${e.message}`);
+  }
+}
+
+async function doDeleteBattalion(t) {
+  if (!confirm(`Delete battalion "${t.name}"? This only removes the template -- it does not touch any of its monsters.`)) return;
+  try {
+    await api("DELETE", `/battalions/${t.id}`);
+    battalions = battalions.filter(b => b.id !== t.id);
+    renderStable();
+  } catch (e) {
+    alert(`Couldn't delete that battalion: ${e.message}`);
+  }
+}
+
 // ── view switching: Lab ⇄ Stable ──────────────────────────────────────────────
 function setView(v) {
   local.view = v; saveLocal();
@@ -1213,6 +1278,7 @@ function renderStable() {
   const grid = document.getElementById("stable-grid");
   const detail = document.getElementById("stable-detail");
   const saved = (local.stable ?? []).map(id => byId(id)).filter(Boolean);
+  renderBattalionsPanel();
   if (saved.length === 0) {
     grid.innerHTML = `<div class="empty">The stable is empty. In a lab, select a specimen and press \u201c\u2b50 Save to stable\u201d.</div>`;
     detail.innerHTML = ""; return;
@@ -1221,17 +1287,56 @@ function renderStable() {
     const fac = factionOfCreature(c);
     if (!thumbCache[c.id]) { try { thumbCache[c.id] = renderThumbnail(c.genome, fac); } catch { thumbCache[c.id] = ""; } }
     const harvesterMark = isHarvesterGenome(c.genome) ? `<span class="sc-harvester" title="Collector unit -- real onboard harvest capacity">🪣</span>` : "";
-    return `<div class="stable-card ${c.id === local.selectedId ? "selected" : ""}" data-id="${c.id}">
+    const picked = battalionSelection.has(c.id) ? " battalion-selected" : "";
+    return `<div class="stable-card ${c.id === local.selectedId ? "selected" : ""}${picked}" data-id="${c.id}">
       <div class="sc-thumb">${thumbCache[c.id] ? `<img src="${thumbCache[c.id]}" alt="">` : ""}<span class="sc-fac">${FACTION_GLYPH[fac]}</span>${harvesterMark}</div>
       <div class="sc-name">⭐ ${esc(c.name)}${c.alive ? "" : " 💀"}</div>
       <div class="sc-meta">${esc(c.genome.body.plan)} · ${esc(c.genome.heart.tier)} heart</div>
     </div>`;
   }).join("");
+  // shift+click stages a monster for the next battalion (a G press below
+  // names and saves it); a plain click keeps its old job of driving the
+  // detail panel -- one click, two jobs, disambiguated by a modifier,
+  // the same shape WaypointCommander's own shift-select already uses
+  // in-game.
   grid.querySelectorAll(".stable-card").forEach(card =>
-    card.addEventListener("click", () => { local.selectedId = card.dataset.id; saveLocal(); renderStable(); }));
+    card.addEventListener("click", (e) => {
+      if (e.shiftKey) { toggleBattalionPick(card.dataset.id, card); return; }
+      local.selectedId = card.dataset.id; saveLocal(); renderStable();
+    }));
   const cur = saved.find(c => c.id === local.selectedId) ?? saved[0];
   showStableDetail(cur.id);
 }
+
+function renderBattalionsPanel() {
+  const panel = document.getElementById("stable-battalions");
+  if (!panel) return;
+  const pickedNote = battalionSelection.size > 0
+    ? `<div class="battalion-hint">${battalionSelection.size} shift-selected — press <kbd>G</kbd> to name &amp; save as a battalion</div>`
+    : `<div class="battalion-hint">Shift-click monsters above, then press <kbd>G</kbd> to group them into a named battalion. A Factory in-game can build whichever one you pick.</div>`;
+  const rows = battalions.map(t => `
+    <div class="battalion-row" data-id="${t.id}">
+      <span class="battalion-name">${esc(t.name)}</span>
+      <span class="battalion-count">${t.creatureIds.length}</span>
+      <button class="bt-rename" title="Rename">🏷️</button>
+      <button class="bt-delete danger" title="Delete">🗑️</button>
+    </div>`).join("");
+  panel.innerHTML = `<h3>Battalions</h3>${pickedNote}${rows || `<div class="empty">No battalions yet.</div>`}`;
+  panel.querySelectorAll(".battalion-row").forEach(row => {
+    const t = battalions.find(b => b.id === row.dataset.id);
+    if (!t) return;
+    row.querySelector(".bt-rename").addEventListener("click", () => doRenameBattalion(t));
+    row.querySelector(".bt-delete").addEventListener("click", () => doDeleteBattalion(t));
+  });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (local.view !== "stable") return;
+  if (e.key !== "g" && e.key !== "G") return;
+  // don't hijack G while the player is typing into a text field
+  if (document.activeElement && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+  doNameAndSaveBattalion();
+});
 
 function showStableDetail(id) {
   const c = byId(id); if (!c) return;

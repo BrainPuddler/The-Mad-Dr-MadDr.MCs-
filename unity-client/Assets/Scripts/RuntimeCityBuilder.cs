@@ -107,6 +107,21 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     private HexCoord? _railyardCenter;
     private HashSet<HexCoord> _roadNetwork;
     private RosterFetcher _roster;
+
+    /// <summary>The player's own fetched creatures (docs/07 Menagerie),
+    /// kept around after the match-start spawn loop so <see
+    /// cref="LabBattalionHud"/> can resolve a Lab-defined battalion
+    /// template's creatureIds back into real genomes without a second
+    /// fetch -- the SAME roster data, not a duplicate source of truth.
+    /// Empty until <see cref="HandleRosterReady"/> fires.</summary>
+    public StoredGenomeDto[] RosterCreatures { get; private set; } = new StoredGenomeDto[0];
+
+    /// <summary>2026-08 (docs/12 "Lab stable" half of battalion grouping):
+    /// every named battalion template this account has saved in the Lab,
+    /// fetched independently of the roster/Menagerie fetch. Empty until
+    /// <see cref="HandleBattalionsReady"/> fires (or forever, if the
+    /// player has never saved one).</summary>
+    public BattalionTemplateDto[] LabBattalions { get; private set; } = new BattalionTemplateDto[0];
     private int _cityVersion;
     private HashSet<HexCoord> _blockedGroundCache;
     private HashSet<HexCoord> _blockedAmphibiousCache;
@@ -408,6 +423,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (battalionHud == null) battalionHud = gameObject.AddComponent<BattalionHud>();
         battalionHud.Init(commander, minimap, recallHud, grabCursor);
 
+        var labBattalionHud = gameObject.GetComponent<LabBattalionHud>();
+        if (labBattalionHud == null) labBattalionHud = gameObject.AddComponent<LabBattalionHud>();
+        labBattalionHud.Init(this, minimap, battalionHud, grabCursor);
+
         var productionQueueHud = gameObject.GetComponent<ProductionQueueHud>();
         if (productionQueueHud == null) productionQueueHud = gameObject.AddComponent<ProductionQueueHud>();
         productionQueueHud.Init(grabCursor);
@@ -421,7 +440,9 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         _roster.accountId = accountId;
         _roster.OnRosterReady += HandleRosterReady;
         _roster.OnRosterFailed += HandleRosterFailed;
+        _roster.OnBattalionsReady += HandleBattalionsReady;
         _roster.FetchRoster();
+        _roster.FetchBattalions();
     }
 
     private const float TrafficCheckInterval = 4f;
@@ -2384,6 +2405,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     {
         Debug.Log("RuntimeCityBuilder: roster ready (" + cache.Creatures.Length + " creatures, "
             + (wasFromCache ? "from local cache, fetched " + cache.FetchedAtUtc : "live") + ")");
+        RosterCreatures = cache.Creatures;
 
         if (_monstersHost == null)
         {
@@ -2766,5 +2788,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     {
         Debug.LogWarning("RuntimeCityBuilder: could not load a roster (" + reason + "). "
             + "Spawn a creature in the Lab, click Save to stable, and paste your Account ID into this component.");
+    }
+
+    private void HandleBattalionsReady(BattalionTemplateDto[] templates)
+    {
+        Debug.Log("RuntimeCityBuilder: " + templates.Length + " Lab battalion template(s) loaded.");
+        LabBattalions = templates;
     }
 }

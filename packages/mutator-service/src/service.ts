@@ -40,6 +40,7 @@ import { genId, newServerSeed } from "./ids.js";
 import { signGenome, verifyGenome } from "./sign.js";
 import { COSTS, canAfford, debit, refund, type Cost } from "./economy.js";
 import {
+  type BattalionTemplate,
   type InventoryItem,
   type OperationRecord,
   type OpStatus,
@@ -55,6 +56,7 @@ export interface ServiceConfig {
   /** Shared secret the match servers present to internal endpoints. */
   readonly internalKey: string;
   readonly menagerieLimit?: number;
+  readonly battalionSizeLimit?: number;
 }
 
 /** What a unit of work produces, before persistence. */
@@ -70,12 +72,14 @@ interface PerformOutcome {
 
 export class MutatorService {
   private readonly menagerieLimit: number;
+  private readonly battalionSizeLimit: number;
 
   constructor(
     private readonly store: Store,
     private readonly cfg: ServiceConfig,
   ) {
     this.menagerieLimit = cfg.menagerieLimit ?? 12;
+    this.battalionSizeLimit = cfg.battalionSizeLimit ?? 24;
   }
 
   // ---- generic operation runner: idempotency + cost + audit ----------------
@@ -537,6 +541,64 @@ export class MutatorService {
     const m = { accountId, creatureIds, updatedAt: new Date().toISOString() };
     this.store.saveMenagerie(m);
     return m;
+  }
+
+  // ---- battalion templates (named creature groups, docs/12 "Lab stable") ---
+
+  /** Shared validation for create/update: ownership + not-retired, same
+   * checks setMenagerie already runs -- a template pointing at a genome
+   * the player doesn't own (or has cannibalized) can never resolve into a
+   * real build. Unlike the Menagerie, DUPLICATE ids are explicitly
+   * allowed ("3 Tetrapods + 2 Winged" is a real composition), mirroring
+   * the in-game battalion feature where multiple live clones already
+   * share one genome id. */
+  private validateBattalionMembers(accountId: string, creatureIds: string[]): void {
+    if (creatureIds.length > this.battalionSizeLimit) {
+      throw badRequest(`a battalion holds at most ${this.battalionSizeLimit} creatures`);
+    }
+    for (const id of new Set(creatureIds)) {
+      this.requireOwned(accountId, id);
+      if (this.store.isRetired(id)) throw badRequest(`creature ${id} is retired (cannibalized)`);
+    }
+  }
+
+  listBattalions(accountId: string): readonly BattalionTemplate[] {
+    return this.store.listBattalions(accountId);
+  }
+
+  createBattalion(accountId: string, name: string, creatureIds: string[]): BattalionTemplate {
+    const trimmed = (name ?? "").trim();
+    if (!trimmed) throw badRequest("battalion name is required");
+    this.validateBattalionMembers(accountId, creatureIds);
+    const t: BattalionTemplate = {
+      id: genId("btn"),
+      accountId,
+      name: trimmed,
+      creatureIds: [...creatureIds],
+      updatedAt: new Date().toISOString(),
+    };
+    this.store.saveBattalion(t);
+    return t;
+  }
+
+  updateBattalion(accountId: string, id: string, name: string, creatureIds: string[]): BattalionTemplate {
+    const existing = this.store.getBattalion(accountId, id);
+    if (!existing) throw notFound(`battalion ${id} not found`);
+    const trimmed = (name ?? "").trim();
+    if (!trimmed) throw badRequest("battalion name is required");
+    this.validateBattalionMembers(accountId, creatureIds);
+    const t: BattalionTemplate = {
+      ...existing,
+      name: trimmed,
+      creatureIds: [...creatureIds],
+      updatedAt: new Date().toISOString(),
+    };
+    this.store.saveBattalion(t);
+    return t;
+  }
+
+  deleteBattalion(accountId: string, id: string): void {
+    this.store.deleteBattalion(accountId, id);
   }
 
   // ---- internal (match servers) --------------------------------------------

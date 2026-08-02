@@ -48,6 +48,19 @@ public class GenomeDtoTests
     private const string MenagerieFixture =
         """{"accountId":"test-account-1783904806","creatureIds":["cr_e85fdbb7a81e2c7c68"],"updatedAt":"2026-07-13T01:06:53.165Z"}""";
 
+    // captured from a real local mutator-service, POST /battalions with
+    // creatureIds [a, b, a] -- the repeated id is deliberate, exercising
+    // the "duplicate ids are allowed" contract (docs/12).
+    private const string BattalionTemplateFixture = """
+    {
+      "id": "btn_2aa75b2a7d9636a717",
+      "accountId": "test-account-1783904806",
+      "name": "Shock Troop",
+      "creatureIds": ["cr_e9b59f32351ca0b41a", "cr_d28cccdcdbb4a64ca0", "cr_e9b59f32351ca0b41a"],
+      "updatedAt": "2026-08-02T05:29:13.769Z"
+    }
+    """;
+
     [Fact]
     public void Parses_a_real_captured_GET_creature_response()
     {
@@ -143,5 +156,31 @@ public class GenomeDtoTests
         Assert.Single(reparsed.Creatures);
         Assert.Equal(creature.Id, reparsed.Creatures[0].Id);
         Assert.Equal(creature.Genome.Slots.Leg.Family, reparsed.Creatures[0].Genome.Slots.Leg.Family);
+    }
+
+    [Fact]
+    public void Parses_a_real_captured_POST_battalions_response()
+    {
+        var template = BattalionTemplateDto.FromJson(JsonValue.Parse(BattalionTemplateFixture));
+
+        Assert.Equal("btn_2aa75b2a7d9636a717", template.Id);
+        Assert.Equal("test-account-1783904806", template.AccountId);
+        Assert.Equal("Shock Troop", template.Name);
+        Assert.Equal("2026-08-02T05:29:13.769Z", template.UpdatedAt);
+        Assert.Equal(
+            new[] { "cr_e9b59f32351ca0b41a", "cr_d28cccdcdbb4a64ca0", "cr_e9b59f32351ca0b41a" },
+            template.CreatureIds);
+    }
+
+    [Fact]
+    public void BattalionTemplate_round_trips_through_ToJson_then_FromJson_unchanged_including_duplicate_ids()
+    {
+        var original = BattalionTemplateDto.FromJson(JsonValue.Parse(BattalionTemplateFixture));
+        var reparsed = BattalionTemplateDto.FromJson(original.ToJson());
+
+        Assert.Equal(original.Id, reparsed.Id);
+        Assert.Equal(original.Name, reparsed.Name);
+        Assert.Equal(original.CreatureIds, reparsed.CreatureIds);
+        Assert.True(reparsed.CreatureIds.Length == 3, "the repeated id must survive the round trip, not get deduped");
     }
 }

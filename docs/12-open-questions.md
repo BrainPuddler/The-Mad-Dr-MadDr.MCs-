@@ -9080,3 +9080,120 @@ production-time, since a queue can outlive the drop that started it).
 No Unity Editor here to confirm the HUD panel or the walk-to-park
 animation on screen -- same standing limit as every other Unity-side
 change in this project's history.
+
+## 2026-08 follow-up: the Lab "stable" half of battalion grouping, built for real -- named templates persisted server-side, four layers deep
+
+Creator direction, following a direct question ("did you implement the
+lab battalion stable system") whose honest answer was no -- an earlier
+entry in this same log explicitly scoped that half OUT as "real,
+substantial, cross-stack work," and the creator's reply was simply
+"sure do it." This entry is that work.
+
+**The shape, unchanged from the original scoping-out analysis:** a
+named, reusable group of creature ids, built in the Lab's Stable view
+via shift-click + a G-key name prompt, persisted server-side, and
+fetched by the Unity client so a Factory can build that exact
+composition -- the Lab-side counterpart to the in-game battalion
+control groups (Ctrl/Alt+[0-9]) that shipped earlier. Four layers, all
+touched:
+
+- **`packages/mutator-service` (store + service + HTTP).** New
+  `BattalionTemplate` row in `store.ts`
+  (`{id, accountId, name, creatureIds[], updatedAt}`) with the usual
+  `InMemoryStore` CRUD (`listBattalions`/`getBattalion`/
+  `saveBattalion`/`deleteBattalion`), following the exact shape every
+  other entity in this file already uses. `MutatorService` gets
+  `listBattalions`/`createBattalion`/`updateBattalion`/
+  `deleteBattalion`, reusing `requireOwned` + the not-retired check
+  `setMenagerie` already runs -- **but deliberately allowing duplicate
+  creature ids**, unlike the Menagerie's own dedup rule: "3 Tetrapods +
+  2 Winged" is a real, intended composition, mirroring how the in-game
+  battalion feature already permits multiple live clones sharing one
+  genome id. New routes `GET/POST /battalions` and
+  `PUT/DELETE /battalions/:id` (CORS's allowed-methods header gained
+  DELETE, which nothing had needed until now). 7 new tests (3
+  service-level, 1 HTTP-level, covering the round trip, ownership/
+  retirement/size-cap/empty-name rejection, cross-account isolation,
+  and the duplicate-id case specifically) -- full suite still 32/32
+  (was 21 before this pass on the service side).
+- **`packages/roster-client` (C# DTOs).** New `BattalionTemplateDto`
+  in `GenomeDto.cs`, parsed/serialized the same field-for-field way
+  `MenagerieDto` already is. Fixture captured from a REAL local
+  mutator-service response (this project's own stated convention: "not
+  hand-written approximations"), deliberately with a repeated
+  creatureId to exercise the duplicate-allowed contract through a real
+  round trip. 2 new tests, suite now 58/58 (was 56).
+- **`site/` (the Lab).** The Stable view's card grid gains shift-click:
+  a plain click still drives the detail panel (unchanged), a
+  shift-click toggles a card into a transient, NOT-persisted
+  `battalionSelection` staging set (rendered as a `--fuel`-colored
+  border, distinct from the detail panel's `--acid` selection border so
+  a player can tell "what I'm looking at" from "what's about to become
+  a battalion" at a glance) -- the same "one click, two jobs,
+  disambiguated by a modifier" shape `WaypointCommander`'s own
+  shift-select already uses in-game. A `G` keydown (guarded to the
+  Stable view, and to not fire while a text field has focus) prompts
+  for a name and `POST`s the staged set as a new template. A new
+  `#stable-battalions` panel (`renderBattalionsPanel`) lists every
+  saved template with rename/delete buttons; `index.html`'s stable
+  detail column was wrapped in a new `.stable-side` flex column to
+  stack the two panels (`.stable-detail` lost its own
+  width/position:sticky rules to the new wrapper, everything else
+  unchanged). Verified via `node --check` only -- same standing "no
+  automated JS suite, no browser here" limit as every prior Lab-side
+  change.
+- **Unity (the consumer).** `RosterFetcher` gains a second, independent
+  fetch (`FetchBattalions`/`OnBattalionsReady`) alongside its existing
+  Menagerie fetch -- independent deliberately, so a battalions-endpoint
+  hiccup can't block spawning the player's actual creatures.
+  `RuntimeCityBuilder` keeps the fetched roster around now
+  (`RosterCreatures`, previously only a local variable inside the
+  match-start spawn loop) plus the new `LabBattalions` list, so a
+  template's bare creature ids can be resolved back into real genomes
+  without a second network round-trip. New `LabBattalionHud.cs` lists
+  every Lab template with a Build button, docked above the existing
+  in-game `BattalionHud` -- which required giving `BattalionHud` a new
+  public `StackTop` property (its own row count is dynamic, so a panel
+  wanting to stack above it can't hardcode a height; this mirrors the
+  exact "read a neighbour's own size" contract `BattalionHud` already
+  uses to stack above `RecallHud`).
+
+  **The one real design gap, resolved and documented, not glossed
+  over:** the existing production queue's per-member park-spot search
+  needs a body radius BEFORE a clone spawns, and for a battalion built
+  from LIVE selected monsters (the existing feature) that radius comes
+  straight off the real `MonsterAgent.Radius`. A Lab template has no
+  live monster to read that from -- `MonsterAgent.Radius` itself is
+  only known once the genome's mesh is actually built
+  (`_body.BodyHeight * 0.55f`, confirmed by reading `MonsterAgent.cs`
+  directly), and building a body just to measure it before deciding
+  whether to spawn it there would be real, avoidable extra work. New
+  `QueueItemKind.LabBattalion` uses a shared default radius for the
+  pre-spawn search instead -- `UnitCombat`'s own existing 1.5m
+  body-radius default (the same fallback `MonsterAgent.Radius` itself
+  returns before a fighter exists), not a new made-up number. Worst
+  case a large creature's real footprint parks a touch tighter than
+  the search assumed; the search still confirms the hex is open before
+  anything spawns there, so this is a cosmetic approximation, never a
+  correctness bug. `GrabCursor.BuildLabBattalion(name, creatureIds[])`
+  resolves each id against `RosterCreatures` and silently skips
+  (logging a count, not per-id spam) any that don't resolve -- a
+  creature removed from the Stable since the template was saved --
+  same "don't crash on a stale reference" posture the Lab's own
+  template storage already takes on its side.
+
+**Verified for real:** `npm test` in both `genome-core` (dependency
+build) and `mutator-service` (32/32, including the 7 new battalion
+tests). `dotnet test` in `packages/roster-client` (58/58, including
+the 2 new DTO tests, against a REAL captured fixture). `node --check`
+on `site/main.js`. Flightcheck recompiles the full edited/new Unity set
+(`RosterFetcher.cs`, `RuntimeCityBuilder.cs`, `GrabCursor.cs`,
+`BattalionHud.cs`, `WaypointCommander.cs`, `LabBattalionHud.cs`) clean
+against a FRESH `MadDr.RosterClient.dll` rebuilt from the changed
+roster-client source (the stale-DLL trap this project has hit before)
+-- including catching a real gap in flightcheck's own `RosterFetcher`
+stub (`ProjStub.cs`), which stands in for the real networking-heavy
+file and hadn't been told about the new battalions event/method until
+this pass. No Unity Editor here to confirm the Lab Battalions panel or
+a resolved build on screen -- same standing limit as every other
+Unity-side change in this project's history.

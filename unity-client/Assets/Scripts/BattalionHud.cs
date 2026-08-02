@@ -35,6 +35,15 @@ public class BattalionHud : MonoBehaviour
 
     public static bool PointerOver { get; private set; }
 
+    /// <summary>Y-coordinate (screen space, GUI top-left origin) that a
+    /// HUD panel wanting to stack directly above THIS one should treat
+    /// as its own bottom edge -- the same "read a neighbour's own
+    /// height/gap" contract this class already uses to stack above
+    /// RecallHud, exposed so a third panel (<see cref="LabBattalionHud"/>)
+    /// can stack above this one without hardcoding its dynamic,
+    /// row-count-dependent height.</summary>
+    public float StackTop { get; private set; }
+
     public void Init(WaypointCommander waypointCommander, Minimap minimapRef, RecallHud recallHudRef, GrabCursor grabCursorRef)
     {
         commander = waypointCommander;
@@ -57,10 +66,11 @@ public class BattalionHud : MonoBehaviour
 
         var rows = 0;
         foreach (var unused in commander.Battalions) rows++;
-        if (rows == 0) { PointerOver = false; return; }
+        if (rows == 0) { PointerOver = false; StackTop = stackTop - dockGapPixels; return; }
 
         var panelWidth = labelWidth + buttonWidth;
         var panelRect = new Rect(mapRect.x, stackTop - rows * rowHeight - dockGapPixels, panelWidth, rows * rowHeight);
+        StackTop = panelRect.y - dockGapPixels;
         var e = Event.current;
         PointerOver = e != null && panelRect.Contains(e.mousePosition);
 

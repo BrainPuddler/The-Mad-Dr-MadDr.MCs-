@@ -152,6 +152,41 @@ test("POST /restore brings a creature back after a simulated server wipe", async
   }
 });
 
+test("battalion templates: full CRUD over HTTP", async () => {
+  const { base, close } = await startServer();
+  try {
+    const a = (await (await fetch(`${base}/spawn`, {
+      method: "POST", headers: ACC, body: JSON.stringify({ idempotencyKey: "bt-a" }),
+    })).json()).genomeId;
+    const b = (await (await fetch(`${base}/spawn`, {
+      method: "POST", headers: ACC, body: JSON.stringify({ idempotencyKey: "bt-b" }),
+    })).json()).genomeId;
+
+    const created = await (await fetch(`${base}/battalions`, {
+      method: "POST", headers: ACC, body: JSON.stringify({ name: "Shock Troop", creatureIds: [a, b] }),
+    })).json();
+    assert.equal(created.name, "Shock Troop");
+    assert.deepEqual(created.creatureIds, [a, b]);
+
+    const listed = await (await fetch(`${base}/battalions`, { headers: ACC })).json();
+    assert.equal(listed.battalions.length, 1);
+    assert.equal(listed.battalions[0].id, created.id);
+
+    const updated = await (await fetch(`${base}/battalions/${created.id}`, {
+      method: "PUT", headers: ACC, body: JSON.stringify({ name: "Renamed", creatureIds: [a, a, b] }),
+    })).json();
+    assert.equal(updated.name, "Renamed");
+    assert.deepEqual(updated.creatureIds, [a, a, b]);
+
+    const del = await fetch(`${base}/battalions/${created.id}`, { method: "DELETE", headers: ACC });
+    assert.equal(del.status, 200);
+    const afterDelete = await (await fetch(`${base}/battalions`, { headers: ACC })).json();
+    assert.equal(afterDelete.battalions.length, 0);
+  } finally {
+    await close();
+  }
+});
+
 test("/health and /version are public -- no x-account-id needed", async () => {
   const { base, close } = await startServer();
   try {

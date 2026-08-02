@@ -305,6 +305,54 @@ test("roster is internal-key gated and returns verifiable signatures", () => {
   assert.ok(verifyGenome(roster[0]!.genome, roster[0]!.signature, CFG.signingKey));
 });
 
+// ---- battalion templates (docs/12 "Lab stable" half) --------------------------
+
+test("battalion templates: create, list, update, delete round-trip", () => {
+  const { svc } = fresh();
+  const a = spawn(svc);
+  const b = spawn(svc);
+
+  const created = svc.createBattalion(ACC, "  Shock Troop  ", [a, b]);
+  assert.equal(created.name, "Shock Troop", "name is trimmed");
+  assert.deepEqual(created.creatureIds, [a, b]);
+  assert.ok(created.id);
+
+  const listed = svc.listBattalions(ACC);
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0]!.id, created.id);
+
+  const updated = svc.updateBattalion(ACC, created.id, "Shock Troop II", [a, a, b]);
+  assert.deepEqual(updated.creatureIds, [a, a, b], "duplicate ids ARE allowed -- multiple copies of one genome");
+  assert.equal(svc.listBattalions(ACC)[0]!.name, "Shock Troop II");
+
+  svc.deleteBattalion(ACC, created.id);
+  assert.equal(svc.listBattalions(ACC).length, 0);
+});
+
+test("battalion templates enforce ownership, retirement, the size cap, and a non-empty name", () => {
+  const { svc } = fresh();
+  const mine = spawn(svc);
+  const theirs = spawn(svc, "acct-2");
+
+  assert.throws(() => svc.createBattalion(ACC, "X", [theirs]), /forbidden|not your creature/);
+  assert.throws(() => svc.createBattalion(ACC, "   ", [mine]), /name is required/);
+  assert.throws(() => svc.createBattalion(ACC, "X", new Array(25).fill(mine)), /at most/);
+
+  const cannibalized = spawn(svc);
+  svc.cannibalize(ACC, key(), { genomeId: cannibalized });
+  assert.throws(() => svc.createBattalion(ACC, "X", [cannibalized]), /retired/);
+});
+
+test("updating or deleting another account's battalion (or one that doesn't exist) is a no-op / not-found", () => {
+  const { svc } = fresh();
+  const mine = spawn(svc);
+  const created = svc.createBattalion(ACC, "Mine", [mine]);
+
+  assert.throws(() => svc.updateBattalion("acct-2", created.id, "Stolen", [mine]), /not found/);
+  svc.deleteBattalion("acct-2", created.id); // silently a no-op, same shape as store.deleteBattalion
+  assert.equal(svc.listBattalions(ACC).length, 1, "battalion survives a delete attempt from another account");
+});
+
 // ---- helpers: seed the store with controlled creatures -----------------------
 
 const HEAVY_CLAW: PartItem = { kind: "part", family: "claw_hand", params: [1, 1, 0.5, 0.5, 0.5, 0.5], hue: 0.5 };
