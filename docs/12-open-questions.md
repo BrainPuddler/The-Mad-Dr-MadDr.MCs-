@@ -9490,3 +9490,36 @@ edited match-core against a freshly rebuilt DLL, confirming
 `BuildGhostCursor`/`SimBridge` still compile clean against the changed
 `CanPlaceBuilding` (unchanged signature, so this was never really in
 doubt, but checked anyway).
+
+## 2026-08 follow-up: FIX -- holding Ctrl/Alt to hit a battalion hotkey was ALSO toggling a build order on the same keypress
+
+Creator direction: "you need to disable the build orders when the
+control key is pressed."
+
+**Root cause.** `BuildMenuHud.Update()` claims plain `digit1Key`
+through `digit9Key` unconditionally, whenever a match exists, to
+toggle which building kind is selected to place -- this predates the
+battalion system entirely. When the in-game battalion hotkeys
+(`WaypointCommander`'s Ctrl+[0-9] assign / Alt+[0-9] select) were
+added on top of the SAME digit keys, `BuildMenuHud`'s own key-read
+never learned to check for either modifier -- it has no concept of
+Ctrl/Alt at all, just "was this digit pressed this frame," so holding
+Ctrl to bind battalion slot 3 also fired `ToggleSelect` for whichever
+building kind hotkey 3 maps to, on the exact same keypress. Two
+unrelated systems both listening to the raw digit key, only one of
+them aware the key was overloaded.
+
+**Fix.** `BuildMenuHud.Update()` now bails out immediately, before
+touching any digit key at all, whenever either Ctrl or Alt is held
+(same `leftCtrlKey.isPressed || rightCtrlKey.isPressed` /
+`leftAltKey`/`rightAltKey` check `WaypointCommander`'s own battalion
+hotkey handler already uses) -- both modifier combinations belong to
+the battalion system now, so the build menu simply steps aside while
+either is down, plain digits untouched.
+
+**Verified for real:** flightcheck recompiles `BuildMenuHud.cs` clean
+against the real match-core/citygen-core DLLs. No Unity Editor here to
+confirm holding Ctrl/Alt no longer double-fires a build toggle on
+screen -- same standing limit as every other Unity-side change in this
+project's history; the fix itself is a single early-return guard on
+already-read keyboard state, not new untested logic.

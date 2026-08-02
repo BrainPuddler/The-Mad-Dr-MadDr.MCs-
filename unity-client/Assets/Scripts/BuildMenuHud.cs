@@ -98,6 +98,23 @@ public class BuildMenuHud : MonoBehaviour
         var keyboard = UnityEngine.InputSystem.Keyboard.current;
         if (keyboard == null) return;
 
+        // 2026-08 (creator report: "you need to disable the build orders
+        // when the control key is pressed"): plain digit1Key-digit9Key
+        // were already claimed here unconditionally BEFORE
+        // WaypointCommander's own Ctrl+[0-9]/Alt+[0-9] battalion
+        // assign/select hotkeys were added on top of the same keys (a
+        // deliberate choice at the time -- plain digits were already
+        // taken, so battalion binding had to use a modifier instead of
+        // fighting over the same keys). That left a real conflict this
+        // class's own Update() never accounted for: holding Ctrl or Alt
+        // to hit a battalion slot ALSO fired a build-menu toggle on the
+        // SAME keypress, since this check never looked at modifier state
+        // at all. Bail out entirely while either is held -- both
+        // combinations belong to the battalion system now, not this one.
+        var ctrlOrAltHeld = keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed
+            || keyboard.leftAltKey.isPressed || keyboard.rightAltKey.isPressed;
+        if (ctrlOrAltHeld) return;
+
         var defs = BuildingDef.AllDefs;
         var hotkey = 1;
         for (var i = 0; i < defs.Count; i++)
