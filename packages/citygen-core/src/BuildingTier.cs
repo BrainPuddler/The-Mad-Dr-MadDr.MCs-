@@ -99,5 +99,29 @@ namespace MadDr.CityGen
                 default: throw new ArgumentOutOfRangeException(nameof(tier));
             }
         }
+
+        /// <summary>2026-08 (creator report: "I've never seen the smoke
+        /// either"): traced to the smoke puff itself being sized for
+        /// nothing bigger than a doorway -- a Small building's own 1x
+        /// puff read fine at 6m tall, but the SAME fixed puff size on a
+        /// 40m Landmark was lost against the roofline the moment it
+        /// spawned. This is the size multiplier a Damaged building's
+        /// smoke plume scales its puffs by, same "small flat number
+        /// scaled loosely by tier" placeholder policy as <see
+        /// cref="FireCount"/> and <see cref="Occupants"/> -- 1.0 leaves
+        /// Small exactly as it always rendered; bigger tiers scale up so
+        /// the plume stays proportionate (and visible) against their own
+        /// taller silhouette.</summary>
+        public static float SmokeScale(BuildingTier tier)
+        {
+            switch (tier)
+            {
+                case BuildingTier.Small: return 1.0f;
+                case BuildingTier.Medium: return 1.5f;
+                case BuildingTier.Large: return 2.2f;
+                case BuildingTier.Landmark: return 3.0f;
+                default: throw new ArgumentOutOfRangeException(nameof(tier));
+            }
+        }
     }
 }

@@ -73,6 +73,34 @@ public class DestructionTests
         Assert.True(BuildingStats.FireCount(BuildingTier.Large) < BuildingStats.FireCount(BuildingTier.Landmark));
     }
 
+    // 2026-08 (creator report: "I've never seen the smoke either"): the
+    // smoke-puff size multiplier per tier -- Small stays 1.0 (unchanged
+    // from before this fix), bigger tiers scale up so the plume stays
+    // visible against their own bigger silhouette.
+    [Theory]
+    [InlineData(BuildingTier.Small)]
+    [InlineData(BuildingTier.Medium)]
+    [InlineData(BuildingTier.Large)]
+    [InlineData(BuildingTier.Landmark)]
+    public void SmokeScale_is_positive_for_every_tier(BuildingTier tier)
+    {
+        Assert.True(BuildingStats.SmokeScale(tier) > 0);
+    }
+
+    [Fact]
+    public void SmokeScale_is_exactly_one_for_Small()
+    {
+        Assert.Equal(1.0f, BuildingStats.SmokeScale(BuildingTier.Small));
+    }
+
+    [Fact]
+    public void SmokeScale_scales_monotonically_with_tier()
+    {
+        Assert.True(BuildingStats.SmokeScale(BuildingTier.Small) < BuildingStats.SmokeScale(BuildingTier.Medium));
+        Assert.True(BuildingStats.SmokeScale(BuildingTier.Medium) < BuildingStats.SmokeScale(BuildingTier.Large));
+        Assert.True(BuildingStats.SmokeScale(BuildingTier.Large) < BuildingStats.SmokeScale(BuildingTier.Landmark));
+    }
+
     [Fact]
     public void FullyIntact_starts_at_max_hp_for_its_tier()
     {

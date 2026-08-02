@@ -147,7 +147,7 @@ public class BaseDresser : MonoBehaviour
             TintShape(root, b.PlayerIndex, b.IsDamaged);
             if (b.IsDamaged && _damagedHandled.Add(b.EntityId))
             {
-                DamageFx.AttachSmoke(root.transform, fullScale.y);
+                DamageFx.AttachSmoke(root.transform, fullScale.y, SmokeScaleFor(def));
                 DamageFx.AttachFireCluster(root.transform, fullScale.y, fullScale.x * 0.5f, FireCountFor(def));
             }
         }
@@ -212,6 +212,21 @@ public class BaseDresser : MonoBehaviour
         if (def.MaxHp >= 1500) return 5;   // Large
         if (def.MaxHp >= 600) return 3;    // Medium
         return 1;                           // Small
+    }
+
+    /// <summary>2026-08 (creator report: "I've never seen the smoke
+    /// either"): the RTS roster's own tier proxy for <see
+    /// cref="DamageFx.AttachSmoke"/>'s `scale` -- same size boundaries
+    /// as <see cref="FireCountFor"/> and <see cref="FullScaleFor"/>,
+    /// same "duplicate the tier boundary constants, not a cross-package
+    /// type" precedent, mirroring <see cref="MadDr.CityGen.
+    /// BuildingStats.SmokeScale"/>'s own numbers.</summary>
+    private static float SmokeScaleFor(BuildingDef def)
+    {
+        if (def.MaxHp >= 3000) return 3.0f;   // Landmark (Hq)
+        if (def.MaxHp >= 1500) return 2.2f;   // Large
+        if (def.MaxHp >= 600) return 1.5f;    // Medium
+        return 1.0f;                           // Small
     }
 
     // ---- per-kind silhouettes (all children of `root`, which is

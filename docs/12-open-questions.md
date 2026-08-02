@@ -9737,3 +9737,68 @@ rebuilt `MadDr.CityGen.dll`, including the new `Light`/`LightType`/
 complete) `Light` type. No Unity Editor here to watch multiple fires
 stagger in and sway/glow on screen -- same standing limit as every
 other Unity-side visual change in this project's history.
+
+## 2026-08 follow-up: FIX -- smoke was already correctly wired, but too small to see against a real building
+
+Creator report: "I've never seen the smoke either" -- arriving right
+after the fire fix above shipped.
+
+**Root cause, found by reading the actual code before assuming it was
+the same bug as fire.** Unlike `AttachFire`, `DamageFx.AttachSmoke`
+was NOT a wiring gap: `RuntimeCityBuilder.cs`'s `Intact -> Damaged`
+branch was already calling it, unconditionally, before any change in
+this session -- confirmed by reading that method's code as it stood
+prior to touching anything. So the bug had to be something else.
+
+The actual cause: a `SmokePlume` puff was a single fixed-size sphere,
+starting at scale 0.8 and growing to about 3.0 over a 2.2s life, dim
+medium-gray (0.35/0.34/0.32) at 0.75 alpha fading to 0 -- sized and
+colored for nothing bigger than a Small 6m house. A `Landmark` tops
+out at 40m tall with an 18m+-wide massing footprint per hex, plus a
+rooftop kit of water towers/antenna masts/billboards from
+`BuildingDresser`; a ~3-unit, low-opacity, medium-gray puff spawned
+near that roofline is genuinely hard to pick out from typical RTS
+camera height and distance, especially once it's most of the way
+through its own fade. Technically running, practically invisible --
+same category of problem fire had, but the fix fire needed (rewire to
+the reachable building system) doesn't apply here; this one needed
+scale, contrast, and hang-time instead.
+
+**The fix.**
+
+- New `MadDr.CityGen.BuildingStats.SmokeScale(BuildingTier)` (citygen-
+  core, alongside `FireCount`/`Occupants`/`StructureHp`/`Armor`):
+  Small=1.0 (renders identically to before this fix), Medium=1.5,
+  Large=2.2, Landmark=3.0 -- same "small flat number scaled loosely by
+  tier" placeholder policy as the rest of that table.
+- `DamageFx.AttachSmoke` now takes a `scale` parameter, threaded
+  through a new `SmokePlume.Init(scale)` into puff sizing. New
+  `SmokePuff.InitPlume` (distinct from `InitBurst`, which flattens the
+  vertical drift rate for a quick one-shot burst -- reusing it would
+  have undone the puff's own lazy climb) keeps `Init`'s original rise
+  speed while overriding life/growth/alpha: puffs now start at
+  `1.1 * scale`, grow by `3.6 * scale` over a longer 3.2s life (was
+  2.2s), colored dark sooty gray (0.16/0.15/0.14, up from
+  0.35/0.34/0.32 -- real contrast against a building's own
+  concrete/roof palette instead of blending into it) at 0.88 alpha (was
+  0.75). Spawn height raised slightly (`height * 1.05`, was `* 0.9`) so
+  the plume clears the roofline before it starts fading instead of
+  spawning inside the same clutter it needs to read against.
+- Wired into BOTH building systems, same split as the fire fix:
+  `RuntimeCityBuilder.cs`'s Damaged branch passes
+  `BuildingStats.SmokeScale(building.Tier)` directly; `BaseDresser.cs`
+  gets a new local `SmokeScaleFor(def)` mirroring the SAME
+  Small/Medium/Large/Landmark boundaries off `BuildingDef.MaxHp`, same
+  "duplicate the tier boundary constants, not a cross-package type"
+  precedent `FullScaleFor`/`FireCountFor` in that file already set.
+
+**Verified for real:** `dotnet test` on `packages/citygen-core`
+(186/186, up from 180 -- 3 new `SmokeScale` tests: positive for every
+tier, exactly 1.0 for Small, monotonic scaling). Flightcheck recompiles
+the full edited set (`DamageFx.cs`, `BaseDresser.cs`,
+`RuntimeCityBuilder.cs`) clean against a freshly rebuilt
+`MadDr.CityGen.dll`. No Unity Editor here to confirm the plume actually
+reads as visible smoke on screen -- same standing limit as every other
+Unity-side visual change in this project's history; this fix is a
+best-effort scale/contrast pass based on the building-size math, not a
+guarantee it's now unmissable at every zoom level.

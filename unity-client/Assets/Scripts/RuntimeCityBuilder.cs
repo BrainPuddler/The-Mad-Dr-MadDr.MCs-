@@ -2006,7 +2006,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             if (cubes.Count > 0)
             {
                 var height = BuildingHeight(building);
-                DamageFx.AttachSmoke(cubes[0].transform, height);
+                DamageFx.AttachSmoke(cubes[0].transform, height, BuildingStats.SmokeScale(building.Tier));
                 // 2026-08 (creator report: "what happen to my low poly
                 // fire for when buildings were under attack" -> traced
                 // to AttachFire having only ever been wired to the

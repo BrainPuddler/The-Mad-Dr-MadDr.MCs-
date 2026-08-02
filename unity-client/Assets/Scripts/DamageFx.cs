@@ -13,13 +13,24 @@ public static class DamageFx
 {
     /// <summary>Attach a slow smoke plume to a Damaged building. Parent
     /// under the building's own holder transform so it rides along if
-    /// that transform ever moves (it doesn't today, but costs nothing).</summary>
-    public static void AttachSmoke(Transform holder, float height)
+    /// that transform ever moves (it doesn't today, but costs nothing).
+    ///
+    /// 2026-08 (creator report: "I've never seen the smoke either"):
+    /// this was already correctly wired to both damage paths -- the bug
+    /// wasn't wiring, it was scale. A single fixed-size puff (topping
+    /// out ~3 units) reads fine against a 6m Small house but disappears
+    /// against a 40m Landmark's own roofline and roof clutter (water
+    /// towers, antenna masts) from typical RTS camera height. `scale`
+    /// (<see cref="MadDr.CityGen.BuildingStats.SmokeScale"/>) sizes the
+    /// puffs up proportionally so bigger buildings get a plume that
+    /// actually stays visible against their own bigger silhouette --
+    /// Small's scale of 1.0 renders identically to before.</summary>
+    public static void AttachSmoke(Transform holder, float height, float scale)
     {
         var go = new GameObject("SmokePlume");
         go.transform.SetParent(holder, false);
-        go.transform.position = holder.position + Vector3.up * (height * 0.9f);
-        go.AddComponent<SmokePlume>();
+        go.transform.position = holder.position + Vector3.up * (height * 1.05f);
+        go.AddComponent<SmokePlume>().Init(scale);
     }
 
     /// <summary>2026-07 (creator direction: "Building need decent amount
@@ -185,6 +196,12 @@ public class GroundStain : MonoBehaviour
 public class SmokePlume : MonoBehaviour
 {
     private float _timer;
+    private float _scale = 1f;
+
+    public void Init(float scale)
+    {
+        _scale = scale;
+    }
 
     private void Awake()
     {
@@ -205,17 +222,22 @@ public class SmokePlume : MonoBehaviour
         go.name = "SmokePuff";
         go.transform.SetParent(transform, false);
         go.transform.position = transform.position;
-        go.transform.localScale = new Vector3(0.8f, 0.8f, 0.8f);
+        var startSize = 1.1f * _scale;
+        go.transform.localScale = new Vector3(startSize, startSize, startSize);
         var collider = go.GetComponent<Collider>();
         if (collider != null) Object.Destroy(collider);
 
         var mat = new Material(ShaderUtil.FindRenderableShader());
-        mat.color = new Color(0.35f, 0.34f, 0.32f, 0.75f);
+        // dark sooty gray (was 0.35/0.34/0.32 -- too close to the
+        // building's own concrete/roof palette to read at a distance)
+        // and higher, longer-held opacity so it doesn't fade to nothing
+        // before it's even climbed clear of the roofline.
+        mat.color = new Color(0.16f, 0.15f, 0.14f, 0.88f);
         LabMeshBuilder.MakeTransparent(mat);
         var renderer = go.GetComponent<Renderer>();
         if (renderer != null) renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().Init(mat);
+        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, 3.6f * _scale, 0.88f);
     }
 }
 
@@ -393,6 +415,20 @@ public class SmokePuff : MonoBehaviour
         _growth = growth;
         _baseAlpha = baseAlpha;
         _drift = new Vector3(_drift.x, 0.6f, _drift.z);
+    }
+
+    /// <summary>Same lazy rise <see cref="Init"/> already gives a smoke
+    /// puff (unlike <see cref="InitBurst"/>'s faster 0.6-up drift, tuned
+    /// for a quick one-shot burst, not an ongoing plume) with life/
+    /// growth/alpha overridden -- 2026-08's smoke-visibility fix needs a
+    /// bigger, longer-held, more opaque puff without also flattening its
+    /// climb rate the way reusing InitBurst would have.</summary>
+    public void InitPlume(Material mat, float life, float growth, float baseAlpha)
+    {
+        Init(mat);
+        _life = life;
+        _growth = growth;
+        _baseAlpha = baseAlpha;
     }
 
     /// <summary>Same shape as <see cref="InitBurst"/> (a fire puff is
