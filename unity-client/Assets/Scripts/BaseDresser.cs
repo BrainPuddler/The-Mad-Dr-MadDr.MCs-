@@ -148,7 +148,7 @@ public class BaseDresser : MonoBehaviour
             if (b.IsDamaged && _damagedHandled.Add(b.EntityId))
             {
                 DamageFx.AttachSmoke(root.transform, fullScale.y);
-                DamageFx.AttachFire(root.transform, fullScale.y);
+                DamageFx.AttachFireCluster(root.transform, fullScale.y, fullScale.x * 0.5f, FireCountFor(def));
             }
         }
     }
@@ -195,6 +195,24 @@ public class BaseDresser : MonoBehaviour
     /// nothing outside this class has to duplicate (and risk drifting
     /// from) those numbers.</summary>
     public static float RoofHeightFor(BuildingKind kind) => FullScaleFor(BuildingDef.Get(kind)).y;
+
+    /// <summary>2026-08 (creator direction: "it should start with 1 but
+    /// then others popup in different places based on the building size
+    /// up to 8"): the RTS roster's own tier proxy for <see
+    /// cref="DamageFx.AttachFireCluster"/>'s `targetCount` -- SAME size
+    /// boundaries `FullScaleFor` already draws (an RTS `BuildingDef` has
+    /// no `MadDr.CityGen.BuildingTier` of its own to hand
+    /// `BuildingStats.FireCount` directly, so this mirrors that table's
+    /// NUMBERS rather than sharing its code, the same "duplicate the
+    /// tier boundary constants, not a cross-package type" precedent
+    /// `FullScaleFor` itself already set for this exact size proxy).</summary>
+    private static int FireCountFor(BuildingDef def)
+    {
+        if (def.MaxHp >= 3000) return 8;   // Landmark (Hq)
+        if (def.MaxHp >= 1500) return 5;   // Large
+        if (def.MaxHp >= 600) return 3;    // Medium
+        return 1;                           // Small
+    }
 
     // ---- per-kind silhouettes (all children of `root`, which is
     // already positioned at the hex's ground point) ----

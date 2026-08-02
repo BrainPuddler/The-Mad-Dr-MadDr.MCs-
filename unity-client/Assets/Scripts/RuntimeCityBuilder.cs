@@ -2003,7 +2003,23 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             }
             // a lazy smoke plume for as long as the building stands damaged
             // (docs/21 batch 2, item 3)
-            if (cubes.Count > 0) DamageFx.AttachSmoke(cubes[0].transform, BuildingHeight(building));
+            if (cubes.Count > 0)
+            {
+                var height = BuildingHeight(building);
+                DamageFx.AttachSmoke(cubes[0].transform, height);
+                // 2026-08 (creator report: "what happen to my low poly
+                // fire for when buildings were under attack" -> traced
+                // to AttachFire having only ever been wired to the
+                // SEPARATE RTS-building roster, BaseDresser.cs, never to
+                // THIS path -- the one monsters actually damage via
+                // TickAttack/ApplyBuildingDamage, the vast majority of
+                // the map. Same fire-cluster call BaseDresser now makes,
+                // scaled off this building's own real footprint size
+                // (hex count) instead of the RTS roster's fixed-size
+                // silhouette table.
+                var footprintRadius = Mathf.Sqrt(building.Footprint.Count) * (float)HexCoord.HexMeters * 0.4f;
+                DamageFx.AttachFireCluster(cubes[0].transform, height, footprintRadius, BuildingStats.FireCount(building.Tier));
+            }
         }
     }
 

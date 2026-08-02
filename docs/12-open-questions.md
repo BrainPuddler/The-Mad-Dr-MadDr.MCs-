@@ -9650,3 +9650,90 @@ confirmed one did. Both assertions passed. Same Chromium-only honest
 limit as the previous entry -- the rebind itself is a two-character
 diff plus matching text, not a new mechanism, so the risk profile here
 is low regardless.
+
+## 2026-08 follow-up: FIX -- attack fire VFX was never wired to the buildings monsters actually damage, plus a real "start with 1, grow with size, up to 8" fire cluster + glow/sway upgrade
+
+Creator report: "what happen to my low poly fire for when buildings
+were under attack." Follow-ups: "it should start with 1 but then
+others popup in different places based on the building size up to 8"
+and "glowing and fire like movement."
+
+**Root cause, found by reading the actual code, not assumed.**
+`DamageFx.AttachFire`/`FirePlume` were real and already shipped (task
+#117's own epic) -- but this codebase has TWO entirely separate
+building-damage systems (an established fact from many earlier
+entries in this log), and fire was wired to only one of them:
+`BaseDresser.cs` (the RTS `SimBuilding` roster -- HQ/Factory/storage)
+calls `AttachFire` the instant `b.IsDamaged` flips true. But
+`b.IsDamaged` can only become true via `MatchState.ApplyAttackBuilding`,
+reachable only through `SimBridge.QueueAttackBuildingCommand` --
+which is **never called from anywhere in the Unity client**. This
+codebase's own decision log already says so, at the time it was
+built: *"nothing calls it yet -- no UI path exists to actually ISSUE
+an attack-building order... flagged as a real, separate gap."* RTS
+buildings can't actually BE damaged in play today, so fire (and even
+`IsDamaged`'s darken-tint) never had anywhere to trigger.
+
+The building system monsters DO actually damage -- procedural
+CityGen buildings (houses/shops/landmarks, confirmed by reading
+`MonsterAgent.TickAttack`, which targets a `Building` and calls
+`RuntimeCityBuilder.ApplyBuildingDamage`, never touching `SimBuilding`
+at all) -- had its own `Intact -> Damaged` branch
+(`RuntimeCityBuilder.cs`) call `DamageFx.AttachSmoke` only. `AttachFire`
+was never called from there. Not a regression from any later pass
+(the HP bumps, the RTS-footprint pathfinding fix, the rubble-clearing
+delay all leave this code untouched) -- a scope gap that was there
+from the day the epic shipped: fire was built for the building system
+players can't actually damage, and never reached the one they can.
+
+**The fix, and the two follow-up asks built in from the start rather
+than as an afterthought.**
+
+- New `MadDr.CityGen.BuildingStats.FireCount(BuildingTier)` (citygen-
+  core, alongside the existing `Occupants`/`StructureHp`/`Armor`
+  tier tables): Small=1, Medium=3, Large=5, Landmark=8 -- the creator's
+  own numbers ("start with 1... up to 8"), monotonically scaling with
+  size like every other tier table in this file.
+- New `DamageFx.AttachFireCluster(holder, height, footprintRadius,
+  targetCount)`: the FIRST fire point lands the instant a building
+  crosses into Damaged (so it's never sitting Damaged with zero fire
+  showing -- "should start with 1"), then a new `FireCluster`
+  component stages in one MORE fire point every 2-5 seconds (randomized,
+  not metronomic) at a NEW scattered spot on the footprint, until
+  reaching `targetCount`. Wired into BOTH building systems: procedural
+  (`RuntimeCityBuilder.cs`'s Damaged branch, the actual fix for the
+  reported bug, using `BuildingStats.FireCount(building.Tier)` and a
+  radius derived from the building's own real footprint hex count) and
+  RTS (`BaseDresser.cs`, replacing its old single-point `AttachFire`
+  call, using a new local `FireCountFor(def)` mirroring the SAME
+  Small/Medium/Large/Landmark numbers off `BuildingDef.MaxHp` -- the
+  same "duplicate the tier boundary constants, not a cross-package
+  type" precedent `FullScaleFor` in that same file already set, since
+  an RTS `BuildingDef` has no citygen `BuildingTier` of its own to hand
+  the shared table directly).
+- **"Glowing"**: `FirePlume` now adds a real flickering `Light`
+  component (warm orange, `LightShadows.None` -- a purely cosmetic
+  beat across a whole burning skyline isn't worth real-time shadow
+  cost) with two mismatched sine frequencies beating against each
+  other for an irregular flicker, not a single clean pulse. Previously
+  fire only self-lit its own puff meshes via emissive material color --
+  it never actually cast light onto the building or ground around it,
+  which is what "glowing" reads as from a real distance.
+- **"Fire like movement"**: new `SmokePuff.InitFlame` -- every other
+  puff kind in this file (smoke, dust, water) keeps its original
+  dead-straight drift, completely unchanged; a flame puff now RISES
+  faster and sways side to side on a sine curve whose amplitude grows
+  with the puff's own age (a flame licks wider the higher it climbs,
+  not a fixed wobble from the moment it's born), instead of traveling
+  in a straight line the way every puff in this file always has.
+
+**Verified for real:** `dotnet test` on `packages/citygen-core`
+(180/180, up from 176 -- 4 new `FireCount` tests: positive for every
+tier, exactly 1 for Small, exactly 8 for Landmark, monotonic scaling).
+Flightcheck recompiles the full edited set (`DamageFx.cs`,
+`BaseDresser.cs`, `RuntimeCityBuilder.cs`) clean against a freshly
+rebuilt `MadDr.CityGen.dll`, including the new `Light`/`LightType`/
+`LightShadows` usage against the local stub's own existing (already-
+complete) `Light` type. No Unity Editor here to watch multiple fires
+stagger in and sway/glow on screen -- same standing limit as every
+other Unity-side visual change in this project's history.

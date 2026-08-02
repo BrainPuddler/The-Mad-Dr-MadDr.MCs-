@@ -41,6 +41,26 @@ public static class DamageFx
         go.AddComponent<FirePlume>();
     }
 
+    /// <summary>2026-08 (creator direction: "it should start with 1 but
+    /// then others popup in different places based on the building size
+    /// up to 8"): the multi-point successor to <see cref="AttachFire"/>
+    /// -- one <see cref="FirePlume"/> lands immediately at a random spot
+    /// on the footprint, then more stagger in over the next several
+    /// seconds at DIFFERENT scattered spots, up to `targetCount` (see
+    /// <see cref="MadDr.CityGen.BuildingStats.FireCount"/> for the
+    /// tier->count table both building systems -- procedural and RTS --
+    /// share the same numbers for). `footprintRadius` bounds how far a
+    /// fire point can land from center -- a bigger building spreads its
+    /// fires wider, not just more densely packed at the same single
+    /// spot `AttachFire` always used.</summary>
+    public static void AttachFireCluster(Transform holder, float height, float footprintRadius, int targetCount)
+    {
+        var go = new GameObject("FireCluster");
+        go.transform.SetParent(holder, false);
+        go.transform.position = holder.position;
+        go.AddComponent<FireCluster>().Init(height, footprintRadius, targetCount);
+    }
+
     /// <summary>One-shot muzzle smoke the instant a gun fires (creator
     /// direction, 2026-07: "guns have smoke when they fire") -- small and
     /// quick next to the building SmokePlume's lazy loop or DustBurstFx's
@@ -204,18 +224,49 @@ public class SmokePlume : MonoBehaviour
 /// own lazy 0.7-1.0s drift, so it reads as agitated flame licking up
 /// rather than another slow gray cloud. Lives exactly as long as the
 /// GameObject it's attached to (i.e. until the building's holder is torn
-/// down at Destroyed).</summary>
+/// down at Destroyed).
+///
+/// 2026-08 (creator direction: "glowing and fire like movement"): two
+/// upgrades over the original puff-only version -- (1) a real flickering
+/// point `Light`, so this actually casts warm light onto the building
+/// and ground around it instead of only self-lighting the fire mesh via
+/// emission, which is what "glowing" actually reads as at a distance;
+/// (2) each puff now sways side to side as it rises (<see
+/// cref="SmokePuff.InitFlame"/>) instead of drifting in a dead-straight
+/// line, the actual "licking" motion real flame has that a constant-
+/// velocity puff never could.</summary>
 public class FirePlume : MonoBehaviour
 {
     private float _timer;
+    private Light _glow;
+    private float _flickerPhase;
 
     private void Awake()
     {
         _timer = (GetInstanceID() & 7) * 0.03f;
+        _flickerPhase = (GetInstanceID() & 255) * 0.37f;
+
+        _glow = gameObject.AddComponent<Light>();
+        _glow.type = LightType.Point;
+        _glow.color = new Color(1f, 0.55f, 0.15f);
+        _glow.range = 6f;
+        _glow.intensity = 2.5f;
+        // no shadow-casting -- a handful of these across a burning
+        // skyline would be a real per-frame cost for a purely cosmetic
+        // beat, same "cheap is the point" reasoning every other FX class
+        // in this file already follows (primitives, no ParticleSystem).
+        _glow.shadows = LightShadows.None;
     }
 
     private void Update()
     {
+        // fast, irregular flicker (two mismatched sine frequencies beat
+        // against each other rather than one clean pulse, which reads as
+        // mechanical, not like fire)
+        _flickerPhase += Time.deltaTime * 9f;
+        var flicker = 0.7f + Mathf.Abs(Mathf.Sin(_flickerPhase) * 0.6f + Mathf.Sin(_flickerPhase * 2.3f) * 0.4f) * 0.5f;
+        _glow.intensity = 2.2f * flicker;
+
         _timer -= Time.deltaTime;
         if (_timer > 0f) return;
         _timer = 0.12f + (GetInstanceID() & 3) * 0.03f;
@@ -242,7 +293,67 @@ public class FirePlume : MonoBehaviour
         var renderer = go.GetComponent<Renderer>();
         if (renderer != null) renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitBurst(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.6f, 0.9f);
+        go.AddComponent<SmokePuff>().InitFlame(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.6f, 0.9f);
+    }
+}
+
+/// <summary>2026-08 (creator direction: "it should start with 1 but
+/// then others popup in different places based on the building size up
+/// to 8"): owns a growing set of <see cref="FirePlume"/> points
+/// scattered across a Damaged building's own footprint. The FIRST point
+/// lands the instant `Init` runs (so a building never sits Damaged with
+/// zero fire showing, matching "should start with 1"); every later
+/// point staggers in on its own randomized 2-5s timer at a NEW random
+/// spot, until `targetCount` is reached, then this component goes
+/// idle -- it never removes a fire once lit (matching every other FX
+/// class in this file: no repair mechanic exists, so nothing here needs
+/// to reverse itself either).</summary>
+public class FireCluster : MonoBehaviour
+{
+    private float _height;
+    private float _footprintRadius;
+    private int _targetCount;
+    private int _spawned;
+    private float _nextSpawnIn;
+
+    public void Init(float height, float footprintRadius, int targetCount)
+    {
+        _height = height;
+        _footprintRadius = footprintRadius;
+        _targetCount = Mathf.Clamp(targetCount, 1, 8);
+        SpawnOne();
+        _nextSpawnIn = NextInterval();
+    }
+
+    private float NextInterval()
+    {
+        return 2f + ((GetInstanceID() + _spawned * 977) & 15) * 0.2f; // 2-5s, staggered not metronomic
+    }
+
+    private void Update()
+    {
+        if (_spawned >= _targetCount) return;
+        _nextSpawnIn -= Time.deltaTime;
+        if (_nextSpawnIn > 0f) return;
+        SpawnOne();
+        _nextSpawnIn = NextInterval();
+    }
+
+    private void SpawnOne()
+    {
+        _spawned++;
+        var salt = GetInstanceID() + _spawned * 733;
+        var angle = ((salt & 0xFFFF) % 360) * Mathf.Deg2Rad;
+        // first point (spawned == 1) stays near center -- a Small
+        // building's own single fire shouldn't land at the footprint's
+        // own edge; later points spread further out, up to the radius.
+        var dist = _spawned == 1 ? 0f : _footprintRadius * (0.25f + ((salt >> 8) & 15) / 15f * 0.65f);
+        var offset = new Vector3(Mathf.Cos(angle) * dist, _height * 0.25f, Mathf.Sin(angle) * dist);
+
+        var go = new GameObject("FirePlume");
+        go.transform.SetParent(transform, false);
+        go.transform.localPosition = offset;
+        go.AddComponent<FirePlume>();
     }
 }
 
@@ -258,6 +369,16 @@ public class SmokePuff : MonoBehaviour
     private float _growth = 2.2f;
     private float _baseAlpha = 0.75f;
 
+    // 2026-08 (creator direction: "fire like movement"): zero for every
+    // existing puff kind (smoke/dust/water jet all keep their original
+    // dead-straight drift, unchanged), nonzero only via InitFlame below
+    // -- a sideways sway ON TOP of the usual upward drift, so a flame
+    // puff licks side to side as it rises instead of traveling a
+    // straight line the way every other puff in this file always has.
+    private float _swayAmp;
+    private float _swayFreq;
+    private float _swayPhase;
+
     public void Init(Material mat)
     {
         _mat = mat;
@@ -272,6 +393,20 @@ public class SmokePuff : MonoBehaviour
         _growth = growth;
         _baseAlpha = baseAlpha;
         _drift = new Vector3(_drift.x, 0.6f, _drift.z);
+    }
+
+    /// <summary>Same shape as <see cref="InitBurst"/> (a fire puff is
+    /// still a short-lived rising burst, not a lazy plume) but with a
+    /// real side-to-side sway layered on top instead of a straight
+    /// drift -- the actual "licking flame" motion.</summary>
+    public void InitFlame(Material mat, float life, float growth, float baseAlpha)
+    {
+        InitBurst(mat, life, growth, baseAlpha);
+        _drift = new Vector3(0f, 1.1f, 0f); // faster, dead-vertical rise -- the sway supplies the sideways motion instead
+        var id = GetInstanceID();
+        _swayAmp = 0.5f + (id & 3) * 0.15f;
+        _swayFreq = 5f + ((id >> 2) & 3) * 1.5f;
+        _swayPhase = (id & 255) * 0.13f;
     }
 
     /// <summary>Fully-specified drift -- the hydrant water jet uses this
@@ -291,6 +426,14 @@ public class SmokePuff : MonoBehaviour
         _age += Time.deltaTime;
         var t = Mathf.Clamp01(_age / _life);
         transform.position += _drift * Time.deltaTime;
+        if (_swayAmp > 0f)
+        {
+            _swayPhase += Time.deltaTime * _swayFreq;
+            // sway grows WITH the puff's own age -- a flame licks wider
+            // the higher it climbs, not a fixed-amplitude wobble from
+            // the moment it's born
+            transform.position += Vector3.right * (Mathf.Sin(_swayPhase) * _swayAmp * t * Time.deltaTime * 3f);
+        }
         var scale = 0.8f + t * _growth;
         transform.localScale = new Vector3(scale, scale, scale);
         if (_mat != null)

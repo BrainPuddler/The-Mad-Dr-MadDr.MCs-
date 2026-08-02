@@ -40,6 +40,39 @@ public class DestructionTests
         Assert.True(BuildingStats.Occupants(BuildingTier.Large) < BuildingStats.Occupants(BuildingTier.Landmark));
     }
 
+    // 2026-08 (creator direction: "it should start with 1 but then
+    // others popup in different places based on the building size up
+    // to 8"): the fire-cluster point count per tier.
+    [Theory]
+    [InlineData(BuildingTier.Small)]
+    [InlineData(BuildingTier.Medium)]
+    [InlineData(BuildingTier.Large)]
+    [InlineData(BuildingTier.Landmark)]
+    public void FireCount_is_positive_for_every_tier(BuildingTier tier)
+    {
+        Assert.True(BuildingStats.FireCount(tier) > 0);
+    }
+
+    [Fact]
+    public void FireCount_starts_at_exactly_one_for_Small()
+    {
+        Assert.Equal(1, BuildingStats.FireCount(BuildingTier.Small));
+    }
+
+    [Fact]
+    public void FireCount_caps_at_eight_for_Landmark()
+    {
+        Assert.Equal(8, BuildingStats.FireCount(BuildingTier.Landmark));
+    }
+
+    [Fact]
+    public void FireCount_scales_monotonically_with_tier()
+    {
+        Assert.True(BuildingStats.FireCount(BuildingTier.Small) < BuildingStats.FireCount(BuildingTier.Medium));
+        Assert.True(BuildingStats.FireCount(BuildingTier.Medium) < BuildingStats.FireCount(BuildingTier.Large));
+        Assert.True(BuildingStats.FireCount(BuildingTier.Large) < BuildingStats.FireCount(BuildingTier.Landmark));
+    }
+
     [Fact]
     public void FullyIntact_starts_at_max_hp_for_its_tier()
     {
