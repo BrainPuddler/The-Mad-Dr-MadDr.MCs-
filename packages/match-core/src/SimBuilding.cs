@@ -38,6 +38,19 @@ namespace MadDr.MatchCore
         public int Hp { get; private set; }
         public BuildingState State { get; private set; }
 
+        /// <summary>2026-08 (creator direction: "once a building is
+        /// destroyed and after 20 seconds, its area becomes clear and we
+        /// can build on it"): the Frame this building's HP first hit 0,
+        /// or null while still standing. Lets `MatchState.CanPlaceBuilding`
+        /// gate NEW construction on this hex behind a rubble-clearing
+        /// delay -- deliberately separate from (and unrelated to) whether
+        /// the hex blocks MOVEMENT, which still reopens the instant this
+        /// building is Destroyed (`MatchState.ApplyBuildingDamage`
+        /// removes it from `_blockedToGround` immediately, unchanged):
+        /// walking through fresh rubble and dropping a new building on
+        /// top of it are different questions with different answers.</summary>
+        public int? DestroyedAtFrame { get; private set; }
+
         private int _ticksUntilComplete;
 
         /// <summary>Ticks left in <see cref="BuildingState.UnderConstruction"/>,
@@ -146,8 +159,11 @@ namespace MadDr.MatchCore
         /// caller later" precedent <see cref="MatchState.SpawnUnit"/> set
         /// for pre-command setup APIs). Clamped at 0, never negative;
         /// reaching 0 is terminal (Destroyed), regardless of construction
-        /// state -- an unfinished building can be destroyed too.</summary>
-        internal void ApplyDamage(int amount)
+        /// state -- an unfinished building can be destroyed too. `frame`
+        /// stamps <see cref="DestroyedAtFrame"/> the instant that
+        /// happens, same "pass the caller's own Frame in" idiom
+        /// <see cref="SimUnit.ApplyDamage"/> already uses.</summary>
+        internal void ApplyDamage(int amount, int frame)
         {
             if (State == BuildingState.Destroyed || amount <= 0) return;
             Hp -= amount;
@@ -155,6 +171,7 @@ namespace MadDr.MatchCore
             {
                 Hp = 0;
                 State = BuildingState.Destroyed;
+                DestroyedAtFrame = frame;
             }
         }
 
@@ -171,6 +188,7 @@ namespace MadDr.MatchCore
             h.Add(MaxHp);
             h.Add(Hp);
             h.Add((int)State);
+            h.Add(DestroyedAtFrame ?? -1);
             h.Add(_ticksUntilComplete);
             // 2026-07 epic: -1 is not a valid RosterUnitKind value (the
             // enum starts at 0), so it unambiguously encodes "idle slot"

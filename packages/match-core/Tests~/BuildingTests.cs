@@ -218,7 +218,7 @@ public class BuildingTests
     }
 
     [Fact]
-    public void ApplyBuildingDamage_destroysAtZeroHpAndReopensTheHexForRebuilding()
+    public void ApplyBuildingDamage_destroysAtZeroHp()
     {
         var city = SmallCity();
         var m = MatchState.Create(8u, TwoPlayers(), city);
@@ -235,8 +235,46 @@ public class BuildingTests
         var building = m.FindBuilding(id)!;
         Assert.Equal(BuildingState.Destroyed, building.State);
         Assert.Equal(0, building.Hp);
+        // this instance's own hex still blocking MOVEMENT is unaffected
+        // by this change (`_blockedToGround.Remove` right where
+        // ApplyDamage is applied, untouched) -- what's now gated
+        // separately is NEW construction, covered below.
+    }
 
-        // the hex is open again -- a second structure can now be built there
+    [Fact]
+    public void ApplyBuildingDamage_blocksRebuildingUntilRubbleClearTicksPass_thenReopensTheHex()
+    {
+        // 2026-08 (creator direction: "once a building is destroyed and
+        // after 20 seconds, its area becomes clear and we can build on
+        // it"): rebuilding on a fresh ruin is blocked for RubbleClearTicks,
+        // then opens -- distinct from the OLD behavior (this test used to
+        // assert rebuilding worked with zero delay; that assertion was the
+        // exact thing this creator direction asked to change).
+        var city = SmallCity();
+        var m = MatchState.Create(8u, TwoPlayers(), city);
+        var hex = FindOpenHex(city, city.CenterHex);
+        var player = m.Player(0);
+        player.Grant(ResourceKind.Bones, 1000);
+        player.Grant(ResourceKind.Blood, 1000);
+        m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: hex.Q, argB: hex.R) });
+        var id = m.BuildingAt(0).EntityId;
+
+        var maxHp = BuildingDef.Get(BuildingKind.BloodStorage).MaxHp;
+        m.ApplyBuildingDamage(id, maxHp);   // exactly lethal
+        Assert.Equal(BuildingState.Destroyed, m.FindBuilding(id)!.State);
+
+        // still rubble -- a rebuild attempt right away is a silent no-op
+        Assert.False(m.CanPlaceBuilding(0, BuildingKind.FuelStorage, hex));
+        m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.FuelStorage, argA: hex.Q, argB: hex.R) });
+        Assert.Equal(1, m.BuildingCount);   // still just the ruin -- the rebuild never landed
+
+        // one tick short of the clear window -- still blocked
+        for (var i = 0; i < MatchState.RubbleClearTicks - 2; i++) m.Tick(null);
+        Assert.False(m.CanPlaceBuilding(0, BuildingKind.FuelStorage, hex));
+
+        m.Tick(null);   // the exact tick the rubble clears
+        Assert.True(m.CanPlaceBuilding(0, BuildingKind.FuelStorage, hex));
+
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.FuelStorage, argA: hex.Q, argB: hex.R) });
         Assert.Equal(2, m.BuildingCount);
         Assert.Equal(BuildingKind.FuelStorage, m.BuildingAt(1).Kind);

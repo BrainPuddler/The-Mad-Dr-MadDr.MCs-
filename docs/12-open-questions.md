@@ -9414,3 +9414,79 @@ despite it. Flightcheck recompiles the real edited file clean against
 match-core/citygen-core. No Unity Editor here to watch this on screen
 -- same standing limit as every other Unity-side change in this
 project's history.
+
+## 2026-08 follow-up: rubble-clearing delay -- a destroyed building's own hex blocks NEW construction for 20 seconds, but movement reopens it immediately as before
+
+Creator direction: "once a building is destroyed and after 20 seconds,
+its area becomes clear and we can build on it."
+
+**What was actually happening.** `MatchState.ApplyBuildingDamage`
+already removes a Destroyed `SimBuilding`'s hex from `_blockedToGround`
+the INSTANT it falls -- that's the existing, unchanged, correct
+"destruction reopens the hex" behavior for MOVEMENT (docs/18). But
+`CanPlaceBuilding` (the SAME shared check both `BuildGhostCursor`'s
+red/green preview and the actual `BuildStructure` command use) reads
+that exact same `_blockedToGround` set, so a fresh ruin was ALSO
+immediately buildable-over -- zero delay, not the 20-second window
+being asked for. Scoped to RTS-buildable structures (`SimBuilding`)
+only, not procedural civilian buildings: those live in a completely
+separate system (`RuntimeCityBuilder`/`BattlefieldState`, Unity-only,
+with no coupling back into match-core's own blocked-hex model at all)
+that was already, independently, never buildable-over in match-core's
+view -- a real, pre-existing, unrelated gap, not something this pass
+touched or claims to fix.
+
+**The fix.** New `SimBuilding.DestroyedAtFrame` (stamped the instant
+HP hits 0, via a new `frame` parameter on `ApplyDamage` -- same "pass
+the caller's own Frame in" idiom `SimUnit.ApplyDamage` already uses)
+plus a new `MatchState.IsRubbleStillClearing(hex)` check inside
+`CanPlaceBuilding`, gated on a NEW, SEPARATE constant
+`RubbleClearTicks` (20 * `TicksPerSecond` = 200 ticks -- the creator's
+own number, not a placeholder). Deliberately a second, independent
+gate rather than delaying the `_blockedToGround.Remove` itself:
+walking through fresh rubble and dropping a brand-new building on top
+of it are different questions with different answers, and conflating
+them would have also broken the already-correct "rubble reopens
+pathing immediately" behavior docs/18 specifically calls out. A
+destroyed `SimBuilding` entity is never removed from the roster
+(`Tick()`'s own doc: destruction is terminal, not deleted), so a plain
+linear scan over `_buildingsInOrder` finds it reliably -- same "a
+handful to dozens of bases, not hundreds" scale this file's own
+`BlockedFor` doc comment already reasons a full-roster walk is fine
+for.
+
+**Free ride:** `BuildGhostCursor`'s red/green placement preview and
+`SimBridge.CanPlaceBuilding` both already route through this exact
+same shared `MatchState.CanPlaceBuilding` method (by design, per that
+method's own doc comment: "a Unity ghost-placement cursor's red/green
+preview can never disagree with what actually happens") -- so the new
+rubble-clearing gate is visible in the placement preview with ZERO
+additional Unity-side code. Nothing in `unity-client/` needed to
+change for this pass.
+
+**Existing tests updated, not just added:**
+`ApplyBuildingDamage_destroysAtZeroHpAndReopensTheHexForRebuilding`
+used to assert a SECOND structure could be built on the ruin with zero
+ticks elapsed -- exactly the old (zero-delay) behavior this creator
+direction asked to change, so that assertion was the thing being
+fixed, not a regression to preserve. Split into
+`ApplyBuildingDamage_destroysAtZeroHp` (still-correct baseline: HP/
+State transition, unaffected) and a new
+`ApplyBuildingDamage_blocksRebuildingUntilRubbleClearTicksPass_thenReopensTheHex`
+(rebuild attempt right after destruction is a silent no-op; one tick
+short of `RubbleClearTicks` still blocked; the exact tick it crosses,
+`CanPlaceBuilding` flips true and a real `BuildStructure` command
+lands).
+
+**Verified for real:** full `MatchCore.Tests.csproj` suite passes
+(280/280, up from 279 -- net +1 after replacing one test with two).
+`Tools~/DetHarness` reconfirms 10k-tick 8-player and 3k-tick 100-unit
+determinism unchanged after adding `DestroyedAtFrame` to
+`SimBuilding.WriteTo`'s canonical hash (a real, deliberate addition --
+this new field affects future sim behavior, so it belongs in the
+hash, same "every field that matters gets hashed" law every other
+entity in this file already follows). Flightcheck recompiles the real
+edited match-core against a freshly rebuilt DLL, confirming
+`BuildGhostCursor`/`SimBridge` still compile clean against the changed
+`CanPlaceBuilding` (unchanged signature, so this was never really in
+doubt, but checked anyway).

@@ -372,7 +372,7 @@ namespace MadDr.MatchCore
         {
             var building = FindBuilding(entityId);
             if (building == null) return;
-            building.ApplyDamage(amount);
+            building.ApplyDamage(amount, Frame);
             if (building.State == BuildingState.Destroyed) _blockedToGround?.Remove(building.Hex);
         }
 
@@ -1260,6 +1260,7 @@ namespace MadDr.MatchCore
             if (playerIndex < 0 || playerIndex >= _players.Length) return false;
             if (!_city.Contains(hex) || _blockedToGround.Contains(hex)) return false;
             if (_roadHexes != null && _roadHexes.Contains(hex)) return false;
+            if (IsRubbleStillClearing(hex)) return false;
 
             var def = BuildingDef.Get(kind);
             var player = _players[playerIndex];
@@ -1268,6 +1269,37 @@ namespace MadDr.MatchCore
 
             return true;
         }
+
+        /// <summary>2026-08 (creator direction: "once a building is
+        /// destroyed and after 20 seconds, its area becomes clear and we
+        /// can build on it"): true while a Destroyed building's own hex
+        /// is still within `RubbleClearTicks` of the frame it fell --
+        /// `_blockedToGround` already dropped the hex the instant it was
+        /// Destroyed (movement reopens immediately, unchanged), so this
+        /// is a SEPARATE, narrower check just for new construction.
+        /// Linear scan over `_buildingsInOrder` -- same "a handful to
+        /// dozens of bases, not hundreds" scale this file's own
+        /// `BlockedFor` doc comment already reasons a full-roster walk is
+        /// fine for. A destroyed building entity is never removed from
+        /// the roster (see `SimBuilding.Tick`'s own doc: destruction is
+        /// terminal, not deleted), so this always finds it as long as
+        /// it's still within the window.</summary>
+        private bool IsRubbleStillClearing(HexCoord hex)
+        {
+            for (var i = 0; i < _buildingsInOrder.Count; i++)
+            {
+                var b = _buildingsInOrder[i];
+                if (b.State != BuildingState.Destroyed || !b.DestroyedAtFrame.HasValue) continue;
+                if (b.Hex != hex) continue;
+                if (Frame - b.DestroyedAtFrame.Value < RubbleClearTicks) return true;
+            }
+            return false;
+        }
+
+        /// <summary>docs/12 decision log, "once a building is destroyed
+        /// and after 20 seconds, its area becomes clear" -- the creator's
+        /// own number, not a placeholder.</summary>
+        public const int RubbleClearTicks = 20 * TicksPerSecond;
 
         /// <summary>docs/23 §2 Phase 2: place a new building at hex
         /// (ArgA, ArgB), building kind decoded from TargetEntity (see
