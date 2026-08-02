@@ -9197,3 +9197,70 @@ file and hadn't been told about the new battalions event/method until
 this pass. No Unity Editor here to confirm the Lab Battalions panel or
 a resolved build on screen -- same standing limit as every other
 Unity-side change in this project's history.
+
+## 2026-08 follow-up: "where is my Big Brain base and human build units" -- investigated, and a real Brain-income gap fixed
+
+Creator report: "where is my big brain base and human build units, I
+don't see them." Investigated both before touching anything.
+
+**Human build units: a real, confirmed gap, NOT fixed this pass (out of
+scope for what was asked next).** The Human Army roster (Rifleman/
+Half-Track/Tank/Zeppelin Gunship, `FactionRoster.cs`) and match-core's
+own `TrainUnit`/`QueueTrainCommand` machinery both exist and are
+sim-tested, but grepping every Unity script turned up zero callers of
+either outside `SimBridge.cs` itself -- no button, hotkey, or menu ever
+issues the command. The only production UI that ever shipped is the Mad
+Doctor's own G-key clone-a-monster mechanic, which is explicitly
+Doctor-only (its own doc comment says so). Compounding this, the player
+defaults to Mad Doctor with `showFactionPicker` off
+(`RuntimeCityBuilder.cs`), so there's currently no way to even BE Human
+Army in a normal match -- matching docs/17 Q13's "humans/aliens are
+AI-only campaign factions at V1." Not addressed here; flagged as its
+own future pass (a real build menu for a second faction, plus making
+faction selection reachable).
+
+**Big Brain: reachable, not faction-gated, but effectively invisible
+because Brains -- its only cost -- had no passive income anywhere in
+the simulation.** `BuildingKind.BigBrain` (`BuildingDef.cs`) is real,
+undamaged, and `BuildMenuHud`/`MatchState.CanPlaceBuilding` never gate
+it by faction. But it costs 20 Brains, and Brains could ONLY ever be
+earned by a monster eating a citizen or a harvester physically
+delivering a load -- both requiring active play with a Brain-favoring
+creature. `HarvestPost`'s own doc comment already called it "the
+player-BUILDABLE version of docs/20's Collection Stations" (which
+convert nearby Citizen deaths into banked resources), but nothing ever
+actually granted it income once built -- a real, silent gap between
+what the comment claimed and what the code did. This also let me
+confirm task #135 ("fix harvest crediting to bank all three lanes") was
+in fact ALREADY fixed in an earlier pass -- `BankHarvestLoad` and
+`CreditHarvestForEatenCitizen` both correctly credit Blood/Bones/Brains
+today, verified by reading the code directly, not assumed; that task
+entry was simply stale.
+
+**The fix:** new `MatchState.GrantHarvestPostIncome`, granting 1 Brain
+per owned Complete `HarvestPost` every 200 ticks (20 simulated seconds
+-- `TicksPerSecond` is 10), gated on the match's own absolute Frame the
+same way `GrantEmitterManaIncome` already gates mana, just a slower
+interval since Brains are meant to be scarce/high-value rather than a
+whole-second trickle. One Complete HarvestPost alone reaches BigBrain's
+20-Brain cost in 20 grants (~6.5 simulated minutes) -- a real,
+unhurried, non-combat path, not a substitute for actually harvesting.
+v0.1 placeholder rate, same standing policy as every other unbalanced
+economy number in this project. No Unity-side changes were needed --
+`ResourceHud` already displays the Brains wallet lane and
+`BuildMenuHud`'s affordability check already reads the live wallet, so
+the fix is visible the moment match-core grants it.
+
+**Verified for real:** new `EconomyTests.HarvestPost_grantsABrainsTrickle_
+onlyOnceComplete_andOnlyToItsOwner` (construction-in-progress grants
+nothing, the exact interval boundary triggers exactly one grant, a
+second interval grants a second, and the opposing player never sees
+it) -- caught and fixed a real bug in the TEST itself on first run (it
+assumed the grant interval was relative to the building's own
+completion tick; it's actually gated on the match's absolute Frame,
+so a slow-building structure like HarvestPost can cross a grant
+boundary well before an interval's worth of ticks have passed since
+completion). Full `MatchCore.Tests.csproj` suite passes (279/279, up
+from 278 -- the new test is the only addition). `Tools~/DetHarness`
+reconfirms 10k-tick 8-player and 3k-tick 100-unit determinism unchanged
+after adding a new per-tick income gate.

@@ -465,6 +465,42 @@ namespace MadDr.MatchCore
             }
         }
 
+        /// <summary>2026-08 (creator report: "where is my big brain base
+        /// and human build units, I don't see them" -- root-caused to
+        /// Brains having no passive/architectural income anywhere in the
+        /// simulation: the only two ways to earn Brains were a monster
+        /// eating a citizen (Unity-side credit, scaled by hand-tool
+        /// gather rate) or a harvester physically delivering a load, both
+        /// requiring active play, leaving <see cref="BuildingKind.BigBrain"/>'s
+        /// 20-Brain cost unreachable for a player who hadn't been
+        /// actively hunting citizens). <see cref="BuildingKind.HarvestPost"/>'s
+        /// own doc comment already calls it "the player-BUILDABLE version
+        /// of docs/20's Collection Stations" (which convert nearby
+        /// Citizen deaths into banked resources) -- but nothing ever
+        /// granted it any actual income once built. This grants a small
+        /// flat Brains trickle per owned Complete HarvestPost, giving
+        /// every player a slow-but-genuine non-combat path toward
+        /// BigBrain. v0.1 placeholder rate (<see
+        /// cref="HarvestPostBrainsPerGrant"/>/<see
+        /// cref="HarvestPostIncomeIntervalTicks"/>), same standing policy
+        /// as every other unbalanced economy number in this
+        /// project -- one Complete HarvestPost alone reaches BigBrain's
+        /// 20-Brain cost in 20 grants (~6.5 simulated minutes at the
+        /// numbers below), a real but unhurried path, not a substitute
+        /// for actually harvesting.</summary>
+        private void GrantHarvestPostIncome()
+        {
+            for (var i = 0; i < _buildingsInOrder.Count; i++)
+            {
+                var b = _buildingsInOrder[i];
+                if (b.Kind != BuildingKind.HarvestPost || b.State != BuildingState.Complete) continue;
+                _players[b.PlayerIndex].Grant(ResourceKind.Brains, HarvestPostBrainsPerGrant);
+            }
+        }
+
+        private const int HarvestPostBrainsPerGrant = 1;
+        private const int HarvestPostIncomeIntervalTicks = 20 * TicksPerSecond;
+
         /// <summary>docs/03's "Emitter polarities &amp; output" table,
         /// verbatim: Solar peaks Day (5), Lunar peaks Night (5), Twilight
         /// peaks the transitions (6) and is otherwise flat (3) -- Solar/
@@ -1019,6 +1055,15 @@ namespace MadDr.MatchCore
                 // docs/23 Phase 7 / docs/06: the regeneration quirk, same idiom.
                 ApplyRegenerationQuirk();
             }
+
+            // 2026-08 (creator report: "where is my big brain base... I
+            // don't see them" -- traced to Brains having NO passive
+            // income at all, only combat-kill/harvester delivery, which
+            // left BigBrain's 20-Brain cost out of reach without active
+            // hunting): a much slower gate than the once-per-second grants
+            // above, since Brains are meant to be scarce/high-value, not
+            // a whole-second trickle.
+            if (Frame % HarvestPostIncomeIntervalTicks == 0) GrantHarvestPostIncome();
         }
 
         private void ApplyCommand(Command cmd)

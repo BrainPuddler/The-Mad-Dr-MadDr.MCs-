@@ -140,6 +140,53 @@ public class EconomyTests
     }
 
     [Fact]
+    public void HarvestPost_grantsABrainsTrickle_onlyOnceComplete_andOnlyToItsOwner()
+    {
+        // 2026-08 (creator report: "where is my big brain base... I
+        // don't see them" -- Brains had no passive income at all, only
+        // combat-kill/harvester delivery, leaving BigBrain's 20-Brain
+        // cost unreachable without active hunting). HarvestPost's own
+        // doc comment already called it the buildable Collection
+        // Station, but granted nothing once built -- this is the fix.
+        var city = SmallCity();
+        var m = MatchState.Create(5u, TwoPlayers(), city);
+        var hex = FindOpenHex(city, city.CenterHex);
+        var player0 = m.Player(0);
+        var player1 = m.Player(1);
+        player0.Grant(ResourceKind.Bones, 100);
+
+        m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.HarvestPost, argA: hex.Q, argB: hex.R) });
+        var buildTime = BuildingDef.Get(BuildingKind.HarvestPost).BuildTimeTicks;
+
+        // still under construction -- no income yet, however long that takes
+        for (var i = 0; i < buildTime - 1; i++) m.Tick(null);
+        Assert.Equal(0, player0.Wallet(ResourceKind.Brains));
+
+        m.Tick(null);   // the exact tick construction completes
+        Assert.Equal(BuildingState.Complete, m.BuildingAt(0).State);
+
+        // the grant gate is on the match's own ABSOLUTE Frame (same idiom
+        // as GrantEmitterManaIncome's once-per-second gate), not a timer
+        // relative to this building's own completion -- so the next grant
+        // boundary depends on exactly which Frame construction finished
+        // on, computed here rather than assumed as a round number.
+        const int intervalTicks = 200;   // mirrors MatchState's private HarvestPostIncomeIntervalTicks
+        var frameNow = 1 + buildTime;   // the placement tick, then buildTime more to Complete
+        var ticksToNextGrant = intervalTicks - (frameNow % intervalTicks);
+
+        for (var i = 0; i < ticksToNextGrant - 1; i++) m.Tick(null);
+        Assert.Equal(0, player0.Wallet(ResourceKind.Brains));
+
+        m.Tick(null);   // crosses the interval boundary -- exactly one grant
+        Assert.Equal(1, player0.Wallet(ResourceKind.Brains));
+
+        for (var i = 0; i < intervalTicks; i++) m.Tick(null);   // a second full interval
+        Assert.Equal(2, player0.Wallet(ResourceKind.Brains));
+
+        Assert.Equal(0, player1.Wallet(ResourceKind.Brains));   // never player 0's opponent
+    }
+
+    [Fact]
     public void Same_seed_same_orders_hashes_identically_with_wallet_caps_in_play()
     {
         ulong Run()
