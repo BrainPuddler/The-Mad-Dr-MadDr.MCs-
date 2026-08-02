@@ -2754,7 +2754,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             + Mathf.Max(groupSpacing, MonsterSteeringController.AvoidancePadding)
             + closingReach;
         _combatantGrid.QueryRadius(self.transform.position, reach, _steerQueryBuffer);
-        return MonsterSteeringController.Combine(self, effectiveDir, speed, _steerQueryBuffer, groupSpacing);
+        // 2026-08: Time.time is passed in rather than read inside Combine so
+        // the steering layer keeps its no-engine-dependency shape and stays
+        // drivable from Tools~/SteerVerify. It backs the side-commitment
+        // hold and the deadlock push-through window.
+        return MonsterSteeringController.Combine(self, effectiveDir, speed, _steerQueryBuffer, groupSpacing, Time.time);
     }
 
     /// <summary>Distinct passable hexes clustered around `center`,

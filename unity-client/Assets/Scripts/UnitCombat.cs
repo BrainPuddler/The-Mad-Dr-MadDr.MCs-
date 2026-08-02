@@ -62,6 +62,29 @@ public class UnitCombat : MonoBehaviour
     public Vector3? YieldTarget;
     public float YieldUntil;
 
+    /// <summary>2026-08 root-cause pass (creator: "circling is still
+    /// happening"): this unit's committed left/right avoidance decision.
+    /// Lives here, beside `LastVelocity`/`YieldTarget`, for the same
+    /// reason those do -- `MonsterSteeringController` already reaches
+    /// every neighbour through a `UnitCombat` handle, so hanging the
+    /// memory off the unit costs no allocation, no per-frame dictionary
+    /// lookup, and nothing to clean up when a unit dies. Default
+    /// (`Side == 0`) means "nothing committed," which is the behaviour
+    /// this had before the field existed. See
+    /// MonsterSteeringController.SteeringMemory.</summary>
+    public MonsterSteeringController.SteeringMemory Steering;
+
+    /// <summary>2026-08: set by DeadlockManager on a unit that has been
+    /// genuinely deadlocked (see that class's progress-based stall
+    /// detection). While this is in the future, `Combine` suspends soft
+    /// avoidance and give-way for this unit so it commits to its heading
+    /// and forces the issue -- the "one monster temporarily ignores
+    /// avoidance" escalation. Hard separation
+    /// (`RuntimeCityBuilder.ApplySeparation`) is NOT suspended, so this
+    /// can never let a unit walk through another. 0 (the overwhelmingly
+    /// common case) means no escalation is active.</summary>
+    public float PushThroughUntil;
+
     /// <summary>docs/26 Phase 5: true for a unit under (future) mind-
     /// control -- nothing sets this yet (no possession mechanic exists),
     /// but the field exists now so friendly-fire exclusions have

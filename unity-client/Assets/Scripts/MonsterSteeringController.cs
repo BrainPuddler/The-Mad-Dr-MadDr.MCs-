@@ -84,9 +84,113 @@ using UnityEngine;
 /// better). Still not a full cure for the hardest multi-squad case, same
 /// honest limit as the paragraph above -- this is a real, measured
 /// improvement on top of it, not a claim of "fixed."
+///
+/// 2026-08 ROOT-CAUSE PASS (creator: "circling is still happening").
+/// Every fix above was verified against a throwaway harness that only
+/// ever tested a LONE PAIR -- and a lone pair really was already clean,
+/// which is why each pass looked like it worked. `Tools~/SteerVerify`
+/// (committed this pass, so this can't silently happen again) tests
+/// three-or-more units in contest, and every such scenario orbited
+/// FOREVER: 13-16x more distance walked than the straight line, 15692
+/// side-reversals, 3 of 6 scenarios never resolving inside 60 seconds.
+///
+/// The circling was not a tuning problem. It was geometry:
+/// `PredictiveAvoidance` returns a purely LATERAL (perpendicular to
+/// `fwd`) vector, summed over neighbours with NO bound. One neighbour at
+/// full urgency already deflects the blended heading ~50 degrees; three
+/// deflect it past 90, at which point the unit is steering AWAY from its
+/// goal while still moving at full speed. A unit that persistently moves
+/// perpendicular to the direction of its goal is, by definition,
+/// travelling a circle around it -- so orbit was never an emergent
+/// oscillation to be damped out, it was the blend's stable fixed point,
+/// and no amount of side tie-breaking could have removed it. The three
+/// fixes this pass adds, in order of how much they matter:
+///
+///   1. `ClampToCone` -- steering may deflect at most `MaxDeflection`
+///      from the seek direction. Progress toward the goal is therefore
+///      never less than `MaxDeflectionCos` of speed, which makes a closed
+///      orbit arithmetically impossible rather than merely unlikely.
+///      This is the actual cure.
+///   2. `SteeringMemory` -- a committed left/right side, held for
+///      `SideCommitSeconds` against the SAME dominant threat. Removes the
+///      frame-to-frame flip-flopping ("commitment"/"hysteresis").
+///   3. `ShouldAdvanceWaypoint` -- see its own comment block. A SECOND,
+///      independent cause, and the one that explains "it's worse with
+///      larger monsters": a path node standing inside another unit's
+///      separation envelope could never be consumed, so the unit orbited
+///      a waypoint it was physically unable to reach. Measured as the
+///      single biggest contributor of the three.
+///
+/// See `Tools~/SteerVerify/README.md` for the before/after numbers.
 /// </summary>
 public static class MonsterSteeringController
 {
+    /// <summary>2026-08 root-cause pass: the widest angle steering may
+    /// deviate from the seek direction, in degrees. THE fix for circling
+    /// -- see this class's header for why an unbounded lateral avoidance
+    /// term makes orbit a stable fixed point rather than an oscillation.
+    ///
+    /// 60 degrees is chosen for a concrete guarantee, not by feel: a unit
+    /// always retains at least cos(60) = HALF its speed as progress
+    /// toward its goal, however crowded it is. Two units contesting the
+    /// same ground therefore always close on their goals while dodging,
+    /// so the encounter resolves in bounded time instead of settling into
+    /// a circle. It is deliberately generous enough to still read as real
+    /// avoidance (a 60-degree swerve is a big, legible dodge), just never
+    /// as an orbit.
+    ///
+    /// This is a hard clamp on the OUTPUT, not a re-weighting of the
+    /// inputs: every existing term keeps its already-tuned weight and its
+    /// full influence right up to the cone edge, so an uncrowded unit's
+    /// steering is byte-for-byte what it was before this pass. Only the
+    /// crowded case -- the only case that was ever broken -- changes.
+    ///
+    /// Safe because this layer steers around UNITS only: static geometry
+    /// (buildings, water) is the hex pathfinder's job, so a capped
+    /// deflection can never be the difference between routing around a
+    /// wall and walking into it.</summary>
+    public const float MaxDeflection = 60f;
+    public static readonly float MaxDeflectionCos = Mathf.Cos(MaxDeflection * Mathf.Deg2Rad);
+    public static readonly float MaxDeflectionSin = Mathf.Sin(MaxDeflection * Mathf.Deg2Rad);
+
+    /// <summary>How long a unit commits to a chosen left/right side
+    /// before it may reconsider -- the "movement commitment"/hysteresis
+    /// this layer never had (its own header above flagged the absence
+    /// honestly: "dense multi-unit combat likely needs real
+    /// hysteresis/state this file's own 'Stateless' design deliberately
+    /// doesn't have yet").
+    ///
+    /// 0.9s is long enough to actually carry a unit PAST a neighbour at
+    /// walking speed rather than merely damping the twitch, and short
+    /// enough that a held side never reads as a unit ignoring a genuinely
+    /// new situation. The commitment is keyed to the DOMINANT THREAT'S
+    /// identity as well as the clock (see `SteeringMemory`): a unit that
+    /// finishes with one neighbour and meets a different one re-decides
+    /// immediately, so this is per-ENCOUNTER commitment, not a blanket
+    /// refusal to re-steer for 0.9 seconds.</summary>
+    public const float SideCommitSeconds = 0.9f;
+
+    /// <summary>The per-unit steering memory that commitment needs. A
+    /// plain mutable struct living on `UnitCombat` (beside `LastVelocity`/
+    /// `YieldTarget`, which this layer already reads through the same
+    /// handle) rather than a dictionary in here: no allocation, no
+    /// per-frame lookup, nothing to clean up when a unit dies, and this
+    /// class keeps its no-stored-collections shape so
+    /// `Tools~/SteerVerify` can still drive it directly.</summary>
+    public struct SteeringMemory
+    {
+        /// <summary>-1 (left) / +1 (right) / 0 (nothing committed).</summary>
+        public sbyte Side;
+
+        /// <summary>`GetInstanceID` of the threat the side was chosen
+        /// against. A different dominant threat releases the commitment
+        /// at once -- commitment is to an ENCOUNTER, not to a clock.</summary>
+        public int SideThreatId;
+
+        /// <summary>Clock time the commitment lapses once the encounter
+        /// ends; refreshed every frame the same threat still dominates.</summary>
+        public float HoldUntil;
+    }
     /// <summary>docs/25 Phase C: how far ahead (seconds) predictive
     /// avoidance looks for a converging neighbour. Long enough to react to
     /// a head-on pair closing at a brisk run well before contact; short
@@ -171,6 +275,7 @@ public static class MonsterSteeringController
     /// DeadlockManager's own escalation path (docs/25 Phase D), never
     /// this layer's job.</summary>
     public const float GiveWayMinSpeedScale = 0.15f;
+
 
     /// <summary>The actual per-neighbour speed multiplier for
     /// `GiveWaySpeedScale` -- 1 at the trigger boundary (`combined +
@@ -267,6 +372,14 @@ public static class MonsterSteeringController
         var v = c.LastVelocity;
         v.y = 0f;
         if (v.sqrMagnitude < 1e-4f) return false;   // stationary neighbour -- nothing to give way to
+        // 2026-08: widening this cutoff to 0.35 (so give-way would also
+        // catch the TANGENTIAL headings of a pair already mid-orbit, which
+        // sit near dot 0 and so straddle this threshold) was tried and
+        // MEASURABLY REJECTED -- SteerVerify got worse, 427 -> 466
+        // side-reversals across the suite, with nothing resolving faster.
+        // Recorded here because it is an obvious-looking idea that will
+        // occur to the next reader too. The orbit it was meant to break is
+        // gone for the real reasons documented in this class's header.
         if (Vector3.Dot(v.normalized, fwd) >= OpposingHeadingCutoff) return false;   // heading my own way -- a squadmate, not a contest
 
         if (self.GetInstanceID() < c.GetInstanceID()) return false;   // this pair's low-ID member always proceeds; only the high-ID one yields
@@ -323,6 +436,129 @@ public static class MonsterSteeringController
     {
         public Vector3 Direction;
         public float SpeedScale;
+
+        /// <summary>2026-08: true when another unit actually influenced
+        /// this frame's steering (avoidance fired, or bodies are inside
+        /// separation range). Reported so the caller can tell "I'm not
+        /// getting closer because someone is in my way" apart from "I'm
+        /// not getting closer because my target is running away" -- see
+        /// `ShouldAdvanceWaypoint`, which must escape the first and must
+        /// NOT escape the second.</summary>
+        public bool Contested;
+    }
+
+    // ---- waypoint progress (2026-08 root-cause pass) --------------------
+    //
+    // The SECOND independent cause of the reported circling, and the one
+    // that explains "seems to happen with larger monsters."
+    //
+    // `MonsterAgent.FollowPath` consumed a path node once it came within a
+    // FLAT 0.6 metre `GroundArriveDist`. But separation holds two bodies
+    // `selfRadius + otherRadius + groupSpacing` apart -- 4 m for default
+    // 1.5 m monsters, 11 m for big ones. So the moment another unit stands
+    // on or near the node being sought, reaching within 0.6 m of it is
+    // physically impossible: the unit is pulled in by seek and shoved out
+    // by separation, forever, and `_pathIndex` never advances. It orbits a
+    // waypoint it can never consume. The bigger the monster, the bigger
+    // the exclusion zone and the more nodes become unreachable -- exactly
+    // the size dependence the creator reported, and something no amount of
+    // steering-side tuning could ever have fixed, because the steering was
+    // being asked to satisfy an unsatisfiable arrival test.
+    //
+    // Three rules replace the single distance check, all pure functions
+    // exercised directly by `Tools~/SteerVerify`:
+
+    /// <summary>Floor on the arrive radius -- the original flat
+    /// `MonsterAgent.GroundArriveDist`, kept so small units keep their
+    /// existing precision exactly.</summary>
+    public const float BaseArriveDist = 0.6f;
+
+    /// <summary>A unit is "at" a node once its own BODY covers it, rather
+    /// than once its origin is within 60 cm of it. Scales with the
+    /// creature, which a flat constant never did.</summary>
+    public static float ArriveDistFor(float radius)
+    {
+        return Mathf.Max(BaseArriveDist, radius);
+    }
+
+    /// <summary>How long a unit may fail to get closer to its current
+    /// node, WHILE another unit is in its way, before it gives up on that
+    /// node and takes the next one. Long enough that ordinary jostling
+    /// never trips it, short enough that a jam never becomes the
+    /// permanent stall the creator reported.</summary>
+    public const float WaypointStallSeconds = 1f;
+
+    /// <summary>Metres of improvement that counts as real progress toward
+    /// the current node (below this is noise).</summary>
+    public const float WaypointProgressEpsilon = 0.25f;
+
+    /// <summary>Per-unit bookkeeping for the rule below. Same "plain
+    /// struct on the owner, no dictionary in here" shape as
+    /// `SteeringMemory`; `MonsterAgent` keeps one, reset whenever it
+    /// adopts a new node.</summary>
+    public struct WaypointProgress
+    {
+        public float BestDistance;   // closest this unit has EVER been to the current node
+        public float StalledFor;
+    }
+
+    /// <summary>Should the caller consume the current path node and move
+    /// on? True on any of three grounds:
+    ///
+    /// 1. **Arrived** -- within `arriveDist` (now body-scaled).
+    /// 2. **Overshot** -- the node is now BEHIND the leg's own direction
+    ///    of travel. A unit shoved sideways past a node used to turn
+    ///    around and go back for it, fighting the very crowd that pushed
+    ///    it there; there is nothing at a path node worth returning for.
+    /// 3. **Contested and not closing** -- no progress for
+    ///    `WaypointStallSeconds` while another unit is in the way. This is
+    ///    the one that breaks the orbit: a node standing inside someone
+    ///    else's body simply stops being sought.
+    ///
+    /// Rule 3 is gated on `contested` deliberately. Distance-to-goal
+    /// refusing to fall ALSO describes a perfectly healthy chase of a
+    /// target that is running away at the same speed -- and abandoning
+    /// the node then would be the AI giving up on the player, the exact
+    /// opposite of what's wanted. "Not closing" alone is not evidence of
+    /// a jam; "not closing while someone is physically in the way" is.
+    ///
+    /// `progress` is mutated in place (it IS the per-unit memory) and
+    /// reset on every advance, so the next node starts with a clean
+    /// baseline.</summary>
+    public static bool ShouldAdvanceWaypoint(ref WaypointProgress progress, Vector3 pos, Vector3 node,
+        Vector3 legDir, float arriveDist, bool contested, float dt)
+    {
+        var to = node - pos;
+        to.y = 0f;
+        var dist = to.magnitude;
+
+        if (dist < arriveDist) { ResetProgress(ref progress); return true; }
+
+        // overshot: the node is behind the direction this leg travels in
+        if (legDir.sqrMagnitude > 1e-6f && Vector3.Dot(to, legDir) < 0f) { ResetProgress(ref progress); return true; }
+
+        if (dist < progress.BestDistance - WaypointProgressEpsilon)
+        {
+            progress.BestDistance = dist;
+            progress.StalledFor = 0f;
+            return false;
+        }
+
+        if (!contested) { progress.StalledFor = 0f; return false; }
+
+        progress.StalledFor += dt;
+        if (progress.StalledFor < WaypointStallSeconds) return false;
+        ResetProgress(ref progress);
+        return true;
+    }
+
+    /// <summary>Arms `progress` for a freshly adopted node -- "closest
+    /// ever" starts at infinity so the very first frame counts as
+    /// progress rather than as a stall.</summary>
+    public static void ResetProgress(ref WaypointProgress progress)
+    {
+        progress.BestDistance = float.MaxValue;
+        progress.StalledFor = 0f;
     }
 
     /// <summary>Ported verbatim from `RuntimeCityBuilder.ApplySeparation`'s
@@ -367,12 +603,21 @@ public static class MonsterSteeringController
     /// Already-overlapping neighbours are deliberately skipped here --
     /// that's `SeparationForce`'s job (a collision that already happened,
     /// not one being predicted); mixing the two signals for the same pair
-    /// would double up the response for no gain.</summary>
-    public static Vector3 PredictiveAvoidance(UnitCombat self, Vector3 selfVel, Vector3 fwd, List<UnitCombat> neighbours)
+    /// would double up the response for no gain.
+    ///
+    /// 2026-08 root-cause pass: now returns an `AvoidanceVote` (a SIGNED
+    /// LATERAL SCALAR plus who the dominant threat is) instead of a raw
+    /// Vector3. No arithmetic changed -- the old return value was always
+    /// `right * (the scalar this now returns)`, since every term it
+    /// accumulates lies along `right` by construction. Naming the scalar
+    /// is what lets `Combine` apply left/right commitment to it (a sign
+    /// is a thing you can hold; a vector isn't) and what lets it identify
+    /// the ONE neighbour a held decision belongs to.</summary>
+    public static AvoidanceVote PredictiveAvoidance(UnitCombat self, Vector3 selfVel, Vector3 fwd, List<UnitCombat> neighbours)
     {
         var right = new Vector3(fwd.z, 0f, -fwd.x);   // fwd rotated -90 about up
         var pos = self.transform.position;
-        var avoid = Vector3.zero;
+        var vote = new AvoidanceVote();
         foreach (var c in neighbours)
         {
             if (c == null || c == self || !c.Alive) continue;
@@ -456,9 +701,54 @@ public static class MonsterSteeringController
             }
             var side = onRight > 0f ? -1f : 1f;
             var urgency = (1f - t / Horizon) * (combined - closestDist) / combined;
-            avoid += right * (side * urgency);
+            vote.Lateral += side * urgency;
+
+            // remember WHICH neighbour is driving this frame's decision, so
+            // Combine's side commitment can be tied to that specific
+            // encounter rather than to a bare timer (see SteeringMemory).
+            if (urgency > vote.DominantUrgency)
+            {
+                vote.DominantUrgency = urgency;
+                vote.DominantThreatId = c.GetInstanceID();
+            }
         }
-        return avoid;
+        return vote;
+    }
+
+    /// <summary>What `PredictiveAvoidance` decided this frame. `Lateral`
+    /// is signed in `right`'s own sense, so the caller reconstructs the
+    /// old vector as `right * Lateral`; the dominant-threat fields exist
+    /// only so `Combine` can decide whether a previously committed side
+    /// still refers to the same encounter.</summary>
+    public struct AvoidanceVote
+    {
+        public float Lateral;
+        public int DominantThreatId;
+        public float DominantUrgency;
+    }
+
+    /// <summary>Clamps `dir` to within `MaxDeflection` of `fwd`, keeping
+    /// whichever side of `fwd` it was already on. THE anti-circling
+    /// primitive -- see `MaxDeflection` and this class's header.
+    ///
+    /// Applied to the FINAL blended heading rather than to any one input
+    /// term on purpose: it is the total deflection that decides whether a
+    /// unit still makes progress, and capping terms individually would
+    /// still let three of them stack past 90 degrees, which is exactly
+    /// how the orbit arose. Because the result is rebuilt from `fwd` and
+    /// `right` (not renormalized from a squashed vector), a unit pinned
+    /// against the cone edge steers along it smoothly rather than
+    /// chattering across it.
+    ///
+    /// A pure function of its arguments, no state, no engine calls --
+    /// `Tools~/SteerVerify` exercises it directly.</summary>
+    public static Vector3 ClampToCone(Vector3 dir, Vector3 fwd)
+    {
+        var along = Vector3.Dot(dir, fwd);
+        if (along >= MaxDeflectionCos) return dir;   // inside the cone already: untouched
+        var right = new Vector3(fwd.z, 0f, -fwd.x);
+        var side = Vector3.Dot(dir, right) >= 0f ? 1f : -1f;
+        return (fwd * MaxDeflectionCos + right * (side * MaxDeflectionSin)).normalized;
     }
 
     /// <summary>docs/23 §5: "match average heading of groupmates within
@@ -562,14 +852,51 @@ public static class MonsterSteeringController
     /// ones) replaces `RuntimeCityBuilder.ApplySeparation`'s hard
     /// positional correction, which keeps running unconditionally
     /// regardless of this call.</summary>
-    public static SteeringResult Combine(UnitCombat self, Vector3 desiredDir, float selfSpeed, List<UnitCombat> neighbours, float groupSpacing)
+    public static SteeringResult Combine(UnitCombat self, Vector3 desiredDir, float selfSpeed, List<UnitCombat> neighbours, float groupSpacing, float now)
     {
         var fwd = new Vector3(desiredDir.x, 0f, desiredDir.z);
         if (fwd.sqrMagnitude < 1e-4f) return new SteeringResult { Direction = desiredDir, SpeedScale = 1f };
         fwd = fwd.normalized;
 
+        // docs/25 Phase D escalation (2026-08): DeadlockManager has told
+        // this unit to stop negotiating and push straight through for a
+        // moment. Soft avoidance and give-way are exactly the terms that
+        // keep a symmetric standoff symmetric, so they -- and ONLY they --
+        // are suspended; separation still runs below, and
+        // `RuntimeCityBuilder.ApplySeparation` still runs unconditionally
+        // afterwards, so "ignores avoidance" never means "walks through
+        // people." See UnitCombat.PushThroughUntil.
+        var pushingThrough = now < self.PushThroughUntil;
+
         var selfVel = fwd * selfSpeed;
-        var avoid = PredictiveAvoidance(self, selfVel, fwd, neighbours);
+        var right = new Vector3(fwd.z, 0f, -fwd.x);
+        var vote = pushingThrough
+            ? new AvoidanceVote()
+            : PredictiveAvoidance(self, selfVel, fwd, neighbours);
+
+        // ---- left/right commitment (hysteresis) -----------------------
+        // The raw geometric sign is recomputed from scratch every frame
+        // and, in a crowd, flips freely as neighbours shuffle -- the
+        // "frame-to-frame direction flipping" that reads as jitter and
+        // stops either unit ever committing. Hold the sign for
+        // SideCommitSeconds as long as the SAME neighbour is still the
+        // dominant threat; take the magnitude live, so urgency still
+        // responds instantly, only the DECISION is sticky.
+        var lateral = vote.Lateral;
+        if (vote.DominantThreatId != 0)
+        {
+            var committed = self.Steering.Side != 0
+                && self.Steering.SideThreatId == vote.DominantThreatId
+                && now < self.Steering.HoldUntil;
+            if (committed)
+                lateral = Mathf.Abs(lateral) * self.Steering.Side;
+            else
+                self.Steering.Side = (sbyte)(lateral >= 0f ? 1 : -1);
+            self.Steering.SideThreatId = vote.DominantThreatId;
+            self.Steering.HoldUntil = now + SideCommitSeconds;   // refresh while the encounter lasts
+        }
+        var avoid = right * lateral;
+
         var sepPush = SeparationForce(self, neighbours, groupSpacing);
         var sepBias = sepPush.sqrMagnitude > 1e-6f
             ? sepPush.normalized * Mathf.Min(1f, sepPush.magnitude / Mathf.Max(0.01f, self.Radius))
@@ -581,6 +908,16 @@ public static class MonsterSteeringController
             && alignBias.sqrMagnitude < 1e-6f && cohesionBias.sqrMagnitude < 1e-6f
             ? fwd
             : (fwd + avoid * 1.2f + sepBias * 0.8f + alignBias * AlignmentWeight + cohesionBias * CohesionWeight).normalized;
+
+        // 2026-08 root-cause pass -- THE anti-circling step. Everything
+        // above keeps its original weights and its full influence; this
+        // only refuses to let their SUM turn the unit so far off its goal
+        // that it stops making progress at all. Without it, three
+        // neighbours' worth of purely-lateral avoidance deflects the
+        // heading past 90 degrees and the unit orbits its own goal
+        // forever, which is precisely the reported bug. See ClampToCone /
+        // MaxDeflection.
+        dir = ClampToCone(dir, fwd);
 
         // speed modulation (docs/25 Phase C): alignment between the chosen
         // heading and the original seek direction is a cheap, principled
@@ -599,8 +936,19 @@ public static class MonsterSteeringController
         // forward progress. See GiveWaySpeedScale's own header for why
         // this exists alongside, rather than replacing, the tie-break
         // already in PredictiveAvoidance.
-        speedScale = Mathf.Min(speedScale, GiveWaySpeedScale(self, fwd, neighbours));
+        //
+        // 2026-08: skipped entirely while pushing through -- a unit the
+        // deadlock layer has explicitly told to force the issue must not
+        // simultaneously be throttled to 15% speed by the very standoff
+        // it was sent to break.
+        if (!pushingThrough)
+            speedScale = Mathf.Min(speedScale, GiveWaySpeedScale(self, fwd, neighbours));
 
-        return new SteeringResult { Direction = dir, SpeedScale = speedScale };
+        // "was anyone actually in my way this frame" -- read straight off
+        // the two terms that already answered that question, so this costs
+        // nothing extra. See SteeringResult.Contested.
+        var contested = vote.DominantUrgency > 0f || sepPush.sqrMagnitude > 1e-6f;
+
+        return new SteeringResult { Direction = dir, SpeedScale = speedScale, Contested = contested };
     }
 }

@@ -52,6 +52,9 @@ internal static class Program
             ConvergeOnPoint("S4 8 units -> one shared destination", 8, 1.5f),
             ConvergeOnPoint("S5 4 LARGE units -> one shared destination", 4, 5f),
             ChaseMovingTarget("S6 4 monsters chase a moving player"),
+            Crush("S7 8v8 dense head-on crush, narrow lane"),
+            ConvergeOnPoint("S7b 24 units -> one shared destination", 24, 1.5f),
+            ThroughAWall("S8 chase a player standing behind idle bodies"),
         };
 
         Console.WriteLine();
@@ -120,6 +123,37 @@ internal static class Program
         return w.Run(name);
     }
 
+    /// <summary>Eight against eight jammed into a lane barely wider than
+    /// their bodies -- the worst legitimate crowding this layer can face,
+    /// and the case where an unbounded lateral avoidance sum stacks
+    /// highest.</summary>
+    private static Result Crush(string name)
+    {
+        var w = new World();
+        for (var i = 0; i < 8; i++)
+        {
+            var lane = (i % 4 - 1.5f) * 3.5f;
+            var rank = (i / 4) * 5f;
+            w.Add(1.5f, new Vector3(-20f - rank, 0f, lane), new Vector3(20f, 0f, lane));
+            w.Add(1.5f, new Vector3(20f + rank, 0f, lane), new Vector3(-20f, 0f, lane));
+        }
+        return w.Run(name);
+    }
+
+    /// <summary>The reported exploit in its purest form: the player stands
+    /// just behind a clump of bodies the chasers have to get through. If
+    /// avoidance can out-vote seek, this is where they orbit instead of
+    /// arriving.</summary>
+    private static Result ThroughAWall(string name)
+    {
+        var w = new World();
+        for (var i = 0; i < 5; i++)   // the wall: idle bodies parked on the approach
+            w.AddIdle(1.5f, new Vector3((i - 2) * 3.2f, 0f, 0f));
+        for (var i = 0; i < 4; i++)
+            w.Add(1.5f, new Vector3((i - 1.5f) * 3.2f, 0f, -20f), new Vector3(0f, 0f, 6f));
+        return w.Run(name);
+    }
+
     // ---- the simulated world ------------------------------------------
 
     private sealed class Mover
@@ -133,6 +167,10 @@ internal static class Program
         public int ArrivedTick = -1;
         public float PathLength;        // total distance actually walked
         public float StraightLine;      // start->goal distance, for the detour ratio
+        public MonsterSteeringController.WaypointProgress Progress;
+        public bool ProgressArmed;
+        public bool Contested;
+        public Vector3 LegDir;          // direction of the leg being walked, for the overshoot test
     }
 
     private sealed class Result
@@ -154,12 +192,29 @@ internal static class Program
             u.transform.position = start;
             var straight = goal - start;
             straight.y = 0f;
-            _movers.Add(new Mover { Unit = u, Goal = goal, StraightLine = straight.magnitude });
+            _movers.Add(new Mover
+            {
+                Unit = u, Goal = goal,
+                StraightLine = straight.magnitude,
+                LegDir = straight.normalized,
+            });
         }
+
+        /// <summary>A body that just stands there -- still a full
+        /// separation/avoidance participant, never a mover.</summary>
+        public void AddIdle(float radius, Vector3 at)
+        {
+            var u = new UnitCombat { Radius = radius };
+            u.transform.position = at;
+            _idle.Add(u);
+        }
+
+        private readonly List<UnitCombat> _idle = new List<UnitCombat>();
 
         public Result Run(string name)
         {
             foreach (var m in _movers) _neighbours.Add(m.Unit);
+            foreach (var u in _idle) _neighbours.Add(u);
 
             var tick = 0;
             for (; tick < MaxTicks; tick++)
@@ -208,6 +263,7 @@ internal static class Program
             Console.WriteLine("  resolved       : " + (MovingGoal ? "n/a (moving goal)" : (resolved ? "yes @ tick " + tick : "NO -- STUCK")));
             Console.WriteLine("  worst detour   : " + worstDetour.ToString("0.00") + "x straight line");
             Console.WriteLine("  min gap        : " + _minGap.ToString("0.00") + "m (0 = bodies touching)");
+            Console.WriteLine("  max deflection : " + _maxDeflect.ToString("0.0") + " deg off the seek direction");
 
             return new Result { Name = name, Flips = flips, Resolved = MovingGoal || resolved };
         }
@@ -215,6 +271,8 @@ internal static class Program
         /// <summary>One unit's frame, in MonsterAgent.Update()'s own order.</summary>
         private bool Step(Mover m, int tick)
         {
+            if (m.Arrived && !MovingGoal) { m.Unit.LastVelocity = Vector3.zero; Separate(m); return true; }
+
             var pos = m.Unit.transform.position;
             var to = m.Goal - pos;
             to.y = 0f;
@@ -222,22 +280,49 @@ internal static class Program
 
             var arrive = _legacyArrive
                 ? LegacyGroundArriveDist
-                : ArriveDistFor(m.Unit.Radius);
+                : MonsterSteeringController.ArriveDistFor(m.Unit.Radius);
 
-            if (dist < arrive)
+            if (!m.ProgressArmed)
             {
+                MonsterSteeringController.ResetProgress(ref m.Progress);
+                m.ProgressArmed = true;
+            }
+
+            // legacy = the flat distance test FollowPath used to do; current
+            // = the shared three-rule test (arrived / overshot / contested
+            // and not closing). The goal here IS the final node, so
+            // "advance past it" means "this order is done."
+            var done = _legacyArrive
+                ? dist < arrive
+                : MonsterSteeringController.ShouldAdvanceWaypoint(ref m.Progress, pos, m.Goal,
+                    m.LegDir, arrive, m.Contested, Dt);
+
+            if (done)
+            {
+                // sticky, mirroring the real game: consuming the FINAL path
+                // node makes FollowPath return zero, which sends TickMove
+                // into GoIdle(). The order is over -- the unit does not
+                // re-seek the point it just settled at. (Separation keeps
+                // running, so the pack still spreads out around it; that's
+                // TickSettle's job in the real code.)
                 if (!m.Arrived) { m.Arrived = true; m.ArrivedTick = tick; }
                 m.Unit.LastVelocity = Vector3.zero;
                 Separate(m);
                 return true;
             }
-            m.Arrived = false;
 
             var dir = to / dist;
-            var result = MonsterSteeringController.Combine(m.Unit, dir, m.Speed, _neighbours, GroupSpacing);
+            var result = MonsterSteeringController.Combine(m.Unit, dir, m.Speed, _neighbours, GroupSpacing, tick * Dt);
+            m.Contested = result.Contested;
 
             // count left/right reversals: the sign of the steering output's
             // lateral component relative to the pure seek direction
+            // how far the blend actually deflected off the seek direction
+            // this frame -- the number that says whether ClampToCone is
+            // doing anything or is dead weight
+            var deflect = (float)(Math.Acos(Mathf.Clamp(Vector3.Dot(result.Direction, dir), -1f, 1f)) * 180.0 / Math.PI);
+            if (deflect > _maxDeflect) _maxDeflect = deflect;
+
             var right = new Vector3(dir.z, 0f, -dir.x);
             var lateral = Vector3.Dot(result.Direction, right);
             if (Mathf.Abs(lateral) > 0.05f)
@@ -268,6 +353,7 @@ internal static class Program
         }
 
         private float _minGap = float.MaxValue;
+        private float _maxDeflect;
 
         /// <summary>Closest any two bodies' surfaces came, over the whole
         /// run -- the guard that a steering change didn't buy smoothness by

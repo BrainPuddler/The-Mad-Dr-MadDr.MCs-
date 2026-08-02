@@ -38,13 +38,32 @@ using UnityEngine;
 public sealed class DeadlockManager
 {
     public const float StallWindow = 2.5f;      // T: how long with < ProgressEpsilon progress counts as "stalled"
-    public const float ProgressEpsilon = 1f;    // meters of movement since the last poll that counts as "making progress"
+    public const float ProgressEpsilon = 1f;    // meters of PROGRESS TOWARD THE GOAL since the last poll that counts
     public const float YieldDuration = 3f;      // how long a granted sidestep target holds before a blocker resumes its own order
     public const float YieldRadius = 6f;        // how close to the stalled unit a neighbour has to be to be asked to yield
 
+    /// <summary>2026-08: how long a unit detected as deadlocked stops
+    /// negotiating and just drives its heading through the jam
+    /// (UnitCombat.PushThroughUntil). Long enough to actually clear a
+    /// body, short enough that the pushy behaviour is a blip rather than
+    /// a personality. Hard separation still runs throughout, so this
+    /// never means walking through anyone.</summary>
+    public const float PushThroughDuration = 1.5f;
+
     private sealed class Track
     {
-        public Vector3 LastCheckedPosition;
+        // 2026-08 root-cause pass: this used to be LastCheckedPosition and
+        // stall was "did the unit MOVE at least ProgressEpsilon." That test
+        // is structurally blind to the exact failure it exists to catch: a
+        // circling unit moves flat out. It covers metres every poll and
+        // reads as perfectly healthy, so the escalation that was supposed
+        // to rescue a stuck group could never fire on the one symptom the
+        // creator kept reporting. What matters is not distance travelled
+        // but distance CLOSED -- so the baseline is now the unit's own
+        // remaining distance to its destination, and "stalled" means that
+        // number stopped falling. Walking in a perfect circle now reads as
+        // exactly what it is: zero progress.
+        public float LastDistanceToGoal;
         public bool HasBaseline;
         public float StalledFor;
     }
@@ -103,25 +122,30 @@ public sealed class DeadlockManager
                 _tracks[m] = track;
             }
 
-            if (!m.WantsToMove)
+            var goal = m.MoveGoalWorld;
+            if (!m.WantsToMove || !goal.HasValue)
             {
                 track.HasBaseline = false;
                 track.StalledFor = 0f;
                 continue;
             }
 
-            var pos = m.transform.position;
+            var toGoal = goal.Value - m.transform.position;
+            toGoal.y = 0f;
+            var distance = toGoal.magnitude;
             if (!track.HasBaseline)
             {
-                track.LastCheckedPosition = pos;
+                track.LastDistanceToGoal = distance;
                 track.HasBaseline = true;
                 track.StalledFor = 0f;
                 continue;
             }
 
-            var moved = (pos - track.LastCheckedPosition).magnitude;
-            track.LastCheckedPosition = pos;
-            if (!IsNowStalled(ref track.StalledFor, moved, pollInterval)) continue;
+            // progress is how much CLOSER we got, not how far we walked --
+            // negative (moved further away) counts as no progress at all
+            var closed = track.LastDistanceToGoal - distance;
+            track.LastDistanceToGoal = distance;
+            if (!IsNowStalled(ref track.StalledFor, closed, pollInterval)) continue;
 
             // first stalled unit found from THIS poll's rotated start wins
             // the grant; the loop keeps going (not breaking) so every
@@ -140,10 +164,16 @@ public sealed class DeadlockManager
     /// the running accumulator (mutated in place, same field `Poll` uses on
     /// its `Track`); returns true (and resets the accumulator) exactly once
     /// the window closes, so a caller sees one grant per stall, not one per
-    /// poll tick for as long as the unit stays stuck.</summary>
-    public static bool IsNowStalled(ref float stalledFor, float movedSinceLastCheck, float pollInterval)
+    /// poll tick for as long as the unit stays stuck.
+    ///
+    /// 2026-08: `closedSinceLastCheck` is now distance CLOSED toward the
+    /// goal (was: distance moved). A negative value -- the unit ended the
+    /// poll further from its goal than it started, which is what half of
+    /// every orbit looks like -- simply fails the threshold and counts as
+    /// no progress, so the arithmetic needed no other change.</summary>
+    public static bool IsNowStalled(ref float stalledFor, float closedSinceLastCheck, float pollInterval)
     {
-        if (movedSinceLastCheck >= ProgressEpsilon) { stalledFor = 0f; return false; }
+        if (closedSinceLastCheck >= ProgressEpsilon) { stalledFor = 0f; return false; }
         stalledFor += pollInterval;
         if (stalledFor < StallWindow) return false;
         stalledFor = 0f;
@@ -157,6 +187,22 @@ public sealed class DeadlockManager
     private static void GrantYields(MonsterAgent stalled, List<MonsterAgent> monsters, float now, IHexObstacleQuery hexQuery)
     {
         var pos = stalled.transform.position;
+
+        // 2026-08: the stalled unit also stops negotiating for a moment.
+        // This class's header notes it deliberately never moved the stalled
+        // unit itself, on the reasoning that asking its blockers to give
+        // ground is enough. For a corridor jam it is. For the reported
+        // symmetric standoff it isn't, and can't be: both units are running
+        // the same avoidance against each other, so whatever ground one
+        // gives, the other's own avoidance immediately answers -- the
+        // symmetry survives every polite solution. Suspending ONE unit's
+        // soft avoidance breaks the symmetry outright, which is the whole
+        // point ("if avoidance fails, resolve the deadlock instead of
+        // oscillating forever"). Only the soft layer is suspended;
+        // ApplySeparation still runs, so nobody walks through anybody.
+        var stalledFighter = stalled.Fighter;
+        if (stalledFighter != null) stalledFighter.PushThroughUntil = now + PushThroughDuration;
+
         foreach (var blocker in monsters)
         {
             if (blocker == null || blocker == stalled) continue;

@@ -57,6 +57,9 @@ namespace UnityEngine
         public static float Clamp(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
         public static float Clamp01(float v) { return Clamp(v, 0f, 1f); }
         public static float Lerp(float a, float b, float t) { return a + (b - a) * Clamp01(t); }
+        public static float Cos(float r) { return (float)Math.Cos(r); }
+        public static float Sin(float r) { return (float)Math.Sin(r); }
+        public const float Deg2Rad = (float)(Math.PI / 180.0);
     }
 }
 
@@ -75,6 +78,11 @@ public sealed class UnitCombat
     public UnityEngine.Vector3 LastVelocity;
     public bool Alive = true;
     public readonly FakeTransform transform = new FakeTransform();
+
+    // mirror the real UnitCombat's steering state (see
+    // MonsterSteeringController.SteeringMemory / UnitCombat.PushThroughUntil)
+    public MonsterSteeringController.SteeringMemory Steering;
+    public float PushThroughUntil;
 
     public int GetInstanceID() { return _id; }
 }

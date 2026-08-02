@@ -120,6 +120,30 @@ public class MonsterAgent : MonoBehaviour
     private int _pathIndex;
     private int _pathCityVersion = -1;
     private HexCoord _pathGoalHex;
+
+    // 2026-08 root-cause pass: how close this unit has managed to get to
+    // the node it is currently seeking, and for how long it has failed to
+    // improve on that while blocked. Drives FollowPath's contested-node
+    // escape -- see MonsterSteeringController.ShouldAdvanceWaypoint.
+    private MonsterSteeringController.WaypointProgress _waypointProgress;
+
+    // 2026-08: fractions of weapon range at which a unit starts shooting
+    // and at which it gives up and closes again. TWO values, deliberately
+    // apart, so the decision has hysteresis -- see TickAttackUnit.
+    private const float EngageRange = 0.9f;
+    private const float BreakOffRange = 1f;
+
+    // true while holding position and shooting, false while closing. Only
+    // the transition between them matters (it's what throws away the path
+    // and runs a fresh A*), which is exactly what the two ranges above
+    // stop from happening every frame.
+    private bool _engaged;
+
+    // last frame's "was another unit actually in my way" answer, from
+    // Combine. Read by the waypoint test on the FOLLOWING frame, which is
+    // fine (a jam lasts far longer than a frame) and keeps this free of
+    // any extra neighbour query.
+    private bool _steerContested;
     private float _attackCooldown;
     private Transform _selectionRing;
 
@@ -274,6 +298,24 @@ public class MonsterAgent : MonoBehaviour
     /// none of those are "stuck," they're doing exactly what they mean to
     /// do.</summary>
     public bool WantsToMove { get { return _path != null && !_flying; } }
+
+    /// <summary>2026-08: where this unit is actually trying to end up --
+    /// the LAST node of its current path, or null when it isn't pathing.
+    /// Exposed for DeadlockManager, whose stall test now measures distance
+    /// CLOSED toward this point rather than distance travelled (a circling
+    /// unit travels plenty and closes nothing -- see that class's `Track`).
+    /// The final node rather than `_pathGoalHex` so this reads the same
+    /// world-space units the caller compares against, and so it stays
+    /// correct for the building-approach paths whose real endpoint
+    /// FindPathToBuilding picks rather than the caller.</summary>
+    public Vector3? MoveGoalWorld
+    {
+        get
+        {
+            if (_path == null || _path.Count == 0) return null;
+            return _path[_path.Count - 1];
+        }
+    }
 
     /// <summary>Standing (not flying) on an elevated surface -- a rooftop
     /// perch. Perched units hold their roost (no auto-engage) and any new
@@ -613,6 +655,7 @@ public class MonsterAgent : MonoBehaviour
         _targetSpecialAttackUnit = null;
         _attackMoveDestination = null;  // any fresh order cancels a pending attack-move/patrol
         _isPatrolling = false;
+        _engaged = false;   // a fresh order means a fresh engagement decision (TickAttackUnit)
         // 2026-07: any fresh order also ends the post-clone "resting on
         // the roof, slowly spinning" display beat -- same "any fresh
         // order cancels a pending X" law every other field here follows.
@@ -1656,8 +1699,27 @@ public class MonsterAgent : MonoBehaviour
         to.y = 0f;
         var dist = to.magnitude;
 
-        if (dist <= (float)w.Range * 0.9f)
+        // 2026-08: engagement hysteresis. This used to be one bare test
+        // against `Range * 0.9`, with `_path = null` on the near side and a
+        // fresh `ComputePath` on the far side -- so a target sitting near
+        // that exact distance (and every target does, since that IS the
+        // distance this unit drives itself to) flipped the unit between
+        // "stand and shoot" and "throw away the path, run a fresh A*" on
+        // ALTERNATE FRAMES. Visible as a monster jittering on the spot
+        // next to its target, and expensive: ComputePath runs A*, and its
+        // DecideFlight can run a second one, per unit per frame.
+        //
+        // Now there are two distances, not one: close to `EngageRange` to
+        // start shooting, and only break off once past `BreakOffRange`.
+        // The gap between them is wider than any frame-to-frame jostling,
+        // so the decision can't chatter. Firing up to full `Range` while
+        // engaged is safe -- UnitCombat.TryFire does its own InRange check,
+        // so the weapon still governs what actually connects.
+        var engageDist = (float)w.Range * EngageRange;
+        var breakDist = (float)w.Range * BreakOffRange;
+        if (dist <= (_engaged ? breakDist : engageDist))
         {
+            _engaged = true;
             _path = null;
             var dir = dist > 0.01f ? to / dist : transform.forward;
             transform.rotation = Quaternion.Slerp(transform.rotation,
@@ -1665,6 +1727,8 @@ public class MonsterAgent : MonoBehaviour
             _fighter.TryFire(_targetUnit, Muzzle());
             return Vector3.zero;
         }
+
+        _engaged = false;   // outside the break-off distance: back to chasing
 
         // close in -- re-path when the target drifts a hex from where we
         // were headed (a rolling tank), the same trick as chasing a citizen
@@ -1988,7 +2052,14 @@ public class MonsterAgent : MonoBehaviour
     // creator direction, 2026-07: "turns are too sharp, they should be
     // more arcs." Ground creatures keep the tight/snappy original values;
     // this is purely a flight-feel change.
-    private const float GroundArriveDist = 0.6f;
+    // 2026-08: the ground arrive distance moved to
+    // MonsterSteeringController.ArriveDistFor -- it has to scale with the
+    // body (a flat 0.6m is smaller than a monster's own radius, which is
+    // what made contested path nodes unreachable and produced the
+    // circling), and both MonsterAgent and Tools~/SteerVerify need to
+    // agree on one definition of it. Flight keeps its own constant: an
+    // airborne unit has no ground crowd to be blocked by, so none of that
+    // applies to it.
     private const float FlightArriveDist = 8f;     // well under a hex (20m) so it never cuts through a corner obstacle
     private const float GroundTurnRate = 5f;
     private const float FlightTurnRate = 1.8f;
@@ -2002,16 +2073,55 @@ public class MonsterAgent : MonoBehaviour
             return Vector3.zero;
         }
 
+        // 2026-08 root-cause pass (creator: "circling is still happening").
+        // This arrival test used to be a single `dist < 0.6f`, and it was
+        // the single biggest cause of the reported circling -- see
+        // MonsterSteeringController's `ShouldAdvanceWaypoint` comment block
+        // for the full mechanism. Short version: separation holds bodies
+        // `myRadius + theirRadius + groupSpacing` apart (4m for default
+        // monsters, 11m for big ones), so a node with another unit standing
+        // on it can NEVER be approached within 60cm. The unit was seeking a
+        // target it was physically forbidden from reaching, `_pathIndex`
+        // never advanced, and it orbited that node until something else
+        // moved. Bigger monster, bigger exclusion zone, more unreachable
+        // nodes -- which is exactly the size dependence that was reported.
+        //
+        // The replacement consumes a node on arrival (now body-scaled),
+        // on overshoot, or after a second of being blocked by another unit
+        // while not getting closer. A loop rather than the old recursion:
+        // several nodes can legitimately be consumed in one frame after a
+        // shove, and this keeps that bounded and stack-free.
+        //
+        // Scoped to GROUND units on purpose. A flyer has no ground crowd to
+        // be blocked by, already carves through its nodes on an 8m arrive
+        // radius, and routes around buildings by altitude tier -- none of
+        // the problem being fixed here exists for it, so it keeps exactly
+        // its old behaviour (plain distance test, no overshoot skip, no
+        // contested escape) rather than inheriting a change it never needed.
+        var ground = !_flying;
+        var arriveDist = ground
+            ? MonsterSteeringController.ArriveDistFor(_fighter != null ? _fighter.Radius : 1.5f)
+            : FlightArriveDist;
+        while (_pathIndex < _path.Count
+               && MonsterSteeringController.ShouldAdvanceWaypoint(ref _waypointProgress,
+                   transform.position, _path[_pathIndex],
+                   ground ? LegDirection() : Vector3.zero, arriveDist,
+                   ground && _steerContested, dt))
+        {
+            _pathIndex++;
+        }
+        if (_pathIndex >= _path.Count)
+        {
+            _path = null;
+            _pathIndex = 0;
+            return Vector3.zero;
+        }
+
         var target = _path[_pathIndex];
         var to = target - transform.position;
         to.y = 0f;
         var dist = to.magnitude;
-        var arriveDist = _flying ? FlightArriveDist : GroundArriveDist;
-        if (dist < arriveDist)
-        {
-            _pathIndex++;
-            return FollowPath(dt, speed);
-        }
+        if (dist < 1e-4f) return Vector3.zero;
 
         var dir = to / dist;
         // docs/25 Phase B/C: SteerFollowPath blends seek against a softened
@@ -2031,6 +2141,16 @@ public class MonsterAgent : MonoBehaviour
             var result = _builder.SteerFollowPath(_fighter, dir, speed);
             steer = result.Direction;
             speedScale = result.SpeedScale;
+            // 2026-08: remembered for NEXT frame's waypoint test. "I'm not
+            // getting closer" only means a jam if somebody is actually in
+            // the way -- without this the same test would also fire while
+            // legitimately chasing a target that is outrunning us, and the
+            // unit would abandon the chase. See ShouldAdvanceWaypoint.
+            _steerContested = result.Contested;
+        }
+        else
+        {
+            _steerContested = false;   // airborne: no ground crowd to be blocked by
         }
         var turnRate = _flying ? FlightTurnRate : GroundTurnRate;
         transform.rotation = Quaternion.Slerp(transform.rotation,
@@ -2167,10 +2287,28 @@ public class MonsterAgent : MonoBehaviour
         return ToWorldPath(hexPath);
     }
 
+    /// <summary>The direction the leg currently being walked runs in --
+    /// previous node to current node. Used only by FollowPath's overshoot
+    /// test ("is this node now BEHIND me?"); returns zero on the first node
+    /// of a path, where there is no previous node to measure from and the
+    /// overshoot test correctly does nothing.</summary>
+    private Vector3 LegDirection()
+    {
+        if (_path == null || _pathIndex <= 0 || _pathIndex >= _path.Count) return Vector3.zero;
+        var leg = _path[_pathIndex] - _path[_pathIndex - 1];
+        leg.y = 0f;
+        return leg.sqrMagnitude < 1e-6f ? Vector3.zero : leg.normalized;
+    }
+
     private List<Vector3> ToWorldPath(List<HexCoord> hexPath)
     {
         if (hexPath == null) return null;
         _pathIndex = 0;
+        // a fresh path means a fresh node to measure progress against --
+        // otherwise the new node inherits the old one's "closest ever" and
+        // reads as instantly stalled
+        MonsterSteeringController.ResetProgress(ref _waypointProgress);
+        _steerContested = false;   // don't let a stale jam flag from a previous order age into this one
         _pathCityVersion = _builder.CityVersion;
         var world = new List<Vector3>(hexPath.Count);
         foreach (var hex in hexPath) world.Add(_builder.WorldOf(hex));
