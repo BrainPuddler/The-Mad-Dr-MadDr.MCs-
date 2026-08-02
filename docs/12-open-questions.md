@@ -9264,3 +9264,49 @@ completion). Full `MatchCore.Tests.csproj` suite passes (279/279, up
 from 278 -- the new test is the only addition). `Tools~/DetHarness`
 reconfirms 10k-tick 8-player and 3k-tick 100-unit determinism unchanged
 after adding a new per-tick income gate.
+
+## 2026-08 follow-up: a delivered harvester now heads back to the patch it was working, not wherever's nearest the Factory
+
+Creator direction: "Once the harvesting units dump their resources in
+the factory they should return to where they were collecting to see
+if there are any more humans."
+
+**What was actually happening.** `MonsterAgent.AcquireTarget`'s forage
+fallback already had a real "go searching for more" behavior (a prior
+pass's own fix for "monsters don't go back to searching after they
+deliver") -- but the search itself was always centered on `transform.
+position`, i.e. wherever the unit currently stands. Right after a
+delivery, that's the Factory, which is very often nowhere near the
+citizens this unit had actually been eating. `NearestCitizenTo`
+searches essentially the whole map already (`ForageRangeMeters` =
+100000m), so the search never came up empty -- it just picked whatever
+was nearest the FACTORY, which could send a harvester clear across the
+map to a totally different neighbourhood from the one it had just
+walked all the way back from, even if its old patch still had
+citizens left in it.
+
+**The fix.** New `MonsterAgent._lastForagePos`: a remembered world
+position, set every time `OrderEat` fires (self-issued by
+`AcquireTarget`'s own fallback, or player-issued via
+`WaypointCommander`) to that citizen's position -- a stand-in for "the
+patch this unit is working," with no real notion of citizen clusters
+needed. The forage fallback's `NearestCitizenTo` call now searches
+from `_lastForagePos ?? transform.position` instead of always
+`transform.position`. Net effect: after banking a load, the very next
+search is centered on wherever this unit was last actually eating, so
+it naturally walks back to that same neighbourhood first and only
+drifts to a new one once that patch is genuinely out of citizens
+(`_lastForagePos` keeps updating to the latest kill, so it tracks the
+unit's own current patch as it works through it, converging correctly
+either way). No behavior change to the ordinary "still out foraging,
+haven't returned yet" case -- current position and `_lastForagePos`
+are nearly identical then, since it just walked to and ate whatever it
+last targeted.
+
+**Verified for real:** flightcheck recompiles `MonsterAgent.cs` clean
+against the real match-core/citygen-core DLLs. No Unity Editor here to
+watch a harvester actually walk back to its old patch on screen --
+same standing limit as every other Unity-side behavior change in this
+project's history; the fix is a small, targeted change to an existing,
+already-tested code path (only the search's ORIGIN point changed, not
+its logic), not a new untested mechanic.

@@ -158,6 +158,17 @@ public class MonsterAgent : MonoBehaviour
     private float _carriedBrains;
     private HexCoord _homeHex;         // spawn = this harvester's fallback unload point (a Vat stand-in) when no Factory exists
 
+    /// <summary>2026-08 (creator direction: "once the harvesting units
+    /// dump their resources in the factory they should return to where
+    /// they were collecting to see if there are any more humans"):
+    /// world position of the last citizen this unit was ordered to eat
+    /// (set in <see cref="OrderEat"/>, whether self-issued by <see
+    /// cref="AcquireTarget"/> or player-issued via WaypointCommander) --
+    /// stands in for "the patch it was working" without needing a real
+    /// notion of citizen clusters. Null until this unit's first eat
+    /// order ever.</summary>
+    private Vector3? _lastForagePos;
+
     /// <summary>Sum of every carried resource lane, gated to `_harvest.
     /// Capacity` -- the single "how full is the onboard tank" figure
     /// every distance/speed/full-tank check already reasoned about
@@ -497,6 +508,7 @@ public class MonsterAgent : MonoBehaviour
         _path = null;
         _targetCitizen = citizen;
         _order = OrderKind.EatCitizen;
+        if (citizen != null) _lastForagePos = citizen.transform.position;
     }
 
     /// <summary>Target an enemy unit (a tank): close to weapon range, then
@@ -1232,6 +1244,21 @@ public class MonsterAgent : MonoBehaviour
         // stand there") -- covers both "nothing worth chasing nearby"
         // and the rare late-match case where no citizens remain
         // anywhere at all.
+        //
+        // 2026-08 follow-up (creator direction: "once the harvesting
+        // units dump their resources in the factory they should return
+        // to where they were collecting to see if there are any more
+        // humans"): the search is centered on `_lastForagePos` (the last
+        // citizen this unit was sent after) instead of its OWN current
+        // position -- right after a delivery, current position IS the
+        // Factory, which searching from directly would just pick
+        // whatever's nearest THAT (often a completely different part of
+        // the map from wherever this unit had actually been working).
+        // Centering on the old patch means it heads back there first if
+        // anyone's left, and only drifts to a new patch once that one's
+        // genuinely empty -- ForageRangeMeters is already effectively
+        // the whole map, so nothing is lost when it IS empty, this only
+        // changes WHICH otherwise-equally-valid citizen wins the search.
         if (_builder != null)
         {
             var isForagingHarvester = _harvest != null && _harvest.Capacity > 0.01f;
@@ -1239,7 +1266,8 @@ public class MonsterAgent : MonoBehaviour
             {
                 var fillFraction = TotalCarriedLoad / (float)_harvest.Capacity;
                 var searchRadius = fillFraction >= PartialLoadReturnFraction ? AggroRangeMeters : ForageRangeMeters;
-                var citizen = _builder.NearestCitizenTo(transform.position, searchRadius);
+                var searchOrigin = _lastForagePos ?? transform.position;
+                var citizen = _builder.NearestCitizenTo(searchOrigin, searchRadius);
                 if (citizen != null) { OrderEat(citizen); return; }
 
                 if (TotalCarriedLoad > 0.01f)
