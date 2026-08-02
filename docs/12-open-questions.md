@@ -9620,3 +9620,33 @@ browser-specific (`shiftKey`/`ctrlKey`/`metaKey` are baseline DOM
 universally supported), so there's no known reason it would behave
 differently there, but that's an engineering argument, not the same
 kind of proof the Chromium run provides.
+
+## 2026-08 follow-up: FIX -- the Lab's battalion hotkey moves off G, onto B ("G key is grab use B key for Battalion")
+
+Creator direction: "G key is grab use B key for Battalion."
+
+**Root cause.** `G` is already the in-game grab-mode hotkey
+(`GrabCursor.cs`, unchanged, unrelated to this file) -- the Lab's own
+Stable-view "name and save the staged battalion" shortcut had also
+landed on `G` (a separate, independent choice made when that feature
+was first built, since the Lab and the game are two different
+applications with no shared keymap to collide against at the time).
+Once both existed side by side, `G` meant two different things
+depending on which screen you were looking at -- exactly the kind of
+mnemonic collision the earlier `Ctrl`/`Alt`-for-battalion decision in
+the IN-game half of this same system was made specifically to avoid
+(see this log's own entry on that).
+
+**Fix.** The Lab's `keydown` listener now checks `e.key === "b" ||
+"B"` instead of `"g"`/`"G"` -- `G` no longer does anything in the
+Stable view. Every place the shortcut is surfaced to the player
+(`.battalion-hint`'s live text, the bottom-of-screen tutorial strip)
+updated to say `B` instead.
+
+**Verified for real:** a Playwright-driven Chromium session (same
+harness as the previous entry) staged a battalion selection, pressed
+`g` and confirmed NO save prompt opened, then pressed `b` and
+confirmed one did. Both assertions passed. Same Chromium-only honest
+limit as the previous entry -- the rebind itself is a two-character
+diff plus matching text, not a new mechanism, so the risk profile here
+is low regardless.

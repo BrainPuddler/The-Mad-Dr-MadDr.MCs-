@@ -1371,12 +1371,12 @@ function renderBattalionsPanel() {
   const panel = document.getElementById("stable-battalions");
   if (!panel) return;
   const pickedNote = battalionSelection.size > 0
-    ? `<div class="battalion-hint">${battalionSelection.size} selected — tap <strong>Done</strong> (or press <kbd>G</kbd>) to name &amp; save as a battalion</div>`
+    ? `<div class="battalion-hint">${battalionSelection.size} selected — tap <strong>Done</strong> (or press <kbd>B</kbd>) to name &amp; save as a battalion</div>`
     : `<div class="battalion-hint">Shift-click, ctrl/cmd-click, or turn on <strong>Battalion+</strong> and tap monsters above, then save as a named battalion. A Factory in-game can build whichever one you pick.</div>`;
   // 2026-08 follow-up: the Battalion+/Done toolbar -- Battalion+ is the
   // touch-friendly stand-in for holding shift/ctrl (see
   // toggleBattalionPickMode's own doc); Done is just doNameAndSaveBattalion
-  // with a button instead of the G hotkey, disabled until there's
+  // with a button instead of the B hotkey, disabled until there's
   // something to save.
   const toolbar = `
     <div class="battalion-toolbar">
@@ -1403,8 +1403,12 @@ function renderBattalionsPanel() {
 
 document.addEventListener("keydown", (e) => {
   if (local.view !== "stable") return;
-  if (e.key !== "g" && e.key !== "G") return;
-  // don't hijack G while the player is typing into a text field
+  // 2026-08 (creator direction: "G key is grab use B key for
+  // Battalion"): G is already the in-game grab-mode hotkey
+  // (GrabCursor.cs) -- B for Battalion keeps the mnemonic distinct
+  // instead of overloading G across the Lab and the game.
+  if (e.key !== "b" && e.key !== "B") return;
+  // don't hijack B while the player is typing into a text field
   if (document.activeElement && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
   doNameAndSaveBattalion();
 });
