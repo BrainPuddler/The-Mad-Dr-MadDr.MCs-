@@ -9802,3 +9802,61 @@ reads as visible smoke on screen -- same standing limit as every other
 Unity-side visual change in this project's history; this fix is a
 best-effort scale/contrast pass based on the building-size math, not a
 guarantee it's now unmissable at every zoom level.
+
+## 2026-08 follow-up: FIX -- fire was too large, plus a real low-poly faceted shard replacing the round sphere puffs
+
+Creator report: "the fire is too large. it should look like [reference:
+small, angular, faceted low-poly flame art]" -- two reference images,
+both small stylized geometric flame shards, not round glowing blobs.
+
+**What was actually wrong.** The multi-point cluster + glow fix (the
+entry above this one) made fire visible and correctly wired, but never
+addressed size or shape -- it inherited the original `AttachFire`'s
+puff geometry unchanged: a `PrimitiveType.Sphere`, which is smooth and
+round no matter how small it's scaled, plus a 6m-range/2.5-intensity
+point `Light` throwing a glow bigger than the flame it was meant to
+light. A shrunk sphere is still a shrunk sphere -- it was never going
+to read as "low-poly" the way the reference images do, so this needed
+an actual shape change, not just smaller numbers on the existing one.
+
+**The fix.**
+
+- New `ProceduralMeshKit.FlameShard(segments, seed)`: a small jagged
+  shard mesh, hand-authored the same way that file's existing
+  `Frustum`/`Wedge` already are (explicit vertex/triangle lists,
+  `FaceOutward` winding fix-up, `RecalculateNormals`) -- an irregular
+  low-poly base ring (per-vertex radius jitter, deterministic off
+  `seed` via a GLSL-style sine hash) tapering to an off-center apex,
+  where the off-center bend is what reads as a "licking" flame lean
+  instead of a symmetric party-hat cone. `FirePlume.SpawnPuff` now
+  builds a `MeshFilter`/`MeshRenderer` GameObject from this instead of
+  `GameObject.CreatePrimitive(PrimitiveType.Sphere)`.
+- Puff footprint shrunk to roughly a third of the old sphere's size
+  (spawn scale 0.28, vs. the old sphere's 0.55 with the shared 0.8
+  puff-growth floor every puff kind used to share).
+- New `SmokePuff._baseScale` field: every existing puff kind (smoke,
+  dust, water, muzzle) keeps the original hardcoded 0.8 floor exactly
+  as before via their existing `Init`/`InitBurst`/`InitPlume`/`InitJet`
+  calls -- only `InitFlame` now takes an explicit `baseScale` argument
+  (0.32) and overrides it. This is deliberately NOT a shared global
+  shrink: reusing the old 0.8 constant across all puff kinds would have
+  also shrunk the smoke-visibility fix that shipped immediately before
+  this one, undoing it as a side effect.
+- `FirePlume`'s point `Light` shrunk to match: range 6->3, base
+  intensity 2.5->1.1 (flicker peak scaled down to match), so the glow
+  reads as a small contained flame's light instead of a bonfire's.
+
+**Verified for real.** A standalone console harness
+(`flameshard-verify`, same UnityStub-backed pattern as every other
+flightcheck verify folder) instantiates `FlameShard` across 20 different
+seeds and checks: no zero-length (cancelled) normals -- the exact
+double-winding regression `ProceduralMeshKit`'s own header comment
+warns about, and the actual mechanism this codebase caught it by before
+-- all vertices finite and within a sane bound (catches an
+exploding/NaN mesh), and the topology matches what a 5-segment shard
+should produce exactly (10 triangles, 7 vertices: 5 ring + base-center
++ apex). All 20 seeds x 5 checks passed. Flightcheck recompiles the
+full edited set (`DamageFx.cs`, `ProceduralMeshKit.cs`) clean. No Unity
+Editor here to confirm the shard actually reads as "low-poly" the way
+the reference images do on a real screen -- same standing limit as
+every other Unity-side visual change in this project's history.

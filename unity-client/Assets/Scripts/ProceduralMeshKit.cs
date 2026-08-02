@@ -107,6 +107,63 @@ public static class ProceduralMeshKit
         return mesh;
     }
 
+    /// <summary>Deterministic 0..1 hash off two float seeds -- the classic
+    /// GLSL sine-hash trick. Cosmetic jitter only (facet irregularity),
+    /// no gameplay meaning riding on it, same "GetInstanceID/seed hashing
+    /// is fine for pure visual variety" precedent the rest of this
+    /// codebase's dressers already use.</summary>
+    private static float Hash01(float seedA, float seedB)
+    {
+        var s = Mathf.Sin(seedA * 12.9898f + seedB * 78.233f) * 43758.5453f;
+        return s - Mathf.Floor(s);
+    }
+
+    /// <summary>2026-08 (creator report: "the fire is too large... it
+    /// should look like [reference: low-poly, faceted, angular fire]"):
+    /// a small jagged shard tapering from an irregular low-poly base ring
+    /// to an off-center apex -- the off-center tip is what reads as a
+    /// "licking" flame lean instead of a symmetric party-hat cone, and
+    /// the jittered ring radii (deterministic off `seed`, same building-
+    /// to-building/puff-to-puff variety convention as every other jitter
+    /// in this file) give it the angular, faceted silhouette the
+    /// reference images show instead of DamageFx's previous smooth
+    /// sphere puffs. Centered at local origin, extends -0.5..0.5 in Y,
+    /// same calling convention as <see cref="Frustum"/>.</summary>
+    public static Mesh FlameShard(int segments, float seed)
+    {
+        var verts = new List<Vector3>();
+        var tris = new List<int>();
+        var baseRing = new int[segments];
+        for (var i = 0; i < segments; i++)
+        {
+            var a = i / (float)segments * 2f * Mathf.PI;
+            var jitter = 0.7f + Hash01(seed, i * 7.13f) * 0.6f; // 0.7-1.3
+            var r = 0.5f * jitter;
+            baseRing[i] = verts.Count;
+            verts.Add(new Vector3(Mathf.Sin(a) * r, -0.5f, Mathf.Cos(a) * r));
+        }
+        var baseCenter = verts.Count; verts.Add(new Vector3(0f, -0.5f, 0f));
+        var bendX = (Hash01(seed, 97f) - 0.5f) * 0.5f;
+        var bendZ = (Hash01(seed, 191f) - 0.5f) * 0.5f;
+        var apex = verts.Count; verts.Add(new Vector3(bendX, 0.5f, bendZ));
+
+        for (var i = 0; i < segments; i++)
+        {
+            var next = (i + 1) % segments;
+            Tri(tris, baseRing[i], apex, baseRing[next]);
+            Tri(tris, baseCenter, baseRing[next], baseRing[i]);
+        }
+
+        FaceOutward(verts, tris);
+
+        var mesh = new Mesh();
+        mesh.vertices = verts.ToArray();
+        mesh.triangles = tris.ToArray();
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
     /// <summary>A lean-to awning wedge -- centered at local origin,
     /// extends -0.5..0.5 on every axis. Flat bottom and back, sloping
     /// from the back-top edge down to the front-bottom edge (local +Z is

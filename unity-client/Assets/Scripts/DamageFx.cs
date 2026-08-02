@@ -271,8 +271,12 @@ public class FirePlume : MonoBehaviour
         _glow = gameObject.AddComponent<Light>();
         _glow.type = LightType.Point;
         _glow.color = new Color(1f, 0.55f, 0.15f);
-        _glow.range = 6f;
-        _glow.intensity = 2.5f;
+        // 2026-08 (creator report: "the fire is too large"): a 6m-range,
+        // 2.5-intensity point light was throwing a glow bigger than the
+        // small low-poly flame it was supposed to be lighting up.
+        // Shrunk to match a contained shard, not a bonfire.
+        _glow.range = 3f;
+        _glow.intensity = 1.1f;
         // no shadow-casting -- a handful of these across a burning
         // skyline would be a real per-frame cost for a purely cosmetic
         // beat, same "cheap is the point" reasoning every other FX class
@@ -287,7 +291,7 @@ public class FirePlume : MonoBehaviour
         // mechanical, not like fire)
         _flickerPhase += Time.deltaTime * 9f;
         var flicker = 0.7f + Mathf.Abs(Mathf.Sin(_flickerPhase) * 0.6f + Mathf.Sin(_flickerPhase * 2.3f) * 0.4f) * 0.5f;
-        _glow.intensity = 2.2f * flicker;
+        _glow.intensity = 1.0f * flicker;
 
         _timer -= Time.deltaTime;
         if (_timer > 0f) return;
@@ -295,16 +299,29 @@ public class FirePlume : MonoBehaviour
         SpawnPuff();
     }
 
+    /// <summary>2026-08 (creator report: "the fire is too large... it
+    /// should look like [reference images: small, angular, faceted low-
+    /// poly fire]"): the puff-sphere approach is gone entirely for fire --
+    /// a smooth round sphere can't read as "low-poly" no matter how small
+    /// it's scaled. Each spawn is now a <see
+    /// cref="ProceduralMeshKit.FlameShard"/>, a small jagged shard mesh,
+    /// at roughly a third of the old sphere puff's footprint.</summary>
     private void SpawnPuff()
     {
-        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        go.name = "FirePuff";
+        var go = new GameObject("FirePuff");
         go.transform.SetParent(transform, false);
         var id = go.GetInstanceID();
-        go.transform.position = transform.position + new Vector3(((id & 3) - 1.5f) * 0.15f, 0f, (((id >> 2) & 3) - 1.5f) * 0.15f);
-        go.transform.localScale = new Vector3(0.55f, 0.55f, 0.55f);
-        var collider = go.GetComponent<Collider>();
-        if (collider != null) Object.Destroy(collider);
+        go.transform.position = transform.position + new Vector3(((id & 3) - 1.5f) * 0.1f, 0f, (((id >> 2) & 3) - 1.5f) * 0.1f);
+        // this initial scale only holds for one frame -- SmokePuff.Update
+        // (below) overwrites it uniformly every frame off _baseScale, the
+        // same "explicit spawn scale is cosmetically moot" precedent
+        // SmokePlume/DustBurstFx's own spawn-time scale already sets.
+        var size = 0.28f;
+        go.transform.localScale = new Vector3(size, size, size);
+
+        var meshFilter = go.AddComponent<MeshFilter>();
+        meshFilter.sharedMesh = ProceduralMeshKit.FlameShard(5, id * 0.017f);
+        var renderer = go.AddComponent<MeshRenderer>();
 
         var mat = new Material(ShaderUtil.FindRenderableShader());
         var warm = ((id >> 4) & 3) == 0;
@@ -312,10 +329,9 @@ public class FirePlume : MonoBehaviour
         LabMeshBuilder.MakeTransparent(mat);
         mat.EnableKeyword("_EMISSION");
         mat.SetColor("_EmissionColor", (warm ? new Color(0.95f, 0.35f, 0.05f) : new Color(1f, 0.65f, 0.1f)) * 2.5f);
-        var renderer = go.GetComponent<Renderer>();
-        if (renderer != null) renderer.sharedMaterial = mat;
+        renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitFlame(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.6f, 0.9f);
+        go.AddComponent<SmokePuff>().InitFlame(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.25f, 0.9f, 0.32f);
     }
 }
 
@@ -391,6 +407,13 @@ public class SmokePuff : MonoBehaviour
     private float _growth = 2.2f;
     private float _baseAlpha = 0.75f;
 
+    // 2026-08 (creator report: "the fire is too large"): every existing
+    // puff kind (smoke/dust/water/muzzle) keeps this at 0.8, its original
+    // hardcoded floor, completely unchanged -- only InitFlame overrides
+    // it, so shrinking fire specifically can never touch the smoke fix
+    // that shipped right before this one.
+    private float _baseScale = 0.8f;
+
     // 2026-08 (creator direction: "fire like movement"): zero for every
     // existing puff kind (smoke/dust/water jet all keep their original
     // dead-straight drift, unchanged), nonzero only via InitFlame below
@@ -434,10 +457,14 @@ public class SmokePuff : MonoBehaviour
     /// <summary>Same shape as <see cref="InitBurst"/> (a fire puff is
     /// still a short-lived rising burst, not a lazy plume) but with a
     /// real side-to-side sway layered on top instead of a straight
-    /// drift -- the actual "licking flame" motion.</summary>
-    public void InitFlame(Material mat, float life, float growth, float baseAlpha)
+    /// drift -- the actual "licking flame" motion. `baseScale` overrides
+    /// the 0.8 every other puff kind uses (2026-08, "the fire is too
+    /// large") -- fire's own low-poly shard mesh is meant to read as a
+    /// small, contained flame, not a puff-sized blob.</summary>
+    public void InitFlame(Material mat, float life, float growth, float baseAlpha, float baseScale)
     {
         InitBurst(mat, life, growth, baseAlpha);
+        _baseScale = baseScale;
         _drift = new Vector3(0f, 1.1f, 0f); // faster, dead-vertical rise -- the sway supplies the sideways motion instead
         var id = GetInstanceID();
         _swayAmp = 0.5f + (id & 3) * 0.15f;
@@ -470,7 +497,7 @@ public class SmokePuff : MonoBehaviour
             // the moment it's born
             transform.position += Vector3.right * (Mathf.Sin(_swayPhase) * _swayAmp * t * Time.deltaTime * 3f);
         }
-        var scale = 0.8f + t * _growth;
+        var scale = _baseScale + t * _growth;
         transform.localScale = new Vector3(scale, scale, scale);
         if (_mat != null)
         {
