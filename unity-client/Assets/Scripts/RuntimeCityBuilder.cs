@@ -2001,10 +2001,29 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 // dressing included -- per-renderer material INSTANCES here,
                 // never a tint on the shared cached dresser materials (that
                 // would darken every building in the city at once)
+                //
+                // 2026-08 (creator report: "goes solid at about 50%
+                // destruction"): GetComponentsInChildren is a RECURSIVE
+                // sweep -- since fire/smoke now spawn as children of THIS
+                // SAME cube transform (DamageFx.AttachSmoke/AttachFireCluster
+                // both take cubes[0].transform as their holder, several
+                // entries back), whatever puffs happened to be alive at
+                // the exact instant a building crossed the Damaged
+                // threshold got their transparent, per-frame-updated
+                // material silently REPLACED by this loop's new opaque
+                // (never MakeTransparent'd), one-time, never-updated-again
+                // Material -- reading as a puff freezing solid, since the
+                // SmokePuff component's own `_mat` field goes on mutating
+                // an now-orphaned Material nothing renders anymore. Skip
+                // any renderer whose ancestor is a live FX root -- this
+                // loop was written before fire/smoke existed under this
+                // same hierarchy and was never audited against it.
                 foreach (var cube in cubes)
                 {
                     foreach (var renderer in cube.GetComponentsInChildren<Renderer>())
                     {
+                        if (renderer.GetComponentInParent<SmokePlume>() != null) continue;
+                        if (renderer.GetComponentInParent<FireCluster>() != null) continue;
                         var mat = new Material(ShaderUtil.FindRenderableShader());
                         var c = renderer.sharedMaterial != null ? renderer.sharedMaterial.color : Color.gray;
                         mat.color = new Color(c.r * 0.6f, c.g * 0.6f, c.b * 0.6f);

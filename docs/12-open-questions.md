@@ -10136,3 +10136,71 @@ No sim-side files touched, no determinism risk. No Unity Editor here to
 confirm the fade curve or Inspector wiring read correctly on a real
 screen or actually appear in the Inspector -- same standing limit as
 every other Unity-side visual change in this project's history.
+
+## 2026-08 follow-up: two real bugs -- smoke "going solid" at 50% HP, and wind drift too subtle to read
+
+Creator report, same session: "the smoke radiates from one point and
+does not travel upward drift away at an diagonal based on wind speed.
+Bug is that it goes solid at about 50% destruction; this must be left
+over code." Both halves turned out to be real, distinct bugs, and the
+creator's own diagnosis ("left over code") was correct for the first
+one.
+
+**Bug 1: solidifying at the Damaged threshold.** Root cause found in
+`RuntimeCityBuilder.ApplyBuildingDamage`'s Intact->Damaged darkening
+block (docs/21 batch 2, item 3 -- written well before fire/smoke FX
+existed). It calls `cube.GetComponentsInChildren<Renderer>()` --
+RECURSIVE, not single-level -- over `cubes[0]`, the SAME transform
+`DamageFx.AttachSmoke`/`AttachFireCluster` use as their `holder`
+(several entries back). Fire/smoke puffs are parented several levels
+under that same cube (cube -> SmokePlume/FireCluster -> individual
+puff), so the darkening sweep was ALSO catching whatever puff
+GameObjects happened to be alive at the exact instant a building
+crossed 50% HP. For each caught renderer it built a brand-new Material
+and called `renderer.sharedMaterial = mat` -- but that new material was
+never passed through `LabMeshBuilder.MakeTransparent` (this loop
+predates transparent dressing being a concern) and is a completely
+separate instance from the one `SmokePuff`'s own `_mat` field still
+points to. The net effect: the renderer's VISIBLE material became a
+frozen, opaque, one-time-darkened snapshot, while `SmokePuff.Update`
+went on mutating the OLD material every frame with zero visible effect
+-- reading exactly as "goes solid," for exactly the puffs unlucky
+enough to be alive at that one instant. `BaseDresser.TintShape` (the
+RTS-roster equivalent) was already safe from this by design -- its own
+header comment notes its sweep is deliberately single-level `GetChild`,
+specifically so nested assemblies without their own tint intent (the
+Big Brain jar, and as of now implicitly fire/smoke too) aren't swept
+up. `RuntimeCityBuilder`'s procedural path had no equivalent guard.
+Fixed by skipping any renderer with a `SmokePlume` or `FireCluster`
+ancestor (`Renderer.GetComponentInParent<T>()`), rather than
+restructuring the darkening sweep to single-level (which would risk
+missing legitimate nested dressing pieces the recursive sweep is
+otherwise relied on to reach).
+
+**Bug 2: wind drift too subtle to read.** `SmokePlume`'s wind-lean
+magnitude was a hardcoded `LeanStrength = 0.55f` (several entries
+back). Over a puff's whole 3.2s life that's under 2 world units of
+total sideways travel -- already modest, and became far LESS visible
+once the immediately-prior entry shrank puffs themselves down to
+roughly 1 world unit under `SmokeResizePct = 0.2`. The net read was a
+column of small puffs popping in and fading near a fixed origin point,
+not a visibly diagonal wind-blown trail -- matching the report exactly.
+Replaced the hardcoded constant with a new `DamageFxProfile.
+SmokeWindSpeed` field (default 1.8, same live-Inspector-tunable pattern
+as the size knobs added in the immediately-prior entry), read once per
+building when its `SmokePlume` is created (a build-time value, unlike
+the per-puff-spawn size knobs -- an Inspector change takes effect on
+the next building that catches fire, not an already-burning one; this
+distinction is documented on the field's own tooltip).
+
+**Verified.** Flightcheck recompiles `DamageFx.cs`,
+`DamageFxProfile.cs`, and `RuntimeCityBuilder.cs` clean.
+`damagefxprofile-verify` extended with a check for
+`Default.SmokeWindSpeed == 1.8`, still all passing. Bug 1's fix could
+NOT be behaviorally verified by the standalone harness -- the local
+`UnityStub.cs`'s `GetComponentInParent<T>()` is a dumb stub that always
+returns `default(T)` regardless of actual hierarchy, so this is a
+compile-time/logical-review confirmation only, not a runtime one. No
+Unity Editor here to confirm either fix actually reads correctly on a
+real screen -- same standing limit as every other Unity-side visual
+change in this project's history.

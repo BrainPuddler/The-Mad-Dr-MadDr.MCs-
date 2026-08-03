@@ -226,12 +226,20 @@ public class SmokePlume : MonoBehaviour
     /// footprint -- reusing it here (rather than deriving a separate
     /// angle from this component's own GetInstanceID) keeps the lean
     /// drifting further in the direction the plume already started in,
-    /// instead of potentially doubling back toward the roof.</summary>
+    /// instead of potentially doubling back toward the roof.
+    ///
+    /// 2026-08 (creator report: "radiates from one point and does not
+    /// travel upward drift away at a diagonal based on wind speed"): the
+    /// magnitude is now <see cref="DamageFxProfile.Active"/>.SmokeWindSpeed
+    /// (default 1.8) instead of a hardcoded 0.55 -- the old constant
+    /// produced barely 1.76 world units of total sideways travel over a
+    /// puff's whole 3.2s life, easy to miss once puffs themselves shrank
+    /// to the ~1-unit range under the 0.2 SmokeResizePct fix.</summary>
     public void Init(float scale, float outwardAngle)
     {
         _scale = scale;
-        const float LeanStrength = 0.55f;
-        _lean = new Vector2(Mathf.Sin(outwardAngle) * LeanStrength, Mathf.Cos(outwardAngle) * LeanStrength);
+        var windSpeed = DamageFxProfile.Active.SmokeWindSpeed;
+        _lean = new Vector2(Mathf.Sin(outwardAngle) * windSpeed, Mathf.Cos(outwardAngle) * windSpeed);
     }
 
     private void Awake()

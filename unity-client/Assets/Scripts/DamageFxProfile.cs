@@ -32,6 +32,10 @@ public class DamageFxProfile : ScriptableObject
     [Range(0.02f, 2f)]
     public float SmokeResizePct = 0.2f;
 
+    [Tooltip("Sideways drift speed (world units/sec) each smoke puff picks up on top of its own upward rise, giving the whole plume a coherent wind-blown diagonal lean instead of climbing straight up. Read ONCE per building when its SmokePlume is created (like a build-time value, not live per-puff like the size knobs above) -- an Inspector change takes effect on the NEXT building that catches fire, not an already-burning one. 2026-08 default: 1.8 (up from the prior hardcoded 0.55, per creator report \"radiates from one point and does not travel upward drift away at a diagonal\" -- 0.55 was too subtle to read once puffs shrank to the 0.2 SmokeResizePct above).")]
+    [Range(0f, 6f)]
+    public float SmokeWindSpeed = 1.8f;
+
     [Header("Fire")]
     [Tooltip("Flat multiplier on fire's flame-shard puff size/growth AND its point-light range/intensity together -- ONE knob for both, so raising/lowering fire size can't accidentally leave the glow mismatched with the flame mesh it's supposed to be lighting. 2026-08 default: 0.35 (the 0.7 * 0.5 already baked into FirePlume before this profile existed).")]
     [Range(0.02f, 2f)]
