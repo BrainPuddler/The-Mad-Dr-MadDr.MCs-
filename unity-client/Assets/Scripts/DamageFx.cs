@@ -33,16 +33,21 @@ public static class DamageFx
     /// swallow the fire they're supposed to be rising from. `footprintRadius`
     /// (same value the caller already computes for `AttachFireCluster`)
     /// pushes the origin out PAST the building's own edge instead of over
-    /// its center, in a deterministic per-building direction; `SmokePlume`'s
-    /// own wind lean (see its `Init`) continues drifting that SAME
-    /// direction, so the whole column reads as escaping past the
-    /// silhouette rather than smothering it.</summary>
+    /// its center.
+    ///
+    /// 2026-08 follow-up (creator report: smoke needs to read as blowing
+    /// "at the correct angle N, S, E or W"): the outward-offset direction
+    /// used to be a per-building hash -- now it's the SAME shared compass
+    /// angle every building's wind lean uses
+    /// (<see cref="DamageFxProfile.Active"/>.SmokeWindAngleRadians), so a
+    /// plume erupts on the actual leeward (downwind) edge of its own roof
+    /// and then keeps drifting further that same way, instead of exiting
+    /// toward an arbitrary side unrelated to which way it's about to blow.</summary>
     public static void AttachSmoke(Transform holder, float height, float footprintRadius, float scale)
     {
         var go = new GameObject("SmokePlume");
         go.transform.SetParent(holder, false);
-        var id = holder.GetInstanceID();
-        var angle = ((id & 0xFFFF) % 360) * Mathf.Deg2Rad;
+        var angle = DamageFxProfile.Active.SmokeWindAngleRadians;
         var outward = new Vector3(Mathf.Sin(angle) * footprintRadius * 1.2f, height * 1.05f, Mathf.Cos(angle) * footprintRadius * 1.2f);
         go.transform.position = holder.position + outward;
         go.AddComponent<SmokePlume>().Init(scale, angle);
@@ -223,18 +228,27 @@ public class SmokePlume : MonoBehaviour
 
     /// <summary>`outwardAngle` is the SAME angle <see cref="DamageFx.AttachSmoke"/>
     /// already used to push this plume's origin outside the building's
-    /// footprint -- reusing it here (rather than deriving a separate
-    /// angle from this component's own GetInstanceID) keeps the lean
-    /// drifting further in the direction the plume already started in,
-    /// instead of potentially doubling back toward the roof.
+    /// footprint -- reusing it here keeps the lean drifting further in
+    /// the direction the plume already started in, instead of potentially
+    /// doubling back toward the roof. As of the wind-direction follow-up
+    /// below, that angle is no longer per-building at all -- it's
+    /// <see cref="DamageFxProfile.Active"/>.SmokeWindAngleRadians, the ONE
+    /// compass direction every building's plume shares.
     ///
     /// 2026-08 (creator report: "radiates from one point and does not
     /// travel upward drift away at a diagonal based on wind speed"): the
-    /// magnitude is now <see cref="DamageFxProfile.Active"/>.SmokeWindSpeed
-    /// (default 1.8) instead of a hardcoded 0.55 -- the old constant
-    /// produced barely 1.76 world units of total sideways travel over a
-    /// puff's whole 3.2s life, easy to miss once puffs themselves shrank
-    /// to the ~1-unit range under the 0.2 SmokeResizePct fix.</summary>
+    /// magnitude is <see cref="DamageFxProfile.Active"/>.SmokeWindSpeed
+    /// instead of a hardcoded 0.55.
+    ///
+    /// 2026-08 follow-up (creator report: "because the camera is above
+    /// the smoke, the smoke must travel far to get the correct angle N,
+    /// S, E or W... as if in a very strong fast wind"): SmokeWindSpeed's
+    /// own default jumped again, 1.8 -> 5, and `AttachSmoke` no longer
+    /// derives `outwardAngle` from a per-building hash -- it's now the
+    /// SAME shared compass angle for every building in the match, so the
+    /// whole city's smoke reads as one coherent wind instead of each
+    /// plume leaning its own arbitrary way (see CompassDirection's own
+    /// doc comment on DamageFxProfile for why N/S/E/W specifically).</summary>
     public void Init(float scale, float outwardAngle)
     {
         _scale = scale;
@@ -343,11 +357,10 @@ public class FirePlume : MonoBehaviour
         // 2026-08 (creator report: "the fire is too large"): a 6m-range,
         // 2.5-intensity point light was throwing a glow bigger than the
         // small low-poly flame it was supposed to be lighting up. Shrunk
-        // to match a contained shard, not a bonfire; the flat 0.7-then-0.5
-        // cuts from that history are now folded into
-        // DamageFxProfile.Active.FireResizePct's own default (0.35) --
-        // see DamageFxProfile for the "add inspector for fire size"
-        // follow-up that replaced the hardcoded constants.
+        // to match a contained shard, not a bonfire -- see
+        // DamageFxProfile.FireResizePct's own doc comment for that
+        // history AND the later "I still do not see the fire" correction
+        // (0.35 turned out to be an over-shrink, reverted to 1.0).
         var fireResizePct = DamageFxProfile.Active.FireResizePct;
         _glow.range = 3f * fireResizePct;
         _glow.intensity = 1.1f * fireResizePct;
@@ -478,8 +491,19 @@ public class FireCluster : MonoBehaviour
         // way up the wall to near the roofline itself, so it reads as
         // erupting from the building's own structure instead of hanging
         // in front of it.
+        //
+        // 2026-08 follow-up (creator report: "I still do not see the
+        // fire... check placement on various buildings to make sure it
+        // is visible"): 0.92 sat BELOW roofline height, i.e. embedded
+        // inside a Landmark-tier building's own roof clutter (water
+        // towers, antenna masts -- the exact same class of occlusion the
+        // smoke-visibility bug several entries back was traced to for
+        // that tier). Raised to right at the roofline (1.0) so a fire
+        // point pokes up clear of roof props instead of nesting among
+        // them, while still reading as attached to the building rather
+        // than floating above it the way AttachSmoke's own 1.05 does.
         var dist = _footprintRadius * (0.3f + ((salt >> 8) & 15) / 15f * 0.6f);
-        var offset = new Vector3(Mathf.Cos(angle) * dist, _height * 0.92f, Mathf.Sin(angle) * dist);
+        var offset = new Vector3(Mathf.Cos(angle) * dist, _height * 1.0f, Mathf.Sin(angle) * dist);
 
         var go = new GameObject("FirePlume");
         go.transform.SetParent(transform, false);

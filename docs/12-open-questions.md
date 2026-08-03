@@ -10204,3 +10204,85 @@ compile-time/logical-review confirmation only, not a runtime one. No
 Unity Editor here to confirm either fix actually reads correctly on a
 real screen -- same standing limit as every other Unity-side visual
 change in this project's history.
+
+## 2026-08 follow-up: one shared compass wind for smoke, and fire reverted back up to a visible size
+
+Creator direction, same session: "because the camera is above the
+smoke the smoke must travel far to get the correct angle N, S, E or W.
+as if in a very strong fast wind. you are trying to correctly
+reproduce the smoke in the picture, with the fading. I still do not
+see the fire. check placement on various building to make sure it is
+visible to the player."
+
+**Why a per-building random angle didn't work.** The RTS camera looks
+down at the city from mostly-overhead, not from the side -- meaning
+horizontal (X/Z-plane) drift is what actually registers as motion on
+screen; vertical rise contributes comparatively little from that angle.
+Two compounding problems with the prior approach: (1) each building's
+own wind-lean angle was independently hashed off its `GetInstanceID`,
+so thirty burning buildings would show thirty different drift
+directions -- from overhead this reads as noise, not "there is wind,"
+even if any single plume's own drift were strong; (2) the magnitude
+itself (`SmokeWindSpeed`, 1.8 as of the entry before this one) was
+still comparatively timid once actually judged against "must travel
+far... very strong fast wind."
+
+**Fix: one shared compass direction.** New `DamageFxProfile.
+CompassDirection` enum (North/East/South/West -- deliberately NOT a
+free angle) + `SmokeWindDirection` field (default North) +
+`SmokeWindAngleRadians` helper property that converts it to the same
+`Mathf.Sin(angle)*x, Mathf.Cos(angle)*z` convention every other
+per-building angle in `DamageFx.cs` already uses (0 rad = +Z/North, 90
+deg = +X/East -- confirmed against `Minimap.cs`'s own documented
+"fixed north-up" default orientation, so this doesn't invent a
+convention that would contradict the minimap's own N marker).
+`DamageFx.AttachSmoke` no longer hashes a per-building angle at all --
+every building's plume now leans (and originates from) the exact SAME
+compass direction, so the whole city reads as one coherent wind instead
+of each plume pointing an arbitrary way. `SmokeWindSpeed`'s own default
+jumped again, 1.8 -> 5 (up from an original hardcoded 0.55 three
+entries back) -- at 5 units/sec over a puff's 3.2s life that's 16 world
+units of travel, several times a typical Small building's own
+footprint radius.
+
+**Fire reverted back up to a visible size.** `DamageFxProfile.
+FireResizePct` default REVERTED from 0.35 (0.7 * 0.5, two separate "a
+lot smaller" passes stacked without re-checking fire's own visibility
+independently of smoke's) up to 1.0. At 0.35 the flame-shard puff's
+actual world-space footprint was `0.28 * 0.35 = 0.098` units -- under
+10cm, and roughly a TENTH the size smoke's own puffs were sitting at by
+that same point in the history (`SmokeResizePct = 0.2` gives puffs up
+to ~0.94 units). That size gap is the likely root cause of "I still do
+not see the fire": not a placement or wiring problem (both had already
+been fixed in earlier entries), but the mesh itself being too small to
+register. 1.0 restores the size from the FIRST shard-mesh pass ("small,
+angular, faceted" per the original reference images) -- the last point
+in this history the size itself was actually confirmed acceptable
+rather than immediately shrunk again in the very next round.
+
+**Placement check across building tiers.** `FireCluster.SpawnOne`'s
+roofline height moved from `_height * 0.92f` to `_height * 1.0f`.
+0.92 sat BELOW the actual roofline -- for Landmark-tier buildings,
+which carry the heaviest roof clutter (water towers, antenna masts;
+the exact class of geometry a much-earlier entry already identified as
+swallowing smoke visibility at that tier), a fire point at 92% height
+could land embedded inside that clutter rather than poking clear of
+it. Moved to right at the roofline (100%) -- still reads as "attached
+to the roof" per the standing creator direction that put it there, but
+no longer nested a few percent below the tallest roof props on the
+tier most likely to have any.
+
+**Verified.** `damagefxprofile-verify` extended with checks for the new
+defaults (`FireResizePct == 1.0`, `SmokeWindSpeed == 5`,
+`SmokeWindDirection == North`) and the compass->radians conversion for
+all four directions (North=0, East=90deg, South=180deg, West=270deg,
+each checked against the exact `Sin`/`Cos` values `DamageFx.cs` uses) --
+all 12 checks passing. Flightcheck recompiles `DamageFx.cs`,
+`DamageFxProfile.cs` clean. No sim-side files touched. No Unity Editor
+here to confirm the wind direction or fire size actually read correctly
+on a real screen, or that fire is now visibly clear of roof clutter on
+every building kind -- same standing limit as every other Unity-side
+visual change in this project's history; this entry is a best-effort
+correction based on the numbers involved (the ~10x fire/smoke size gap,
+the roofline-vs-clutter height comparison), not a confirmed-fixed
+screenshot.
