@@ -45,9 +45,12 @@ public class DamageFxProfile : ScriptableObject
     public float SmokeWindSpeed = 5f;
 
     [Header("Fire")]
-    [Tooltip("Flat multiplier on fire's flame-shard puff size/growth AND its point-light range/intensity together -- ONE knob for both, so raising/lowering fire size can't accidentally leave the glow mismatched with the flame mesh it's supposed to be lighting. 2026-08 default: 1.0 -- REVERTED from 0.35 (0.7 * 0.5, two separate \"a lot smaller\" passes stacked on top of each other without re-checking fire's OWN visibility independently of smoke's) after creator report \"I still do not see the fire\": at 0.35 the flame-shard puff was roughly 0.1 world units across, well under a tenth the size of a smoke puff from the SAME era -- likely below the actual visibility threshold, not a matter of taste. 1.0 restores the size from the FIRST shard-mesh pass (\"small, angular, faceted\" per the original reference images), the last point in this history the size itself was actually confirmed acceptable rather than immediately re-shrunk again.")]
-    [Range(0.02f, 2f)]
-    public float FireResizePct = 1.0f;
+    [Tooltip("Flat multiplier on fire's flame-shard puff size/growth AND its point-light range/intensity together -- ONE knob for both, so raising/lowering fire size can't accidentally leave the glow mismatched with the flame mesh it's supposed to be lighting. 2026-08 default: 3.0 -- pushed up hard (from 1.0) after creator report \"I STILL CAN'T SEE THE FIRE\" survived confirmed-correct position/trigger logs (see DamageFx.AttachFireCluster's own Debug.Log) and a structural investigation that ruled out any culling/LOD/pooling/fog-of-war system hiding it. At 1.0 the flame-shard puff was only ~0.3-0.6 world units across against buildings 6-38 units tall -- possibly still below the real visibility threshold even though that was the last size anyone had explicitly confirmed as \"not too large.\" Deliberately overshooting this time: a \"too big\" report is a single-number walk-back: continued invisibility after six rounds of smaller nudges is the much more expensive failure mode to keep risking.")]
+    [Range(0.02f, 6f)]
+    public float FireResizePct = 3.0f;
+
+    [Tooltip("Diagnostic only -- spawns a big (4-unit), fully opaque, bright magenta sphere at the FIRST fire point on every building that catches fire, self-destructing after 20s. Nothing like the real flame shard on purpose: if this can't be spotted either, the problem isn't fire's own size/color/transparency, it's something else (camera culling mask, Scene-vs-Game view, etc). 2026-08 default: true, while fire visibility is still an open question -- creator direction: \"figure out how to verify fire is being seen.\" Turn this off once fire itself is confirmed visible; it's not meant to ship on.")]
+    public bool ShowFireDebugMarkers = true;
 
     private static DamageFxProfile _default;
 

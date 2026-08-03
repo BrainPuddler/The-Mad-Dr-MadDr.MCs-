@@ -162,6 +162,36 @@ public static class DamageFx
         Debug.Log("[DamageFx] Fire cluster started on " + holder.name + " at ground " + groundPos + " (roofline will be " + (groundPos.y + height).ToString("F1") + ")");
     }
 
+    /// <summary>2026-08 (creator direction: "figure out how to verify
+    /// fire is being seen"): a big (4-unit), fully opaque, bright
+    /// emissive sphere -- deliberately NOTHING like the real low-poly
+    /// flame shard, so there's no ambiguity about whether it's visible.
+    /// If this can't be spotted either, the problem isn't fire's own
+    /// size/color/transparency at all. Self-destructs after 20s so it
+    /// doesn't linger as permanent clutter once its job (answering "is it
+    /// even at the position the log claims") is done. Called from
+    /// FireCluster's own first spawn point, gated behind
+    /// DamageFxProfile.ShowFireDebugMarkers.</summary>
+    public static void SpawnDebugMarker(Vector3 at)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        go.name = "FireDebugMarker";
+        go.transform.position = at;
+        go.transform.localScale = Vector3.one * 4f;
+        var collider = go.GetComponent<Collider>();
+        if (collider != null) Object.Destroy(collider);
+
+        var magenta = new Color(1f, 0f, 1f);
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = magenta;
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", magenta * 3f);
+        var renderer = go.GetComponent<Renderer>();
+        if (renderer != null) renderer.sharedMaterial = mat;
+
+        Object.Destroy(go, 20f);
+    }
+
     /// <summary>One-shot muzzle smoke the instant a gun fires (creator
     /// direction, 2026-07: "guns have smoke when they fire") -- small and
     /// quick next to the building SmokePlume's lazy loop or DustBurstFx's
@@ -487,11 +517,11 @@ public class FirePlume : MonoBehaviour
     /// cref="ProceduralMeshKit.FlameShard"/>, a small jagged shard mesh.
     ///
     /// 2026-08 follow-up (creator direction: "add inspector for fire
-    /// size"): puff size/growth now read
-    /// <see cref="DamageFxProfile.Active"/>.FireResizePct (default 0.35,
-    /// the same "resize 70%, then a lot smaller (0.5 cut)" history
-    /// folded into one number) instead of the flat 0.7*0.5 literal, fresh
-    /// on every spawn.</summary>
+    /// size"): puff size/growth read
+    /// <see cref="DamageFxProfile.Active"/>.FireResizePct fresh on every
+    /// spawn instead of a hardcoded literal -- see that field's own doc
+    /// comment for its current default and the "I STILL CAN'T SEE THE
+    /// FIRE" history behind it.</summary>
     private void SpawnPuff()
     {
         var go = new GameObject("FirePuff");
@@ -533,7 +563,13 @@ public class FirePlume : MonoBehaviour
         mat.renderQueue = 3001;
         renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitFlame(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.25f * fireResizePct, 0.9f, 0.32f * fireResizePct);
+        // 2026-08 (creator report: "I STILL CAN'T SEE THE FIRE"): life
+        // was 0.5-0.74s -- fast enough that an individual shard could
+        // blink in and fade back out before the eye has time to register
+        // it, unlike smoke's own sustained 3.2s puffs. Tripled to
+        // 1.5-2.22s so a flame actually holds on screen long enough to be
+        // seen, not just technically rendered for a few frames.
+        go.AddComponent<SmokePuff>().InitFlame(mat, 1.5f + ((id >> 6) & 3) * 0.24f, 0.25f * fireResizePct, 0.9f, 0.32f * fireResizePct);
     }
 }
 
@@ -624,6 +660,31 @@ public class FireCluster : MonoBehaviour
         go.transform.SetParent(transform, false);
         go.transform.localPosition = offset;
         go.AddComponent<FirePlume>();
+
+        // 2026-08 (creator report, after confirming the Console log line
+        // DOES appear: "is it too small? Or wrong colours? or Too
+        // transparent?"): the log proves AttachFireCluster runs and
+        // computes a sane position -- it does NOT prove anything at that
+        // position is actually visible on screen, which is exactly the
+        // open question. Rather than guess at size/color/alpha again (six
+        // rounds of that already), drop an UNMISSABLE marker at the
+        // FIRST point's exact world position: a big, bright, fully-lit
+        // (no transparency, no low-poly subtlety) primitive sphere,
+        // nothing like the real flame shard. If the creator can't spot
+        // THIS either, the bug is categorically not about fire's own
+        // size/shape/color -- it's something else entirely (camera
+        // culling mask, a Scene-vs-Game view mixup, etc.) and this rules
+        // that whole size-tuning direction out in one look. If they CAN
+        // see the marker but not the real flame next to it, that
+        // conclusively confirms it IS a size/color/transparency problem
+        // with the flame specifically. Gated behind
+        // DamageFxProfile.ShowFireDebugMarkers (default true while this
+        // is still being diagnosed) so it's a one-flip Inspector toggle
+        // to turn off once resolved, not a permanent fixture.
+        if (DamageFxProfile.Active.ShowFireDebugMarkers && _spawned == 1)
+        {
+            DamageFx.SpawnDebugMarker(go.transform.position);
+        }
     }
 }
 

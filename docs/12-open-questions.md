@@ -10510,3 +10510,101 @@ this actually reads correctly on a real screen, or that the Inspector
 steps above match what the creator's own Unity version shows -- same
 standing limit as every other Unity-side visual change in this
 project's history.
+
+## 2026-08 follow-up: "I STILL CAN'T SEE THE FIRE" -- confirmed-correct position, structural investigation, debug marker, deliberate overshoot
+
+Creator, terse and frustrated (verbatim): "I STILL CAN'T SEE THE FIRE."
+This came after six-plus rounds of size/position/timing fixes, so the
+response here is different in kind from the prior entries: instead of
+another guess, get real data first, rule out entire categories of bug
+structurally, then act on what's left.
+
+**Step 1: get real Console data.** Asked the creator to check for the
+`[DamageFx] Fire cluster started on...` log line added the entry
+before this one. They confirmed it DOES appear, with real numbers:
+`ground (710.00, -4.00, 502.29)` / `roofline will be 34.0`, plus three
+more lines for other buildings (roofline 12.0, 6.0, 34.0 across
+different tiers). This proves two things at once: `AttachFireCluster`
+is genuinely being called (from `MonsterAgent.TickAttack` via
+`RuntimeCityBuilder.ApplyBuildingDamage`, confirmed in the stack
+trace), and the computed ground position is sane and varies
+per-building the way real terrain elevation should (ground Y of -4 and
+0 across different buildings -- not a flat, suspiciously-uniform
+number that would suggest the ground-offset math from two entries back
+was silently wrong).
+
+**Step 2: structurally rule out other bug categories.** Rather than
+keep tuning size/color/position, dispatched a focused investigation
+into five categories that could hide a correctly-positioned,
+correctly-sized `MeshRenderer` for reasons having NOTHING to do with
+fire's own tuning: (1) an engagement-zone LOD/distance-culling system
+-- exists in `packages/citygen-core/src/EngagementZone.cs` as a pure
+classifier, but has ZERO references anywhere in `unity-client/Assets/
+Scripts`, i.e. it's entirely unwired to Unity rendering and cannot be
+hiding anything; (2) camera culling mask / Layer reassignment -- no
+code anywhere sets `.layer` or `cullingMask`, so nothing excludes
+Layer 0 (what `new GameObject()` always gets); (3) object pooling/
+cleanup -- no generic "clear all children" system exists;
+`DynamicLightBudget`'s own pool only recycles lights registered via
+`GlowPointRegistry.Register`, which `FirePlume`'s own `Light` is never
+passed to, so that budget system is entirely unrelated; (4) both
+`AttachFireCluster`/`AttachFire` call sites (procedural buildings via
+`RuntimeCityBuilder.cs`, RTS roster via `BaseDresser.cs`) are live,
+reachable, and symmetrically gated -- no reason one path would
+silently never trigger while the other does; (5) Fog of War
+(`FogOfWar.cs`) only ever feeds the 2D minimap overlay, never touches
+a 3D-scene `Renderer.enabled`/`SetActive` call anywhere. None of the
+five explain the report. Emission setup (`EnableKeyword("_EMISSION")`
++ `SetColor("_EmissionColor", ...)`) was also cross-checked against
+every other confirmed-working emissive material in the codebase
+(streetlamp bulbs, windows, neon, headlights, brake lights, the Big
+Brain jar) -- fire's own pattern is identical, so a broken/different
+emission setup is ruled out too.
+
+**Step 3: an unmissable diagnostic the creator can use themselves.**
+The Console log proves SPAWNING, not RENDERING -- there was still no
+way to distinguish "the flame is there but too subtle" from "something
+else entirely is wrong" without a human actually looking. New
+`DamageFx.SpawnDebugMarker`: a big (4-unit), fully opaque, bright
+magenta emissive sphere -- deliberately nothing like the real low-poly
+flame shard -- spawned at the FIRST fire point on every building,
+self-destructing after 20s. Gated behind a new `DamageFxProfile.
+ShowFireDebugMarkers` (default `true` while this is still open). If
+the creator can't spot the marker either, the bug isn't fire's own
+size/color/transparency at all, and this whole line of investigation
+redirects immediately to camera/rendering/Scene-vs-Game-view
+questions instead of another size tweak.
+
+**Step 4: deliberately overshoot on the remaining plausible cause.**
+With every structural category ruled out, the numbers (`FireResizePct
+= 1.0` gives an actual world-space puff footprint of roughly 0.3-0.6
+units against buildings logged at 6-38 units tall -- 1.5-9% of the
+building's own height) are still the most likely explanation left.
+Rather than nudge again, `FireResizePct`'s default jumped hard, 1.0 ->
+3.0 (Inspector range widened to `[0.02, 6]` to allow it), explicitly
+reasoned as an intentional overshoot: a "too big" report is a
+one-number walk-back; continued invisibility after seven rounds of
+smaller nudges is the far more expensive failure mode to keep risking.
+Separately, individual fire-puff life was tripled (0.5-0.74s ->
+1.5-2.22s) -- short-lived puffs can blink in and fade out fast enough
+that a human eye may never register them even if every frame they
+existed was, technically, rendered correctly; smoke's own puffs (which
+the creator has been able to see and comment on) hold for 3.2s by
+comparison.
+
+**Verified.** `damagefxprofile-verify` updated for the new defaults
+(`FireResizePct == 3.0`, `ShowFireDebugMarkers == true`) and
+`smokegrowth-verify` re-run unchanged -- 10 and 6 checks respectively,
+all passing. One real compile error caught along the way: the local
+`UnityStub.cs`'s `Color` struct doesn't define `magenta` (real Unity
+does) -- worked around by constructing `new Color(1f, 0f, 1f)`
+directly rather than patching the stub, same precedent set earlier in
+this session for the `Vector2` operator gap. Flightcheck recompiles
+`DamageFx.cs` and `DamageFxProfile.cs` clean. No sim-side files
+touched. The debug marker and the structural
+LOD/culling/pooling/fog-of-war investigation are both logically
+reviewed / code-searched, not executed in a real Editor -- the actual
+verdict on whether ANY of this fixes the report depends on what the
+creator sees next, which is the entire point of Step 3's marker: to
+make that verdict fast and unambiguous instead of another round of
+guessing.
