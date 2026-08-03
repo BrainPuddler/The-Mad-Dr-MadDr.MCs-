@@ -40,42 +40,9 @@ public class DamageFxProfile : ScriptableObject
     [Range(0f, 6f)]
     public float SmokeRiseSpeed = 1.4f;
 
-    [Tooltip("Sideways drift speed (world units/sec) each smoke puff picks up on top of its own upward rise, giving the whole plume a coherent wind-blown diagonal lean instead of climbing straight up. Read ONCE per building when its SmokePlume is created (like a build-time value, not live per-puff like the size knobs above) -- an Inspector change takes effect on the NEXT building that catches fire, not an already-burning one. 2026-08 default: 5 (up from a prior 1.8, then 0.55 before that -- creator report: \"the camera is above the smoke, the smoke must travel far to get the correct angle... as if in a very strong fast wind\" -- an RTS camera looking mostly straight down reads horizontal (X/Z) drift far more clearly than vertical rise, so this needs to be dramatic, not subtle, to register at all from that angle).")]
+    [Tooltip("Outward drift speed (world units/sec) each smoke puff picks up on top of its own upward rise, carrying it away from the building it spawned on. Read ONCE per building when its SmokePlume is created (like a build-time value, not live per-puff like the size knobs above) -- an Inspector change takes effect on the NEXT building that catches fire, not an already-burning one. 2026-08 default: 5.\n\n2026-08 follow-up (creator direction: \"smoke may spawn from any place on a building BUT IT MUST start on the building and must travel out radially from the building so it is always seen\"): this used to be a SHARED compass direction (N/S/E/W) every building's plume leaned the same way -- REMOVED. Each plume now spawns at its own random point around the building and drifts straight outward (away from the building's own center) at this speed instead, so it can never drift back across/behind the structure it just escaped, regardless of where on the building it started. See DamageFx.AttachSmoke's own doc comment for the full writeup.")]
     [Range(0f, 12f)]
     public float SmokeWindSpeed = 5f;
-
-    /// <summary>North/South/East/West only -- deliberately NOT a free
-    /// angle. 2026-08 (creator report: smoke needs to read as blowing "at
-    /// the correct angle N, S, E or W" from an overhead RTS camera): a
-    /// per-building random angle (the prior approach) scatters plumes in
-    /// every direction, which from near-directly-overhead reads as noisy
-    /// scribbling rather than "there is wind." Locking every building's
-    /// plume to the SAME one of 4 compass directions reads as one
-    /// coherent city-wide wind instead. North = world +Z, East = +X (the
-    /// same north-up convention <see cref="Minimap"/>'s default
-    /// orientation already uses).</summary>
-    public enum CompassDirection { North, East, South, West }
-
-    [Tooltip("The one direction EVERY building's smoke blows -- see CompassDirection's own doc comment for why this is locked to N/S/E/W instead of a free angle.")]
-    public CompassDirection SmokeWindDirection = CompassDirection.North;
-
-    /// <summary>Degrees clockwise from North, matching the
-    /// Mathf.Sin(angle)*x/Mathf.Cos(angle)*z convention DamageFx.AttachSmoke
-    /// and SmokePlume.Init already use for every other per-building angle
-    /// (0 rad = pure +Z/North; 90 deg = pure +X/East).</summary>
-    public float SmokeWindAngleRadians
-    {
-        get
-        {
-            switch (SmokeWindDirection)
-            {
-                case CompassDirection.East: return 90f * Mathf.Deg2Rad;
-                case CompassDirection.South: return 180f * Mathf.Deg2Rad;
-                case CompassDirection.West: return 270f * Mathf.Deg2Rad;
-                default: return 0f; // North
-            }
-        }
-    }
 
     [Header("Fire")]
     [Tooltip("Flat multiplier on fire's flame-shard puff size/growth AND its point-light range/intensity together -- ONE knob for both, so raising/lowering fire size can't accidentally leave the glow mismatched with the flame mesh it's supposed to be lighting. 2026-08 default: 1.0 -- REVERTED from 0.35 (0.7 * 0.5, two separate \"a lot smaller\" passes stacked on top of each other without re-checking fire's OWN visibility independently of smoke's) after creator report \"I still do not see the fire\": at 0.35 the flame-shard puff was roughly 0.1 world units across, well under a tenth the size of a smoke puff from the SAME era -- likely below the actual visibility threshold, not a matter of taste. 1.0 restores the size from the FIRST shard-mesh pass (\"small, angular, faceted\" per the original reference images), the last point in this history the size itself was actually confirmed acceptable rather than immediately re-shrunk again.")]

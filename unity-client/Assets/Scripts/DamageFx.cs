@@ -37,12 +37,29 @@ public static class DamageFx
     ///
     /// 2026-08 follow-up (creator report: smoke needs to read as blowing
     /// "at the correct angle N, S, E or W"): the outward-offset direction
-    /// used to be a per-building hash -- now it's the SAME shared compass
-    /// angle every building's wind lean uses
-    /// (<see cref="DamageFxProfile.Active"/>.SmokeWindAngleRadians), so a
-    /// plume erupts on the leeward (downwind) side of its own building and
-    /// then keeps drifting further that same way, instead of exiting
-    /// toward an arbitrary side unrelated to which way it's about to blow.
+    /// used to be a per-building hash -- changed to the SAME shared
+    /// compass angle every building's wind lean used, so a plume erupts
+    /// on the leeward side of its own building and keeps drifting that
+    /// same way. SUPERSEDED below.
+    ///
+    /// 2026-08 follow-up (creator direction: "smoke may spawn from any
+    /// place on a building BUT IT MUST start on the building and must
+    /// travel out radially from the building so it is always seen"): the
+    /// shared-compass-wind idea above is GONE -- it could drift a puff
+    /// laterally along or even back across a building it didn't spawn on
+    /// the leeward side of, depending on that building's position
+    /// relative to the one shared direction, risking exactly the
+    /// "hidden behind my own building" failure the creator is now
+    /// explicitly guarding against. Back to a per-building angle (any
+    /// place around the building, hashed off `holder.GetInstanceID()` --
+    /// same "cosmetic jitter, no gameplay meaning" precedent every other
+    /// per-building visual variety in this codebase already uses), but
+    /// this time <see cref="SmokePlume.Init"/> reuses the EXACT same
+    /// angle for its own outward drift (not a separate wind lean) -- a
+    /// plume moves in a straight radial line away from wherever it
+    /// started, so it is GUARANTEED to be moving away from the building's
+    /// own silhouette from the very first frame, regardless of where on
+    /// the building it happened to spawn.
     ///
     /// 2026-08 follow-up BUGFIX (creator report: "I still do not see the
     /// fire" -- root cause traced here, affecting smoke too):
@@ -70,7 +87,7 @@ public static class DamageFx
     {
         var go = new GameObject("SmokePlume");
         go.transform.SetParent(holder, false);
-        var angle = DamageFxProfile.Active.SmokeWindAngleRadians;
+        var angle = ((holder.GetInstanceID() & 0xFFFF) % 360) * Mathf.Deg2Rad;
         var groundY = holder.position.y + holderGroundOffset;
         var pos = new Vector3(
             holder.position.x + Mathf.Sin(angle) * footprintRadius,
@@ -78,6 +95,14 @@ public static class DamageFx
             holder.position.z + Mathf.Cos(angle) * footprintRadius);
         go.transform.position = pos;
         go.AddComponent<SmokePlume>().Init(scale, angle);
+        // 2026-08 (creator direction: "figure out how to verify fire is
+        // being seen"): no Editor exists in the environment this was
+        // written in, so this is the best available diagnostic -- check
+        // the Console for this line to confirm a plume was actually
+        // created and see exactly where, rather than having to guess
+        // whether a reported "still not visible" is a spawn/wiring bug
+        // or a genuine render/camera issue.
+        Debug.Log("[DamageFx] Smoke started on " + holder.name + " at world " + pos + " (angle " + (angle * Mathf.Rad2Deg).ToString("F0") + " deg)");
     }
 
     /// <summary>2026-07 (creator direction: "Building need decent amount
@@ -125,8 +150,16 @@ public static class DamageFx
     {
         var go = new GameObject("FireCluster");
         go.transform.SetParent(holder, false);
-        go.transform.position = new Vector3(holder.position.x, holder.position.y + holderGroundOffset, holder.position.z);
+        var groundPos = new Vector3(holder.position.x, holder.position.y + holderGroundOffset, holder.position.z);
+        go.transform.position = groundPos;
         go.AddComponent<FireCluster>().Init(height, footprintRadius, targetCount);
+        // 2026-08 (creator direction: "figure out how to verify fire is
+        // being seen"): see AttachSmoke's own matching log line -- this
+        // confirms AttachFireCluster actually ran and shows the corrected
+        // ground position the cluster's own points are offset from, so a
+        // "still don't see it" report can be checked against the actual
+        // numbers instead of guessed at blind.
+        Debug.Log("[DamageFx] Fire cluster started on " + holder.name + " at ground " + groundPos + " (roofline will be " + (groundPos.y + height).ToString("F1") + ")");
     }
 
     /// <summary>One-shot muzzle smoke the instant a gun fires (creator
@@ -265,27 +298,26 @@ public class SmokePlume : MonoBehaviour
 
     /// <summary>`outwardAngle` is the SAME angle <see cref="DamageFx.AttachSmoke"/>
     /// already used to push this plume's origin outside the building's
-    /// footprint -- reusing it here keeps the lean drifting further in
-    /// the direction the plume already started in, instead of potentially
-    /// doubling back toward the roof. As of the wind-direction follow-up
-    /// below, that angle is no longer per-building at all -- it's
-    /// <see cref="DamageFxProfile.Active"/>.SmokeWindAngleRadians, the ONE
-    /// compass direction every building's plume shares.
+    /// footprint -- reusing it here keeps the drift moving further in the
+    /// direction the plume already started in, instead of potentially
+    /// doubling back across the building.
     ///
     /// 2026-08 (creator report: "radiates from one point and does not
     /// travel upward drift away at a diagonal based on wind speed"): the
     /// magnitude is <see cref="DamageFxProfile.Active"/>.SmokeWindSpeed
     /// instead of a hardcoded 0.55.
     ///
-    /// 2026-08 follow-up (creator report: "because the camera is above
-    /// the smoke, the smoke must travel far to get the correct angle N,
-    /// S, E or W... as if in a very strong fast wind"): SmokeWindSpeed's
-    /// own default jumped again, 1.8 -> 5, and `AttachSmoke` no longer
-    /// derives `outwardAngle` from a per-building hash -- it's now the
-    /// SAME shared compass angle for every building in the match, so the
-    /// whole city's smoke reads as one coherent wind instead of each
-    /// plume leaning its own arbitrary way (see CompassDirection's own
-    /// doc comment on DamageFxProfile for why N/S/E/W specifically).</summary>
+    /// 2026-08 follow-up (creator direction: "smoke may spawn from any
+    /// place on a building BUT IT MUST start on the building and must
+    /// travel out radially from the building so it is always seen"): this
+    /// briefly went through a SHARED-compass-direction phase (every
+    /// building's plume leaning the exact same N/S/E/W way) -- REMOVED.
+    /// `outwardAngle` is back to being per-building (see `AttachSmoke`'s
+    /// own doc comment for why the shared version was actually a
+    /// visibility risk, not just an aesthetic downgrade), and this drift
+    /// is now purely radial -- straight away from wherever the plume
+    /// spawned, guaranteed to never lean back toward the building's own
+    /// silhouette.</summary>
     public void Init(float scale, float outwardAngle)
     {
         _scale = scale;
@@ -484,6 +516,21 @@ public class FirePlume : MonoBehaviour
         LabMeshBuilder.MakeTransparent(mat);
         mat.EnableKeyword("_EMISSION");
         mat.SetColor("_EmissionColor", (warm ? new Color(0.95f, 0.35f, 0.05f) : new Color(1f, 0.65f, 0.1f)) * 2.5f);
+        // 2026-08 (creator direction: "figure out how to verify fire is
+        // being seen and make sure it is NOT hidden by smoke"): both fire
+        // and smoke materials go through the SAME MakeTransparent, which
+        // sets renderQueue = 3000 for both -- meaning ordinary back-to-
+        // front alpha-blend sorting decides which one paints on top,
+        // purely by which happens to be nearer the camera at that
+        // instant. A smoke puff drifting past a fire point could
+        // therefore visually paint over it regardless of size. Bumping
+        // fire ONE queue value above smoke's (LabMeshBuilder itself is
+        // untouched, so every OTHER transparent object in this file
+        // keeps sorting by distance as before) makes fire always
+        // composite AFTER (i.e. on top of/visible through) any smoke at
+        // the same screen position, independent of which is actually
+        // closer to the camera.
+        mat.renderQueue = 3001;
         renderer.sharedMaterial = mat;
 
         go.AddComponent<SmokePuff>().InitFlame(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.25f * fireResizePct, 0.9f, 0.32f * fireResizePct);
@@ -557,7 +604,20 @@ public class FireCluster : MonoBehaviour
         // point pokes up clear of roof props instead of nesting among
         // them, while still reading as attached to the building rather
         // than floating above it the way AttachSmoke's own 1.05 does.
-        var dist = _footprintRadius * (0.3f + ((salt >> 8) & 15) / 15f * 0.6f);
+        //
+        // 2026-08 follow-up (creator direction: "same radial rule applies
+        // to fire. Always visible"): the old 30-90%-of-radius range put
+        // some points as much as 70% of the way back toward the
+        // building's own interior/roof-center, exactly the kind of
+        // position roof clutter (or the building's own bulk, from a
+        // shallow camera angle) could bury a point behind. Fixed to
+        // EXACTLY `_footprintRadius` -- the building's own outer edge,
+        // same "sits at the true perimeter, not somewhere inward that
+        // might be occluded" rule `AttachSmoke` already applies to
+        // smoke's own placement (`footprintRadius * 1.0`). Only the
+        // ANGLE still varies per point, matching smoke's own "any place
+        // around the building" placement freedom.
+        var dist = _footprintRadius;
         var offset = new Vector3(Mathf.Cos(angle) * dist, _height * 1.0f, Mathf.Sin(angle) * dist);
 
         var go = new GameObject("FirePlume");

@@ -10402,3 +10402,111 @@ reads correctly on a real screen -- same standing limit as every other
 Unity-side visual change in this project's history, though the
 ground-offset fix in particular is a strong, mechanically-verifiable
 (re-derived by hand above) correction rather than a guess.
+
+## 2026-08 follow-up: where the Inspector setting actually lives, guaranteeing fire isn't hidden by smoke, and radial placement for both effects
+
+Creator, same session: "Where is the inspector setting I asked for ?
+AND figure out how to verify fire is being seen and make sure it is
+NOT hidden by smoke. Smoke may spawn from any place on a building BUT
+IT MUST Start on the building and must travel out radially from the
+building so it is always seen." Followed shortly by: "same radial rule
+applies to fire. Always visible."
+
+**Where the Inspector setting is.** Not a code bug -- a usage gap.
+`RuntimeCityBuilder` has had a public `damageFxProfile` field (`Damage
+FX` header, `Damage Fx Profile` label) since the entry that introduced
+`DamageFxProfile`, but a `ScriptableObject`-typed field shows as an
+EMPTY object-reference slot until an actual asset exists and is
+dragged in -- it doesn't inline the sliders the way a struct/primitive
+field would. Steps: (1) in the Project window, Assets > Create > MadDr
+> Damage Fx Profile -- creates a `.asset` file; (2) select the
+`RuntimeCityBuilder` GameObject in the scene, find the `Damage Fx
+Profile` slot under its `Damage FX` header, drag the new asset in;
+(3) select the ASSET ITSELF (not the GameObject) to see and edit
+`SmokeResizePct`/`SmokeGrowthMultiplier`/`SmokeRiseSpeed`/
+`SmokeWindSpeed`/`FireResizePct` as ordinary Inspector sliders. Left
+unassigned, everything silently uses `DamageFxProfile.Default`'s own
+values (documented on the class itself) -- which is exactly why an
+unassigned slot doesn't visibly break anything, it just means there's
+nothing to drag sliders on yet.
+
+**"Figure out how to verify fire is being seen."** No Unity Editor
+exists in this environment, so an actual screenshot/visual confirmation
+isn't available. The best substitute added: `AttachSmoke` and
+`AttachFireCluster` each emit a one-line `Debug.Log` the instant they
+run (`"[DamageFx] Smoke started on <building> at world <pos> (angle
+<deg> deg)"` / `"[DamageFx] Fire cluster started on <building> at
+ground <pos> (roofline will be <y>)"`). Checking the Console for these
+lines answers two different failure modes at once: if the line NEVER
+appears, the trigger itself isn't firing (a wiring/gating bug); if it
+DOES appear but nothing is visible at the logged coordinates, the
+problem is downstream (rendering, camera, occlusion) -- a much smaller
+search space than guessing between "never spawned" and "spawned but
+invisible" blind, which is what every previous round of this back-
+and-forth effectively had to do.
+
+**Guaranteeing fire isn't hidden by smoke.** Both effects' materials
+go through the same `LabMeshBuilder.MakeTransparent`, which sets
+`renderQueue = 3000` for both -- meaning ordinary back-to-front alpha
+sorting decides which one paints on top, purely by whichever happens
+to be nearer the camera at that instant. A large, growing smoke puff
+drifting near a small fire point could therefore visually paint over
+it regardless of the fire's own size or brightness. Fixed with one
+line: `FirePlume.SpawnPuff` now sets its own material's `renderQueue =
+3001`, one above smoke's -- fire always composites AFTER (i.e. on top
+of) any smoke at the same screen position, independent of which is
+actually closer to the camera. `LabMeshBuilder.MakeTransparent` itself
+is untouched, so every other transparent object in this file keeps
+sorting by distance exactly as before.
+
+**Radial placement -- smoke.** The shared-compass-wind mechanic from
+two entries back directly conflicted with "smoke may spawn from any
+place on a building BUT IT MUST... travel out radially... so it is
+always seen": a single city-wide wind direction could, depending on a
+given building's position, drift a puff LATERALLY ALONG or even BACK
+ACROSS a building it didn't happen to spawn on the leeward side of --
+exactly the "hidden behind my own building" failure this new direction
+is explicitly guarding against. Reverted to a per-building angle
+(hashed off `holder.GetInstanceID()`, same "cosmetic jitter, no
+gameplay meaning" precedent every other per-building visual variety in
+this codebase already uses -- "any place on a building"), but this
+time `SmokePlume.Init` reuses that EXACT SAME angle for its own
+outward drift instead of a separate wind lean -- a plume moves in a
+straight radial line away from wherever it started, guaranteed to be
+moving away from the building's own silhouette from the very first
+frame regardless of where on the building it happened to spawn. The
+now-unused `DamageFxProfile.CompassDirection`/`SmokeWindDirection`/
+`SmokeWindAngleRadians` were removed rather than left as dead,
+misleading Inspector fields.
+
+**Radial placement -- fire.** "Same radial rule applies to fire.
+Always visible" -- `FireCluster.SpawnOne`'s distance-from-center used
+to be randomized across 30-90% of `_footprintRadius`, meaning some
+points landed as much as 70% of the way back toward the building's own
+interior/roof-center, exactly the kind of position roof clutter (or
+the building's own bulk, from a shallow camera angle) could bury a
+point behind. Fixed to EXACTLY `_footprintRadius` -- the building's
+own true outer edge, matching the same rule `AttachSmoke` already
+applies to smoke's own placement. Only the angle still varies per
+point (unlike smoke, fire doesn't travel after spawning -- it's a
+fixed lick of flame, not a drifting puff -- so "radial" here means
+placement only, not an ongoing motion).
+
+**Verified.** `damagefxprofile-verify` updated (checks for the removed
+`CompassDirection` fields dropped; `SmokeGrowthMultiplier`/
+`SmokeRiseSpeed` default checks added) and `smokegrowth-verify` re-run
+unchanged -- both still passing (9 and 6 checks respectively).
+Flightcheck recompiles `DamageFx.cs` and `DamageFxProfile.cs` clean.
+No sim-side files touched. The radial-placement and render-queue fixes
+could not be behaviorally exercised the same way the growth-cap fix
+was (via reflection into a real `SmokePuff`/`InitPlume` call) --
+`AttachSmoke`/`AttachFireCluster` create untracked child GameObjects
+inside a void method, and the local `UnityStub.cs` has no real scene-
+graph bookkeeping (`SetParent`/`GetChild`/`childCount` are no-ops), so
+there's no way to spawn one and inspect the resulting position/material
+in this sandbox. Both are logically-reviewed code changes plus a clean
+compile, not executed tests. No Unity Editor here to confirm any of
+this actually reads correctly on a real screen, or that the Inspector
+steps above match what the creator's own Unity version shows -- same
+standing limit as every other Unity-side visual change in this
+project's history.
