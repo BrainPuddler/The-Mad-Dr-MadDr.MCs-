@@ -198,6 +198,14 @@ public class SmokePlume : MonoBehaviour
     private float _timer;
     private float _scale = 1f;
 
+    // 2026-08 (creator direction, confirming a reference image: diagonal
+    // drift/lean like wind-blown smoke instead of climbing straight up):
+    // computed ONCE per plume (i.e. per building) in Awake, not per puff
+    // -- every puff this plume ever spawns shares the same lean, so the
+    // whole column reads as one coherent wind-blown trail rather than
+    // independent puffs each wobbling their own random direction.
+    private Vector2 _lean;
+
     public void Init(float scale)
     {
         _scale = scale;
@@ -206,6 +214,10 @@ public class SmokePlume : MonoBehaviour
     private void Awake()
     {
         _timer = (GetInstanceID() & 7) * 0.1f;
+        var id = GetInstanceID();
+        var angle = ((id & 0xFFFF) % 360) * Mathf.Deg2Rad;
+        const float LeanStrength = 0.55f;
+        _lean = new Vector2(Mathf.Sin(angle) * LeanStrength, Mathf.Cos(angle) * LeanStrength);
     }
 
     private void Update()
@@ -216,34 +228,47 @@ public class SmokePlume : MonoBehaviour
         SpawnPuff();
     }
 
+    /// <summary>2026-08 (creator direction, confirming a reference image
+    /// for shape/color/scale): the round `Sphere` primitive is gone --
+    /// each puff is now a <see cref="ProceduralMeshKit.CloudShard"/>, a
+    /// jittered angular low-poly chunk (answer "1: angular" to the shape
+    /// question). Lightened from the near-black sooty gray the prior
+    /// visibility fix used to a cool pale gray -- with the shape, scale,
+    /// and lean changes in this same pass all adding their own
+    /// contrast/readability on top, a return to a lighter, more
+    /// traditional smoke color no longer risks blending back into the
+    /// building palette the way the original 0.35/0.34/0.32 gray did.
+    /// Scaled up (`ScaleUpPct`) on top of the existing 0.7 resize so the
+    /// plume reads as bigger than the fire burning beneath it.</summary>
     private void SpawnPuff()
     {
-        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        go.name = "SmokePuff";
+        var go = new GameObject("SmokePuff");
         go.transform.SetParent(transform, false);
         go.transform.position = transform.position;
-        // 2026-08 (creator direction: "resize it 70%"): a flat 0.7
-        // multiplier on top of the existing per-tier _scale, applied
-        // here rather than to BuildingStats.SmokeScale's own numbers --
-        // this is a size trim on the puff geometry itself, not a change
-        // to how much bigger one tier's smoke is than another's.
+        var id = go.GetInstanceID();
+        // 2026-08 (creator direction: "resize it 70%", then "scale up"):
+        // ResizePct is the flat 0.7 trim from the earlier pass; ScaleUpPct
+        // is a fresh multiplier on top of that, NOT a reversal of it --
+        // net effect is bigger than the pre-resize original.
         const float ResizePct = 0.7f;
-        var startSize = 1.1f * ResizePct * _scale;
+        const float ScaleUpPct = 1.6f;
+        var startSize = 1.1f * ResizePct * ScaleUpPct * _scale;
         go.transform.localScale = new Vector3(startSize, startSize, startSize);
-        var collider = go.GetComponent<Collider>();
-        if (collider != null) Object.Destroy(collider);
+
+        var meshFilter = go.AddComponent<MeshFilter>();
+        meshFilter.sharedMesh = ProceduralMeshKit.CloudShard(6, id * 0.013f);
+        var renderer = go.AddComponent<MeshRenderer>();
 
         var mat = new Material(ShaderUtil.FindRenderableShader());
-        // dark sooty gray (was 0.35/0.34/0.32 -- too close to the
-        // building's own concrete/roof palette to read at a distance)
-        // and higher, longer-held opacity so it doesn't fade to nothing
-        // before it's even climbed clear of the roofline.
-        mat.color = new Color(0.16f, 0.15f, 0.14f, 0.88f);
+        // cool pale gray (was 0.16/0.15/0.14 sooty near-black) -- see the
+        // summary above for why the earlier contrast fix's reasoning no
+        // longer applies once shape/scale/lean are all pulling their own
+        // weight too.
+        mat.color = new Color(0.68f, 0.7f, 0.74f, 0.8f);
         LabMeshBuilder.MakeTransparent(mat);
-        var renderer = go.GetComponent<Renderer>();
-        if (renderer != null) renderer.sharedMaterial = mat;
+        renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, 3.6f * ResizePct * _scale, 0.88f);
+        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, 3.6f * ResizePct * ScaleUpPct * _scale, 0.8f, _lean);
     }
 }
 
@@ -475,14 +500,21 @@ public class SmokePuff : MonoBehaviour
     /// climb rate the way reusing InitBurst would have. Starts at 20% of
     /// its own base size (2026-08, "should start small and float upward
     /// getting bigger and dissipating") and grows into the full puff as
-    /// it rises -- a visible small-to-big arc, not an instant pop-in.</summary>
-    public void InitPlume(Material mat, float life, float growth, float baseAlpha)
+    /// it rises -- a visible small-to-big arc, not an instant pop-in.
+    /// `lean` (2026-08, confirming a reference image: diagonal drift
+    /// instead of straight-up) is added on top of `Init`'s own small
+    /// per-puff horizontal wobble -- every puff from the same
+    /// `SmokePlume` shares the same `lean` value, so the whole column
+    /// drifts one coherent wind-blown direction instead of each puff
+    /// wandering its own random way.</summary>
+    public void InitPlume(Material mat, float life, float growth, float baseAlpha, Vector2 lean)
     {
         Init(mat);
         _life = life;
         _growth = growth;
         _baseAlpha = baseAlpha;
         _startScaleFraction = 0.2f;
+        _drift = new Vector3(_drift.x + lean.x, _drift.y, _drift.z + lean.y);
     }
 
     /// <summary>Same shape as <see cref="InitBurst"/> (a fire puff is

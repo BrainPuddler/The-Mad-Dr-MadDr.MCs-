@@ -164,6 +164,56 @@ public static class ProceduralMeshKit
         return mesh;
     }
 
+    /// <summary>2026-08 (creator direction, confirming a reference image:
+    /// "1 angular" for smoke shape): a jittered, twisted low-poly barrel --
+    /// two irregular rings (a wider bottom, a narrower top rotated by a
+    /// random twist so the side facets aren't rectangular) capped top and
+    /// bottom, unlike <see cref="FlameShard"/>'s single taper-to-a-point
+    /// cone. A smoke puff is rounder/chunkier than a flame lick, so this
+    /// reads as an angular cloud chunk rather than another flame shape.
+    /// Same calling convention as every other shape here: centered at
+    /// local origin, extends -0.5..0.5 in Y.</summary>
+    public static Mesh CloudShard(int segments, float seed)
+    {
+        var verts = new List<Vector3>();
+        var tris = new List<int>();
+        var bottomRing = new int[segments];
+        var topRing = new int[segments];
+        var topTwist = Hash01(seed, 311f) * (2f * Mathf.PI / segments);
+        for (var i = 0; i < segments; i++)
+        {
+            var aBottom = i / (float)segments * 2f * Mathf.PI;
+            var aTop = aBottom + topTwist;
+            var jitterBottom = 0.75f + Hash01(seed, i * 5.31f) * 0.5f; // 0.75-1.25
+            var jitterTop = 0.6f + Hash01(seed, i * 9.17f + 50f) * 0.55f; // 0.6-1.15
+            var rBottom = 0.5f * jitterBottom;
+            var rTop = 0.4f * jitterTop;
+            bottomRing[i] = verts.Count;
+            verts.Add(new Vector3(Mathf.Sin(aBottom) * rBottom, -0.25f, Mathf.Cos(aBottom) * rBottom));
+            topRing[i] = verts.Count;
+            verts.Add(new Vector3(Mathf.Sin(aTop) * rTop, 0.3f, Mathf.Cos(aTop) * rTop));
+        }
+        var bottomCap = verts.Count; verts.Add(new Vector3(0f, -0.5f, 0f));
+        var topCap = verts.Count; verts.Add(new Vector3(0f, 0.5f, 0f));
+
+        for (var i = 0; i < segments; i++)
+        {
+            var next = (i + 1) % segments;
+            Tri(tris, bottomCap, bottomRing[next], bottomRing[i]);
+            Tri(tris, topCap, topRing[i], topRing[next]);
+            Quad(tris, bottomRing[i], topRing[i], topRing[next], bottomRing[next]);
+        }
+
+        FaceOutward(verts, tris);
+
+        var mesh = new Mesh();
+        mesh.vertices = verts.ToArray();
+        mesh.triangles = tris.ToArray();
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
     /// <summary>A lean-to awning wedge -- centered at local origin,
     /// extends -0.5..0.5 on every axis. Flat bottom and back, sloping
     /// from the back-top edge down to the front-bottom edge (local +Z is

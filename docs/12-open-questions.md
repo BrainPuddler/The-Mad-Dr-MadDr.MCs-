@@ -9931,3 +9931,73 @@ behavior) rather than assumed. No Unity Editor here to confirm the
 roofline placement or the growth arc read correctly on a real screen --
 same standing limit as every other Unity-side visual change in this
 project's history.
+
+## 2026-08 follow-up: smoke gets its own faceted shape, a lighter color, a coherent wind lean, and a size bump
+
+Creator direction: a reference image ("use this for scale and shape
+reference for fire and smoke, and position on buildings"), followed by
+three clarifying questions once the sandbox's network policy turned
+out to block the image host (`encrypted-tbn0.gstatic.com` -- same
+class of external-domain 403 this log has hit before with
+`maddr-mutator.onrender.com` and `brainpuddler.github.io`; confirmed
+via the proxy's own `/__agentproxy/status` endpoint rather than
+guessed). Creator's answers: shape "1, angular"; color/drift "yes"
+(lighten + diagonal lean); scale "yes" (scale up).
+
+**Shape.** New `ProceduralMeshKit.CloudShard(segments, seed)`: a
+jittered, twisted low-poly barrel -- an irregular wider bottom ring and
+a narrower top ring, the top ring rotated by a random twist so the side
+facets read as angular quads rather than a smooth cylinder, capped top
+and bottom. Deliberately a DIFFERENT shape family from `FlameShard`
+(which tapers to a single off-center apex) rather than reusing it at a
+different scale -- a smoke puff is rounder/chunkier than a flame lick,
+so a taper-to-a-point cone would have read as another (bigger, grayer)
+flame rather than a cloud chunk. `SmokePlume.SpawnPuff` builds this via
+`MeshFilter`/`MeshRenderer` the same way `FirePlume.SpawnPuff` already
+does for `FlameShard`, replacing the `CreatePrimitive(Sphere)` call.
+
+**Color.** Lightened from the near-black sooty gray
+(0.16/0.15/0.14) the smoke-visibility fix (several entries back) chose
+specifically for contrast against the building palette, to a cool pale
+gray (0.68/0.7/0.74). That earlier reasoning doesn't automatically
+still apply here: this same pass ALSO changes shape (angular facets
+catch light differently than a smooth sphere) and scale (bigger reads
+farther regardless of color), so a return to a more traditional pale
+smoke color no longer risks the original "blends into the roofline"
+failure mode on its own.
+
+**Diagonal lean.** New `SmokePlume._lean` (a `Vector2`, computed ONCE
+in `Awake` off the plume's own `GetInstanceID` -- i.e. once per
+building, not once per puff) threaded into a new `SmokePuff.InitPlume`
+overload that takes a `lean` parameter and adds it to the puff's own
+existing small per-puff horizontal wobble. Every puff a given
+`SmokePlume` ever spawns shares the exact same `lean` value, so the
+whole column reads as one coherent wind-blown trail leaning a
+consistent direction, instead of the previous per-puff independent
+random wobble (which never accumulated into a visible "lean" no matter
+how long you watched it, since each puff's own small sideways
+component pointed a different random way).
+
+**Scale.** A new `ScaleUpPct = 1.6f` multiplier layered ON TOP of the
+existing `ResizePct = 0.7f` resize (not a replacement for it) -- net
+effect is a plume noticeably bigger than the pre-resize original,
+scaled up specifically so it reads as bigger than the fire burning
+beneath it, per the reference.
+
+**Verified for real.** A standalone `cloudshard-verify` harness (same
+UnityStub-backed pattern as `flameshard-verify`) instantiates
+`CloudShard` across 20 seeds and checks: no zero-length (cancelled)
+normals (the same double-winding regression class this file's own
+header warns about), all vertices finite and within a sane bound, and
+exact topology for a 6-segment shard (24 triangles/72 indices, 14
+vertices: 12 ring + 2 caps). All 20 seeds x 5 checks passed.
+Flightcheck recompiles `DamageFx.cs`/`ProceduralMeshKit.cs` clean
+(one real compile error caught and fixed along the way: the local
+`UnityStub.cs` `Vector2` doesn't define an `operator*(Vector2, float)`
+the way real Unity's does, so the lean-vector construction was
+rewritten to multiply each component directly instead of relying on
+that operator -- avoids depending on an operator the stub doesn't
+have, rather than patching the stub itself). No Unity Editor here to
+confirm the shape/color/lean/scale actually read the way the reference
+image does on a real screen -- same standing limit as every other
+Unity-side visual change in this project's history.
