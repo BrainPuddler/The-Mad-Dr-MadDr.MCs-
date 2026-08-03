@@ -10608,3 +10608,69 @@ verdict on whether ANY of this fixes the report depends on what the
 creator sees next, which is the entire point of Step 3's marker: to
 make that verdict fast and unambiguous instead of another round of
 guessing.
+
+## 2026-08 follow-up: the magenta sphere wasn't visible either -- this is no longer a fire-tuning problem
+
+Creator, verbatim: "No do not see magenta sphere." This is the answer
+the debug marker was built to get, and it changes the shape of the
+problem entirely. A big (4-unit), fully opaque, bright emissive sphere
+at a position independently confirmed correct via Console log is about
+as far from "a fire-tuning problem" as a report can get -- if it's not
+visible, fire's own size/color/shape/transparency were never the real
+issue, and no further tuning in that direction would have helped no
+matter how many more rounds it went through.
+
+**Most likely remaining explanation: the camera isn't pointed there.**
+Monsters auto-attack buildings via `MonsterAgent.TickAttack` regardless
+of where the player's camera currently is -- if the creator was
+watching their own base/units while a monster set fire to some other,
+unwatched building elsewhere on the map, NEITHER the real flame NOR the
+debug marker would ever cross the screen, independent of any rendering
+bug. This is consistent with everything confirmed so far: the Console
+log's positions (`ground (710.00, -4.00, 502.29)`, etc.) are far apart
+across at least 4 different buildings, any and all of which could be
+outside camera view at any given moment.
+
+**Fix: force the camera there instead of hoping.** `FireCluster.
+SpawnOne` now calls `Camera.main.GetComponent<SimpleCameraRig>().
+FocusOn(...)` the instant the first fire point ignites -- the EXACT
+same glide `WaypointCommander.JumpToNearestUnit` already uses for the
+J-key jump-to-nearest-unit feature (`SimpleCameraRig.FocusOn`,
+confirmed via that method's own existing doc comment: "Used by the
+G-key jump-to-nearest-unit," moved to J in 2026-07). This is a
+mechanically real code path, not a new invention -- reusing an already-
+shipped, presumably-working camera glide sidesteps any question of
+whether a NEW camera-movement implementation might itself have a bug.
+If the creator still can't see the marker after the camera itself
+glides to its exact position, that is about as close to conclusive
+proof as code review alone can produce that this isn't a fire-tuning
+problem, a position problem, or even a "camera wasn't looking there"
+problem -- it would point specifically at either (a) the Camera
+component's own Culling Mask Inspector value excluding Layer 0 (every
+dynamically-created GameObject in this project defaults to Layer 0;
+no code anywhere reassigns `.layer`, confirmed by the structural
+investigation in the entry before this one -- so this would have to be
+an Editor-side Inspector setting, not something code review can see or
+fix), or (b) a Scene-view-vs-Game-view mixup (looking at the Scene
+window instead of what the Game window/build actually renders).
+
+**Also widened the margin.** Marker size 4 -> 8 units, lifetime 20 ->
+45s -- doesn't address the camera-positioning theory directly (that's
+what `FocusOn` is for), but costs nothing and rules out "it was too
+small/too brief to catch" as a residual explanation even after the
+camera glide.
+
+**Verified.** `smokegrowth-verify`'s own `.csproj` needed
+`SimpleCameraRig.cs` added to its compile list once `DamageFx.cs`
+started referencing `SimpleCameraRig`/`Camera.main` -- caught
+immediately by a build failure, fixed, re-ran clean (6 checks).
+`damagefxprofile-verify` re-run unchanged (10 checks). Flightcheck
+recompiles `DamageFx.cs` clean. No sim-side files touched. This
+entry's own core claim -- "the camera now genuinely moves to the fire"
+-- could NOT be exercised in this sandbox even in principle:
+`SimpleCameraRig.FocusOn`'s own implementation depends on a real
+Physics raycast against real screen dimensions (`GroundUnderScreen`),
+neither of which the local `UnityStub.cs` implements meaningfully. This
+is the most code-only-verifiable this particular investigation can get
+without a real Editor; the actual answer now depends entirely on what
+the creator sees after this lands.

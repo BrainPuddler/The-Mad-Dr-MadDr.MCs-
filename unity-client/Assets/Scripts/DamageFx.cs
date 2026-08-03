@@ -177,7 +177,14 @@ public static class DamageFx
         var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         go.name = "FireDebugMarker";
         go.transform.position = at;
-        go.transform.localScale = Vector3.one * 4f;
+        // 2026-08 (creator report: "No do not see magenta sphere"): 4
+        // units and 20s left too little margin against "the camera
+        // wasn't even pointed there yet." Now that ignition also snaps
+        // the camera straight to this point (see FireCluster.SpawnOne),
+        // size/duration matter less for THAT specific failure mode, but
+        // bumped both anyway (4 -> 8 units, 20 -> 45s) for margin against
+        // zoom level and reaction time.
+        go.transform.localScale = Vector3.one * 8f;
         var collider = go.GetComponent<Collider>();
         if (collider != null) Object.Destroy(collider);
 
@@ -189,7 +196,7 @@ public static class DamageFx
         var renderer = go.GetComponent<Renderer>();
         if (renderer != null) renderer.sharedMaterial = mat;
 
-        Object.Destroy(go, 20f);
+        Object.Destroy(go, 45f);
     }
 
     /// <summary>One-shot muzzle smoke the instant a gun fires (creator
@@ -684,6 +691,28 @@ public class FireCluster : MonoBehaviour
         if (DamageFxProfile.Active.ShowFireDebugMarkers && _spawned == 1)
         {
             DamageFx.SpawnDebugMarker(go.transform.position);
+            // 2026-08 (creator report: "No do not see magenta sphere"): a
+            // marker unmissable in isolation still isn't visible if the
+            // camera simply isn't pointed anywhere near it -- which the
+            // debug marker alone can't distinguish from "nothing renders
+            // there at all." Force the issue: reuse the SAME camera-glide
+            // WaypointCommander's J-key jump-to-nearest-unit already uses
+            // (SimpleCameraRig.FocusOn, WaypointCommander.cs's
+            // JumpToNearestUnit) to snap the view to this exact point the
+            // instant the first fire ignites. If the marker is STILL not
+            // visible after the camera itself glides there, that's about
+            // as close to conclusive proof as code alone can get that
+            // this isn't a fire-tuning problem at all -- it's a camera
+            // culling mask (Layer 0 excluded on the actual Camera
+            // component, which no code anywhere in this project sets, so
+            // it would have to be an Editor-configured value) or a
+            // Scene-view-vs-Game-view mixup.
+            var mainCam = Camera.main;
+            if (mainCam != null)
+            {
+                var rig = mainCam.GetComponent<SimpleCameraRig>();
+                if (rig != null) rig.FocusOn(go.transform.position);
+            }
         }
     }
 }
