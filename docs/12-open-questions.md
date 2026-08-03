@@ -9871,3 +9871,63 @@ themselves, so the per-tier scaling ratios (Small vs. Landmark) are
 unchanged; this is a flat trim of the whole effect's size, not a
 retune of how much bigger a Landmark's fire/smoke is than a Small
 building's. Flightcheck recompiles `DamageFx.cs` clean.
+
+## 2026-08 follow-up: fire attached to the roofline + shrunk further; smoke gets a real start-small-grow-big arc
+
+Creator direction: "the fire should come from the building be attached
+to the roof, or the windows, and a lot smaller. The smoke should start
+small and float upward getting bigger and dissipating."
+
+**Fire placement.** `FireCluster.SpawnOne`'s old placement put every
+fire point at a quarter of the way up the building's own height, with
+the very FIRST point forced to `dist = 0` -- dead center of the
+footprint, floating in open air disconnected from any wall or roof
+surface. Windows themselves aren't addressable from `DamageFx` today
+(`BuildingDresser.SpawnWindowStrip` spawns window-band geometry
+per-floor during dressing but never returns/exposes those world
+positions anywhere `RuntimeCityBuilder.ApplyBuildingDamage` or
+`BaseDresser` could look them up later -- wiring that up would mean
+threading a window-socket list out of the dresser and through both
+damage-effect call sites, a real separate piece of plumbing). Given the
+creator's own phrasing offered roof OR windows as alternatives, this
+pass moved fire to the roofline instead: height changed from `_height *
+0.25f` to `_height * 0.92f`, and EVERY point (the first one included,
+not just the later staggered-in ones) now lands 30-90% of the way out
+toward the footprint's own edge rather than at dead center -- so fire
+reads as erupting from the roof's own surface/edge instead of hanging
+in the open air above the building's interior.
+
+**Fire size.** Two more flat multipliers stacked on top of the
+existing 0.7x resize: puff mesh spawn scale, `InitFlame`'s growth/
+base-scale, and the `Light`'s range/intensity/flicker-peak all cut by
+another 0.5x. Fire is now roughly a sixth the size of the original
+sphere-puff version (0.7 x 0.5 on top of the shard-mesh trim that had
+already cut the sphere's own footprint by about two-thirds).
+
+**Smoke's growth arc.** The smoke-visibility fix (two entries back)
+already had a puff GROW over its life (`_baseScale + t * _growth`), but
+it started AT `_baseScale` the instant it spawned -- no visible small-
+to-big ramp, just an immediate pop-in followed by modest further
+growth. New `SmokePuff._startScaleFraction` field (default 1.0, a
+complete no-op for every other puff kind -- fire/dust/water/muzzle all
+keep spawning at their own existing full base size, unchanged) lets a
+puff kind override its OWN starting fraction of `_baseScale`; `InitPlume`
+(smoke's own init, and only smoke's) sets it to 0.2. The `Update()` scale
+formula changed from `_baseScale + t * _growth` to `_baseScale *
+Lerp(_startScaleFraction, 1, t) + t * _growth` -- for the unchanged
+default (`_startScaleFraction = 1`), `Lerp(1, 1, t)` is always 1, so
+this reduces to the EXACT original formula bit-for-bit for every puff
+kind except smoke. Smoke now visibly starts at 20% of its base size and
+grows into its full (already-tuned) end size across its 3.2s life while
+rising and fading -- the small-to-big-to-gone arc the creator described,
+instead of an instant pop to near-full-size.
+
+**Verified for real:** flightcheck recompiles `DamageFx.cs` clean
+against the full edited set. The `Lerp` reduction to the pre-existing
+formula for `_startScaleFraction = 1` was checked by hand (`Mathf.Lerp(1,
+1, t) == 1` for all `t`, so `scale = _baseScale * 1 + t * _growth =
+_baseScale + t * _growth`, identical to every prior puff kind's
+behavior) rather than assumed. No Unity Editor here to confirm the
+roofline placement or the growth arc read correctly on a real screen --
+same standing limit as every other Unity-side visual change in this
+project's history.

@@ -282,8 +282,10 @@ public class FirePlume : MonoBehaviour
         // small low-poly flame it was supposed to be lighting up.
         // Shrunk to match a contained shard, not a bonfire. Follow-up
         // ("resize it 70%"): another flat 0.7 on top of that first trim.
-        _glow.range = 3f * 0.7f;
-        _glow.intensity = 1.1f * 0.7f;
+        // Follow-up ("a lot smaller"): a further 0.5 cut -- fire is now
+        // roughly a third of its original post-shard-mesh size.
+        _glow.range = 3f * 0.7f * 0.5f;
+        _glow.intensity = 1.1f * 0.7f * 0.5f;
         // no shadow-casting -- a handful of these across a burning
         // skyline would be a real per-frame cost for a purely cosmetic
         // beat, same "cheap is the point" reasoning every other FX class
@@ -298,7 +300,7 @@ public class FirePlume : MonoBehaviour
         // mechanical, not like fire)
         _flickerPhase += Time.deltaTime * 9f;
         var flicker = 0.7f + Mathf.Abs(Mathf.Sin(_flickerPhase) * 0.6f + Mathf.Sin(_flickerPhase * 2.3f) * 0.4f) * 0.5f;
-        _glow.intensity = 0.7f * flicker;
+        _glow.intensity = 0.35f * flicker;
 
         _timer -= Time.deltaTime;
         if (_timer > 0f) return;
@@ -323,9 +325,9 @@ public class FirePlume : MonoBehaviour
         // (below) overwrites it uniformly every frame off _baseScale, the
         // same "explicit spawn scale is cosmetically moot" precedent
         // SmokePlume/DustBurstFx's own spawn-time scale already sets.
-        // 2026-08 (creator direction: "resize it 70%"): another flat 0.7
-        // on top of the shard-mesh trim.
-        var size = 0.28f * 0.7f;
+        // 2026-08 (creator direction: "resize it 70%", then "a lot
+        // smaller"): two more flat cuts on top of the shard-mesh trim.
+        var size = 0.28f * 0.7f * 0.5f;
         go.transform.localScale = new Vector3(size, size, size);
 
         var meshFilter = go.AddComponent<MeshFilter>();
@@ -340,7 +342,7 @@ public class FirePlume : MonoBehaviour
         mat.SetColor("_EmissionColor", (warm ? new Color(0.95f, 0.35f, 0.05f) : new Color(1f, 0.65f, 0.1f)) * 2.5f);
         renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitFlame(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.25f * 0.7f, 0.9f, 0.32f * 0.7f);
+        go.AddComponent<SmokePuff>().InitFlame(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.25f * 0.7f * 0.5f, 0.9f, 0.32f * 0.7f * 0.5f);
     }
 }
 
@@ -391,11 +393,17 @@ public class FireCluster : MonoBehaviour
         _spawned++;
         var salt = GetInstanceID() + _spawned * 733;
         var angle = ((salt & 0xFFFF) % 360) * Mathf.Deg2Rad;
-        // first point (spawned == 1) stays near center -- a Small
-        // building's own single fire shouldn't land at the footprint's
-        // own edge; later points spread further out, up to the radius.
-        var dist = _spawned == 1 ? 0f : _footprintRadius * (0.25f + ((salt >> 8) & 15) / 15f * 0.65f);
-        var offset = new Vector3(Mathf.Cos(angle) * dist, _height * 0.25f, Mathf.Sin(angle) * dist);
+        // 2026-08 (creator direction: "the fire should come from the
+        // building, be attached to the roof, or the windows"): EVERY
+        // point (including the first) now lands 30-90% out toward the
+        // footprint's own edge -- near a roof edge/window band, not the
+        // dead-center open air the old "first point sits at dist 0"
+        // placement floated it in. Height moved from a quarter of the
+        // way up the wall to near the roofline itself, so it reads as
+        // erupting from the building's own structure instead of hanging
+        // in front of it.
+        var dist = _footprintRadius * (0.3f + ((salt >> 8) & 15) / 15f * 0.6f);
+        var offset = new Vector3(Mathf.Cos(angle) * dist, _height * 0.92f, Mathf.Sin(angle) * dist);
 
         var go = new GameObject("FirePlume");
         go.transform.SetParent(transform, false);
@@ -422,6 +430,16 @@ public class SmokePuff : MonoBehaviour
     // it, so shrinking fire specifically can never touch the smoke fix
     // that shipped right before this one.
     private float _baseScale = 0.8f;
+
+    // 2026-08 (creator direction: "the smoke should start small and
+    // float upward getting bigger and dissipating"): 1.0 for every
+    // existing puff kind (fire/dust/water/muzzle keep spawning already
+    // at their own full base size, completely unchanged) -- only
+    // InitPlume (smoke) overrides it below 1, so a puff's very FIRST
+    // frame renders at `_baseScale * _startScaleFraction` and grows to
+    // `_baseScale + _growth` by the end of its life, instead of already
+    // popping in near its base size the instant it spawns.
+    private float _startScaleFraction = 1f;
 
     // 2026-08 (creator direction: "fire like movement"): zero for every
     // existing puff kind (smoke/dust/water jet all keep their original
@@ -454,13 +472,17 @@ public class SmokePuff : MonoBehaviour
     /// for a quick one-shot burst, not an ongoing plume) with life/
     /// growth/alpha overridden -- 2026-08's smoke-visibility fix needs a
     /// bigger, longer-held, more opaque puff without also flattening its
-    /// climb rate the way reusing InitBurst would have.</summary>
+    /// climb rate the way reusing InitBurst would have. Starts at 20% of
+    /// its own base size (2026-08, "should start small and float upward
+    /// getting bigger and dissipating") and grows into the full puff as
+    /// it rises -- a visible small-to-big arc, not an instant pop-in.</summary>
     public void InitPlume(Material mat, float life, float growth, float baseAlpha)
     {
         Init(mat);
         _life = life;
         _growth = growth;
         _baseAlpha = baseAlpha;
+        _startScaleFraction = 0.2f;
     }
 
     /// <summary>Same shape as <see cref="InitBurst"/> (a fire puff is
@@ -506,7 +528,7 @@ public class SmokePuff : MonoBehaviour
             // the moment it's born
             transform.position += Vector3.right * (Mathf.Sin(_swayPhase) * _swayAmp * t * Time.deltaTime * 3f);
         }
-        var scale = _baseScale + t * _growth;
+        var scale = _baseScale * Mathf.Lerp(_startScaleFraction, 1f, t) + t * _growth;
         transform.localScale = new Vector3(scale, scale, scale);
         if (_mat != null)
         {
