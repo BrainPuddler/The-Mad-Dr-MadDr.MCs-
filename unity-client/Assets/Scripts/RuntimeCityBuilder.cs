@@ -49,6 +49,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     [Tooltip("Every tunable number for streetlamps/windows/neon/marquee lights -- brightness, real-light budget, flicker/buzz/chase timing. Create one via Assets > Create > MadDr > City Lighting Profile. Left unassigned, everything falls back to CityLightingProfile.Default's own safe values.")]
     public CityLightingProfile lightingProfile;
 
+    [Header("Damage FX (docs/21 batch 2)")]
+    [Tooltip("Fire/smoke puff size knobs. Create one via Assets > Create > MadDr > Damage Fx Profile. Left unassigned, everything falls back to DamageFxProfile.Default's own safe values. Unlike the lighting profile, these are read live -- no rebuild needed to see a change.")]
+    public DamageFxProfile damageFxProfile;
+
     [Header("Region picker (off by default -- unchanged behavior)")]
     [Tooltip("Shows an in-game 'choose your city' screen before generation instead of using the Inspector's preset field directly. Off by default so every existing scene/workflow (Inspector preset, CityGizmo sync) keeps working byte-for-byte unchanged -- this only changes anything when explicitly turned on.")]
     public bool showRegionPicker = false;
@@ -338,6 +342,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // (Bulb(), window glow) ONCE at build time, reading whatever
         // profile is active right now.
         CityLightingProfile.Active = lightingProfile != null ? lightingProfile : CityLightingProfile.Default;
+        // read LIVE by DamageFx (not just at build time) -- set here anyway
+        // so a match that never touches the Inspector still gets Default's
+        // safe values instead of a null Active on the very first puff.
+        DamageFxProfile.Active = damageFxProfile != null ? damageFxProfile : DamageFxProfile.Default;
 
         BuildGround();
         BuildTableEdge();

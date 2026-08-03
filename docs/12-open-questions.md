@@ -10070,3 +10070,69 @@ suite re-run needed for those packages. No Unity Editor here to
 confirm the new position/timing read correctly on a real screen -- same
 standing limit as every other Unity-side visual change in this
 project's history.
+
+## 2026-08 follow-up: smoke shrunk to 0.2, a smooth fade curve, and Inspector knobs for both effects
+
+Creator direction, same session: "smoke way way smaller. 0.2 resize.
+and always smooth fading out of upper large chunks of smoke." Then,
+separately: "add inspector for smoke size and and fire size."
+
+**0.2 resize.** `SmokePlume.SpawnPuff`'s resize constant dropped from
+0.7 straight to 0.2 -- a further cut on top of (not a reversal of) the
+immediately-prior entry's fix.
+
+**Smooth fade.** `SmokePuff` gained a smoke-only `_easeFade` bool
+(false/linear, completely unchanged, for every other puff kind --
+fire/dust/water/muzzle). When true, `Update`'s alpha fade swaps from a
+constant-rate linear ramp (`1f - t`) to a smoothstep ease (`t*t*(3-2t)`
+applied to alpha's fade-in-progress, i.e. `1f - smoothstep(t)`): alpha
+barely drops during the first stretch of a puff's life, falls through
+the middle, then eases toward zero rather than declining at the exact
+same rate the whole way. The practical effect is on the "upper large
+chunks" specifically -- the biggest, oldest puffs in the column (the
+ones nearest the end of their own life) are visibly present longer and
+then dissolve gradually, instead of already being close to fully
+transparent well before they're at their biggest size the way a
+constant linear rate works out to.
+
+**Inspector knobs.** New `DamageFxProfile.cs` -- a `ScriptableObject`
+following the EXACT pattern `CityLightingProfile` already established
+for lighting (`[CreateAssetMenu]`, `[Range]`-attributed public fields,
+a lazy `Default` fallback, an `Active` static holder DamageFx's static
+methods read from since there's no MonoBehaviour instance to hang an
+Inspector field off directly). Two fields: `SmokeResizePct` (default
+0.2, replacing the constant above) and `FireResizePct` (default 0.35 --
+folding the "resize it 70%, then a lot smaller (0.5 cut)" history
+`FirePlume`'s glow range/puff size/growth all separately hardcoded into
+ONE number, so raising/lowering fire size can't leave the glow
+mismatched with the flame mesh it lights). `RuntimeCityBuilder` gained
+a `damageFxProfile` field wired the same way `lightingProfile` already
+is, setting `DamageFxProfile.Active` at city-build time.
+
+Unlike `CityLightingProfile` (whose values only take effect at the next
+city rebuild), `DamageFx` reads `DamageFxProfile.Active` FRESH on every
+puff spawn and every `FirePlume.Update` flicker tick -- an Inspector
+slider change takes effect on the very next puff/frame, including on an
+ALREADY-burning building, with no rebuild needed. One correctness catch
+caught while wiring this: `FirePlume.Update`'s per-frame flicker
+intensity used a SEPARATE hardcoded `0.35f` literal that was never
+actually tied to the 0.7*0.5 resize history (Awake's own
+resize-scaled intensity assignment was dead code, immediately
+overwritten by Update every frame) -- naively multiplying that literal
+by `FireResizePct` would have compounded into an unintended ~3x
+dimming at the profile's own default. Fixed by REPLACING the literal
+with the live profile value instead of multiplying both together;
+since the profile's default (0.35) numerically matches the literal it
+replaced, default behavior is unchanged.
+
+**Verified.** A new standalone `damagefxprofile-verify` harness checks:
+`Default.SmokeResizePct == 0.2`, `Default.FireResizePct == 0.35`
+(byte-for-byte reproducing prior hardcoded behavior when unassigned),
+`Active` falls back to `Default` before anything is set, `Active`
+reflects an explicitly assigned profile once one is set, and falls back
+to `Default` again once cleared -- all passing. Flightcheck recompiles
+`DamageFx.cs`, `DamageFxProfile.cs`, and `RuntimeCityBuilder.cs` clean.
+No sim-side files touched, no determinism risk. No Unity Editor here to
+confirm the fade curve or Inspector wiring read correctly on a real
+screen or actually appear in the Inspector -- same standing limit as
+every other Unity-side visual change in this project's history.

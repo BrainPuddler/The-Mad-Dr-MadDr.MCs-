@@ -261,21 +261,28 @@ public class SmokePlume : MonoBehaviour
     /// 2026-08 CORRECTION (creator report: "the smoke is way too big and
     /// I can not see the fire"): the same pass's `ScaleUpPct` size-up on
     /// top of the existing 0.7 resize is GONE -- it made the plume big
-    /// enough to visually swallow the fire cluster it rises from. Back to
-    /// exactly the 0.7-resize baseline's own numbers; see
+    /// enough to visually swallow the fire cluster it rises from. See
     /// `DamageFx.AttachSmoke` for the other half of this fix (moving the
-    /// plume's origin outside the building instead of shrinking further).</summary>
+    /// plume's origin outside the building instead of shrinking further).
+    ///
+    /// 2026-08 follow-up (creator direction: "smoke way way smaller. 0.2
+    /// resize."): dropped from 0.7 to 0.2 -- a further cut on top of the
+    /// fix above, not a reversal of it.
+    ///
+    /// 2026-08 follow-up (creator direction: "add inspector for smoke
+    /// size"): the flat constant is gone -- now reads
+    /// <see cref="DamageFxProfile.Active"/>.SmokeResizePct every spawn
+    /// (not cached), so an Inspector slider takes effect on the very next
+    /// puff without a city rebuild. 0.2 lives on as that field's own
+    /// default.</summary>
     private void SpawnPuff()
     {
         var go = new GameObject("SmokePuff");
         go.transform.SetParent(transform, false);
         go.transform.position = transform.position;
         var id = go.GetInstanceID();
-        // 2026-08 (creator direction: "resize it 70%"): unchanged from
-        // that pass -- see the CORRECTION above for why this is no longer
-        // multiplied by a further scale-up.
-        const float ResizePct = 0.7f;
-        var startSize = 1.1f * ResizePct * _scale;
+        var resizePct = DamageFxProfile.Active.SmokeResizePct;
+        var startSize = 1.1f * resizePct * _scale;
         go.transform.localScale = new Vector3(startSize, startSize, startSize);
 
         var meshFilter = go.AddComponent<MeshFilter>();
@@ -291,7 +298,7 @@ public class SmokePlume : MonoBehaviour
         LabMeshBuilder.MakeTransparent(mat);
         renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, 3.6f * ResizePct * _scale, 0.8f, _lean);
+        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, 3.6f * resizePct * _scale, 0.8f, _lean);
     }
 }
 
@@ -327,13 +334,15 @@ public class FirePlume : MonoBehaviour
         _glow.color = new Color(1f, 0.55f, 0.15f);
         // 2026-08 (creator report: "the fire is too large"): a 6m-range,
         // 2.5-intensity point light was throwing a glow bigger than the
-        // small low-poly flame it was supposed to be lighting up.
-        // Shrunk to match a contained shard, not a bonfire. Follow-up
-        // ("resize it 70%"): another flat 0.7 on top of that first trim.
-        // Follow-up ("a lot smaller"): a further 0.5 cut -- fire is now
-        // roughly a third of its original post-shard-mesh size.
-        _glow.range = 3f * 0.7f * 0.5f;
-        _glow.intensity = 1.1f * 0.7f * 0.5f;
+        // small low-poly flame it was supposed to be lighting up. Shrunk
+        // to match a contained shard, not a bonfire; the flat 0.7-then-0.5
+        // cuts from that history are now folded into
+        // DamageFxProfile.Active.FireResizePct's own default (0.35) --
+        // see DamageFxProfile for the "add inspector for fire size"
+        // follow-up that replaced the hardcoded constants.
+        var fireResizePct = DamageFxProfile.Active.FireResizePct;
+        _glow.range = 3f * fireResizePct;
+        _glow.intensity = 1.1f * fireResizePct;
         // no shadow-casting -- a handful of these across a burning
         // skyline would be a real per-frame cost for a purely cosmetic
         // beat, same "cheap is the point" reasoning every other FX class
@@ -348,7 +357,13 @@ public class FirePlume : MonoBehaviour
         // mechanical, not like fire)
         _flickerPhase += Time.deltaTime * 9f;
         var flicker = 0.7f + Mathf.Abs(Mathf.Sin(_flickerPhase) * 0.6f + Mathf.Sin(_flickerPhase * 2.3f) * 0.4f) * 0.5f;
-        _glow.intensity = 0.35f * flicker;
+        // this REPLACES a previously-hardcoded `0.35f` literal with the
+        // live profile value (default 0.35, so default behavior is
+        // byte-identical) -- NOT multiplied together with it, which would
+        // have compounded into an unintended ~3x dimming at the default.
+        // Read fresh every frame (not cached from Awake) so an Inspector
+        // change affects an ALREADY-burning building's glow immediately.
+        _glow.intensity = DamageFxProfile.Active.FireResizePct * flicker;
 
         _timer -= Time.deltaTime;
         if (_timer > 0f) return;
@@ -361,21 +376,26 @@ public class FirePlume : MonoBehaviour
     /// poly fire]"): the puff-sphere approach is gone entirely for fire --
     /// a smooth round sphere can't read as "low-poly" no matter how small
     /// it's scaled. Each spawn is now a <see
-    /// cref="ProceduralMeshKit.FlameShard"/>, a small jagged shard mesh,
-    /// at roughly a third of the old sphere puff's footprint.</summary>
+    /// cref="ProceduralMeshKit.FlameShard"/>, a small jagged shard mesh.
+    ///
+    /// 2026-08 follow-up (creator direction: "add inspector for fire
+    /// size"): puff size/growth now read
+    /// <see cref="DamageFxProfile.Active"/>.FireResizePct (default 0.35,
+    /// the same "resize 70%, then a lot smaller (0.5 cut)" history
+    /// folded into one number) instead of the flat 0.7*0.5 literal, fresh
+    /// on every spawn.</summary>
     private void SpawnPuff()
     {
         var go = new GameObject("FirePuff");
         go.transform.SetParent(transform, false);
         var id = go.GetInstanceID();
         go.transform.position = transform.position + new Vector3(((id & 3) - 1.5f) * 0.1f, 0f, (((id >> 2) & 3) - 1.5f) * 0.1f);
+        var fireResizePct = DamageFxProfile.Active.FireResizePct;
         // this initial scale only holds for one frame -- SmokePuff.Update
         // (below) overwrites it uniformly every frame off _baseScale, the
         // same "explicit spawn scale is cosmetically moot" precedent
         // SmokePlume/DustBurstFx's own spawn-time scale already sets.
-        // 2026-08 (creator direction: "resize it 70%", then "a lot
-        // smaller"): two more flat cuts on top of the shard-mesh trim.
-        var size = 0.28f * 0.7f * 0.5f;
+        var size = 0.28f * fireResizePct;
         go.transform.localScale = new Vector3(size, size, size);
 
         var meshFilter = go.AddComponent<MeshFilter>();
@@ -390,7 +410,7 @@ public class FirePlume : MonoBehaviour
         mat.SetColor("_EmissionColor", (warm ? new Color(0.95f, 0.35f, 0.05f) : new Color(1f, 0.65f, 0.1f)) * 2.5f);
         renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitFlame(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.25f * 0.7f * 0.5f, 0.9f, 0.32f * 0.7f * 0.5f);
+        go.AddComponent<SmokePuff>().InitFlame(mat, 0.5f + ((id >> 6) & 3) * 0.08f, 0.25f * fireResizePct, 0.9f, 0.32f * fireResizePct);
     }
 }
 
@@ -499,6 +519,13 @@ public class SmokePuff : MonoBehaviour
     private float _swayFreq;
     private float _swayPhase;
 
+    // 2026-08 (creator direction: "always smooth fading out of upper
+    // large chunks of smoke"): false (linear alpha fade, `1f - t`,
+    // completely unchanged) for every existing puff kind -- only
+    // InitPlume (smoke) sets this, so fire/dust/water/muzzle keep their
+    // original fade curve exactly.
+    private bool _easeFade;
+
     public void Init(Material mat)
     {
         _mat = mat;
@@ -529,7 +556,20 @@ public class SmokePuff : MonoBehaviour
     /// per-puff horizontal wobble -- every puff from the same
     /// `SmokePlume` shares the same `lean` value, so the whole column
     /// drifts one coherent wind-blown direction instead of each puff
-    /// wandering its own random way.</summary>
+    /// wandering its own random way.
+    ///
+    /// 2026-08 follow-up (creator direction: "always smooth fading out
+    /// of upper large chunks of smoke"): sets `_easeFade`, which swaps
+    /// `Update`'s fade curve from a constant-rate linear ramp to a
+    /// smoothstep ease -- alpha barely moves for the first stretch of
+    /// life, drops through the middle, then eases toward zero rather
+    /// than hitting it at a fixed rate the whole way. The biggest, oldest
+    /// puffs (the "upper large chunks," near the end of their own life
+    /// and the top of the column) are specifically the ones this changes
+    /// the feel of, since a linear ramp is already close to zero alpha by
+    /// the time they're that old/big -- easing keeps them visibly present
+    /// longer and then dissolves them gradually instead of at the same
+    /// flat rate as a puff half their age.</summary>
     public void InitPlume(Material mat, float life, float growth, float baseAlpha, Vector2 lean)
     {
         Init(mat);
@@ -538,6 +578,7 @@ public class SmokePuff : MonoBehaviour
         _baseAlpha = baseAlpha;
         _startScaleFraction = 0.2f;
         _drift = new Vector3(_drift.x + lean.x, _drift.y, _drift.z + lean.y);
+        _easeFade = true;
     }
 
     /// <summary>Same shape as <see cref="InitBurst"/> (a fire puff is
@@ -587,8 +628,11 @@ public class SmokePuff : MonoBehaviour
         transform.localScale = new Vector3(scale, scale, scale);
         if (_mat != null)
         {
+            // smoke (_easeFade) uses a smoothstep ease instead of a
+            // constant-rate linear ramp -- see InitPlume's summary for why
+            var fadeT = _easeFade ? t * t * (3f - 2f * t) : t;
             var c = _mat.color;
-            _mat.color = new Color(c.r, c.g, c.b, _baseAlpha * (1f - t));
+            _mat.color = new Color(c.r, c.g, c.b, _baseAlpha * (1f - fadeT));
         }
         if (t >= 1f) Object.Destroy(gameObject);
     }
