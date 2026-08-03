@@ -2059,8 +2059,22 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 // (hex count) instead of the RTS roster's fixed-size
                 // silhouette table.
                 var footprintRadius = Mathf.Sqrt(building.Footprint.Count) * (float)HexCoord.HexMeters * 0.4f;
-                DamageFx.AttachSmoke(cubes[0].transform, height, footprintRadius, BuildingStats.SmokeScale(building.Tier));
-                DamageFx.AttachFireCluster(cubes[0].transform, height, footprintRadius, BuildingStats.FireCount(building.Tier));
+                // 2026-08 follow-up BUGFIX (creator report: "I still do
+                // not see the fire"): cubes[0].transform.position.y is
+                // NOT ground level -- SpawnCube(hex, height/2f, height,
+                // ...) centers the massing cube at HALF the building's
+                // height (a primitive "sitting on the ground" is
+                // positioned at its own vertical middle). Every
+                // height-fraction offset AttachSmoke/AttachFireCluster
+                // compute was therefore landing half a building-height
+                // too high -- fire in particular ended up floating ~50%
+                // of the building's own height above its actual roofline.
+                // See DamageFx.AttachSmoke's own doc comment for the full
+                // writeup; -height*0.5f is the correction back to true
+                // ground level.
+                var groundOffset = -height * 0.5f;
+                DamageFx.AttachSmoke(cubes[0].transform, height, footprintRadius, BuildingStats.SmokeScale(building.Tier), groundOffset);
+                DamageFx.AttachFireCluster(cubes[0].transform, height, footprintRadius, BuildingStats.FireCount(building.Tier), groundOffset);
             }
         }
     }

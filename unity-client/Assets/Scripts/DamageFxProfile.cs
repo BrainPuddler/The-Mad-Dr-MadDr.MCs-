@@ -28,9 +28,17 @@ using UnityEngine;
 public class DamageFxProfile : ScriptableObject
 {
     [Header("Smoke")]
-    [Tooltip("Flat multiplier on every smoke puff's spawn size, growth, and max size (SmokePlume.SpawnPuff's own ResizePct). 2026-08 default: 0.2, per creator direction \"smoke way way smaller. 0.2 resize.\"")]
+    [Tooltip("Flat multiplier on every smoke puff's OWN starting size (SmokePlume.SpawnPuff's own ResizePct). 2026-08 default: 0.2, per creator direction \"smoke way way smaller. 0.2 resize.\" 2026-08 follow-up fix: this used to only affect the ADDITIONAL growth amount, not the puff's actual starting scale (SmokePuff._baseScale was a fixed 0.8 constant no smoke code path ever touched) -- now genuinely drives the start size, see SmokeGrowthMultiplier below for the (separate, now-capped) growth-over-life knob.")]
     [Range(0.02f, 2f)]
     public float SmokeResizePct = 0.2f;
+
+    [Tooltip("How large a puff grows by the END of its life, as a multiplier on its OWN starting size (SmokeResizePct above) -- 1 means it never grows at all, 2 means it doubles. 2026-08 (creator direction: \"growth in size should never exceed 2 times the size of the original\"): hard-clamped to [1, 2] in DamageFx.cs regardless of what's typed here, so this genuinely can't exceed the ceiling the creator asked for. Replaces the prior growth formula, which added a SEPARATE fixed amount on top of a puff's DISCONNECTED base scale and could reach roughly 9-10x the puff's actual starting size.")]
+    [Range(1f, 2f)]
+    public float SmokeGrowthMultiplier = 2f;
+
+    [Tooltip("Vertical rise speed (world units/sec) each smoke puff climbs at, before the sideways wind drift below is added on top. 2026-08 default: 1.4 (unchanged from the prior hardcoded constant every puff kind shared) -- now Inspector-tunable per creator direction \"give me inspector setting to alter drift.\"")]
+    [Range(0f, 6f)]
+    public float SmokeRiseSpeed = 1.4f;
 
     [Tooltip("Sideways drift speed (world units/sec) each smoke puff picks up on top of its own upward rise, giving the whole plume a coherent wind-blown diagonal lean instead of climbing straight up. Read ONCE per building when its SmokePlume is created (like a build-time value, not live per-puff like the size knobs above) -- an Inspector change takes effect on the NEXT building that catches fire, not an already-burning one. 2026-08 default: 5 (up from a prior 1.8, then 0.55 before that -- creator report: \"the camera is above the smoke, the smoke must travel far to get the correct angle... as if in a very strong fast wind\" -- an RTS camera looking mostly straight down reads horizontal (X/Z) drift far more clearly than vertical rise, so this needs to be dramatic, not subtle, to register at all from that angle).")]
     [Range(0f, 12f)]

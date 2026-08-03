@@ -40,16 +40,43 @@ public static class DamageFx
     /// used to be a per-building hash -- now it's the SAME shared compass
     /// angle every building's wind lean uses
     /// (<see cref="DamageFxProfile.Active"/>.SmokeWindAngleRadians), so a
-    /// plume erupts on the actual leeward (downwind) edge of its own roof
-    /// and then keeps drifting further that same way, instead of exiting
-    /// toward an arbitrary side unrelated to which way it's about to blow.</summary>
-    public static void AttachSmoke(Transform holder, float height, float footprintRadius, float scale)
+    /// plume erupts on the leeward (downwind) side of its own building and
+    /// then keeps drifting further that same way, instead of exiting
+    /// toward an arbitrary side unrelated to which way it's about to blow.
+    ///
+    /// 2026-08 follow-up BUGFIX (creator report: "I still do not see the
+    /// fire" -- root cause traced here, affecting smoke too):
+    /// `holder.position.y` is NOT reliably ground level. RuntimeCityBuilder's
+    /// procedural-building call site passes `cubes[0].transform`, and
+    /// `SpawnCube(hex, height/2f, height, ...)` places that cube's own
+    /// `position.y` at HALF the building's height (a centered primitive
+    /// "sitting on the ground" is positioned at its own vertical middle,
+    /// not its base) -- every height-fraction offset computed on top of
+    /// that was landing half a building-height too high. `holderGroundOffset`
+    /// lets a caller correct for this (RuntimeCityBuilder passes
+    /// `-height * 0.5f`; BaseDresser's RTS-roster call site, whose root
+    /// transform really is at ground level already, passes the default 0
+    /// and is unaffected).
+    ///
+    /// 2026-08 follow-up (creator direction: "smoke must start from low ON
+    /// the building and travel upward"): origin height fraction dropped
+    /// from 1.05 (floating above the roof, where it used to spawn already
+    /// "arrived") to 0.3 -- low on the wall, well under the roofline
+    /// <see cref="AttachFireCluster"/>'s own points sit at -- so a puff's
+    /// own rise (<see cref="DamageFxProfile.Active"/>.SmokeRiseSpeed) has
+    /// real distance to visibly climb THROUGH and past the structure
+    /// instead of starting already above it.</summary>
+    public static void AttachSmoke(Transform holder, float height, float footprintRadius, float scale, float holderGroundOffset = 0f)
     {
         var go = new GameObject("SmokePlume");
         go.transform.SetParent(holder, false);
         var angle = DamageFxProfile.Active.SmokeWindAngleRadians;
-        var outward = new Vector3(Mathf.Sin(angle) * footprintRadius * 1.2f, height * 1.05f, Mathf.Cos(angle) * footprintRadius * 1.2f);
-        go.transform.position = holder.position + outward;
+        var groundY = holder.position.y + holderGroundOffset;
+        var pos = new Vector3(
+            holder.position.x + Mathf.Sin(angle) * footprintRadius,
+            groundY + height * 0.3f,
+            holder.position.z + Mathf.Cos(angle) * footprintRadius);
+        go.transform.position = pos;
         go.AddComponent<SmokePlume>().Init(scale, angle);
     }
 
@@ -83,12 +110,22 @@ public static class DamageFx
     /// share the same numbers for). `footprintRadius` bounds how far a
     /// fire point can land from center -- a bigger building spreads its
     /// fires wider, not just more densely packed at the same single
-    /// spot `AttachFire` always used.</summary>
-    public static void AttachFireCluster(Transform holder, float height, float footprintRadius, int targetCount)
+    /// spot `AttachFire` always used.
+    ///
+    /// 2026-08 follow-up BUGFIX (creator report: "I still do not see the
+    /// fire"): same ground-offset bug <see cref="AttachSmoke"/> was fixed
+    /// for -- `holder.position.y` isn't reliably ground level (see that
+    /// method's own doc comment for the full root-cause writeup).
+    /// `FireCluster.SpawnOne`'s own local-Y-offset math (`_height * 1.0f`
+    /// for the roofline) assumes its parent transform's origin IS ground
+    /// level, so snapping that parent to the corrected ground Y here
+    /// fixes every point this cluster ever spawns without touching
+    /// `FireCluster`'s own logic at all.</summary>
+    public static void AttachFireCluster(Transform holder, float height, float footprintRadius, int targetCount, float holderGroundOffset = 0f)
     {
         var go = new GameObject("FireCluster");
         go.transform.SetParent(holder, false);
-        go.transform.position = holder.position;
+        go.transform.position = new Vector3(holder.position.x, holder.position.y + holderGroundOffset, holder.position.z);
         go.AddComponent<FireCluster>().Init(height, footprintRadius, targetCount);
     }
 
@@ -296,7 +333,25 @@ public class SmokePlume : MonoBehaviour
     /// <see cref="DamageFxProfile.Active"/>.SmokeResizePct every spawn
     /// (not cached), so an Inspector slider takes effect on the very next
     /// puff without a city rebuild. 0.2 lives on as that field's own
-    /// default.</summary>
+    /// default.
+    ///
+    /// 2026-08 follow-up BUGFIX (creator direction: "growth in size
+    /// should never exceed 2 times the size of the original"): while
+    /// wiring an Inspector cap for this, found `SmokeResizePct` was NEVER
+    /// actually reaching the puff's real on-screen size -- `startSize`
+    /// here was only ever applied to `localScale` for ONE frame before
+    /// `SmokePuff.Update` overwrote it every subsequent frame using its
+    /// OWN `_baseScale` field, which `InitPlume` never set (it silently
+    /// kept the shared 0.8 default every non-smoke puff kind also uses).
+    /// The actual growth formula was ALSO unrelated to that base -- a
+    /// flat amount added on top, letting the visible size reach roughly
+    /// 9-10x its nominal starting point regardless of what
+    /// `SmokeResizePct` was set to. Both are fixed together:
+    /// `InitPlume` now takes this method's own `startSize` directly and
+    /// stores it as `_baseScale` (so the resize knob finally drives the
+    /// size that's actually rendered every frame), and growth is now a
+    /// capped multiplier on THAT base (see `InitPlume`'s own doc comment)
+    /// instead of an unrelated flat add.</summary>
     private void SpawnPuff()
     {
         var go = new GameObject("SmokePuff");
@@ -320,7 +375,7 @@ public class SmokePlume : MonoBehaviour
         LabMeshBuilder.MakeTransparent(mat);
         renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, 3.6f * resizePct * _scale, 0.8f, _lean);
+        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, startSize, 0.8f, _lean);
     }
 }
 
@@ -532,13 +587,17 @@ public class SmokePuff : MonoBehaviour
     private float _baseScale = 0.8f;
 
     // 2026-08 (creator direction: "the smoke should start small and
-    // float upward getting bigger and dissipating"): 1.0 for every
-    // existing puff kind (fire/dust/water/muzzle keep spawning already
-    // at their own full base size, completely unchanged) -- only
-    // InitPlume (smoke) overrides it below 1, so a puff's very FIRST
-    // frame renders at `_baseScale * _startScaleFraction` and grows to
-    // `_baseScale + _growth` by the end of its life, instead of already
-    // popping in near its base size the instant it spawns.
+    // float upward getting bigger and dissipating"): used by the ORIGINAL
+    // (non-smoke) growth formula below -- `_baseScale * Lerp(_startScaleFraction,
+    // 1, t) + t * _growth` -- still exactly 1.0 (no-op) for every puff
+    // kind that uses that formula (fire/dust/water/muzzle).
+    //
+    // 2026-08 follow-up: smoke no longer uses this field at all -- see
+    // `_useGrowthMultiplier`/`_growthMultiplier` below and `InitPlume`'s
+    // own doc comment for why (the old start-fraction-plus-flat-growth
+    // model let a puff balloon to ~9-10x its own starting size, well past
+    // what "growth in size should never exceed 2 times the size of the
+    // original" asks for).
     private float _startScaleFraction = 1f;
 
     // 2026-08 (creator direction: "fire like movement"): zero for every
@@ -558,6 +617,16 @@ public class SmokePuff : MonoBehaviour
     // original fade curve exactly.
     private bool _easeFade;
 
+    // 2026-08 (creator direction: "growth in size should never exceed 2
+    // times the size of the original"): false (the old `_baseScale *
+    // Lerp(_startScaleFraction, 1, t) + t * _growth` formula, completely
+    // unchanged) for every existing puff kind -- only InitPlume (smoke)
+    // sets this true, switching Update's scale math to a clean
+    // `_baseScale * Lerp(1, _growthMultiplier, t)` (start size times a
+    // capped multiplier) instead.
+    private bool _useGrowthMultiplier;
+    private float _growthMultiplier = 2f;
+
     public void Init(Material mat)
     {
         _mat = mat;
@@ -576,16 +645,10 @@ public class SmokePuff : MonoBehaviour
 
     /// <summary>Same lazy rise <see cref="Init"/> already gives a smoke
     /// puff (unlike <see cref="InitBurst"/>'s faster 0.6-up drift, tuned
-    /// for a quick one-shot burst, not an ongoing plume) with life/
-    /// growth/alpha overridden -- 2026-08's smoke-visibility fix needs a
-    /// bigger, longer-held, more opaque puff without also flattening its
-    /// climb rate the way reusing InitBurst would have. Starts at 20% of
-    /// its own base size (2026-08, "should start small and float upward
-    /// getting bigger and dissipating") and grows into the full puff as
-    /// it rises -- a visible small-to-big arc, not an instant pop-in.
-    /// `lean` (2026-08, confirming a reference image: diagonal drift
-    /// instead of straight-up) is added on top of `Init`'s own small
-    /// per-puff horizontal wobble -- every puff from the same
+    /// for a quick one-shot burst, not an ongoing plume) with life/alpha
+    /// overridden. `lean` (2026-08, confirming a reference image: diagonal
+    /// drift instead of straight-up) is added on top of `Init`'s own
+    /// small per-puff horizontal wobble -- every puff from the same
     /// `SmokePlume` shares the same `lean` value, so the whole column
     /// drifts one coherent wind-blown direction instead of each puff
     /// wandering its own random way.
@@ -601,15 +664,34 @@ public class SmokePuff : MonoBehaviour
     /// the feel of, since a linear ramp is already close to zero alpha by
     /// the time they're that old/big -- easing keeps them visibly present
     /// longer and then dissolves them gradually instead of at the same
-    /// flat rate as a puff half their age.</summary>
-    public void InitPlume(Material mat, float life, float growth, float baseAlpha, Vector2 lean)
+    /// flat rate as a puff half their age.
+    ///
+    /// 2026-08 follow-up BUGFIX/redesign (creator direction: "growth in
+    /// size should never exceed 2 times the size of the original"; "give
+    /// me inspector setting to alter drift"): `startSize` (renamed from
+    /// the old `growth` parameter, and now genuinely THE puff's rendered
+    /// starting size -- see `SmokePlume.SpawnPuff`'s own doc comment for
+    /// why the old wiring never actually achieved that) becomes
+    /// `_baseScale` directly, replacing the old shared-default-0.8
+    /// nobody had actually pointed `SmokeResizePct` at. `_growthMultiplier`
+    /// is read from <see cref="DamageFxProfile.Active"/>.SmokeGrowthMultiplier
+    /// and clamped to [1, 2] here in code -- NOT just via the Inspector's
+    /// own [Range] attribute, which a script or an out-of-date serialized
+    /// asset could bypass -- so a puff genuinely cannot exceed double its
+    /// own starting size regardless of what's configured. Vertical rise
+    /// speed is now <see cref="DamageFxProfile.Active"/>.SmokeRiseSpeed
+    /// instead of the flat 1.4 baked into `Init` above (still shared by
+    /// every OTHER puff kind, unchanged).</summary>
+    public void InitPlume(Material mat, float life, float startSize, float baseAlpha, Vector2 lean)
     {
         Init(mat);
         _life = life;
-        _growth = growth;
         _baseAlpha = baseAlpha;
-        _startScaleFraction = 0.2f;
-        _drift = new Vector3(_drift.x + lean.x, _drift.y, _drift.z + lean.y);
+        _baseScale = startSize;
+        _useGrowthMultiplier = true;
+        _growthMultiplier = Mathf.Clamp(DamageFxProfile.Active.SmokeGrowthMultiplier, 1f, 2f);
+        var riseSpeed = DamageFxProfile.Active.SmokeRiseSpeed;
+        _drift = new Vector3(_drift.x + lean.x, riseSpeed, _drift.z + lean.y);
         _easeFade = true;
     }
 
@@ -656,7 +738,13 @@ public class SmokePuff : MonoBehaviour
             // the moment it's born
             transform.position += Vector3.right * (Mathf.Sin(_swayPhase) * _swayAmp * t * Time.deltaTime * 3f);
         }
-        var scale = _baseScale * Mathf.Lerp(_startScaleFraction, 1f, t) + t * _growth;
+        // smoke (_useGrowthMultiplier) grows from its OWN starting size up
+        // to at most `_growthMultiplier` times that (hard-capped to 2x --
+        // see InitPlume's own doc comment); every other puff kind keeps
+        // the original formula exactly.
+        var scale = _useGrowthMultiplier
+            ? _baseScale * Mathf.Lerp(1f, _growthMultiplier, t)
+            : _baseScale * Mathf.Lerp(_startScaleFraction, 1f, t) + t * _growth;
         transform.localScale = new Vector3(scale, scale, scale);
         if (_mat != null)
         {

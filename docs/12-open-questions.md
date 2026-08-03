@@ -10286,3 +10286,119 @@ visual change in this project's history; this entry is a best-effort
 correction based on the numbers involved (the ~10x fire/smoke size gap,
 the roofline-vs-clutter height comparison), not a confirmed-fixed
 screenshot.
+
+## 2026-08 follow-up: the actual root cause of "fire is missing" -- a ground-level math bug, plus a from-scratch smoke growth/placement rewrite
+
+Creator direction, same session: "smoke must start from low ON the
+building and travel upward. growth in size should never exceed 2 times
+the size of the original. give me inspector setting to alter drift.
+growth size. wind strength. Fire Flames are STILL MISSING!"
+
+**The real bug behind "fire is missing."** Every prior fire-visibility
+pass (size, timing, roofline placement) turned out to be correcting
+symptoms of a single upstream bug nobody had traced yet. `DamageFx.
+AttachSmoke`/`AttachFireCluster` both compute their spawn height as
+`holder.position.y + height * someFraction`, which is only correct if
+`holder.position.y` IS ground level. For `RuntimeCityBuilder`'s
+procedural-building call site, `holder` is `cubes[0]` -- the building's
+own massing cube, built via `SpawnCube(hex, height / 2f, height, mat,
+...)` (`RuntimeCityBuilder.cs` line ~1803). A primitive cube "sitting on
+the ground" is positioned at its own vertical CENTER, so that `y`
+parameter of `height / 2f` means `cubes[0].transform.position.y` is
+HALF the building's height above ground, not ground level itself. Every
+height-fraction offset computed on top of that landed a half-building-
+height too high: fire (at the time, `_height * 1.0f` for the roofline)
+was actually rendering at `groundY + height*0.5 + height*1.0 =
+groundY + height*1.5` -- floating 50% of the building's OWN height
+above its real roofline. For a Small building that's a couple of extra
+meters (borderline noticeable); for a Landmark it could be 15-20+
+extra meters, almost certainly out of the frame a player would
+actually be looking at. `BaseDresser`'s RTS-roster call site was NEVER
+affected -- its root transform (`root.transform.position = new
+Vector3(hexWorld.x, groundY, hexWorld.z)`, `BaseDresser.cs` line ~153)
+really is ground level, which is exactly why nobody had reason to
+suspect this before: the same shared `AttachSmoke`/`AttachFireCluster`
+code was correct for ONE of its two callers and silently wrong for the
+other, and the wrong one (`RuntimeCityBuilder`) is what handles "the
+vast majority of the map" per several earlier entries in this log.
+
+**Fix.** Both methods gained a `holderGroundOffset` parameter
+(default 0, so `BaseDresser`'s call sites need no change at all).
+`RuntimeCityBuilder.ApplyBuildingDamage` now passes `-height * 0.5f`,
+computed from the SAME `height` variable `SpawnCube` used to place the
+cube in the first place -- the exact inverse of the error. Documented
+at length on `AttachSmoke`'s own doc comment (the natural place a
+future reader investigating a similar "why is X floating in the wrong
+place" bug would look first).
+
+**Smoke starts low and travels upward.** Creator direction: "smoke
+must start from low ON the building and travel upward." Origin height
+fraction dropped from 1.05 (previously already ABOVE the roof --
+barely anywhere to visibly rise TO) to 0.3 (low on the wall, well under
+where `AttachFireCluster`'s own points sit at the roofline). The
+horizontal outward-offset multiplier was also simplified from
+`footprintRadius * 1.2` (pushing the origin outside the footprint
+immediately) to `footprintRadius * 1.0` (right at the building's own
+wall) -- with fire now safely separated by height alone (0.3 vs 1.0),
+the extra horizontal push is no longer needed to avoid the two
+effects overlapping.
+
+**Growth capped at 2x, and a real bug found while wiring it.** While
+implementing "growth in size should never exceed 2 times the size of
+the original," found that `SmokeResizePct` had never actually reached
+a smoke puff's rendered size at all: `SmokePlume.SpawnPuff` computed a
+`startSize` from it, but that value only ever set `go.transform.
+localScale` for ONE frame before `SmokePuff.Update` overwrote it every
+subsequent frame from its OWN `_baseScale` field -- which `InitPlume`
+had never actually touched, leaving it at the shared 0.8 default every
+non-smoke puff kind also uses. Separately, the growth formula itself
+(`_baseScale * Lerp(_startScaleFraction, 1, t) + t * _growth`) added a
+flat amount unrelated to the puff's own starting size, and could reach
+roughly 9-10x that starting point by end of life -- nowhere near a 2x
+cap. Both fixed together: `InitPlume`'s `growth` parameter is gone,
+replaced by `startSize` (this method's own actual starting size,
+finally assigned to `_baseScale`); a new `_useGrowthMultiplier`/
+`_growthMultiplier` pair drives a clean `_baseScale * Lerp(1,
+growthMultiplier, t)` formula (smoke only -- every other puff kind
+keeps the original formula, branched on `_useGrowthMultiplier`,
+completely unchanged). `growthMultiplier` is read from
+`DamageFxProfile.Active.SmokeGrowthMultiplier` and clamped to `[1, 2]`
+IN CODE (`Mathf.Clamp`), not just via the Inspector's own `[Range]`
+attribute -- a `[Range]` only constrains the Editor's slider UI, not an
+assignment from script or a stale serialized asset, so the code-level
+clamp is what actually guarantees the ceiling the creator asked for.
+
+**Inspector knobs.** Three new `DamageFxProfile` fields answer "give
+me inspector setting to alter drift. growth size. wind strength":
+`SmokeRiseSpeed` (drift -- vertical climb rate, default 1.4, replacing
+the flat constant `SmokePuff.Init` used to bake in for every puff
+kind, now overridden per-smoke-puff in `InitPlume`), `SmokeGrowthMultiplier`
+(growth size, default 2, see above), and the already-existing
+`SmokeWindSpeed` (wind strength, unchanged this entry).
+
+**Verified.** A new standalone `smokegrowth-verify` harness uses
+reflection to call the real `SmokePuff.InitPlume` (not a reimplementation)
+and inspect its private fields directly: confirms `SmokeGrowthMultiplier`
+values of 5 and 0.3 (values that would bypass the Inspector's own
+`[Range]`) clamp to 2 and 1 respectively, a mid-range value of 1.5
+passes through unclamped, `startSize` genuinely becomes `_baseScale`
+(the bug above, now fixed), `_useGrowthMultiplier` gets set, and an
+analytic sweep of the growth formula across `t` in `[0, 1]` confirms
+its maximum is exactly `baseScale * growthMultiplier` for every
+sampled point, not just at `t=1` -- 6 checks, all passing. The ground-
+offset fix itself could NOT be similarly exercised: the local
+`UnityStub.cs`'s `Transform.SetParent`/`GetChild`/`childCount` are
+no-op stubs with no real scene-graph bookkeeping, so there's no way to
+spawn `AttachFireCluster`/`AttachSmoke` in this environment and
+inspect the resulting child transform's actual position -- this half
+of the fix is a traced-through-the-math correctness argument (repeated
+above) and a flightcheck recompile, not an executed test.
+`damagefxprofile-verify` re-run clean against the new
+`FireResizePct == 1.0`/`SmokeWindSpeed == 5` defaults from the entry
+before this one. Flightcheck recompiles `DamageFx.cs`,
+`DamageFxProfile.cs`, and `RuntimeCityBuilder.cs` clean. No sim-side
+files touched. No Unity Editor here to confirm any of this actually
+reads correctly on a real screen -- same standing limit as every other
+Unity-side visual change in this project's history, though the
+ground-offset fix in particular is a strong, mechanically-verifiable
+(re-derived by hand above) correction rather than a guess.
