@@ -85,10 +85,20 @@ public class BaseDresser : MonoBehaviour
 
     // 2026-07 (creator direction: "Building need decent amount of HPs and
     // should show damage and some low-poly fire when being attacked"):
-    // Intact -> Damaged fires the smoke+fire attach exactly once per
-    // EntityId, same "match-core's building list only grows" reasoning
-    // as _destroyedHandled above -- there is no repair mechanic yet, so
-    // IsDamaged never regresses back to false for a live building.
+    // fires the smoke+fire attach exactly once per EntityId, same
+    // "match-core's building list only grows" reasoning as
+    // _destroyedHandled above -- there is no repair mechanic yet, so a
+    // building's HP never regresses back up once it starts taking
+    // damage.
+    //
+    // 2026-08 (creator direction: "as soon as a building is in combat we
+    // need to see the smoke and fire"): the trigger condition itself
+    // moved from `b.IsDamaged` (<=50% HP, docs/18 SS3) to "has taken any
+    // damage at all" (see Dress() below) -- the name stays
+    // `_damagedHandled` since it's still the same "fired exactly once"
+    // guard, just gated earlier now. `TintShape`'s own Damaged-tier
+    // darkening is UNCHANGED and still keyed on the real `b.IsDamaged`
+    // threshold -- these are deliberately two independent triggers now.
     private readonly HashSet<uint> _damagedHandled = new HashSet<uint>();
 
     public void Init(SimBridge simBridge, RuntimeCityBuilder cityBuilder)
@@ -145,10 +155,18 @@ public class BaseDresser : MonoBehaviour
                 _completed[b.EntityId] = root;
             }
             TintShape(root, b.PlayerIndex, b.IsDamaged);
-            if (b.IsDamaged && _damagedHandled.Add(b.EntityId))
+            // 2026-08 (creator direction: "as soon as a building is in
+            // combat we need to see the smoke and fire"): was `b.IsDamaged`
+            // (<=50% HP) -- now any HP loss at all, so fire/smoke shows on
+            // the very first hit instead of waiting for the Damaged
+            // threshold. `b.Hp < b.MaxHp` can only newly become true once
+            // per building (no repair path), so `_damagedHandled` still
+            // guards this to exactly one fire per building.
+            if (b.State == BuildingState.Complete && b.Hp < b.MaxHp && _damagedHandled.Add(b.EntityId))
             {
-                DamageFx.AttachSmoke(root.transform, fullScale.y, SmokeScaleFor(def));
-                DamageFx.AttachFireCluster(root.transform, fullScale.y, fullScale.x * 0.5f, FireCountFor(def));
+                var footprintRadius = fullScale.x * 0.5f;
+                DamageFx.AttachSmoke(root.transform, fullScale.y, footprintRadius, SmokeScaleFor(def));
+                DamageFx.AttachFireCluster(root.transform, fullScale.y, footprintRadius, FireCountFor(def));
             }
         }
     }

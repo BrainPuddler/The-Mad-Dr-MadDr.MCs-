@@ -24,13 +24,28 @@ public static class DamageFx
     /// (<see cref="MadDr.CityGen.BuildingStats.SmokeScale"/>) sizes the
     /// puffs up proportionally so bigger buildings get a plume that
     /// actually stays visible against their own bigger silhouette --
-    /// Small's scale of 1.0 renders identically to before.</summary>
-    public static void AttachSmoke(Transform holder, float height, float scale)
+    /// Small's scale of 1.0 renders identically to before.
+    ///
+    /// 2026-08 (creator report: "make sure it is on the outside of the
+    /// building"): the plume used to spawn dead-center above the roof,
+    /// directly over the <see cref="AttachFireCluster"/> points below it
+    /// -- once puffs got bigger/paler this pass they could visually
+    /// swallow the fire they're supposed to be rising from. `footprintRadius`
+    /// (same value the caller already computes for `AttachFireCluster`)
+    /// pushes the origin out PAST the building's own edge instead of over
+    /// its center, in a deterministic per-building direction; `SmokePlume`'s
+    /// own wind lean (see its `Init`) continues drifting that SAME
+    /// direction, so the whole column reads as escaping past the
+    /// silhouette rather than smothering it.</summary>
+    public static void AttachSmoke(Transform holder, float height, float footprintRadius, float scale)
     {
         var go = new GameObject("SmokePlume");
         go.transform.SetParent(holder, false);
-        go.transform.position = holder.position + Vector3.up * (height * 1.05f);
-        go.AddComponent<SmokePlume>().Init(scale);
+        var id = holder.GetInstanceID();
+        var angle = ((id & 0xFFFF) % 360) * Mathf.Deg2Rad;
+        var outward = new Vector3(Mathf.Sin(angle) * footprintRadius * 1.2f, height * 1.05f, Mathf.Cos(angle) * footprintRadius * 1.2f);
+        go.transform.position = holder.position + outward;
+        go.AddComponent<SmokePlume>().Init(scale, angle);
     }
 
     /// <summary>2026-07 (creator direction: "Building need decent amount
@@ -200,24 +215,28 @@ public class SmokePlume : MonoBehaviour
 
     // 2026-08 (creator direction, confirming a reference image: diagonal
     // drift/lean like wind-blown smoke instead of climbing straight up):
-    // computed ONCE per plume (i.e. per building) in Awake, not per puff
-    // -- every puff this plume ever spawns shares the same lean, so the
-    // whole column reads as one coherent wind-blown trail rather than
+    // set ONCE per plume (i.e. per building) in Init, not per puff -- every
+    // puff this plume ever spawns shares the same lean, so the whole
+    // column reads as one coherent wind-blown trail rather than
     // independent puffs each wobbling their own random direction.
     private Vector2 _lean;
 
-    public void Init(float scale)
+    /// <summary>`outwardAngle` is the SAME angle <see cref="DamageFx.AttachSmoke"/>
+    /// already used to push this plume's origin outside the building's
+    /// footprint -- reusing it here (rather than deriving a separate
+    /// angle from this component's own GetInstanceID) keeps the lean
+    /// drifting further in the direction the plume already started in,
+    /// instead of potentially doubling back toward the roof.</summary>
+    public void Init(float scale, float outwardAngle)
     {
         _scale = scale;
+        const float LeanStrength = 0.55f;
+        _lean = new Vector2(Mathf.Sin(outwardAngle) * LeanStrength, Mathf.Cos(outwardAngle) * LeanStrength);
     }
 
     private void Awake()
     {
         _timer = (GetInstanceID() & 7) * 0.1f;
-        var id = GetInstanceID();
-        var angle = ((id & 0xFFFF) % 360) * Mathf.Deg2Rad;
-        const float LeanStrength = 0.55f;
-        _lean = new Vector2(Mathf.Sin(angle) * LeanStrength, Mathf.Cos(angle) * LeanStrength);
     }
 
     private void Update()
@@ -233,26 +252,30 @@ public class SmokePlume : MonoBehaviour
     /// each puff is now a <see cref="ProceduralMeshKit.CloudShard"/>, a
     /// jittered angular low-poly chunk (answer "1: angular" to the shape
     /// question). Lightened from the near-black sooty gray the prior
-    /// visibility fix used to a cool pale gray -- with the shape, scale,
+    /// visibility fix used to a cool pale gray -- with the shape, position,
     /// and lean changes in this same pass all adding their own
     /// contrast/readability on top, a return to a lighter, more
     /// traditional smoke color no longer risks blending back into the
     /// building palette the way the original 0.35/0.34/0.32 gray did.
-    /// Scaled up (`ScaleUpPct`) on top of the existing 0.7 resize so the
-    /// plume reads as bigger than the fire burning beneath it.</summary>
+    ///
+    /// 2026-08 CORRECTION (creator report: "the smoke is way too big and
+    /// I can not see the fire"): the same pass's `ScaleUpPct` size-up on
+    /// top of the existing 0.7 resize is GONE -- it made the plume big
+    /// enough to visually swallow the fire cluster it rises from. Back to
+    /// exactly the 0.7-resize baseline's own numbers; see
+    /// `DamageFx.AttachSmoke` for the other half of this fix (moving the
+    /// plume's origin outside the building instead of shrinking further).</summary>
     private void SpawnPuff()
     {
         var go = new GameObject("SmokePuff");
         go.transform.SetParent(transform, false);
         go.transform.position = transform.position;
         var id = go.GetInstanceID();
-        // 2026-08 (creator direction: "resize it 70%", then "scale up"):
-        // ResizePct is the flat 0.7 trim from the earlier pass; ScaleUpPct
-        // is a fresh multiplier on top of that, NOT a reversal of it --
-        // net effect is bigger than the pre-resize original.
+        // 2026-08 (creator direction: "resize it 70%"): unchanged from
+        // that pass -- see the CORRECTION above for why this is no longer
+        // multiplied by a further scale-up.
         const float ResizePct = 0.7f;
-        const float ScaleUpPct = 1.6f;
-        var startSize = 1.1f * ResizePct * ScaleUpPct * _scale;
+        var startSize = 1.1f * ResizePct * _scale;
         go.transform.localScale = new Vector3(startSize, startSize, startSize);
 
         var meshFilter = go.AddComponent<MeshFilter>();
@@ -262,13 +285,13 @@ public class SmokePlume : MonoBehaviour
         var mat = new Material(ShaderUtil.FindRenderableShader());
         // cool pale gray (was 0.16/0.15/0.14 sooty near-black) -- see the
         // summary above for why the earlier contrast fix's reasoning no
-        // longer applies once shape/scale/lean are all pulling their own
-        // weight too.
+        // longer applies once shape/position/lean are all pulling their
+        // own weight too.
         mat.color = new Color(0.68f, 0.7f, 0.74f, 0.8f);
         LabMeshBuilder.MakeTransparent(mat);
         renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, 3.6f * ResizePct * ScaleUpPct * _scale, 0.8f, _lean);
+        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, 3.6f * ResizePct * _scale, 0.8f, _lean);
     }
 }
 

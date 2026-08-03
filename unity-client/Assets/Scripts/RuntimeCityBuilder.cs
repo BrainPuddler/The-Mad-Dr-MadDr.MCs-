@@ -1985,28 +1985,42 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             _cityVersion++;
             Debug.Log("Building destroyed -- rubble is now walkable.");
         }
-        else if (next.Stage == DamageStage.Damaged && current.Stage == DamageStage.Intact)
+        else
         {
-            // Intact -> Damaged visual: darken (docs/18's cracked state),
-            // dressing included -- per-renderer material INSTANCES here,
-            // never a tint on the shared cached dresser materials (that
-            // would darken every building in the city at once)
-            foreach (var cube in cubes)
+            if (next.Stage == DamageStage.Damaged && current.Stage == DamageStage.Intact)
             {
-                foreach (var renderer in cube.GetComponentsInChildren<Renderer>())
+                // Intact -> Damaged visual: darken (docs/18's cracked state),
+                // dressing included -- per-renderer material INSTANCES here,
+                // never a tint on the shared cached dresser materials (that
+                // would darken every building in the city at once)
+                foreach (var cube in cubes)
                 {
-                    var mat = new Material(ShaderUtil.FindRenderableShader());
-                    var c = renderer.sharedMaterial != null ? renderer.sharedMaterial.color : Color.gray;
-                    mat.color = new Color(c.r * 0.6f, c.g * 0.6f, c.b * 0.6f);
-                    renderer.sharedMaterial = mat;
+                    foreach (var renderer in cube.GetComponentsInChildren<Renderer>())
+                    {
+                        var mat = new Material(ShaderUtil.FindRenderableShader());
+                        var c = renderer.sharedMaterial != null ? renderer.sharedMaterial.color : Color.gray;
+                        mat.color = new Color(c.r * 0.6f, c.g * 0.6f, c.b * 0.6f);
+                        renderer.sharedMaterial = mat;
+                    }
                 }
             }
-            // a lazy smoke plume for as long as the building stands damaged
-            // (docs/21 batch 2, item 3)
-            if (cubes.Count > 0)
+
+            // 2026-08 (creator direction: "as soon as a building is in
+            // combat we need to see the smoke and fire"): this used to be
+            // gated behind the SAME `Damaged` crossing (<=50% HP, docs/18
+            // SS3) the darkening above uses -- fine when Structure HP was
+            // small, but the newly-bumped high-HP tiers (1000-10000) could
+            // now take a long beating with zero fire/smoke feedback before
+            // crossing that threshold. `current.CurrentHp == current.MaxHp`
+            // is true only on this building's very FIRST damage
+            // application (HP only ever decreases, no repair path), so
+            // this still fires exactly once per building -- just on first
+            // hit instead of first crossing into Damaged. Deliberately
+            // independent of the Damaged-darkening block above: a
+            // building can now show fire/smoke while still Intact-tinted.
+            if (current.CurrentHp == current.MaxHp && cubes.Count > 0)
             {
                 var height = BuildingHeight(building);
-                DamageFx.AttachSmoke(cubes[0].transform, height, BuildingStats.SmokeScale(building.Tier));
                 // 2026-08 (creator report: "what happen to my low poly
                 // fire for when buildings were under attack" -> traced
                 // to AttachFire having only ever been wired to the
@@ -2018,6 +2032,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 // (hex count) instead of the RTS roster's fixed-size
                 // silhouette table.
                 var footprintRadius = Mathf.Sqrt(building.Footprint.Count) * (float)HexCoord.HexMeters * 0.4f;
+                DamageFx.AttachSmoke(cubes[0].transform, height, footprintRadius, BuildingStats.SmokeScale(building.Tier));
                 DamageFx.AttachFireCluster(cubes[0].transform, height, footprintRadius, BuildingStats.FireCount(building.Tier));
             }
         }

@@ -10001,3 +10001,72 @@ have, rather than patching the stub itself). No Unity Editor here to
 confirm the shape/color/lean/scale actually read the way the reference
 image does on a real screen -- same standing limit as every other
 Unity-side visual change in this project's history.
+
+## 2026-08 follow-up: smoke was hiding the fire, and FX now fires on the first hit instead of the Damaged threshold
+
+Creator reports, same session: "the smoke is way too big and I can not
+see the fire, make sure it is on the outside of the building" and,
+separately, "as soon as a building is in combat we need to see the
+smoke and fire."
+
+**Size.** The immediately-prior entry's `ScaleUpPct = 1.6f` size-up is
+GONE -- `SmokePuff._baseScale`/growth are back to exactly the
+`ResizePct = 0.7f`-only baseline (`1.1f * ResizePct * _scale` /
+`3.6f * ResizePct * _scale`). That baseline was the last
+creator-unchallenged size; the 1.6x layered on top of it is what made
+the plume big enough to visually swallow the fire cluster it rises
+from.
+
+**Position ("outside the building").** `DamageFx.AttachSmoke` gained a
+`footprintRadius` parameter (the caller already computes this for
+`AttachFireCluster` -- both call sites now share one value instead of
+computing it twice). The plume's origin is no longer dead-center above
+the roof (directly over where `AttachFireCluster` scatters its points);
+it's offset outward past the footprint's own edge, `footprintRadius *
+1.2f`, in a deterministic per-building angle (hashed off the holder's
+own `GetInstanceID`, same "cosmetic jitter, no gameplay meaning"
+precedent every other per-building visual variety in this codebase
+already uses). `SmokePlume.Init` now takes that SAME `outwardAngle`
+directly (rather than deriving its own separate angle from its own
+`GetInstanceID` the way the immediately-prior entry did) so the wind
+lean keeps drifting further in the direction the plume already started
+in, instead of potentially wandering back over the roof it just moved
+away from.
+
+**Trigger timing ("as soon as a building is in combat").** Both fire/
+smoke call sites (`RuntimeCityBuilder.ApplyBuildingDamage` for
+procedural buildings, `BaseDresser.Dress` for the RTS roster) used to
+gate the attach behind the SAME `Damaged` stage crossing (<=50% HP,
+docs/18 SS3) their own material-darkening logic uses. That threshold
+was fine when Structure HP was small, but the recently-bumped high-HP
+tiers (1000-10000, several entries back) could now sit in combat a
+long time with zero fire/smoke feedback before crossing 50%. Changed
+to fire on the very FIRST hit instead:
+- `RuntimeCityBuilder.ApplyBuildingDamage`: `current.CurrentHp ==
+  current.MaxHp` -- true only on a building's first-ever
+  `ApplyDamage` call (HP only decreases, no repair path), so this
+  still fires exactly once. Restructured the method's `if/else if` into
+  `if (Destroyed) {...} else { if (Damaged-crossing) {darken} if
+  (first-hit) {attach FX} }` -- the darkening and the FX attach are now
+  two independent conditions in the same branch, not one combined
+  gate; a building can show fire/smoke while still Intact-tinted.
+- `BaseDresser.Dress`: was `b.IsDamaged` (<=50% HP); now
+  `b.State == BuildingState.Complete && b.Hp < b.MaxHp`, computed
+  locally in Unity code (not a new match-core field -- both `Hp`/`MaxHp`
+  are already public on `SimBuilding`, so this needed no sim-side
+  change, no determinism/hash impact, and no new combat math, matching
+  this being a purely visual gating decision). `_damagedHandled` still
+  guards it to fire exactly once, same reasoning as before (HP never
+  regresses). `TintShape`'s own Damaged-tier darkening is UNCHANGED,
+  still keyed on the real `b.IsDamaged` (50%) threshold -- deliberately
+  kept as its own separate signal from the combat-FX trigger now.
+
+**Verified.** Flightcheck recompiles `DamageFx.cs`,
+`RuntimeCityBuilder.cs`, and `BaseDresser.cs` clean (confirmed all
+three are in the flightcheck harness's own compile list, not assumed).
+No sim-side (`match-core`/`citygen-core`) files touched by this
+entry's changes, so no determinism/golden-hash risk and no C# test
+suite re-run needed for those packages. No Unity Editor here to
+confirm the new position/timing read correctly on a real screen -- same
+standing limit as every other Unity-side visual change in this
+project's history.
