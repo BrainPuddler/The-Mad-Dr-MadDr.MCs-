@@ -56,28 +56,111 @@ namespace MadDr.CityGen
             get { return Stage != DamageStage.Destroyed; }
         }
 
-        private BuildingRuntimeState(Building building, int maxHp, int currentHp)
+        /// <summary>2026-08 (creator direction: "assign some salvage
+        /// parts based on the building size... as the lot is cleaned of
+        /// parts the lot debris is decreased until it is completely
+        /// cleared"): this wreck's total usable-metal value, a fixed
+        /// identity stat derived from <see cref="BuildingTier"/> (see
+        /// <see cref="BuildingStats.ScavengeValue"/>) -- same "size"
+        /// concept <see cref="MaxHp"/> already derives from Tier.</summary>
+        public int ScavengeValue
+        {
+            get { return BuildingStats.ScavengeValue(Building.Tier); }
+        }
+
+        /// <summary>How much of <see cref="ScavengeValue"/> is still
+        /// waiting to be cleared from this wreck -- 0 while standing,
+        /// set to the full <see cref="ScavengeValue"/> the instant
+        /// <see cref="ApplyDamage"/> newly crosses into
+        /// <see cref="DamageStage.Destroyed"/>, decremented as
+        /// <see cref="WithScavengeConsumed"/> clears the pile.</summary>
+        public int ScavengeRemaining { get; }
+
+        /// <summary>True once this wreck's own pile has been fully
+        /// cleared -- the gate a caller uses to decide the lot is
+        /// actually available to build on again (docs/12: "until it is
+        /// completely cleared and is available to build on it").</summary>
+        public bool IsFullyScavenged
+        {
+            get { return Stage == DamageStage.Destroyed && ScavengeRemaining <= 0; }
+        }
+
+        /// <summary>The frame this building first crossed into Destroyed,
+        /// or null while still standing -- same "pass the caller's own
+        /// frame in" idiom the separate match-core `SimBuilding.
+        /// DestroyedAtFrame` already established (citygen-core stays
+        /// match-core-agnostic; this is only a same-shaped convention,
+        /// not a shared type), threaded through the optional <see
+        /// cref="ApplyDamage(int, int)"/> overload so a caller can gate
+        /// reclaim on elapsed time as a fallback when nothing ever
+        /// scavenges the pile.</summary>
+        public int? DestroyedAtFrame { get; }
+
+        private BuildingRuntimeState(Building building, int maxHp, int currentHp, int scavengeRemaining, int? destroyedAtFrame)
         {
             Building = building;
             MaxHp = maxHp;
             CurrentHp = currentHp;
+            ScavengeRemaining = scavengeRemaining;
+            DestroyedAtFrame = destroyedAtFrame;
         }
 
         public static BuildingRuntimeState FullyIntact(Building building)
         {
             var hp = BuildingStats.StructureHp(building.Tier);
-            return new BuildingRuntimeState(building, hp, hp);
+            return new BuildingRuntimeState(building, hp, hp, scavengeRemaining: 0, destroyedAtFrame: null);
         }
 
         /// <summary>Applies damage, clamped to [0, MaxHp]. Never goes
         /// negative; never heals past its own max -- there's no repair
         /// path for buildings in v0.1 (docs/20's Repair action is
-        /// creature HP only).</summary>
+        /// creature HP only). The instant this crosses into Destroyed for
+        /// the first time, rolls <see cref="ScavengeRemaining"/> up to the
+        /// full <see cref="ScavengeValue"/> -- idempotent against a
+        /// repeated call on an already-destroyed instance (the pile is
+        /// only ever set once, never re-topped-up).</summary>
         public BuildingRuntimeState ApplyDamage(int amount)
+        {
+            return ApplyDamage(amount, frame: null);
+        }
+
+        /// <summary>Same as <see cref="ApplyDamage(int)"/>, additionally
+        /// stamping <see cref="DestroyedAtFrame"/> with the caller's own
+        /// `frame` the instant this crosses into Destroyed -- optional
+        /// overload so existing callers/tests using the single-arg form
+        /// are unaffected (DestroyedAtFrame just stays null for them).</summary>
+        public BuildingRuntimeState ApplyDamage(int amount, int frame)
+        {
+            return ApplyDamage(amount, frame: (int?)frame);
+        }
+
+        private BuildingRuntimeState ApplyDamage(int amount, int? frame)
         {
             if (amount < 0) throw new ArgumentOutOfRangeException(nameof(amount));
             var newHp = Math.Max(0, CurrentHp - amount);
-            return new BuildingRuntimeState(Building, MaxHp, newHp);
+            var wasDestroyed = Stage == DamageStage.Destroyed;
+            var nowDestroyed = DamageStaging.StageFor(newHp, MaxHp) == DamageStage.Destroyed;
+            var newScavengeRemaining = ScavengeRemaining;
+            var newDestroyedAtFrame = DestroyedAtFrame;
+            if (!wasDestroyed && nowDestroyed)
+            {
+                newScavengeRemaining = ScavengeValue;
+                newDestroyedAtFrame = frame;
+            }
+            return new BuildingRuntimeState(Building, MaxHp, newHp, newScavengeRemaining, newDestroyedAtFrame);
+        }
+
+        /// <summary>Deplete this wreck's own remaining pile by `amount`
+        /// (clamped at 0) -- "as the lot is cleaned of parts the lot
+        /// debris is decreased." No-op (returns this unchanged) if not
+        /// actually Destroyed, `amount` isn't positive, or the pile is
+        /// already empty -- same bad-input contract <see
+        /// cref="ApplyDamage(int)"/> already follows.</summary>
+        public BuildingRuntimeState WithScavengeConsumed(int amount)
+        {
+            if (amount <= 0 || Stage != DamageStage.Destroyed || ScavengeRemaining <= 0) return this;
+            var newRemaining = Math.Max(0, ScavengeRemaining - amount);
+            return new BuildingRuntimeState(Building, MaxHp, CurrentHp, newRemaining, DestroyedAtFrame);
         }
     }
 

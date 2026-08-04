@@ -151,6 +151,7 @@ public class AttackBuildingTests
         // BloodStorage is Small tier (armor 2)
         mSmall.Player(0).Grant(ResourceKind.Bones, 1000);
         mSmall.Player(0).Grant(ResourceKind.Blood, 1000);
+        mSmall.Player(0).Grant(ResourceKind.Parts, 1000);
         mSmall.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: smallHex.Q, argB: smallHex.R) });
         var smallId = mSmall.BuildingAt(0).EntityId;
         for (var i = 0; i < BuildingDef.Get(BuildingKind.BloodStorage).BuildTimeTicks; i++) mSmall.Tick(null);

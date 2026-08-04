@@ -102,6 +102,17 @@ public class BuildGhostCursor : MonoBehaviour
         var hex = builder.HexAt(hit.Value.point);
         if (!builder.City.Contains(hex)) { HideGhost(); return; }
 
+        // 2026-08 (creator direction: "as the lot is cleaned of parts the
+        // lot debris is decreased until it is completely cleared and is
+        // available to build on it"): lazily resolve this hex's own
+        // procedural-building reclaim gate right before checking
+        // placement -- see RuntimeCityBuilder.TryReclaimHex's own doc
+        // comment for why this per-frame hover call is the chosen trigger
+        // instead of a proactive sweep. A no-op for a hex with no
+        // Destroyed procedural building on it (the overwhelming majority
+        // of hover checks), or one not yet eligible.
+        builder.TryReclaimHex(hex);
+
         // 2026-07 epic: Factory construction requires a possessed Worker
         // on hand -- every other kind is untouched (RequiresWorker(kind)
         // is false for them, so this reduces to the original check).

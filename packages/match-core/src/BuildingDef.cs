@@ -174,9 +174,16 @@ namespace MadDr.MatchCore
                 maxHp: LandmarkHp, armor: LandmarkArmor, storageCapBonus: null,
                 occupants: 10, scavengeValue: LandmarkScavenge),
 
-            // docs/22 §6's real "Blood Bank" numbers.
+            // docs/22 §6's real "Blood Bank" numbers, plus a Parts line
+            // (2026-08 creator direction: "make metal and other building
+            // resources one of the requirement for making new buildings
+            // structures; it's a plentiful resource" -- every buildable
+            // kind below now costs SOME Parts, deliberately a small
+            // fraction of a single Small wreck's own ScavengeValue [100]
+            // so "plentiful" reads as true: one scavenged house's rubble
+            // easily funds several of these).
             new BuildingDef(BuildingKind.BloodStorage, "Blood Storage",
-                new[] { (ResourceKind.Bones, 20), (ResourceKind.Blood, 10) },
+                new[] { (ResourceKind.Bones, 20), (ResourceKind.Blood, 10), (ResourceKind.Parts, 30) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
                 storageCapBonus: (ResourceKind.Blood, 100), occupants: 2, scavengeValue: SmallScavenge),
 
@@ -184,7 +191,7 @@ namespace MadDr.MatchCore
             // building; shaped like BloodStorage's cost as a reasonable
             // starting guess, not a balance claim.
             new BuildingDef(BuildingKind.FuelPump, "Fuel Pump",
-                new[] { (ResourceKind.Bones, 20), (ResourceKind.Fuel, 10) },
+                new[] { (ResourceKind.Bones, 20), (ResourceKind.Fuel, 10), (ResourceKind.Parts, 30) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
                 storageCapBonus: null, occupants: 2, scavengeValue: SmallScavenge),
 
@@ -192,7 +199,7 @@ namespace MadDr.MatchCore
             // Bones only) as the closest existing analog; cap bonus
             // mirrors BloodStorage's +100 for the same resource class.
             new BuildingDef(BuildingKind.FuelStorage, "Fuel Storage",
-                new[] { (ResourceKind.Bones, 15) },
+                new[] { (ResourceKind.Bones, 15), (ResourceKind.Parts, 30) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
                 storageCapBonus: (ResourceKind.Fuel, 100), occupants: 2, scavengeValue: SmallScavenge),
 
@@ -200,7 +207,7 @@ namespace MadDr.MatchCore
             // column for Parts storage is "enables grafting," not a
             // wallet-cap raise.
             new BuildingDef(BuildingKind.PartsStorage, "Parts Storage",
-                new[] { (ResourceKind.Bones, 15) },
+                new[] { (ResourceKind.Bones, 15), (ResourceKind.Parts, 30) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
                 storageCapBonus: null, occupants: 2, scavengeValue: SmallScavenge),
 
@@ -208,7 +215,7 @@ namespace MadDr.MatchCore
             // pre-existing, hands-free CITY feature -- this is the
             // player-BUILDABLE version docs/23 §2 adds to the roster.
             new BuildingDef(BuildingKind.HarvestPost, "Harvest Post",
-                new[] { (ResourceKind.Bones, 15) },
+                new[] { (ResourceKind.Bones, 15), (ResourceKind.Parts, 30) },
                 buildTimeTicks: 80, maxHp: SmallHp, armor: SmallArmor,
                 storageCapBonus: null, occupants: 3, scavengeValue: SmallScavenge),
 
@@ -217,26 +224,28 @@ namespace MadDr.MatchCore
             // Medium tier: sturdier than basic storage, matching that
             // higher stake.
             new BuildingDef(BuildingKind.Factory, "Factory",
-                new[] { (ResourceKind.Bones, 30), (ResourceKind.Blood, 15) },
+                new[] { (ResourceKind.Bones, 30), (ResourceKind.Blood, 15), (ResourceKind.Parts, 50) },
                 buildTimeTicks: 150, maxHp: MediumHp, armor: MediumArmor,
                 storageCapBonus: null, occupants: 6, scavengeValue: MediumScavenge),
 
             // v0.1 placeholder cost. Medium tier: a defensive structure
             // sturdier than basic storage, matching its role.
             new BuildingDef(BuildingKind.Defense, "Defense",
-                new[] { (ResourceKind.Bones, 25), (ResourceKind.Blood, 10) },
+                new[] { (ResourceKind.Bones, 25), (ResourceKind.Blood, 10), (ResourceKind.Parts, 50) },
                 buildTimeTicks: 120, maxHp: MediumHp, armor: MediumArmor,
                 storageCapBonus: null, occupants: 3, scavengeValue: MediumScavenge),
 
             // 2026-07 epic: 20 Brains, per the creator's own number --
             // the one deliberately-sized cost in this whole table, not a
-            // placeholder. Large tier (sturdier than a basic storage/
-            // production building, matching a one-off strategic
-            // structure's stakes) and zero occupants (a control
+            // placeholder -- left untouched. Large tier (sturdier than a
+            // basic storage/production building, matching a one-off
+            // strategic structure's stakes) and zero occupants (a control
             // apparatus, not a staffed building -- nothing to disgorge
-            // if it falls).
+            // if it falls). The Parts line alongside it is the SAME
+            // 2026-08 "every buildable kind costs some Parts" addition as
+            // every other entry in this table, scaled to Large tier.
             new BuildingDef(BuildingKind.BigBrain, "Big Brain",
-                new[] { (ResourceKind.Brains, 20) },
+                new[] { (ResourceKind.Brains, 20), (ResourceKind.Parts, 80) },
                 buildTimeTicks: 200, maxHp: LargeHp, armor: LargeArmor,
                 storageCapBonus: null, occupants: 0, supplyCapBonus: 100, scavengeValue: LargeScavenge),
         };

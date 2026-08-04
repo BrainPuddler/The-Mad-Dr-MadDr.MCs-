@@ -35,6 +35,7 @@ public class TrainUnitTests
         var player = m.Player(playerIndex);
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
+        player.Grant(ResourceKind.Parts, 1000);
         m.Tick(new List<Command> { new Command(playerIndex, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.Factory, argA: hex.Q, argB: hex.R) });
         var id = m.BuildingAt(0).EntityId;
         var buildTime = BuildingDef.Get(BuildingKind.Factory).BuildTimeTicks;
@@ -53,6 +54,7 @@ public class TrainUnitTests
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
         player.Grant(ResourceKind.Fuel, 1000);
+        player.Grant(ResourceKind.Parts, 1000);
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.Factory, argA: hex.Q, argB: hex.R) });
         var id = m.BuildingAt(0).EntityId;
 
@@ -205,12 +207,15 @@ public class TrainUnitTests
         var startingCap = player.SupplyCap;
 
         var def = BuildingDef.Get(BuildingKind.BigBrain);
-        Assert.Single(def.Cost);
+        Assert.Equal(2, def.Cost.Count);   // 2026-08: BigBrain now also costs Parts (scavenged-metal economy)
         Assert.Equal(ResourceKind.Brains, def.Cost[0].Resource);
         Assert.Equal(20, def.Cost[0].Amount);
+        Assert.Equal(ResourceKind.Parts, def.Cost[1].Resource);
+        Assert.Equal(80, def.Cost[1].Amount);
         Assert.Equal(100, def.SupplyCapBonus);
 
         player.Grant(ResourceKind.Brains, 20);
+        player.Grant(ResourceKind.Parts, 80);
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BigBrain, argA: hex.Q, argB: hex.R) });
         Assert.Equal(0, player.Wallet(ResourceKind.Brains));   // spent in full immediately
 
@@ -227,6 +232,7 @@ public class TrainUnitTests
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
         player.Grant(ResourceKind.Brains, 20);
+        player.Grant(ResourceKind.Parts, 80);
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BigBrain, argA: hex.Q, argB: hex.R) });
         for (var i = 0; i < BuildingDef.Get(BuildingKind.BigBrain).BuildTimeTicks; i++) m.Tick(null);
         var capAfterComplete = player.SupplyCap;

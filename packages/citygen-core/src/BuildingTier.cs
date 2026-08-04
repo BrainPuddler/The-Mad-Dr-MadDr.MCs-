@@ -117,6 +117,27 @@ namespace MadDr.CityGen
         /// Small exactly as it always rendered; bigger tiers scale up so
         /// the plume stays proportionate (and visible) against their own
         /// taller silhouette.</summary>
+        /// <summary>2026-08 (creator direction: "assign some salvage
+        /// parts based on the building size"): usable-metal salvage
+        /// value for a destroyed PROCEDURAL building's own wreck -- the
+        /// SAME absolute figures `MadDr.MatchCore.BuildingDef.
+        /// ScavengeValue` already uses for its separate RTS-building
+        /// roster (Small 100 / Medium 200 / Large 400 / Landmark 800),
+        /// reused verbatim for the identical "two building systems land
+        /// on the same numbers per tier" reasoning <see
+        /// cref="StructureHp"/>'s own doc comment already established.</summary>
+        public static int ScavengeValue(BuildingTier tier)
+        {
+            switch (tier)
+            {
+                case BuildingTier.Small: return 100;
+                case BuildingTier.Medium: return 200;
+                case BuildingTier.Large: return 400;
+                case BuildingTier.Landmark: return 800;
+                default: throw new ArgumentOutOfRangeException(nameof(tier));
+            }
+        }
+
         public static float SmokeScale(BuildingTier tier)
         {
             switch (tier)

@@ -137,6 +137,15 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
     private readonly Dictionary<Collider, Building> _buildingByCollider = new Dictionary<Collider, Building>();
     private readonly Dictionary<Building, List<GameObject>> _cubesByBuilding = new Dictionary<Building, List<GameObject>>();
+    // 2026-08 (creator direction: "as the lot is cleaned of parts the lot
+    // debris is decreased"): the individual rubble chunk GameObjects
+    // spawned for a building's own collapse (flattened out of
+    // RubbleDresser.Shatter/Scatter's returned hosts) -- ScavengeBuildingDebris
+    // destroys a proportional slice of this list as the pile depletes, a
+    // SEPARATE tracking set from `_cubesByBuilding` (whose entries are
+    // either already destroyed or repurposed as squished dressing, not
+    // the actual visible rubble silhouette).
+    private readonly Dictionary<Building, List<GameObject>> _debrisChunksByBuilding = new Dictionary<Building, List<GameObject>>();
     private Transform _buildingsHost;
     private Transform _monstersHost;
     private readonly List<MonsterAgent> _monsters = new List<MonsterAgent>();
@@ -1916,7 +1925,15 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             if (ReferenceEquals(state.Building, building)) { current = state; break; }
         if (current == null || current.Stage == DamageStage.Destroyed) return;
 
-        var next = current.ApplyDamage(amount);
+        // 2026-08 (creator direction: "as the lot is cleaned of parts the
+        // lot debris is decreased... available to build on it"): stamp
+        // the destroy-transition frame off match-core's own running
+        // clock (0 if no match is up yet, same degenerate-but-harmless
+        // fallback UnblockProceduralBuildingHex's own callers already
+        // accept) -- TryReclaimHex's decay fallback below needs SOME
+        // elapsed-time reference, and reusing match-core's Frame avoids
+        // introducing a second clock.
+        var next = current.ApplyDamage(amount, _simBridge?.CurrentFrame ?? 0);
         _battlefield = _battlefield.WithBuildingDamage(next);
 
         List<GameObject> cubes;
@@ -1935,6 +1952,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             var rubbleMat = new Material(ShaderUtil.FindRenderableShader());
             rubbleMat.color = new Color(0.3f, 0.28f, 0.26f);
             var footprintCount = building.Footprint.Count;
+            // 2026-08 (creator direction: "as the lot is cleaned of parts
+            // the lot debris is decreased"): collect every spawned rubble
+            // host's children into one flat per-building list so
+            // ScavengeBuildingDebris can later destroy a proportional
+            // slice of it as the pile depletes.
+            var debrisChunks = new List<GameObject>();
             for (var i = 0; i < cubes.Count; i++)
             {
                 var cube = cubes[i];
@@ -1949,7 +1972,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                     var massingCollider = cube.GetComponent<Collider>();
                     if (massingCollider != null) _buildingByCollider.Remove(massingCollider);
                     Object.Destroy(cube);
-                    if (_buildingsHost != null) RubbleDresser.Shatter(this, hex, pos0, rubbleMat, _buildingsHost);
+                    if (_buildingsHost != null)
+                    {
+                        var shatterHost = RubbleDresser.Shatter(this, hex, pos0, rubbleMat, _buildingsHost);
+                        for (var c = 0; c < shatterHost.childCount; c++) debrisChunks.Add(shatterHost.GetChild(c).gameObject);
+                    }
                     continue;
                 }
                 // dressing holder: still squish in place -- it's already a
@@ -1974,10 +2001,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // for the collapse beat (item 3)
             if (_buildingsHost != null)
             {
-                RubbleDresser.Scatter(this, building, rubbleMat, _buildingsHost);
+                var scatterHost = RubbleDresser.Scatter(this, building, rubbleMat, _buildingsHost);
+                for (var c = 0; c < scatterHost.childCount; c++) debrisChunks.Add(scatterHost.GetChild(c).gameObject);
                 DamageFx.DustBurst(WorldOf(building.Footprint[0]), _buildingsHost);
                 SpawnScorchDecal(building, _buildingsHost);
             }
+            _debrisChunksByBuilding[building] = debrisChunks;
             // 2026-08 (creator report: "I don't see people fleeing from
             // the wreckage of the building"): disgorge was wired ONLY to
             // the separate RTS-building roster (BaseDresser watching
@@ -1995,15 +2024,26 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // reclaimed... for new player to create new buildings"):
             // this procedural building has no SimBuilding entity of its
             // own, so match-core's OWN blocked-hex set (CanPlaceBuilding's
-            // gate) never learned it was destroyed and stayed permanently
-            // blocked -- only THIS file's own BlockedFor cache (used for
-            // movement/pathing, already correct via `_cityVersion++`
-            // above) reopened. Mirrors the automatic unblock
-            // MatchState.ApplyBuildingDamage already does for the
-            // separate RTS SimBuilding roster.
-            if (_simBridge != null)
-                foreach (var hex in building.Footprint)
-                    _simBridge.UnblockProceduralBuildingHex(hex);
+            // gate) never learned it was destroyed -- only THIS file's
+            // own BlockedFor cache (used for movement/pathing, already
+            // correct via `_cityVersion++` above) reopened.
+            //
+            // 2026-08 follow-up (creator direction: "assign some salvage
+            // parts based on the building size... as the lot is cleaned
+            // of parts the lot debris is decreased until it is completely
+            // cleared and is available to build on it"): the original fix
+            // here unblocked the hex IMMEDIATELY on destruction. That's
+            // now superseded -- build-placement availability is gated on
+            // TryReclaimHex's own dual check (fully scavenged, or a decay
+            // fallback if nobody ever does), same shape as the separate
+            // RTS SimBuilding roster's own RubbleClearTicks/
+            // DebrisDecayTicks gate. Deliberately NOT called here: nothing
+            // needs to know "can I build on this fresh wreck" until
+            // someone actually tries, and TryReclaimHex is cheap to call
+            // lazily right at that moment (BuildGhostCursor's own live
+            // preview, and ScavengeBuildingDebris on full clear) rather
+            // than proactively swept every frame for every destroyed
+            // building on the map.
             Debug.Log("Building destroyed -- rubble is now walkable.");
         }
         else
@@ -2089,6 +2129,97 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 DamageFx.AttachSmoke(cubes[0].transform, height, footprintRadius, BuildingStats.SmokeScale(building.Tier), groundOffset);
                 DamageFx.AttachFireCluster(cubes[0].transform, height, footprintRadius, BuildingStats.FireCount(building.Tier), groundOffset);
             }
+        }
+    }
+
+    /// <summary>2026-08 (creator direction: "assign some salvage parts
+    /// based on the building size... as the lot is cleaned of parts the
+    /// lot debris is decreased until it is completely cleared and is
+    /// available to build on it"): drains up to `amount` of `building`'s
+    /// own remaining scavenge pile, credits `playerIndex`'s wallet that
+    /// much <see cref="ResourceKind.Parts"/> (via the SAME `BankHarvestLoad`
+    /// no-source-entity precedent a harvester's own Blood/Bones/Brains
+    /// delivery already uses -- there is no monster/worker AI issuing
+    /// this yet, same "build the mechanism, wire the AI later" split the
+    /// SEPARATE RTS-building roster's own ScavengeDebris command already
+    /// went through), shrinks the visible rubble proportionally, and
+    /// reclaims the hex the instant the pile is fully cleared. Silent
+    /// no-op if the building isn't actually Destroyed, has nothing left
+    /// to loot, or `amount` isn't positive -- same bad-input contract as
+    /// <see cref="ApplyBuildingDamage(Building, int)"/>.</summary>
+    public void ScavengeBuildingDebris(Building building, int playerIndex, int amount)
+    {
+        if (_simBridge == null || amount <= 0) return;
+        BuildingRuntimeState current = null;
+        foreach (var state in _battlefield.Buildings)
+            if (ReferenceEquals(state.Building, building)) { current = state; break; }
+        if (current == null || current.Stage != DamageStage.Destroyed || current.ScavengeRemaining <= 0) return;
+
+        var before = current.ScavengeRemaining;
+        var next = current.WithScavengeConsumed(amount);
+        _battlefield = _battlefield.WithBuildingDamage(next);
+
+        var actuallyConsumed = before - next.ScavengeRemaining;
+        if (actuallyConsumed > 0) _simBridge.QueueBankHarvestLoadCommand(playerIndex, actuallyConsumed, ResourceKind.Parts);
+
+        List<GameObject> chunks;
+        if (_debrisChunksByBuilding.TryGetValue(building, out chunks) && chunks.Count > 0 && next.ScavengeValue > 0)
+        {
+            var targetVisible = Mathf.CeilToInt(chunks.Count * (next.ScavengeRemaining / (float)next.ScavengeValue));
+            while (chunks.Count > targetVisible)
+            {
+                var last = chunks[chunks.Count - 1];
+                chunks.RemoveAt(chunks.Count - 1);
+                if (last != null) Object.Destroy(last);
+            }
+        }
+
+        if (next.IsFullyScavenged)
+            foreach (var hex in building.Footprint) _simBridge.UnblockProceduralBuildingHex(hex);
+    }
+
+    /// <summary>docs/12 follow-up: the reclaim-eligibility gate for a
+    /// PROCEDURAL building's own hex -- true once its wreck is either
+    /// fully scavenged (<see cref="BuildingRuntimeState.IsFullyScavenged"/>)
+    /// or <see cref="MatchState.DebrisDecayTicks"/> has passed unscavenged
+    /// (the same decaying-if-unlooted fallback the RTS SimBuilding
+    /// roster's own dual gate already uses, reusing ITS constant directly
+    /// rather than duplicating the number -- see that gate's own doc
+    /// comment for why an unlooted wreck can never block a hex forever).
+    /// False (not yet eligible) for anything not actually Destroyed, or
+    /// with no `DestroyedAtFrame` stamp to measure decay against.</summary>
+    private bool IsReclaimEligible(BuildingRuntimeState state)
+    {
+        if (state.Stage != DamageStage.Destroyed) return false;
+        if (state.IsFullyScavenged) return true;
+        if (!state.DestroyedAtFrame.HasValue || _simBridge == null) return false;
+        return _simBridge.CurrentFrame - state.DestroyedAtFrame.Value >= MatchState.DebrisDecayTicks;
+    }
+
+    /// <summary>Lazily resolves and applies <see cref="IsReclaimEligible"/>
+    /// for whichever Destroyed procedural building (if any) owns `hex`,
+    /// unblocking its WHOLE footprint in match-core's own build-placement
+    /// gate the instant it becomes eligible. Called reactively right
+    /// before a live placement check (<see cref="BuildGhostCursor"/>'s own
+    /// per-frame preview) rather than proactively swept every frame for
+    /// every destroyed building on the map -- nothing needs this hex's
+    /// answer until someone is actually about to build there. Idempotent
+    /// and cheap to call repeatedly (<see cref="SimBridge.
+    /// UnblockProceduralBuildingHex"/> is itself a harmless no-op on an
+    /// already-unblocked hex).</summary>
+    public void TryReclaimHex(HexCoord hex)
+    {
+        if (_simBridge == null) return;
+        foreach (var state in _battlefield.Buildings)
+        {
+            if (state.Stage != DamageStage.Destroyed) continue;
+            var footprint = state.Building.Footprint;
+            var owns = false;
+            for (var i = 0; i < footprint.Count; i++) if (footprint[i] == hex) { owns = true; break; }
+            if (!owns) continue;   // not this building's footprint -- keep scanning the rest
+            if (!IsReclaimEligible(state)) return;
+            foreach (var h in footprint) _simBridge.UnblockProceduralBuildingHex(h);
+            return;
         }
     }
 

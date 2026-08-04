@@ -20,7 +20,13 @@ public static class RubbleDresser
         }
     }
 
-    public static void Scatter(RuntimeCityBuilder builder, Building building, Material rubbleMat, Transform parent)
+    /// <summary>2026-08 (creator direction: "as the lot is cleaned of
+    /// parts the lot debris is decreased"): returns the spawned host so
+    /// a caller can track/progressively remove its individual chunk
+    /// children as a building's own debris pile is scavenged down.
+    /// Purely additive -- existing callers ignoring the return value are
+    /// unaffected.</summary>
+    public static Transform Scatter(RuntimeCityBuilder builder, Building building, Material rubbleMat, Transform parent)
     {
         var host = new GameObject("Rubble").transform;
         host.SetParent(parent, false);
@@ -42,6 +48,7 @@ public static class RubbleDresser
                 chunk.transform.rotation = Quaternion.Euler((hi % 23) - 11f, (hi % 47) * 7.6f, (hi % 19) - 9f);
             }
         }
+        return host;
     }
 
     /// <summary>Replaces a footprint hex's massing cube -- destroyed by
@@ -52,8 +59,10 @@ public static class RubbleDresser
     /// from the RTS camera, not a collapsed building; a handful of
     /// varied-size, steeply-tilted wall-section-scale slabs reads as
     /// actual broken masonry. `Scatter`'s smaller debris chunks layer on
-    /// top of this, same as before.</summary>
-    public static void Shatter(RuntimeCityBuilder builder, HexCoord hex, Vector3 originalCenter, Material rubbleMat, Transform parent)
+    /// top of this, same as before. Returns the spawned host, same
+    /// "let a caller track/deplete the chunks" reasoning as
+    /// <see cref="Scatter"/>'s own doc comment.</summary>
+    public static Transform Shatter(RuntimeCityBuilder builder, HexCoord hex, Vector3 originalCenter, Material rubbleMat, Transform parent)
     {
         var host = new GameObject("Collapsed").transform;
         host.SetParent(parent, false);
@@ -78,5 +87,6 @@ public static class RubbleDresser
                 (hi * 37) % 360,
                 (((hi >> 2) % 7) - 3f) * 6f);
         }
+        return host;
     }
 }

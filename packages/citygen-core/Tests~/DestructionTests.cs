@@ -175,6 +175,101 @@ public class DestructionTests
         Assert.True(state.BlocksMovement);
     }
 
+    // ---- 2026-08 (creator direction: "assign some salvage parts based
+    // on the building size... as the lot is cleaned of parts the lot
+    // debris is decreased until it is completely cleared") ----
+
+    [Theory]
+    [InlineData(BuildingTier.Small)]
+    [InlineData(BuildingTier.Medium)]
+    [InlineData(BuildingTier.Large)]
+    [InlineData(BuildingTier.Landmark)]
+    public void ScavengeValue_is_positive_for_every_tier(BuildingTier tier)
+    {
+        Assert.True(BuildingStats.ScavengeValue(tier) > 0);
+    }
+
+    [Fact]
+    public void ScavengeValue_scales_monotonically_with_tier()
+    {
+        Assert.True(BuildingStats.ScavengeValue(BuildingTier.Small) < BuildingStats.ScavengeValue(BuildingTier.Medium));
+        Assert.True(BuildingStats.ScavengeValue(BuildingTier.Medium) < BuildingStats.ScavengeValue(BuildingTier.Large));
+        Assert.True(BuildingStats.ScavengeValue(BuildingTier.Large) < BuildingStats.ScavengeValue(BuildingTier.Landmark));
+    }
+
+    [Fact]
+    public void A_standing_building_has_no_scavenge_pile_yet()
+    {
+        var building = new Building(new[] { new HexCoord(0, 0) }, BuildingTier.Medium);
+        var state = BuildingRuntimeState.FullyIntact(building);
+        Assert.Equal(0, state.ScavengeRemaining);
+        Assert.False(state.IsFullyScavenged);
+        Assert.Null(state.DestroyedAtFrame);
+    }
+
+    [Fact]
+    public void Destruction_rolls_the_scavenge_pile_up_to_the_full_ScavengeValue()
+    {
+        var building = new Building(new[] { new HexCoord(0, 0) }, BuildingTier.Medium);
+        var destroyed = BuildingRuntimeState.FullyIntact(building).ApplyDamage(int.MaxValue / 2);
+        Assert.Equal(DamageStage.Destroyed, destroyed.Stage);
+        Assert.Equal(BuildingStats.ScavengeValue(BuildingTier.Medium), destroyed.ScavengeRemaining);
+        Assert.False(destroyed.IsFullyScavenged);
+    }
+
+    [Fact]
+    public void ApplyDamage_with_a_frame_stamps_DestroyedAtFrame_only_on_the_newly_destroyed_transition()
+    {
+        var building = new Building(new[] { new HexCoord(0, 0) }, BuildingTier.Small);
+        var intact = BuildingRuntimeState.FullyIntact(building);
+
+        var stillStanding = intact.ApplyDamage(1, frame: 7);
+        Assert.Null(stillStanding.DestroyedAtFrame);
+
+        var destroyed = stillStanding.ApplyDamage(stillStanding.MaxHp, frame: 42);
+        Assert.Equal(42, destroyed.DestroyedAtFrame);
+
+        // a second lethal call (amount clamps at 0 HP either way) must NOT
+        // re-stamp the frame -- same "roll/stamp exactly once" contract
+        // ScavengeRemaining itself already follows.
+        var stillDestroyed = destroyed.ApplyDamage(0, frame: 99);
+        Assert.Equal(42, stillDestroyed.DestroyedAtFrame);
+    }
+
+    [Fact]
+    public void WithScavengeConsumed_depletes_the_pile_and_clamps_at_zero()
+    {
+        var building = new Building(new[] { new HexCoord(0, 0) }, BuildingTier.Small);
+        var destroyed = BuildingRuntimeState.FullyIntact(building).ApplyDamage(int.MaxValue / 2);
+        var value = destroyed.ScavengeRemaining;
+        Assert.True(value > 0);
+
+        var partial = destroyed.WithScavengeConsumed(value / 2);
+        Assert.Equal(value - value / 2, partial.ScavengeRemaining);
+        Assert.False(partial.IsFullyScavenged);
+
+        var overConsumed = partial.WithScavengeConsumed(value * 100);
+        Assert.Equal(0, overConsumed.ScavengeRemaining);
+        Assert.True(overConsumed.IsFullyScavenged);
+    }
+
+    [Fact]
+    public void WithScavengeConsumed_on_a_standing_building_is_a_no_op()
+    {
+        var building = new Building(new[] { new HexCoord(0, 0) }, BuildingTier.Small);
+        var intact = BuildingRuntimeState.FullyIntact(building);
+        Assert.Same(intact, intact.WithScavengeConsumed(50));
+    }
+
+    [Fact]
+    public void WithScavengeConsumed_of_a_non_positive_amount_is_a_no_op()
+    {
+        var building = new Building(new[] { new HexCoord(0, 0) }, BuildingTier.Small);
+        var destroyed = BuildingRuntimeState.FullyIntact(building).ApplyDamage(int.MaxValue / 2);
+        Assert.Same(destroyed, destroyed.WithScavengeConsumed(0));
+        Assert.Same(destroyed, destroyed.WithScavengeConsumed(-5));
+    }
+
     [Fact]
     public void Bridge_reuses_the_large_tier_hp_and_stages_the_same_way()
     {

@@ -138,6 +138,7 @@ public class ScavengeTests
         var (m, scavengerId, buildingId, hex) = SetUpFreshWreck(6u);
         m.Player(0).Grant(ResourceKind.Bones, 1000);
         m.Player(0).Grant(ResourceKind.Fuel, 1000);
+        m.Player(0).Grant(ResourceKind.Parts, 1000);   // 2026-08: FuelStorage now also costs Parts
         var destroyedAtFrame = m.FindBuilding(buildingId)!.DestroyedAtFrame!.Value;
         m.Tick(new List<Command> { new Command(1, CommandKind.ScavengeDebris, targetEntity: scavengerId, argA: unchecked((int)buildingId)) });
         for (var i = 0; i < 60; i++) m.Tick(null);   // channel completes well before RubbleClearTicks (20s)
@@ -158,6 +159,7 @@ public class ScavengeTests
         var (m, _, _, hex) = SetUpFreshWreck(7u);
         m.Player(0).Grant(ResourceKind.Bones, 1000);
         m.Player(0).Grant(ResourceKind.Fuel, 1000);
+        m.Player(0).Grant(ResourceKind.Parts, 1000);   // 2026-08: FuelStorage now also costs Parts
         // nobody scavenges -- tick well past the minimum 20s clear window
         for (var i = 0; i < MatchState.RubbleClearTicks; i++) m.Tick(null);
         Assert.False(m.CanPlaceBuilding(0, BuildingKind.FuelStorage, hex));   // still holding metal, still blocked

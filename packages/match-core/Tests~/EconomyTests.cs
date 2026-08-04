@@ -81,6 +81,7 @@ public class EconomyTests
         var player = m.Player(0);
         player.Grant(ResourceKind.Bones, 100);
         player.Grant(ResourceKind.Blood, 100);
+        player.Grant(ResourceKind.Parts, 100);
 
         Assert.Equal(int.MaxValue, player.WalletCap(ResourceKind.Blood));   // uncapped before any storage
 
@@ -108,6 +109,7 @@ public class EconomyTests
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
         player.Grant(ResourceKind.Bones, 100);
+        player.Grant(ResourceKind.Parts, 100);
 
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.FuelStorage, argA: hex.Q, argB: hex.R) });
         var buildTime = BuildingDef.Get(BuildingKind.FuelStorage).BuildTimeTicks;
@@ -129,6 +131,7 @@ public class EconomyTests
         var player = m.Player(0);
         player.Grant(ResourceKind.Bones, 100);
         player.Grant(ResourceKind.Blood, 100);
+        player.Grant(ResourceKind.Parts, 100);
 
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.Factory, argA: hex.Q, argB: hex.R) });
         var buildTime = BuildingDef.Get(BuildingKind.Factory).BuildTimeTicks;
@@ -154,6 +157,7 @@ public class EconomyTests
         var player0 = m.Player(0);
         var player1 = m.Player(1);
         player0.Grant(ResourceKind.Bones, 100);
+        player0.Grant(ResourceKind.Parts, 100);
 
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.HarvestPost, argA: hex.Q, argB: hex.R) });
         var buildTime = BuildingDef.Get(BuildingKind.HarvestPost).BuildTimeTicks;
@@ -197,6 +201,7 @@ public class EconomyTests
             var player = m.Player(0);
             player.Grant(ResourceKind.Bones, 200);
             player.Grant(ResourceKind.Blood, 200);
+            player.Grant(ResourceKind.Parts, 200);
 
             m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: hex.Q, argB: hex.R) });
             for (var i = 0; i < 150; i++) m.Tick(null);

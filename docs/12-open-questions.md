@@ -11005,3 +11005,154 @@ identically at this same call site one line above for
 `SpawnFleeingOccupant`) -- flagged as the standing verification gap
 every Unity-side change in this project's history carries until a real
 Editor session confirms it.
+
+## 2026-08 follow-up: scavenging + Parts-as-building-cost extended to ALL buildings, not just the RTS roster
+
+Creator direction, two parts in the same request: **"Make all building
+clearable and assign some salvage parts based on the building size. As
+the lot is cleaned of parts the lot debris is decreased until it is
+completely cleared and is available to building on it."** Then, mid-
+implementation: **"Let's make metal and other building resources one
+of the requirement for making new buildings structures; it's a
+plentiful resource."**
+
+**Scope decision (asked, unanswered, proceeded on the stated default):**
+build the full mechanism -- size-based value, progressive depletion,
+visual shrink, hex-reclaim-on-zero -- for every building, with the
+depletion entry point wired and ready but not yet driven by monster/
+worker AI, the same "build it, wire the AI later" split the original
+RTS-only `ScavengeDebris` command already went through. The prior
+"unblock immediately on destroy" bugfix (the entry directly above) is
+explicitly SUPERSEDED here: build availability is now gated on
+scavenging (or a decay fallback), not instant -- see below for why that
+doesn't reopen the "permanently blocked" bug the bugfix closed.
+
+**Why citygen-core, not match-core, for the procedural-building side.**
+The RTS `SimBuilding` roster's own scavenging (a prior entry) lives
+entirely in `packages/match-core`, because `SimBuilding` IS a match-core
+entity. Procedural buildings are NOT -- they're `MadDr.CityGen.
+BuildingRuntimeState`, a pure, already-unit-tested value type in
+`packages/citygen-core` (confirmed match-core-agnostic: citygen-core has
+zero dependency on match-core, the correct direction per this repo's own
+package layering). Extending scavenging there, in citygen-core itself,
+keeps that layering intact and gets the mechanism proper `Tests~/
+DestructionTests.cs` coverage instead of leaving it Unity-only and
+untestable.
+
+**What shipped, sizing/value/decay mechanism (`packages/citygen-core`):**
+
+- `BuildingStats.ScavengeValue(BuildingTier tier)` (`BuildingTier.cs`):
+  the SAME absolute per-tier figures `MadDr.MatchCore.BuildingDef.
+  ScavengeValue` already uses (Small 100 / Medium 200 / Large 400 /
+  Landmark 800) -- reused verbatim, not re-derived, for the identical
+  "two building systems land on the same numbers per tier" reasoning
+  `StructureHp`'s own doc comment already established for HP.
+- `BuildingRuntimeState` (`Destruction.cs`) gains `ScavengeValue`
+  (computed from `Building.Tier`), `ScavengeRemaining` (rolled to the
+  full `ScavengeValue` the instant `ApplyDamage` newly crosses into
+  Destroyed, idempotent against a repeated call), `IsFullyScavenged`,
+  and `DestroyedAtFrame` (an optional new `ApplyDamage(int, int frame)`
+  overload stamps it; the original single-arg `ApplyDamage(int)` is
+  UNCHANGED, delegating to the same private implementation with
+  `frame: null` -- every existing test/call site keeps compiling and
+  passing untouched). New `WithScavengeConsumed(int amount)` depletes
+  the pile, clamped at 0, no-op if not actually Destroyed or already
+  empty (same bad-input contract `ApplyDamage` itself follows).
+  Deliberately NO percentage-roll variance (unlike the RTS roster's own
+  corpse-style 40-60% `SalvageMath.RollAmount`) -- citygen-core has no
+  RNG plumbing at this call site today (procedural-building combat
+  damage itself is already non-deterministic/client-local, unlike
+  match-core's own lockstep-safe rolls), and threading one in would be
+  new, unasked-for scope; the full `ScavengeValue` is what's rolled.
+  8 new tests in `Tests~/DestructionTests.cs` (per-tier positivity/
+  monotonicity, the roll, the frame-stamp-once-on-first-destroy
+  contract, depletion + clamping + no-ops) -- full suite 197/197.
+
+**What shipped, wiring (`unity-client/Assets/Scripts`):**
+
+- `RubbleDresser.Shatter`/`Scatter` now RETURN their spawned host
+  Transform (previously `void`) -- purely additive, existing callers
+  ignoring the return value are unaffected -- so a caller can track and
+  later deplete the individual rubble chunk children.
+- `RuntimeCityBuilder`: a new `_debrisChunksByBuilding` dictionary
+  flattens every spawned rubble host's children into one list per
+  building at destruction time (`ApplyBuildingDamage(Building, int)`,
+  right alongside the pre-existing `_cubesByBuilding` tracking -- kept
+  SEPARATE since `_cubesByBuilding`'s own entries are either already
+  destroyed or repurposed as squished dressing, not the actual visible
+  rubble). `ApplyBuildingDamage` now also stamps `DestroyedAtFrame` off
+  `SimBridge.CurrentFrame` (0 if no match is running -- the same
+  degenerate-but-harmless fallback the prior bugfix's own
+  `UnblockProceduralBuildingHex` callers already accept).
+- New `RuntimeCityBuilder.ScavengeBuildingDebris(building, playerIndex,
+  amount)`: drains up to `amount` of the pile, credits that player's
+  wallet the actual amount consumed in `ResourceKind.Parts` via
+  `SimBridge.QueueBankHarvestLoadCommand` -- reusing the EXACT
+  no-source-entity `BankHarvestLoad` precedent a harvester's own Blood/
+  Bones/Brains delivery already established (`CommandKind.
+  BankHarvestLoad`'s own doc comment: "a harvester monster isn't itself
+  a SimUnit... so unlike every other command kind there is no source
+  entity to validate against" -- a procedural building's wreck is the
+  same shape of gap), shrinks the visible rubble to
+  `ceil(chunkCount * remaining/value)` pieces (destroying the excess),
+  and unblocks the building's whole footprint the instant the pile hits
+  zero.
+- New `RuntimeCityBuilder.TryReclaimHex(hex)` / private
+  `IsReclaimEligible`: the actual reclaim gate, true once a Destroyed
+  procedural building's wreck is either fully scavenged OR `MatchState.
+  DebrisDecayTicks` (the RTS roster's OWN constant, reused directly
+  rather than duplicated) has passed unscavenged -- the SAME
+  decay-if-unlooted safety net that constant already provides on the
+  RTS side, so an unlooted procedural wreck can never re-block a hex
+  forever either. Called LAZILY, not via a proactive per-frame sweep --
+  `RuntimeCityBuilder` has no existing Update()/Tick() hook of its own
+  to piggyback on cheaply, so instead `BuildGhostCursor.Update()`'s
+  already-existing per-frame hover query (`bridge.CanPlaceBuilding`) now
+  calls `TryReclaimHex` immediately before it -- nothing needs a hex's
+  reclaim answer until a player is actually about to build there, and
+  that's exactly when the ghost cursor already asks. Caught and fixed a
+  real bug during review before this shipped: the first draft of
+  `TryReclaimHex`'s scan `return`ed on the first Destroyed building that
+  DIDN'T own the queried hex, instead of `continue`ing to check the
+  rest -- would have silently failed to reclaim any hex whose owning
+  building wasn't first in iteration order.
+
+**Second half: Parts as a building-construction cost
+(`packages/match-core/src/BuildingDef.cs`).** Every buildable
+`BuildingKind` (everything except `Hq`, generator-placed/never
+player-built) now costs some `ResourceKind.Parts` alongside its
+existing resources -- Small tier (BloodStorage/FuelPump/FuelStorage/
+PartsStorage/HarvestPost) 30, Medium tier (Factory/Defense) 50,
+BigBrain (Large tier) 80, chosen as a deliberately small fraction of a
+single Small wreck's own 100-Parts pile so "it's a plentiful resource"
+reads as literally true -- one scavenged house easily funds several new
+structures. BigBrain's existing "20 Brains, the creator's own number,
+not a placeholder" line is untouched; Parts is ADDED alongside it, not
+substituted. This is what gives Parts (previously "enables grafting" on
+the mutator-service side per `PartsStorage`'s own doc comment, with no
+match-core spend at all) an actual RTS-economy use, closing the loop the
+scavenging feature itself opened.
+
+**Test fallout and verification.** Adding a cost line to every buildable
+kind broke every existing test that built one of them expecting success
+(insufficient-funds REJECTION tests were unaffected -- they were already
+failing on a resource that hadn't changed). Fixed across
+`AttackBuildingTests.cs`, `BuildingTests.cs`, `ContainmentFuzzTests.cs`,
+`EconomyTests.cs`, and `TrainUnitTests.cs` (~35 call sites: added a
+`Grant(ResourceKind.Parts, ...)` matching each test's own existing
+grant-amount style -- generous round numbers where the test already used
+one, exact amounts where the test was pinning an exact-affordability
+boundary), plus two of this project's own `ScavengeTests.cs` tests that
+newly needed a Parts grant before their `FuelStorage` placement checks,
+and one `TrainUnitTests.cs` assertion (`Assert.Single(def.Cost)` ->
+`Assert.Equal(2, def.Cost.Count)`) that was pinning BigBrain's cost line
+count and went stale the moment a second line was added. Full
+`MatchCore.Tests.csproj` suite: 288/288 pass. `Tools~/DetHarness`'s two
+acceptance runs hash identically to their own pre-change baseline
+(unaffected -- neither determinism scenario issues a BuildStructure
+command). No Unity Editor in this environment to compile-check the
+`unity-client` edits directly -- same standing gap as every Unity-side
+change in this project's history; the code follows established idioms
+in every file it touches (`RubbleDresser`'s own existing spawn-and-parent
+pattern, `SimBridge`'s own null-conditional wrapper style, `BuildGhostCursor`'s
+own already-per-frame hover call) rather than introducing a new one.

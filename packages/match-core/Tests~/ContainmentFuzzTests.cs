@@ -167,6 +167,7 @@ public class ContainmentFuzzTests
         m.Player(0).Grant(ResourceKind.Bones, 100000);
         m.Player(0).Grant(ResourceKind.Blood, 100000);
         m.Player(0).Grant(ResourceKind.Fuel, 100000);
+        m.Player(0).Grant(ResourceKind.Parts, 100000);
 
         // Track hexes we've deliberately built on and later destroyed, to
         // spot-check exact-footprint reopening at the end (BloodStorage

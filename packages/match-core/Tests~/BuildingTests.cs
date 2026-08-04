@@ -110,6 +110,7 @@ public class BuildingTests
         var player = m.Player(0);
         player.Grant(ResourceKind.Bones, 50);
         player.Grant(ResourceKind.Blood, 50);
+        player.Grant(ResourceKind.Parts, 30);
 
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: hex.Q, argB: hex.R) });
 
@@ -200,6 +201,7 @@ public class BuildingTests
         var player = m.Player(0);
         player.Grant(ResourceKind.Bones, 100);
         player.Grant(ResourceKind.Blood, 100);
+        player.Grant(ResourceKind.Parts, 100);
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: hex.Q, argB: hex.R) });
 
         var buildTime = BuildingDef.Get(BuildingKind.BloodStorage).BuildTimeTicks;
@@ -226,6 +228,7 @@ public class BuildingTests
         var player = m.Player(0);
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
+        player.Grant(ResourceKind.Parts, 1000);
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: hex.Q, argB: hex.R) });
         var id = m.BuildingAt(0).EntityId;
 
@@ -268,6 +271,7 @@ public class BuildingTests
         var player = m.Player(0);
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
+        player.Grant(ResourceKind.Parts, 1000);
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: hex.Q, argB: hex.R) });
         var id = m.BuildingAt(0).EntityId;
 
@@ -299,6 +303,7 @@ public class BuildingTests
         m.Tick(null);   // the exact tick the rubble clears
         Assert.True(m.CanPlaceBuilding(0, BuildingKind.FuelStorage, hex));
 
+        player.Grant(ResourceKind.Parts, 30);   // FuelStorage's Parts cost
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.FuelStorage, argA: hex.Q, argB: hex.R) });
         Assert.Equal(2, m.BuildingCount);
         Assert.Equal(BuildingKind.FuelStorage, m.BuildingAt(1).Kind);
@@ -313,6 +318,7 @@ public class BuildingTests
         var player = m.Player(0);
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
+        player.Grant(ResourceKind.Parts, 1000);
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: hex.Q, argB: hex.R) });
         var id = m.BuildingAt(0).EntityId;
 
@@ -335,6 +341,7 @@ public class BuildingTests
         var player = m.Player(0);
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
+        player.Grant(ResourceKind.Parts, 1000);
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: hex.Q, argB: hex.R) });
         var id = m.BuildingAt(0).EntityId;
         var building = m.FindBuilding(id)!;
@@ -371,8 +378,10 @@ public class BuildingTests
             var p1 = m.Player(1);
             p0.Grant(ResourceKind.Bones, 200);
             p0.Grant(ResourceKind.Blood, 200);
+            p0.Grant(ResourceKind.Parts, 200);
             p1.Grant(ResourceKind.Bones, 200);
             p1.Grant(ResourceKind.Fuel, 200);
+            p1.Grant(ResourceKind.Parts, 200);
 
             var commands = new List<Command>
             {
@@ -456,6 +465,7 @@ public class BuildingTests
         var hex = FindOpenHex(city, city.CenterHex);
         m.Player(0).Grant(ResourceKind.Bones, 20);
         m.Player(0).Grant(ResourceKind.Blood, 10);
+        m.Player(0).Grant(ResourceKind.Parts, 30);
 
         Assert.True(m.CanPlaceBuilding(0, BuildingKind.BloodStorage, hex));
     }
@@ -507,6 +517,7 @@ public class BuildingTests
         var hex = FindOpenHex(city, city.CenterHex);
         m.Player(0).Grant(ResourceKind.Bones, 1000);
         m.Player(0).Grant(ResourceKind.Blood, 1000);
+        m.Player(0).Grant(ResourceKind.Parts, 1000);
 
         Assert.True(m.CanPlaceBuilding(0, BuildingKind.FuelStorage, hex));
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: hex.Q, argB: hex.R) });
@@ -524,6 +535,7 @@ public class BuildingTests
         var hex = FindOpenHex(city, city.CenterHex);
         m.Player(0).Grant(ResourceKind.Bones, 100);
         m.Player(0).Grant(ResourceKind.Blood, 100);
+        m.Player(0).Grant(ResourceKind.Parts, 100);
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BloodStorage, argA: hex.Q, argB: hex.R) });
 
         var buildTime = BuildingDef.Get(BuildingKind.BloodStorage).BuildTimeTicks;
