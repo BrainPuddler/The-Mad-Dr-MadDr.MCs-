@@ -52,6 +52,18 @@ namespace MadDr.MatchCore
         /// Level/XP of its own, the same reasoning <see cref="AttackAnomaly"/>
         /// already established for anomalies.</summary>
         AttackBuilding = 5,
+
+        /// <summary>2026-08 (creator direction: "the debris field is
+        /// scavenged for any usable metal by the zombie workers, and
+        /// monsters"): channeling a harvest of a Destroyed <see
+        /// cref="SimBuilding"/>'s wreck (<see cref="SimUnit.
+        /// ScavengeTargetId"/>). Set by <see cref="CommandKind.
+        /// ScavengeDebris"/>; re-validated every tick (building still
+        /// Destroyed with loot remaining, still in range) the same way
+        /// <see cref="Salvaging"/>'s own corpse/range checks are -- an
+        /// invalidated channel simply cancels back to Idle rather than
+        /// erroring.</summary>
+        Scavenging = 6,
     }
 
     /// <summary>
@@ -314,6 +326,63 @@ namespace MadDr.MatchCore
 
         /// <summary>Called on the CORPSE once its pile has been paid out.</summary>
         internal void ConsumeSalvage() => SalvageRemaining = 0;
+
+        /// <summary>docs/23 follow-up (creator direction: "the debris
+        /// field is scavenged for any usable metal"): same 3-second
+        /// channel convention as <see cref="SalvageChannelSeconds"/>, kept
+        /// as its own constant rather than reused directly -- a future
+        /// tuning pass (e.g. "scavenging a whole building takes longer
+        /// than looting one corpse") shouldn't have to un-share a
+        /// coincidentally-equal number.</summary>
+        public const double ScavengeChannelSeconds = 3.0;
+
+        /// <summary>Which Destroyed building's wreck this unit is
+        /// channeling a scavenge against, while <see cref="Order"/> is
+        /// <see cref="UnitOrderKind.Scavenging"/>.</summary>
+        public uint? ScavengeTargetId { get; private set; }
+
+        private double _scavengeChannelRemainingSeconds;
+
+        /// <summary>Start (or restart) scavenging a building's wreck --
+        /// same "re-issuing restarts progress" v0.1 simplification <see
+        /// cref="BeginSalvaging"/> already uses.</summary>
+        internal void BeginScavenging(uint buildingId)
+        {
+            ScavengeTargetId = buildingId;
+            _scavengeChannelRemainingSeconds = ScavengeChannelSeconds;
+            Order = UnitOrderKind.Scavenging;
+        }
+
+        /// <summary>Abort an in-progress scavenge (target's pile was
+        /// already emptied by someone else, or this unit walked out of
+        /// range). No-op if not currently scavenging.</summary>
+        internal void CancelScavenging()
+        {
+            if (Order != UnitOrderKind.Scavenging) return;
+            Order = UnitOrderKind.Idle;
+            ScavengeTargetId = null;
+            _scavengeChannelRemainingSeconds = 0.0;
+        }
+
+        /// <summary>Advance this tick's worth of channel progress. Returns
+        /// true the instant the channel completes -- only ever called by
+        /// <see cref="MatchState.TickScavenge"/>, and only while <see
+        /// cref="Order"/> is already confirmed <see cref="UnitOrderKind.
+        /// Scavenging"/> and in-range, same division of labor as <see
+        /// cref="TickSalvageChannel"/>.</summary>
+        internal bool TickScavengeChannel(double dt)
+        {
+            _scavengeChannelRemainingSeconds -= dt;
+            return _scavengeChannelRemainingSeconds <= 0.0;
+        }
+
+        /// <summary>Called on the SCAVENGER once payout completes.</summary>
+        internal void CompleteScavenging()
+        {
+            Order = UnitOrderKind.Idle;
+            ScavengeTargetId = null;
+            _scavengeChannelRemainingSeconds = 0.0;
+        }
 
         /// <summary>Which of this unit's 6 hex edges it currently faces --
         /// feeds <see cref="MadDr.CityGen.Facing.ArcOf"/> when someone
@@ -656,8 +725,8 @@ namespace MadDr.MatchCore
         /// reaching 0 is death: records `DeathTick`, drops whatever this
         /// unit was doing (a corpse channels nothing, attacks nothing, and
         /// harvests nothing -- if it was mid-<see cref="UnitOrderKind.
-        /// Salvaging"/> itself when killed, that channel is abandoned
-        /// too).</summary>
+        /// Salvaging"/> or mid-<see cref="UnitOrderKind.Scavenging"/>
+        /// itself when killed, that channel is abandoned too).</summary>
         internal void ApplyDamage(int amount, int currentFrame)
         {
             if (Combat == null || !IsAlive || amount <= 0) return;
@@ -673,6 +742,8 @@ namespace MadDr.MatchCore
                 AttackBuildingTargetId = null;
                 SalvageTargetId = null;
                 _salvageChannelRemainingSeconds = 0.0;
+                ScavengeTargetId = null;
+                _scavengeChannelRemainingSeconds = 0.0;
                 _path = null;
             }
         }
@@ -751,6 +822,12 @@ namespace MadDr.MatchCore
             // 2026-07: building-attack target, same "real mutable state
             // two clients must agree on" reasoning as AttackAnomalyTargetId.
             h.Add(AttackBuildingTargetId.HasValue ? (long)AttackBuildingTargetId.Value : -1L);
+
+            // 2026-08: scavenger's own channel state against a destroyed
+            // building's wreck, same "real mutable state" reasoning as
+            // SalvageTargetId/_salvageChannelRemainingSeconds above.
+            h.Add(ScavengeTargetId.HasValue ? (long)ScavengeTargetId.Value : -1L);
+            h.AddBits(_scavengeChannelRemainingSeconds);
         }
     }
 }

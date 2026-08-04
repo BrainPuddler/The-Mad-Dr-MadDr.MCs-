@@ -116,6 +116,23 @@ namespace MadDr.MatchCore
         /// `HarvestProfile`'s own three gather rates) instead of folding
         /// everything into Blood.</summary>
         BankHarvestLoad = 10,
+        /// <summary>2026-08 (creator direction: "the debris field is
+        /// scavenged for any usable metal by the zombie workers, and
+        /// monsters"): TargetEntity (the scavenger) begins a channel
+        /// looting ArgA (a Destroyed <see cref="SimBuilding"/>'s entity
+        /// ID, cast to int -- same reinterpreted-slot contract as <see
+        /// cref="SalvageCorpse"/>). Silently a no-op unless the scavenger
+        /// is alive, the target building is actually Destroyed with
+        /// something left in <see cref="SimBuilding.ScavengeRemaining"/>,
+        /// and the two are within <see cref="MatchState.
+        /// ScavengeRangeHexes"/> -- same "bad input never queues, just
+        /// rejects" contract as every other command kind. Deliberately
+        /// does NOT check faction, same "lootable by either side"
+        /// reasoning <see cref="SalvageCorpse"/> already applies to
+        /// corpses -- a fallen wreck belongs to whoever gets there first,
+        /// per the creator's own "zombie workers, and monsters" (i.e. both
+        /// sides' scavengers).</summary>
+        ScavengeDebris = 11,
     }
 
     /// <summary>

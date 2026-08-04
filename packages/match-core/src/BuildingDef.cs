@@ -112,9 +112,24 @@ namespace MadDr.MatchCore
         /// cref="PlayerState.WalletCap"/>).</summary>
         public int? SupplyCapBonus { get; }
 
+        /// <summary>2026-08 (creator direction: "the debris field is
+        /// scavenged for any usable metal by the zombie workers, and
+        /// monsters"): total <see cref="ResourceKind.Parts"/> value this
+        /// building's wreck yields once destroyed -- the building-side
+        /// twin of <see cref="SimUnit.SalvageValue"/>, rolled down to
+        /// <see cref="SimBuilding.ScavengeRemaining"/> via the same
+        /// <see cref="SalvageMath.RollAmount"/> 40-60% curve corpses
+        /// already use. Flat per-tier placeholder (Small 100 / Medium 200
+        /// / Large 400 / Landmark 800, doubling per tier), same "no real
+        /// number exists yet, scaled loosely by tier" policy as every
+        /// other v0.1 figure in this file -- NOT derived from <see
+        /// cref="Cost"/>, since summing mixed resource lanes into one
+        /// Parts figure would be its own unverified guess.</summary>
+        public int ScavengeValue { get; }
+
         private BuildingDef(BuildingKind kind, string name, (ResourceKind, int)[] cost,
             int buildTimeTicks, int maxHp, int armor, (ResourceKind, int)? storageCapBonus,
-            int occupants, int? supplyCapBonus = null)
+            int occupants, int? supplyCapBonus = null, int scavengeValue = 0)
         {
             Kind = kind;
             Name = name;
@@ -125,7 +140,14 @@ namespace MadDr.MatchCore
             StorageCapBonus = storageCapBonus;
             Occupants = occupants;
             SupplyCapBonus = supplyCapBonus;
+            ScavengeValue = scavengeValue;
         }
+
+        // Flat per-tier scavenge placeholders, doubling per tier -- same
+        // tier bands as SmallHp/MediumHp/LargeHp/LandmarkHp just below,
+        // reused for a second, independent v0.1 number rather than
+        // inventing a third scale.
+        private const int SmallScavenge = 100, MediumScavenge = 200, LargeScavenge = 400, LandmarkScavenge = 800;
 
         // docs/18 §3 tiers as a base, bumped 50% in an earlier pass
         // (2026-07: "buildings need larger hitpoints"), then bumped AGAIN
@@ -150,13 +172,13 @@ namespace MadDr.MatchCore
             new BuildingDef(BuildingKind.Hq, "Headquarters",
                 new (ResourceKind, int)[0], buildTimeTicks: 0,
                 maxHp: LandmarkHp, armor: LandmarkArmor, storageCapBonus: null,
-                occupants: 10),
+                occupants: 10, scavengeValue: LandmarkScavenge),
 
             // docs/22 §6's real "Blood Bank" numbers.
             new BuildingDef(BuildingKind.BloodStorage, "Blood Storage",
                 new[] { (ResourceKind.Bones, 20), (ResourceKind.Blood, 10) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
-                storageCapBonus: (ResourceKind.Blood, 100), occupants: 2),
+                storageCapBonus: (ResourceKind.Blood, 100), occupants: 2, scavengeValue: SmallScavenge),
 
             // v0.1 placeholder: no real number exists yet for the income
             // building; shaped like BloodStorage's cost as a reasonable
@@ -164,7 +186,7 @@ namespace MadDr.MatchCore
             new BuildingDef(BuildingKind.FuelPump, "Fuel Pump",
                 new[] { (ResourceKind.Bones, 20), (ResourceKind.Fuel, 10) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
-                storageCapBonus: null, occupants: 2),
+                storageCapBonus: null, occupants: 2, scavengeValue: SmallScavenge),
 
             // v0.1 placeholder cost, shaped like docs/22's Bone Pile (15
             // Bones only) as the closest existing analog; cap bonus
@@ -172,7 +194,7 @@ namespace MadDr.MatchCore
             new BuildingDef(BuildingKind.FuelStorage, "Fuel Storage",
                 new[] { (ResourceKind.Bones, 15) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
-                storageCapBonus: (ResourceKind.Fuel, 100), occupants: 2),
+                storageCapBonus: (ResourceKind.Fuel, 100), occupants: 2, scavengeValue: SmallScavenge),
 
             // v0.1 placeholder cost. No cap bonus -- docs/23 §2's Function
             // column for Parts storage is "enables grafting," not a
@@ -180,7 +202,7 @@ namespace MadDr.MatchCore
             new BuildingDef(BuildingKind.PartsStorage, "Parts Storage",
                 new[] { (ResourceKind.Bones, 15) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
-                storageCapBonus: null, occupants: 2),
+                storageCapBonus: null, occupants: 2, scavengeValue: SmallScavenge),
 
             // v0.1 placeholder cost. docs/20's Collection Stations are a
             // pre-existing, hands-free CITY feature -- this is the
@@ -188,7 +210,7 @@ namespace MadDr.MatchCore
             new BuildingDef(BuildingKind.HarvestPost, "Harvest Post",
                 new[] { (ResourceKind.Bones, 15) },
                 buildTimeTicks: 80, maxHp: SmallHp, armor: SmallArmor,
-                storageCapBonus: null, occupants: 3),
+                storageCapBonus: null, occupants: 3, scavengeValue: SmallScavenge),
 
             // v0.1 placeholder cost, pricier than storage (docs/22 §7:
             // "a forward Stitchworks... is a massive tempo investment").
@@ -197,14 +219,14 @@ namespace MadDr.MatchCore
             new BuildingDef(BuildingKind.Factory, "Factory",
                 new[] { (ResourceKind.Bones, 30), (ResourceKind.Blood, 15) },
                 buildTimeTicks: 150, maxHp: MediumHp, armor: MediumArmor,
-                storageCapBonus: null, occupants: 6),
+                storageCapBonus: null, occupants: 6, scavengeValue: MediumScavenge),
 
             // v0.1 placeholder cost. Medium tier: a defensive structure
             // sturdier than basic storage, matching its role.
             new BuildingDef(BuildingKind.Defense, "Defense",
                 new[] { (ResourceKind.Bones, 25), (ResourceKind.Blood, 10) },
                 buildTimeTicks: 120, maxHp: MediumHp, armor: MediumArmor,
-                storageCapBonus: null, occupants: 3),
+                storageCapBonus: null, occupants: 3, scavengeValue: MediumScavenge),
 
             // 2026-07 epic: 20 Brains, per the creator's own number --
             // the one deliberately-sized cost in this whole table, not a
@@ -216,7 +238,7 @@ namespace MadDr.MatchCore
             new BuildingDef(BuildingKind.BigBrain, "Big Brain",
                 new[] { (ResourceKind.Brains, 20) },
                 buildTimeTicks: 200, maxHp: LargeHp, armor: LargeArmor,
-                storageCapBonus: null, occupants: 0, supplyCapBonus: 100),
+                storageCapBonus: null, occupants: 0, supplyCapBonus: 100, scavengeValue: LargeScavenge),
         };
 
         public static BuildingDef Get(BuildingKind kind) => All[(int)kind];

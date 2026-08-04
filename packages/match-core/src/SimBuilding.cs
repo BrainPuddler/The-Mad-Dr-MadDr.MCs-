@@ -51,6 +51,38 @@ namespace MadDr.MatchCore
         /// top of it are different questions with different answers.</summary>
         public int? DestroyedAtFrame { get; private set; }
 
+        /// <summary>2026-08 (creator direction: "the debris field is
+        /// scavenged for any usable metal by the zombie workers, and
+        /// monsters"): how much of <see cref="BuildingDef.ScavengeValue"/>
+        /// is still waiting to be looted from this wreck -- 0 while
+        /// standing, rolled once at <see cref="ApplyDamage"/>'s Destroyed
+        /// transition (<see cref="SalvageMath.RollAmount"/>, the same
+        /// 40-60% curve a corpse's own <see cref="SimUnit.SalvageRemaining"/>
+        /// uses), decremented to 0 the instant a scavenge channel
+        /// completes (<see cref="MatchState.TickScavenge"/> pays out the
+        /// whole remaining pile in one channel, same "no partial-harvest
+        /// system" contract corpse salvage already established).</summary>
+        public int ScavengeRemaining { get; private set; }
+
+        private bool _scavengeRolled;
+
+        /// <summary>Roll this wreck's loot, exactly once (idempotent
+        /// against an accidental second call, same defensive-no-op style
+        /// as <see cref="SimUnit.RollSalvage"/>). Called by <see
+        /// cref="MatchState.ApplyBuildingDamage"/> the instant <see
+        /// cref="State"/> flips to Destroyed.</summary>
+        internal void RollScavenge(SimRng rng)
+        {
+            if (_scavengeRolled) return;
+            _scavengeRolled = true;
+            ScavengeRemaining = SalvageMath.RollAmount(BuildingDef.Get(Kind).ScavengeValue, rng);
+        }
+
+        /// <summary>Called once a scavenge channel's payout completes --
+        /// same "consume the whole pile" contract as <see
+        /// cref="SimUnit.ConsumeSalvage"/>.</summary>
+        internal void ConsumeScavenge() => ScavengeRemaining = 0;
+
         private int _ticksUntilComplete;
 
         /// <summary>Ticks left in <see cref="BuildingState.UnderConstruction"/>,
@@ -195,6 +227,7 @@ namespace MadDr.MatchCore
             // without an extra bool field.
             h.Add(TrainingKind.HasValue ? (int)TrainingKind.Value : -1);
             h.Add(TrainTicksRemaining);
+            h.Add(ScavengeRemaining);
         }
     }
 }

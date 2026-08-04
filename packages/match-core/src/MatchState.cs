@@ -373,7 +373,16 @@ namespace MadDr.MatchCore
             var building = FindBuilding(entityId);
             if (building == null) return;
             building.ApplyDamage(amount, Frame);
-            if (building.State == BuildingState.Destroyed) _blockedToGround?.Remove(building.Hex);
+            if (building.State == BuildingState.Destroyed)
+            {
+                _blockedToGround?.Remove(building.Hex);
+                // 2026-08 (creator direction: "the debris field is
+                // scavenged for any usable metal"): roll the wreck's loot
+                // pile the instant it falls, same "roll once at the
+                // moment of death" timing SimUnit.RollSalvage already
+                // uses for corpses.
+                building.RollScavenge(_rng);
+            }
         }
 
         /// <summary>docs/23 §3 Phase 3: a storage building just completed
@@ -812,6 +821,74 @@ namespace MadDr.MatchCore
             }
         }
 
+        /// <summary>2026-08 (creator direction: "the debris field is
+        /// scavenged for any usable metal by the zombie workers, and
+        /// monsters. Then the area is cleared and the area reclaimed, so
+        /// players can build in that area"): how close a scavenger must be
+        /// to a Destroyed building's own hex to begin (and keep)
+        /// channeling -- same convention (and same number) as <see
+        /// cref="SalvageRangeHexes"/>.</summary>
+        public const int ScavengeRangeHexes = 1;
+
+        /// <summary>TargetEntity (the scavenger) begins looting ArgA (a
+        /// Destroyed building). Both must exist, the scavenger must be
+        /// alive, and the building must actually be Destroyed with <see
+        /// cref="SimBuilding.ScavengeRemaining"/> &gt; 0 and within <see
+        /// cref="ScavengeRangeHexes"/> -- silent no-op otherwise, same
+        /// bad-input contract as <see cref="ApplySalvageCorpse"/>.
+        /// Deliberately does NOT check faction or PlayerIndex against the
+        /// building's own owner -- a fallen wreck is fair game for
+        /// "zombie workers, and monsters" alike, the same "lootable by
+        /// either side" rule corpses already follow.</summary>
+        private void ApplyScavengeDebris(Command cmd)
+        {
+            var scavenger = FindUnit(cmd.TargetEntity);
+            var building = FindBuilding(unchecked((uint)cmd.ArgA));
+            if (scavenger == null || building == null) return;
+            if (!scavenger.IsAlive) return;
+            if (building.State != BuildingState.Destroyed || building.ScavengeRemaining <= 0) return;
+
+            var scavengerHex = HexAt(scavenger.X, scavenger.Z);
+            if (scavengerHex.DistanceTo(building.Hex) > ScavengeRangeHexes) return;
+
+            scavenger.BeginScavenging(building.EntityId);
+        }
+
+        /// <summary>One tick of scavenge-channel resolution, entity-ID
+        /// order -- same iteration law, same per-tick re-validation
+        /// (range and still-Destroyed-with-loot-remaining), and same
+        /// "one channel empties the whole pile" payout shape as <see
+        /// cref="TickSalvage"/>.</summary>
+        private void TickScavenge()
+        {
+            for (var i = 0; i < _unitsInOrder.Count; i++)
+            {
+                var scavenger = _unitsInOrder[i];
+                if (scavenger.Order != UnitOrderKind.Scavenging || !scavenger.IsAlive) continue;
+
+                var building = scavenger.ScavengeTargetId.HasValue ? FindBuilding(scavenger.ScavengeTargetId.Value) : null;
+                if (building == null || building.State != BuildingState.Destroyed || building.ScavengeRemaining <= 0)
+                {
+                    scavenger.CancelScavenging();
+                    continue;
+                }
+
+                var scavengerHex = HexAt(scavenger.X, scavenger.Z);
+                if (scavengerHex.DistanceTo(building.Hex) > ScavengeRangeHexes)
+                {
+                    scavenger.CancelScavenging();
+                    continue;
+                }
+
+                if (!scavenger.TickScavengeChannel(DtSeconds)) continue;   // still channeling
+
+                var amount = building.ScavengeRemaining;
+                _players[scavenger.PlayerIndex].Grant(ResourceKind.Parts, amount);
+                building.ConsumeScavenge();
+                scavenger.CompleteScavenging();
+            }
+        }
+
         /// <summary>2026-07 (harvester-to-Factory delivery loop, docs/22),
         /// 2026-08 (creator direction: "all harvesters can collect all
         /// resources" -- ArgB now selects WHICH resource, was previously
@@ -992,6 +1069,11 @@ namespace MadDr.MatchCore
             // gone -- unit just waits" idiom rather than same-tick chaining).
             TickSalvage();
 
+            // 2026-08: same reasoning as TickSalvage just above -- after
+            // TickBuildingCombat so a building destroyed THIS tick can't
+            // be validly scavenged until next tick.
+            TickScavenge();
+
             // docs/23 §5 / docs/27 Phase C: separation, restoring the same
             // "never actually overlap" guarantee legacy (non-sim-driven)
             // units already have via RuntimeCityBuilder.ApplySeparation.
@@ -1101,6 +1183,9 @@ namespace MadDr.MatchCore
                     break;
                 case CommandKind.BankHarvestLoad:
                     ApplyBankHarvestLoad(cmd);
+                    break;
+                case CommandKind.ScavengeDebris:
+                    ApplyScavengeDebris(cmd);
                     break;
                 case CommandKind.None:
                 default:
@@ -1283,7 +1368,23 @@ namespace MadDr.MatchCore
         /// fine for. A destroyed building entity is never removed from
         /// the roster (see `SimBuilding.Tick`'s own doc: destruction is
         /// terminal, not deleted), so this always finds it as long as
-        /// it's still within the window.</summary>
+        /// it's still within the window.
+        ///
+        /// 2026-08 follow-up (creator direction: "the debris field is
+        /// scavenged for any usable metal by the zombie workers, and
+        /// monsters. Then the area is cleared and the area reclaimed"):
+        /// the flat 20s timer alone used to be the WHOLE gate. Now it's
+        /// only the minimum -- past it, the hex stays blocked until
+        /// EITHER the wreck's `ScavengeRemaining` reaches 0 (someone
+        /// actually hauled the metal off) OR `DebrisDecayTicks` passes
+        /// (nobody ever came for it, and it eventually settles/weathers
+        /// into unusable rubble on its own -- the same decay-if-unlooted
+        /// idea `SimUnit.IsSalvageable`'s own 15s corpse window already
+        /// establishes, so an unscavenged wreck can never block
+        /// construction FOREVER). RollScavenge always runs the instant a
+        /// building dies (`ApplyBuildingDamage`), so `ScavengeRemaining`
+        /// is never in a not-yet-rolled state by the time this is
+        /// checked.</summary>
         private bool IsRubbleStillClearing(HexCoord hex)
         {
             for (var i = 0; i < _buildingsInOrder.Count; i++)
@@ -1291,15 +1392,31 @@ namespace MadDr.MatchCore
                 var b = _buildingsInOrder[i];
                 if (b.State != BuildingState.Destroyed || !b.DestroyedAtFrame.HasValue) continue;
                 if (b.Hex != hex) continue;
-                if (Frame - b.DestroyedAtFrame.Value < RubbleClearTicks) return true;
+                var elapsed = Frame - b.DestroyedAtFrame.Value;
+                if (elapsed < RubbleClearTicks) return true;
+                if (b.ScavengeRemaining > 0 && elapsed < DebrisDecayTicks) return true;
             }
             return false;
         }
 
         /// <summary>docs/12 decision log, "once a building is destroyed
         /// and after 20 seconds, its area becomes clear" -- the creator's
-        /// own number, not a placeholder.</summary>
+        /// own number, not a placeholder. The MINIMUM delay before a hex
+        /// can reopen, regardless of scavenging -- see `DebrisDecayTicks`
+        /// below for the separate, longer scavenge-completion gate this
+        /// combines with.</summary>
         public const int RubbleClearTicks = 20 * TicksPerSecond;
+
+        /// <summary>2026-08 (creator direction: "the debris field is
+        /// scavenged... Then the area is cleared and reclaimed"): how
+        /// long an unscavenged wreck can hold a hex blocked past
+        /// `RubbleClearTicks` before it settles on its own regardless --
+        /// a v0.1 placeholder number (no real figure given for THIS part
+        /// of the request, same "flag it, don't invent silently" policy
+        /// as every other placeholder in this file), chosen generously
+        /// (90s) so scavenging is worth doing without being able to
+        /// permanently deny a hex if nobody shows up to loot it.</summary>
+        public const int DebrisDecayTicks = 90 * TicksPerSecond;
 
         /// <summary>docs/23 §2 Phase 2: place a new building at hex
         /// (ArgA, ArgB), building kind decoded from TargetEntity (see

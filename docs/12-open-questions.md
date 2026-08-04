@@ -10842,3 +10842,108 @@ real screen -- same standing limit as every other Unity-side visual
 change in this project's history; if fire is STILL not seen after
 this, the size/position theory is likely exhausted and the next round
 should investigate the material/shader/light path directly instead.
+
+## 2026-08 follow-up: debris scavenging + hex reclaim -- a destroyed building's own wreck now has to be looted (or decay unlooted) before the hex is fully clear
+
+Creator direction: **"When a building is destroyed. The debris field
+is scavenged for any usable metal by the zombie workers, and monsters.
+Then the area is cleared and the area reclaimed, so players can build
+in that area."** Three scoping questions before any code, resolved
+against the creator's own follow-up ("go with that we will wire the
+zombies ghoul-ish units in later"):
+
+1. **Which resource?** Reused the existing `ResourceKind.Parts`
+   (already the corpse-salvage currency, docs/23 Phase 6a) rather than
+   inventing a separate "Metal" resource -- "usable metal" from a
+   wrecked building is the same kind of scrap income as looting a dead
+   unit, no new wallet-cap/HUD plumbing needed for a second currency.
+2. **Which buildings?** RTS `SimBuilding`s only. The procedural
+   civilian buildings (houses/shops/landmarks destroyed by monster
+   attacks) are pure cosmetic `RubbleDresser` set-dressing with zero
+   build-blocking today, in a Unity-only system with no coupling into
+   match-core's blocked-hex model at all (a real, pre-existing,
+   unrelated gap -- see the "once a building is destroyed and after 20
+   seconds" entry above) -- extending scavenging there is real,
+   separate scope, not attempted here.
+3. **Who scavenges?** Player-commanded, mirroring `SalvageCorpse`
+   almost exactly (channel near the wreck, pay out over time) rather
+   than autonomous auto-scavenge (the docs/22 §6 "Ghoul" concept --
+   designed, never implemented). No actual "zombie" unit/faction
+   exists in the codebase; the creator's own follow-up confirmed the
+   real zombie/ghoul-ish auto-scavenge AI is a LATER pass -- this one
+   only builds the sim-side mechanism a later Worker/Collector/monster
+   AI update will issue commands into, not the AI itself.
+
+**What shipped, all in `packages/match-core`:**
+
+- `BuildingDef.ScavengeValue` (`src/BuildingDef.cs`): a new per-kind
+  field, flat per-tier placeholders (Small 100 / Medium 200 / Large
+  400 / Landmark 800, doubling per tier) -- same "no real number
+  exists yet, scaled loosely by tier" v0.1 policy as every other
+  figure in that file, deliberately NOT derived from `Cost` (summing
+  mixed resource lanes into one Parts figure would be its own
+  unverified guess).
+- `SimBuilding.ScavengeRemaining` (`src/SimBuilding.cs`): rolled once,
+  idempotently, via `RollScavenge` the instant a building's `ApplyDamage`
+  crosses into `BuildingState.Destroyed` -- `SalvageMath.RollAmount`,
+  the exact same 40-60% uniform curve a corpse's own `SalvageRemaining`
+  already uses. `ConsumeScavenge` empties the pile on payout, hashed
+  into `WriteTo` for determinism.
+- `CommandKind.ScavengeDebris` (`src/Command.cs`) / `UnitOrderKind.
+  Scavenging` (`src/SimUnit.cs`): a near-verbatim mirror of
+  `SalvageCorpse`/`UnitOrderKind.Salvaging` -- same 3-second channel
+  constant (`ScavengeChannelSeconds`, kept as its own constant rather
+  than reused directly, so a future "scavenging a building takes
+  longer than looting a corpse" tuning pass doesn't have to un-share a
+  coincidentally-equal number), same `BeginScavenging`/
+  `CancelScavenging`/`TickScavengeChannel`/`CompleteScavenging` shape,
+  same "abandoned on the scavenger's own death" reset in `ApplyDamage`.
+  Deliberately does NOT check faction or the building's own owner --
+  "zombie workers, and monsters" (i.e. both sides) can loot a fallen
+  wreck, same "lootable by either side" rule corpses already follow.
+- `MatchState.ApplyScavengeDebris`/`TickScavenge`
+  (`src/MatchState.cs`): same shape as `ApplySalvageCorpse`/
+  `TickSalvage` -- range check (`ScavengeRangeHexes = 1`, same number
+  as `SalvageRangeHexes`), per-tick re-validation (still Destroyed,
+  still has loot, still in range), one channel empties the whole pile
+  into `ResourceKind.Parts`. Wired into the main `Tick()` right after
+  `TickSalvage`, same "after combat so same-tick deaths aren't validly
+  targeted until next tick" ordering.
+- `MatchState.IsRubbleStillClearing` (`src/MatchState.cs`): the actual
+  reclaim-gating change. `RubbleClearTicks` (20s, the creator's own
+  number from the prior entry) is now only the MINIMUM of a two-part
+  gate, not the whole thing -- past it, a hex stays blocked until
+  EITHER `ScavengeRemaining` reaches 0 (someone hauled the metal off)
+  OR a new `DebrisDecayTicks` (90s, a v0.1 placeholder -- no real
+  number was given for this specific part of the request, flagged
+  rather than invented silently, chosen generously so scavenging is
+  worth doing without being able to permanently deny a hex if nobody
+  shows up) passes, whichever comes first. This mirrors `SimUnit.
+  IsSalvageable`'s own 15s corpse-decay window -- an unlooted wreck
+  settles into unusable rubble on its own rather than blocking
+  construction forever. `RollScavenge` always runs the instant a
+  building dies, so `ScavengeRemaining` is never in a not-yet-rolled
+  state by the time this gate is checked.
+
+**Verified.** New `ScavengeTests.cs` (8 tests): the 40-60% roll band,
+a no-op against a standing building, a no-op out of range, a full
+channel paying the whole pile and emptying the wreck, a second
+scavenge of an already-empty wreck paying nothing more, a fully-
+scavenged hex reopening right at `RubbleClearTicks`, an unscavenged
+hex staying blocked past `RubbleClearTicks` until `DebrisDecayTicks`,
+and same-seed-same-orders hash determinism with scavenging in play.
+The pre-existing `BuildingTests.
+ApplyBuildingDamage_blocksRebuildingUntilRubbleClearTicksPass_
+thenReopensTheHex` test now scavenges its own wreck mid-test (its
+`BloodStorage` target has a nonzero `ScavengeValue` like every other
+buildable kind now) so its own "reopens exactly at the 20s timer"
+assertion keeps isolating just that timer, unaffected by the new
+scavenge gate layered on top. Full `MatchCore.Tests.csproj` suite:
+288/288 pass. `Tools~/DetHarness`'s two acceptance runs (10k-tick
+8-player empty match; 100-unit 3k-tick scripted-move match) both hash
+identically across two runs, confirming the new command/state doesn't
+break lockstep determinism. No Unity-side files touched this pass --
+the sim-side mechanism is in place; a Worker/Collector/monster AI
+update that actually ISSUES `ScavengeDebris` orders (the "zombie
+workers, and monsters" part) is explicit follow-up scope per the
+creator's own "we will wire the zombies ghoul-ish units in later."

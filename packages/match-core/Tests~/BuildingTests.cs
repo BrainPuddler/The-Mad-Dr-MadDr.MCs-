@@ -250,6 +250,18 @@ public class BuildingTests
         // then opens -- distinct from the OLD behavior (this test used to
         // assert rebuilding worked with zero delay; that assertion was the
         // exact thing this creator direction asked to change).
+        //
+        // 2026-08 follow-up (creator direction: "the debris field is
+        // scavenged for any usable metal by the zombie workers, and
+        // monsters. Then the area is cleared and reclaimed"): RubbleClearTicks
+        // is now only the MINIMUM of a two-part gate -- see
+        // MatchState.IsRubbleStillClearing's own doc comment. A wreck with
+        // ScavengeRemaining > 0 stays blocked past this minimum until
+        // either scavenged or MatchState.DebrisDecayTicks passes (see
+        // ScavengeTests.cs for that side of the contract); this test
+        // scavenges the wreck well before the minimum window closes so its
+        // own "opens exactly at RubbleClearTicks" assertion still isolates
+        // just the timer, unaffected by the newer gate.
         var city = SmallCity();
         var m = MatchState.Create(8u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
@@ -268,8 +280,20 @@ public class BuildingTests
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.FuelStorage, argA: hex.Q, argB: hex.R) });
         Assert.Equal(1, m.BuildingCount);   // still just the ruin -- the rebuild never landed
 
-        // one tick short of the clear window -- still blocked
-        for (var i = 0; i < MatchState.RubbleClearTicks - 2; i++) m.Tick(null);
+        // scavenge the wreck now, well inside the 20s minimum, so it's
+        // fully looted long before the timer itself is what's being tested
+        var scavengerId = m.SpawnUnit(0, hex, speed: 3.0);
+        m.Tick(new List<Command> { new Command(0, CommandKind.ScavengeDebris, targetEntity: scavengerId, argA: unchecked((int)id)) });
+        for (var i = 0; i < 60; i++) m.Tick(null);
+        Assert.Equal(0, m.FindBuilding(id)!.ScavengeRemaining);
+
+        // one tick short of the clear window -- still blocked. Computed
+        // from Frame/DestroyedAtFrame directly (not a hand-counted tick
+        // total) so this stays correct regardless of exactly how many
+        // ticks the scavenge channel above took.
+        var destroyedAtFrame = m.FindBuilding(id)!.DestroyedAtFrame!.Value;
+        var elapsed = m.Frame - destroyedAtFrame;
+        for (var i = elapsed; i < MatchState.RubbleClearTicks - 1; i++) m.Tick(null);
         Assert.False(m.CanPlaceBuilding(0, BuildingKind.FuelStorage, hex));
 
         m.Tick(null);   // the exact tick the rubble clears
