@@ -82,20 +82,25 @@ namespace MadDr.CityGen
         /// but then others popup in different places based on the
         /// building size up to 8"): how many simultaneous fire points a
         /// Damaged building of this tier eventually grows to -- one fire
-        /// lands the instant it's Damaged regardless of tier (`Small`
-        /// literally IS this count, 1), then more stagger in over the
-        /// next several seconds up to this total for anything bigger.
-        /// Capped at 8 (`Landmark`) per the creator's own number. Same
-        /// v0.1 "small flat count scaled loosely by tier" placeholder
-        /// policy as `Occupants`' own doc comment already states.</summary>
+        /// lands the instant it's Damaged regardless of tier, then more
+        /// stagger in over the next several seconds up to this total for
+        /// anything bigger.
+        ///
+        /// 2026-08 follow-up (creator direction: "YOU may add more fire
+        /// as the building is attacked. 2-4 depending on the size of the
+        /// building"): the 1-8 range above is REPLACED with 2-4 -- every
+        /// building now starts with at least 2 fire points instead of a
+        /// single one, and the ceiling drops from 8 down to 4. Same v0.1
+        /// "small flat count scaled loosely by tier" placeholder policy
+        /// as `Occupants`' own doc comment already states.</summary>
         public static int FireCount(BuildingTier tier)
         {
             switch (tier)
             {
-                case BuildingTier.Small: return 1;
+                case BuildingTier.Small: return 2;
                 case BuildingTier.Medium: return 3;
-                case BuildingTier.Large: return 5;
-                case BuildingTier.Landmark: return 8;
+                case BuildingTier.Large: return 4;
+                case BuildingTier.Landmark: return 4;
                 default: throw new ArgumentOutOfRangeException(nameof(tier));
             }
         }

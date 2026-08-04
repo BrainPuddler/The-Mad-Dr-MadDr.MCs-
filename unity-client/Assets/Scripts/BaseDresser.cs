@@ -223,13 +223,17 @@ public class BaseDresser : MonoBehaviour
     /// `BuildingStats.FireCount` directly, so this mirrors that table's
     /// NUMBERS rather than sharing its code, the same "duplicate the
     /// tier boundary constants, not a cross-package type" precedent
-    /// `FullScaleFor` itself already set for this exact size proxy).</summary>
+    /// `FullScaleFor` itself already set for this exact size proxy).
+    ///
+    /// 2026-08 follow-up (creator direction: "2-4 depending on the size
+    /// of the building"): mirrors `BuildingStats.FireCount`'s own same
+    /// follow-up -- 1-8 replaced with 2-4.</summary>
     private static int FireCountFor(BuildingDef def)
     {
-        if (def.MaxHp >= 3000) return 8;   // Landmark (Hq)
-        if (def.MaxHp >= 1500) return 5;   // Large
+        if (def.MaxHp >= 3000) return 4;   // Landmark (Hq)
+        if (def.MaxHp >= 1500) return 4;   // Large
         if (def.MaxHp >= 600) return 3;    // Medium
-        return 1;                           // Small
+        return 2;                           // Small
     }
 
     /// <summary>2026-08 (creator report: "I've never seen the smoke

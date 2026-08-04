@@ -586,11 +586,28 @@ public class FirePlume : MonoBehaviour
 /// scattered across a Damaged building's own footprint. The FIRST point
 /// lands the instant `Init` runs (so a building never sits Damaged with
 /// zero fire showing, matching "should start with 1"); every later
-/// point staggers in on its own randomized 2-5s timer at a NEW random
-/// spot, until `targetCount` is reached, then this component goes
-/// idle -- it never removes a fire once lit (matching every other FX
-/// class in this file: no repair mechanic exists, so nothing here needs
-/// to reverse itself either).</summary>
+/// point staggers in on its own randomized 2-5s timer, until
+/// `targetCount` is reached, then this component goes idle -- it never
+/// removes a fire once lit (matching every other FX class in this file:
+/// no repair mechanic exists, so nothing here needs to reverse itself
+/// either).
+///
+/// 2026-08 follow-up (creator direction: "Start the fire on the side
+/// that the camera happens to be pointing at BUT keep it locked to
+/// that side after. DO NOT move the camera to the fire or the fire
+/// should NOT move sides after it is started"): the prior pass tried
+/// moving the CAMERA to the fire (via SimpleCameraRig.FocusOn) once the
+/// creator reported not being able to spot even an unmissable debug
+/// marker -- explicitly rejected. This does the inverse: the fire
+/// itself reads `Camera.main`'s current position ONCE, at ignition
+/// (`_baseAngle`, computed in `Init`, never recomputed after), and
+/// every point this cluster ever spawns -- not just the first -- lands
+/// within a bounded arc of that SAME angle, instead of the old full
+/// 0-360 degree random scatter. A building's fire commits to whichever
+/// face happened to be camera-facing when it started burning and stays
+/// there for its whole life, so it's never NOT visible because the
+/// building itself is between it and wherever the camera happens to be
+/// looking right now.</summary>
 public class FireCluster : MonoBehaviour
 {
     private float _height;
@@ -598,14 +615,38 @@ public class FireCluster : MonoBehaviour
     private int _targetCount;
     private int _spawned;
     private float _nextSpawnIn;
+    private float _baseAngle;
 
     public void Init(float height, float footprintRadius, int targetCount)
     {
         _height = height;
         _footprintRadius = footprintRadius;
-        _targetCount = Mathf.Clamp(targetCount, 1, 8);
+        // 2026-08 (creator direction: "2-4 depending on the size of the
+        // building"): safety-clamp ceiling dropped from 8 to 4, matching
+        // BuildingStats.FireCount/BaseDresser.FireCountFor's own new
+        // range -- this is just a defensive bound against a bad caller,
+        // not itself a source of the count, so both tables' own numbers
+        // (2-4) are what actually reach this in practice.
+        _targetCount = Mathf.Clamp(targetCount, 1, 4);
+        _baseAngle = CameraFacingAngle();
         SpawnOne();
         _nextSpawnIn = NextInterval();
+    }
+
+    /// <summary>The angle (this class's own `Mathf.Cos(angle)*x,
+    /// Mathf.Sin(angle)*z` convention -- standard math angle from +X,
+    /// matching `SpawnOne`'s own offset formula below) from this
+    /// building's own ground position toward wherever `Camera.main`
+    /// currently is. Falls back to a per-building hash (the OLD fully-
+    /// random behavior) if no main camera exists yet -- still
+    /// deterministic and harmless, just not camera-aware, for whatever
+    /// edge case (headless test, camera not yet spawned) that implies.</summary>
+    private float CameraFacingAngle()
+    {
+        var cam = Camera.main;
+        if (cam == null) return ((GetInstanceID() & 0xFFFF) % 360) * Mathf.Deg2Rad;
+        var toCamera = cam.transform.position - transform.position;
+        return Mathf.Atan2(toCamera.z, toCamera.x);
     }
 
     private float NextInterval()
@@ -626,7 +667,16 @@ public class FireCluster : MonoBehaviour
     {
         _spawned++;
         var salt = GetInstanceID() + _spawned * 733;
-        var angle = ((salt & 0xFFFF) % 360) * Mathf.Deg2Rad;
+        // 2026-08 (creator direction: "keep it locked to that side...
+        // the fire should NOT move sides after it is started"): was a
+        // full 0-360 degree random spread per point -- now a bounded
+        // +-35 degree jitter around `_baseAngle` (the camera-facing
+        // direction captured once at ignition, see `Init`/
+        // `CameraFacingAngle`), so every point this cluster ever spawns
+        // stays on the SAME face of the building instead of wrapping
+        // around to whichever side happens to be away from the camera.
+        var jitterDeg = ((salt >> 8) & 0xFFFF) % 71 - 35;
+        var angle = _baseAngle + jitterDeg * Mathf.Deg2Rad;
         // 2026-08 (creator direction: "the fire should come from the
         // building, be attached to the roof, or the windows"): EVERY
         // point (including the first) now lands 30-90% out toward the
@@ -688,31 +738,20 @@ public class FireCluster : MonoBehaviour
         // DamageFxProfile.ShowFireDebugMarkers (default true while this
         // is still being diagnosed) so it's a one-flip Inspector toggle
         // to turn off once resolved, not a permanent fixture.
+        //
+        // 2026-08 follow-up (creator direction: "DO NOT move the camera
+        // to the fire"): the camera-glide this comment used to describe
+        // (SimpleCameraRig.FocusOn on ignition) is GONE -- explicitly
+        // rejected. The fix is now upstream of this marker entirely:
+        // `_baseAngle`/`CameraFacingAngle` (see `Init`, above) place the
+        // fire itself on whatever side already faces the camera, so
+        // there's no camera movement to remove a dependency on -- the
+        // marker still helps confirm the flame mesh itself (as opposed
+        // to just this bright placeholder) is visible once placement is
+        // no longer the variable in question.
         if (DamageFxProfile.Active.ShowFireDebugMarkers && _spawned == 1)
         {
             DamageFx.SpawnDebugMarker(go.transform.position);
-            // 2026-08 (creator report: "No do not see magenta sphere"): a
-            // marker unmissable in isolation still isn't visible if the
-            // camera simply isn't pointed anywhere near it -- which the
-            // debug marker alone can't distinguish from "nothing renders
-            // there at all." Force the issue: reuse the SAME camera-glide
-            // WaypointCommander's J-key jump-to-nearest-unit already uses
-            // (SimpleCameraRig.FocusOn, WaypointCommander.cs's
-            // JumpToNearestUnit) to snap the view to this exact point the
-            // instant the first fire ignites. If the marker is STILL not
-            // visible after the camera itself glides there, that's about
-            // as close to conclusive proof as code alone can get that
-            // this isn't a fire-tuning problem at all -- it's a camera
-            // culling mask (Layer 0 excluded on the actual Camera
-            // component, which no code anywhere in this project sets, so
-            // it would have to be an Editor-configured value) or a
-            // Scene-view-vs-Game-view mixup.
-            var mainCam = Camera.main;
-            if (mainCam != null)
-            {
-                var rig = mainCam.GetComponent<SimpleCameraRig>();
-                if (rig != null) rig.FocusOn(go.transform.position);
-            }
         }
     }
 }

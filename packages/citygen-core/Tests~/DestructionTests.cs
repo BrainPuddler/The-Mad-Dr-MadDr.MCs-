@@ -43,6 +43,12 @@ public class DestructionTests
     // 2026-08 (creator direction: "it should start with 1 but then
     // others popup in different places based on the building size up
     // to 8"): the fire-cluster point count per tier.
+    //
+    // 2026-08 follow-up (creator direction: "YOU may add more fire as
+    // the building is attacked. 2-4 depending on the size of the
+    // building"): the 1-8 range these tests originally pinned is
+    // REPLACED by 2-4 -- updated below rather than left checking
+    // numbers that no longer match FireCount's own intended behavior.
     [Theory]
     [InlineData(BuildingTier.Small)]
     [InlineData(BuildingTier.Medium)]
@@ -54,23 +60,27 @@ public class DestructionTests
     }
 
     [Fact]
-    public void FireCount_starts_at_exactly_one_for_Small()
+    public void FireCount_starts_at_exactly_two_for_Small()
     {
-        Assert.Equal(1, BuildingStats.FireCount(BuildingTier.Small));
+        Assert.Equal(2, BuildingStats.FireCount(BuildingTier.Small));
     }
 
     [Fact]
-    public void FireCount_caps_at_eight_for_Landmark()
+    public void FireCount_caps_at_four_for_Landmark()
     {
-        Assert.Equal(8, BuildingStats.FireCount(BuildingTier.Landmark));
+        Assert.Equal(4, BuildingStats.FireCount(BuildingTier.Landmark));
     }
 
+    /// <summary>Only 3 distinct values (2, 3, 4) cover 4 tiers, so strict
+    /// monotonicity across all four is impossible by construction -- Large
+    /// and Landmark share the same 4-point ceiling. Small &lt; Medium &lt;=
+    /// Large == Landmark is the actual intended shape.</summary>
     [Fact]
     public void FireCount_scales_monotonically_with_tier()
     {
         Assert.True(BuildingStats.FireCount(BuildingTier.Small) < BuildingStats.FireCount(BuildingTier.Medium));
-        Assert.True(BuildingStats.FireCount(BuildingTier.Medium) < BuildingStats.FireCount(BuildingTier.Large));
-        Assert.True(BuildingStats.FireCount(BuildingTier.Large) < BuildingStats.FireCount(BuildingTier.Landmark));
+        Assert.True(BuildingStats.FireCount(BuildingTier.Medium) <= BuildingStats.FireCount(BuildingTier.Large));
+        Assert.True(BuildingStats.FireCount(BuildingTier.Large) <= BuildingStats.FireCount(BuildingTier.Landmark));
     }
 
     // 2026-08 (creator report: "I've never seen the smoke either"): the

@@ -10674,3 +10674,104 @@ neither of which the local `UnityStub.cs` implements meaningfully. This
 is the most code-only-verifiable this particular investigation can get
 without a real Editor; the actual answer now depends entirely on what
 the creator sees after this lands.
+
+## 2026-08 follow-up: camera-move rejected -- fire locks to whichever side already faces the camera instead
+
+Creator, verbatim: "No! Start the fire on the side that the camera
+happens to be pointing at BUT keep it locked to that side after. DO
+NOT move the camera to the fire or the fire should NOT move sides
+after it is started. YOU may add more fire as the building is
+attacked. 2-4 depending on the size of the building." Then, mid-turn:
+"And What about the possibility it's just too small?!"
+
+**The camera-glide from the entry before this one is reverted.**
+`SimpleCameraRig.FocusOn` is no longer called from `FireCluster` at
+all -- explicitly rejected. The fix moves upstream: instead of moving
+the camera to the fire, the fire now spawns wherever the camera
+ALREADY is relative to the building.
+
+**`_baseAngle`: captured once, at ignition, never recomputed.** New
+`FireCluster.CameraFacingAngle()`, called exactly once from `Init`
+(the same place the very first fire point already lands): reads
+`Camera.main.transform.position`, computes the direction from this
+building's own ground position toward it, and converts that to an
+angle via `Mathf.Atan2(toCamera.z, toCamera.x)` -- matching
+`SpawnOne`'s own existing `Mathf.Cos(angle)*x, Mathf.Sin(angle)*z`
+offset convention exactly (confirmed by a standalone
+`firecameraangle-verify` harness: for six test camera positions
+spanning every quadrant plus an oblique angle, the resulting offset
+direction's dot product with the true toCamera direction is exactly
+1.0 -- the formula genuinely points at the camera, not just
+approximately). Stored in a new `_baseAngle` field and never
+recomputed after -- if the camera later moves elsewhere (a realistic
+RTS scenario: the player pans away to manage something else), the
+fire does NOT chase it; it stays exactly where it started, satisfying
+"the fire should NOT move sides after it is started" literally.
+Falls back to the OLD per-building hash if `Camera.main` is null
+(e.g. before a camera has spawned yet) -- deterministic and harmless,
+just not camera-aware for that edge case.
+
+**Every point, not just the first, stays within the locked arc.**
+`SpawnOne`'s own angle used to be a full 0-360 degree random spread
+per point (`((salt & 0xFFFF) % 360)`); now it's `_baseAngle` plus a
+bounded ±35 degree jitter (`((salt >> 8) & 0xFFFF) % 71 - 35`),
+verified by the same harness to never exceed that bound across a wide
+salt sample while still reaching close to both edges (not a
+degenerate near-zero range) -- so a building's fire reads as
+"concentrated on one visible face," with some per-point scatter for
+texture, rather than either a single repeated point or the old
+scattered-to-any-side behavior.
+
+**FireCount: 1-8 replaced with 2-4.** Direct creator instruction ("YOU
+may add more fire as the building is attacked. 2-4 depending on the
+size of the building"). `BuildingStats.FireCount`
+(`packages/citygen-core/src/BuildingTier.cs`) and its RTS-roster mirror
+`BaseDresser.FireCountFor` both changed from Small/Medium/Large/
+Landmark = 1/3/5/8 to 2/3/4/4. Every building now starts with at
+least 2 simultaneous fire points instead of 1, and the ceiling drops
+from 8 to 4. Large and Landmark share the same 4-point ceiling since
+only 3 distinct values (2, 3, 4) cover 4 tiers -- strict monotonicity
+across all four was mathematically impossible by construction, so the
+existing `citygen-core` xunit tests pinning the old 1/8 numbers and
+strict `<` monotonicity were updated to match (`FireCount_starts_at_
+exactly_two_for_Small`, `FireCount_caps_at_four_for_Landmark`,
+relaxed `<=` between Medium/Large/Landmark) rather than left checking
+numbers that no longer reflect the intended behavior. All 186
+`citygen-core` tests pass after the change. Caught along the way:
+`FlightCheck.csproj` references a PREBUILT `MadDr.CityGen.dll`
+snapshot, not `BuildingTier.cs`'s own source -- editing the source
+alone left flightcheck silently compiling against the stale DLL until
+the fresh one (produced by the `dotnet test` run above) was copied
+into the flightcheck scratchpad directory and flightcheck rebuilt
+again. Worth remembering for any future citygen-core change verified
+through flightcheck: the DLL copy needs refreshing, source edits alone
+aren't enough.
+
+**"What about the possibility it's just too small?!"** Not dropped --
+pushed further, in parallel with (not instead of) the placement fix.
+`FireResizePct`'s default jumped again, 3.0 -> 6.0 (Inspector range
+widened to `[0.02, 10]`), putting the flame-shard puff's own footprint
+at roughly 1.7-3.4 world units -- comfortably building-scale even
+against the smallest (6-unit) tier, not a speck. Placement and size
+are two independent, non-conflicting levers: locking fire to the
+camera-facing side guarantees it's never hidden BEHIND the building,
+and the size bump guarantees that once it's on the visible side, it's
+actually big enough to register. Neither alone was sufficient on its
+own in earlier rounds.
+
+**Verified.** New `firecameraangle-verify` harness (8 checks, pure
+math -- no Unity stub needed for this particular verification, unlike
+most others in this history) confirms the angle formula's geometric
+correctness and the jitter bound, both described above.
+`damagefxprofile-verify` updated for the new `FireResizePct == 6.0`
+default and re-run clean (10 checks). `smokegrowth-verify` re-run
+unchanged (6 checks) after adding `SimpleCameraRig.cs` to its own
+compile list (needed once `DamageFx.cs` started referencing
+`SimpleCameraRig`/`Camera.main`, even though this entry ultimately
+REMOVED that specific call site -- the reference to the TYPE remains
+via `CameraFacingAngle`'s own `Camera.main` read). `citygen-core`'s
+full 186-test xunit suite passes. Flightcheck recompiles `DamageFx.cs`,
+`DamageFxProfile.cs`, and `BaseDresser.cs` clean, against a freshly
+rebuilt `MadDr.CityGen.dll`. No Unity Editor here to confirm any of
+this actually reads correctly on a real screen -- same standing limit
+as every other Unity-side visual change in this project's history.
