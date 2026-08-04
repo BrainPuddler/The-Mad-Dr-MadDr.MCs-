@@ -121,10 +121,32 @@ public class UnitCombat : MonoBehaviour
     /// never does.</summary>
     private float _stunRemaining;
 
+    // 2026-08 (creator report: "the indicator on the monsters should be
+    // attached to body not to ground indicator... especially important
+    // for flying units"): a monster's own root transform stays ground-
+    // locked even while flying (altitude lives on MonsterBody's torso
+    // child only, see MonsterBody.FlightLift's own doc comment) -- AimPoint
+    // is what both the health bar AND actual weapon aiming/targeting read,
+    // so a flying target was being aimed at its own footprint on the
+    // ground, not its visible body. Lazily cached (GetComponent is null,
+    // and stays null, for a Tank -- no MonsterBody sibling -- so this adds
+    // zero behavior change there) rather than looked up fresh every read;
+    // AimPoint is read every combat tick, for every unit, every frame.
+    private MonsterBody _monsterBody;
+    private bool _monsterBodyChecked;
+
     public bool Alive { get { return !_dead && Health > 0f; } }
     public bool InBattle { get { return _battleTimer > 0f; } }
     public float HealthFraction { get { return Mathf.Clamp01(Health / Mathf.Max(1f, MaxHealth)); } }
-    public Vector3 AimPoint { get { return transform.position + Vector3.up * AimHeight; } }
+    public Vector3 AimPoint
+    {
+        get
+        {
+            if (!_monsterBodyChecked) { _monsterBody = GetComponent<MonsterBody>(); _monsterBodyChecked = true; }
+            var lift = _monsterBody != null ? _monsterBody.FlightLift : 0f;
+            return transform.position + Vector3.up * (AimHeight + lift);
+        }
+    }
     public UnitCombat LastAttacker { get; private set; }
 
     /// <summary>1 = normal speed; less than 1 while a slow status is

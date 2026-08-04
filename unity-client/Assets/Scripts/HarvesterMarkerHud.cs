@@ -42,7 +42,13 @@ public class HarvesterMarkerHud : MonoBehaviour
         {
             if (m == null || !m.IsHarvester) continue;
 
-            var world = m.transform.position + Vector3.up * (m.Radius + 1.6f);
+            // 2026-08 (creator report: "the indicator on the monsters
+            // should be attached to body not to ground indicator...
+            // especially important for flying units"): m.transform stays
+            // ground-locked in flight (altitude lives on the torso only)
+            // -- add FlightLift so an airborne harvester's badge floats
+            // at its actual body, not the ground far below it.
+            var world = m.transform.position + Vector3.up * (m.Radius + 1.6f + m.FlightLift);
             var sp = cam.WorldToScreenPoint(world);
             if (sp.z <= 0f) continue;   // behind the camera
 

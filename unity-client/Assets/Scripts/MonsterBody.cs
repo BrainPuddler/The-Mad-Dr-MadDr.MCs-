@@ -200,6 +200,17 @@ public class MonsterBody : MonoBehaviour
     /// for everything else.</summary>
     public bool CanFly { get { return _canFly; } }
 
+    /// <summary>2026-08 (creator report: "the indicator on the monsters
+    /// should be attached to body not to ground indicator... especially
+    /// important for flying units"): the SAME animated altitude offset
+    /// `UpdateLocomotion` already applies to `_torso.localPosition` and
+    /// `_selectionCollider.center` (both above, `BodyHeight + _flightLift`)
+    /// -- 0 for a grounded/non-flying creature, eased up toward its cruise
+    /// altitude while airborne. Exposed so `MonsterAgent`'s own body-
+    /// attached UI (the selection ring) can track the SAME offset instead
+    /// of staying pinned to the ground-locked root transform.</summary>
+    public float FlightLift { get { return _flightLift; } }
+
     /// <summary>Cruise altitude that clears short buildings (small/medium
     /// tier, per RuntimeCityBuilder's height table) but NOT tall ones --
     /// MonsterAgent reads these two so it can weigh "detour around a tall

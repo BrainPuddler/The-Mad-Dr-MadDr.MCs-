@@ -279,6 +279,15 @@ public class MonsterAgent : MonoBehaviour
     /// hex."</summary>
     public float Radius { get { return _fighter != null ? _fighter.Radius : 1.5f; } }
 
+    /// <summary>2026-08 (creator report: "the indicator on the monsters
+    /// should be attached to body not to ground indicator... especially
+    /// important for flying units"): passthrough to <see cref="MonsterBody.
+    /// FlightLift"/> (0 for a grounded/non-flying creature) -- exposed so
+    /// world-space UI that projects off this agent's own root transform
+    /// (which stays ground-locked even in flight) can add this offset and
+    /// track the actual visual body instead.</summary>
+    public float FlightLift { get { return _body != null ? _body.FlightLift : 0f; } }
+
     /// <summary>This monster's own walking speed in meters/second (same
     /// `_profile.WalkMetersPerSecond` TickSettle already reads), exposed
     /// 2026-08 for `WaypointCommander.AssignFormation`'s slot assignment
@@ -1155,6 +1164,20 @@ public class MonsterAgent : MonoBehaviour
             _body.SetDescentFloor(_builder != null ? _builder.SurfaceHeightAt(transform.position) : 0f);
 
         if (_body != null) _body.UpdateLocomotion(velocity, dt);
+        // 2026-08 (creator report: "the indicator on the monsters should
+        // be attached to body not to ground indicator... especially
+        // important for flying units"): the selection ring is parented to
+        // THIS root transform, which stays ground-locked even while
+        // flying (see the "transform y is always 0" note right below) --
+        // left at its original fixed y=0.05, it sat on the ground
+        // directly under an airborne creature instead of at its actual
+        // altitude. Tracking _body.FlightLift (the SAME offset
+        // UpdateLocomotion just applied to the torso and selection
+        // hitbox, read fresh after that call above) keeps it visually
+        // attached to the body instead: 0 while grounded (unchanged
+        // behavior), rising and falling with the creature while airborne.
+        if (_selectionRing != null && _body != null)
+            _selectionRing.localPosition = new Vector3(0f, 0.05f + _body.FlightLift, 0f);
         // separation is a GROUND-plane push (transform y is always 0 --
         // altitude lives on the torso), so exempt units that aren't
         // actually standing in the crowd: an airborne flyer passing

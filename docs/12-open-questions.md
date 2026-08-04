@@ -11156,3 +11156,81 @@ change in this project's history; the code follows established idioms
 in every file it touches (`RubbleDresser`'s own existing spawn-and-parent
 pattern, `SimBridge`'s own null-conditional wrapper style, `BuildGhostCursor`'s
 own already-per-frame hover call) rather than introducing a new one.
+
+## 2026-08 follow-up: monster UI (harvest badge, HP bar, selection ring, weapon aim) tracked the ground-locked root, not the animated body -- broke worst for flying units
+
+Creator report: **"The indicator on the monsters should be attached to
+body not to ground indicator. This is especially important for flying
+units."** Clarified once the initial fix (below) was scoped: **"The
+indicator I mean has a bar telling the harvesting status and tank
+status. Not the selection indicator on the ground."** -- i.e. `Harvester
+MarkerHud`'s floating "H" badge + fill bar, not the selection ring. Both
+turned out to share the exact same root cause; both are fixed.
+
+**Root cause.** `MonsterAgent.Update()` unconditionally re-snaps this
+agent's own root `transform.position.y` to ground height every frame,
+even while a unit is flying (`transform.position = new Vector3(pos.x,
+gy, pos.z)`) -- deliberate, since separation/pathing math is a GROUND-
+plane push and needs a flat 2D reference regardless of altitude (the
+class's own comment: "separation is a GROUND-plane push (transform y is
+always 0 -- altitude lives on the torso)"). The actual visual lift for
+a flying creature lives ONLY on `MonsterBody`'s private `_flightLift`
+field, applied to a *child* transform (`_torso.localPosition`) purely
+for rendering -- it never touches the root. Every piece of world-space
+UI that read the root `transform.position` (or `UnitCombat.AimPoint`,
+built from it) was therefore anchored at the creature's ground footprint,
+not its visible body -- worst for flyers, whose torso can sit tens of
+meters above that anchor while cruising. One place already got this
+right, and became the fix's reference pattern: `MonsterBody`'s own
+`_selectionCollider.center = new Vector3(0f, BodyHeight + _flightLift, 0f)`
+(the click-to-select hitbox already tracks the real body).
+
+**Fix.** New `MonsterBody.FlightLift` public accessor (0 for a grounded/
+non-flying creature, the same value `UpdateLocomotion` already applies
+to the torso and selection hitbox each frame) plus a `MonsterAgent.
+FlightLift` passthrough, so any world-space UI keyed off a `MonsterAgent`
+reference can add the offset without reaching into `MonsterBody`
+internals. Three read sites updated to use it:
+- **`HarvesterMarkerHud.cs`** (the actual reported bug -- the harvest-
+  status badge + fill bar): `m.transform.position + ... + m.Radius` ->
+  now `+ m.FlightLift` too.
+- **`UnitCombat.AimPoint`**: was `transform.position + Vector3.up *
+  AimHeight` (a fixed offset from the ground-locked root, set once at
+  spawn to `_body.BodyHeight`) -- now adds a lazily-cached sibling
+  `MonsterBody`'s `FlightLift` (null and inert for a `Tank`, which has
+  no `MonsterBody`, so zero behavior change there). `AimPoint` isn't
+  just cosmetic: it's what `HealthBars.cs`'s floating HP bar projects
+  from (fixed for free, no separate edit needed), AND what
+  `TickAttackUnit`/`TickSpecialAttack`/`Tank.cs`/`Projectile.cs` actually
+  aim weapons at -- flying units were being targeted at their own
+  footprint on the ground, not their visible body, a real combat-
+  accuracy bug beyond the visual one.
+- **`MonsterAgent`'s own selection ring** (`_selectionRing`, parented to
+  the same ground-locked root at a fixed `y=0.05`): synced to `0.05f +
+  _body.FlightLift` right after `UpdateLocomotion` runs each frame, so
+  it rises and falls with the creature instead of sitting on the ground
+  underneath it. Not what the creator meant by "the indicator" (per
+  their own follow-up above), but the identical bug under the identical
+  root cause, fixed at zero extra cost once `FlightLift` existed --
+  left in rather than reverted.
+
+**Deliberately NOT touched:** `MonsterAgent.EnsureRoofGlow`'s
+`RoofGlowDisc` (also parented to the root at a fixed local offset) --
+that one is CORRECTLY ground/roof-anchored by design (it marks "this is
+the surface the creature is parked on," the roof itself, not the
+creature's floating body), so leaving it alone is the right call, not
+an oversight.
+
+**Verification.** No Unity Editor in this environment, and no
+persisted flightcheck/compile-check harness on disk to run standalone
+(one existed at points in this project's history per its own task log
+but isn't checked in) -- reconstructing one is separate, larger scope
+not attempted here. Verified by careful manual review against the
+project's own existing correct pattern (`_selectionCollider`'s `BodyHeight
++ _flightLift` local offset) instead: `FlightLift` is a straight read of
+an already-animated private field, the `AimPoint` cache follows the same
+lazy-`GetComponent`-once idiom already used elsewhere in this codebase,
+and grounded/non-flying units get `FlightLift == 0` in every case (the
+field starts at 0 and is only ever driven upward by `_canFly` logic),
+so behavior for every non-flying unit -- the majority of the roster --
+is provably unchanged.
