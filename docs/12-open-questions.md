@@ -10775,3 +10775,70 @@ full 186-test xunit suite passes. Flightcheck recompiles `DamageFx.cs`,
 rebuilt `MadDr.CityGen.dll`. No Unity Editor here to confirm any of
 this actually reads correctly on a real screen -- same standing limit
 as every other Unity-side visual change in this project's history.
+
+## 2026-08 follow-up: fire pushed past the building's own edge, and borrows smoke's own size formula instead of its own knob
+
+Creator report, after the camera-facing-lock fix and the FireCount
+2-4 change: **"still no visible fire. Make sure the fire is on the
+outside of the building, and for now make it the size of the smoke."**
+The camera-facing placement fix confirmed fire was on the visible side
+of the building; four rounds of `FireResizePct` increases (1.0 -> 3.0
+-> 6.0, plus this session's earlier attempt) hadn't resolved
+visibility either. Two concrete, literal changes this round, both in
+`unity-client/Assets/Scripts/DamageFx.cs`:
+
+**Placement.** `FireCluster.SpawnOne`'s `dist` used to sit at EXACTLY
+`_footprintRadius` -- the prior round's own fix, matching `AttachSmoke`'s
+placement rule. But `footprintRadius` itself (computed by the caller,
+`RuntimeCityBuilder.cs`) is only a rough `sqrt(hexCount) * hexMeters *
+0.4` approximation of a building's plan size, not its true rendered
+half-width -- a point placed at exactly that distance could still land
+within the building cube's own visual silhouette instead of clearly
+past it. Changed to `_footprintRadius * 1.6`, pushing fire 60% further
+out than the approximated edge so it reads as unambiguously outside
+the mesh. Smoke's own placement (`* 1.0`) is untouched -- it's the one
+effect confirmed visible this round, nothing about ITS placement was
+in question.
+
+**Size.** `FirePlume.SpawnPuff` used to size its `FlameShard` mesh off
+`DamageFxProfile.FireResizePct` (`0.28f * fireResizePct` for the spawn
+scale, `0.32f * fireResizePct`/`0.25f * fireResizePct` for
+`InitFlame`'s baseScale/growth). That knob alone had already climbed
+1.0 -> 3.0 -> 6.0 across three straight "still can't see it" reports
+without resolving it -- so rather than push it a fifth time, this
+round stops trusting it for the mesh's size at all and borrows smoke's
+own formula instead: `SmokePlume.SpawnPuff`'s `1.1f * SmokeResizePct *
+scale`, minus the per-tier `scale` factor (`FireCluster` doesn't carry
+a building-scale value the way `SmokePlume` does via
+`BuildingStats.SmokeScale`, and "for now" doesn't call for plumbing
+one through for a diagnostic step). Smoke IS confirmed visible at its
+own size -- if a flame shard sized by that exact same knob still can't
+be spotted, size was never the actual bug, and the next round should
+look elsewhere (material/shader/render order/lighting) instead of
+bumping a number again. `InitFlame`'s growth/baseScale are now
+`size * 0.8` / `size`, giving fire an end-of-life size of 1.8x its
+start -- in the same spirit as (though not literally sharing)
+smoke's own `<= 2x` `SmokeGrowthMultiplier` cap. `FireResizePct`
+itself is untouched in the profile and still drives only the flickering
+point `Light`'s range/intensity -- its own Tooltip updated to say so
+explicitly, so a future reader doesn't assume it still controls the
+flame mesh.
+
+**Verified.** New `firesize-verify` harness (11 checks, pure math):
+confirms `dist = footprintRadius * 1.6` clears the building's own
+approximated edge and sits strictly past smoke's own `* 1.0` distance,
+across a range of footprint sizes; confirms fire's puff-size formula
+(`1.1 * SmokeResizePct`) is bit-for-bit identical to smoke's own
+formula on a Small-tier building (`scale == 1.0`) and has zero
+remaining dependence on `FireResizePct`; confirms the 1.8x end-of-life
+growth multiplier. `damagefxprofile-verify` re-run clean (10 checks --
+numeric defaults are unchanged, only the `FireResizePct` Tooltip's
+wording changed, which the harness doesn't assert on). Flightcheck
+(`dotnet build FlightCheck.csproj`) recompiles `DamageFx.cs` and
+`DamageFxProfile.cs` clean against the existing prebuilt DLLs -- no
+citygen-core/match-core changes this round, so no DLL refresh needed.
+No Unity Editor here to confirm this actually resolves visibility on a
+real screen -- same standing limit as every other Unity-side visual
+change in this project's history; if fire is STILL not seen after
+this, the size/position theory is likely exhausted and the next round
+should investigate the material/shader/light path directly instead.

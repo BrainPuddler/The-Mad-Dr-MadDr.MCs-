@@ -45,7 +45,7 @@ public class DamageFxProfile : ScriptableObject
     public float SmokeWindSpeed = 5f;
 
     [Header("Fire")]
-    [Tooltip("Flat multiplier on fire's flame-shard puff size/growth AND its point-light range/intensity together -- ONE knob for both, so raising/lowering fire size can't accidentally leave the glow mismatched with the flame mesh it's supposed to be lighting. 2026-08 history: 1.0 -> 3.0 -> 6.0, each bump after \"I STILL CAN'T SEE THE FIRE\" survived the previous one. At 6.0 the flame-shard puff is ~1.7-3.4 world units across (0.28 * fireResizePct) -- comfortably building-scale even against a 6-unit Small structure, not a speck. Combined with this round's camera-facing placement fix (see FireCluster.CameraFacingAngle in DamageFx.cs), size and position are now BOTH pushed hard rather than one at the expense of the other -- a \"too big now\" report is still a single-number walk-back.")]
+    [Tooltip("Multiplier on fire's point-light range/intensity only. 2026-08 history: 1.0 -> 3.0 -> 6.0, each bump after \"I STILL CAN'T SEE THE FIRE\" survived the previous one -- but the flame-shard MESH itself stayed unseen through all three, so this knob alone was never proven to be the actual lever. 2026-08 follow-up (creator direction: \"still no visible fire... for now make it the size of the smoke\"): the flame-shard puff's own size no longer reads this field at all -- FirePlume.SpawnPuff now sizes it off SmokeResizePct instead (smoke IS confirmed visible at its own size), as a diagnostic step to rule size in or out for good. This field still only controls the glow light.")]
     [Range(0.02f, 10f)]
     public float FireResizePct = 6.0f;
 

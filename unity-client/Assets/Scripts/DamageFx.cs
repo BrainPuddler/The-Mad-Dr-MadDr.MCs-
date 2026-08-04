@@ -528,19 +528,35 @@ public class FirePlume : MonoBehaviour
     /// <see cref="DamageFxProfile.Active"/>.FireResizePct fresh on every
     /// spawn instead of a hardcoded literal -- see that field's own doc
     /// comment for its current default and the "I STILL CAN'T SEE THE
-    /// FIRE" history behind it.</summary>
+    /// FIRE" history behind it.
+    ///
+    /// 2026-08 follow-up (creator report: "still no visible fire... for
+    /// now make it the size of the smoke"): FireResizePct alone climbed
+    /// 1.0 -> 3.0 -> 6.0 across three straight "still can't see it"
+    /// reports, so this stops trusting fire's own size knob and borrows
+    /// smoke's instead -- `SmokePlume.SpawnPuff`'s own `1.1f *
+    /// SmokeResizePct * scale` formula, minus the per-tier `scale` (this
+    /// cluster doesn't carry a building-scale value the way SmokePlume
+    /// does, and "for now" doesn't call for plumbing one through). Smoke
+    /// IS confirmed visible at its own size -- if a flame shard sized by
+    /// that exact same knob still can't be spotted, size was never the
+    /// actual bug and the next round should look elsewhere (material/
+    /// shader/render order) instead of bumping a number a fifth time.
+    /// FireResizePct itself is untouched and still drives the point
+    /// light's range/intensity below -- only the flame MESH's size
+    /// changed here.</summary>
     private void SpawnPuff()
     {
         var go = new GameObject("FirePuff");
         go.transform.SetParent(transform, false);
         var id = go.GetInstanceID();
         go.transform.position = transform.position + new Vector3(((id & 3) - 1.5f) * 0.1f, 0f, (((id >> 2) & 3) - 1.5f) * 0.1f);
-        var fireResizePct = DamageFxProfile.Active.FireResizePct;
+        var smokeResizePct = DamageFxProfile.Active.SmokeResizePct;
         // this initial scale only holds for one frame -- SmokePuff.Update
         // (below) overwrites it uniformly every frame off _baseScale, the
         // same "explicit spawn scale is cosmetically moot" precedent
         // SmokePlume/DustBurstFx's own spawn-time scale already sets.
-        var size = 0.28f * fireResizePct;
+        var size = 1.1f * smokeResizePct;
         go.transform.localScale = new Vector3(size, size, size);
 
         var meshFilter = go.AddComponent<MeshFilter>();
@@ -576,7 +592,7 @@ public class FirePlume : MonoBehaviour
         // it, unlike smoke's own sustained 3.2s puffs. Tripled to
         // 1.5-2.22s so a flame actually holds on screen long enough to be
         // seen, not just technically rendered for a few frames.
-        go.AddComponent<SmokePuff>().InitFlame(mat, 1.5f + ((id >> 6) & 3) * 0.24f, 0.25f * fireResizePct, 0.9f, 0.32f * fireResizePct);
+        go.AddComponent<SmokePuff>().InitFlame(mat, 1.5f + ((id >> 6) & 3) * 0.24f, size * 0.8f, 0.9f, size);
     }
 }
 
@@ -710,7 +726,21 @@ public class FireCluster : MonoBehaviour
         // smoke's own placement (`footprintRadius * 1.0`). Only the
         // ANGLE still varies per point, matching smoke's own "any place
         // around the building" placement freedom.
-        var dist = _footprintRadius;
+        //
+        // 2026-08 follow-up (creator report: "still no visible fire. Make
+        // sure the fire is on the outside of the building"): EXACTLY the
+        // footprint radius turned out not to read as "outside" -- the
+        // caller's own `footprintRadius` (RuntimeCityBuilder.cs) is a
+        // rough `sqrt(hexCount) * hexMeters * 0.4` approximation of a
+        // building's plan size, not its true rendered half-width, so a
+        // point placed at exactly that distance can still land within
+        // the building cube's own visual silhouette instead of clear of
+        // it. Pushed 60% further out so fire sits unambiguously past the
+        // mesh's own edge, not right at (or inside) an approximated one.
+        // Smoke keeps its own unchanged `footprintRadius * 1.0` -- it's
+        // the one confirmed-visible effect this round, nothing about its
+        // placement is in question.
+        var dist = _footprintRadius * 1.6f;
         var offset = new Vector3(Mathf.Cos(angle) * dist, _height * 1.0f, Mathf.Sin(angle) * dist);
 
         var go = new GameObject("FirePlume");
