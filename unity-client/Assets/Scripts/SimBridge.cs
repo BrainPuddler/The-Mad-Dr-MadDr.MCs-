@@ -162,6 +162,15 @@ public class SimBridge : MonoBehaviour
     public bool CanPlaceBuilding(int playerIndex, BuildingKind kind, HexCoord hex)
         => _match != null && _match.CanPlaceBuilding(playerIndex, kind, hex);
 
+    /// <summary>2026-08 bugfix: unblocks a hex in the sim's own build-
+    /// placement gate, for the PROCEDURAL building destruction path
+    /// (<see cref="RuntimeCityBuilder.ApplyBuildingDamage(Building, int)"/>),
+    /// which has no <see cref="SimBuilding"/> entity of its own to route
+    /// through <see cref="MatchState.ApplyBuildingDamage(uint, int)"/>'s
+    /// own automatic unblock. Silent no-op if no match is running, same
+    /// contract as every other wrapper here.</summary>
+    public void UnblockProceduralBuildingHex(HexCoord hex) => _match?.UnblockProceduralBuildingHex(hex);
+
     /// <summary>Live building count, 0 if no match is running -- iterate
     /// with <see cref="BuildingAt"/> for a BaseDresser to sync visuals.</summary>
     public int BuildingCount => _match?.BuildingCount ?? 0;

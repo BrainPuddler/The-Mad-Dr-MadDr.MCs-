@@ -368,6 +368,29 @@ namespace MadDr.MatchCore
         /// always meant for. Reopens the hex the instant the building is
         /// Destroyed. Silent no-op for an unknown entity, matching every
         /// other bad-input contract in this class.</summary>
+        /// <summary>2026-08 bugfix (creator report: "building debris is
+        /// not being cleared... and areas are NOT being reclaimed"): the
+        /// PROCEDURAL civilian building roster (`RuntimeCityBuilder`'s own
+        /// `Building`/`BuildingRuntimeState`, the vast majority of what
+        /// monsters actually destroy in play via `MonsterAgent`) has no
+        /// `SimBuilding` entity of its own, so it can never route through
+        /// <see cref="ApplyBuildingDamage(uint, int)"/>'s own automatic
+        /// `_blockedToGround.Remove` -- that hex stayed permanently
+        /// blocked in <see cref="CanPlaceBuilding"/>'s own model forever,
+        /// regardless of how long ago the building actually fell. This is
+        /// the same "destruction reopens the hex" unblock, exposed
+        /// directly for that separate destruction path to call once
+        /// per footprint hex. Deliberately does NOT roll a scavenge pile
+        /// or apply RubbleClearTicks/DebrisDecayTicks -- the procedural
+        /// roster never had that timed-decay concept to begin with (its
+        /// rubble is permanent set-dressing by design), and inventing one
+        /// here would be new, undiscussed scope; this fix closes the
+        /// concrete "hex never reopens" gap only.</summary>
+        public void UnblockProceduralBuildingHex(HexCoord hex)
+        {
+            _blockedToGround?.Remove(hex);
+        }
+
         public void ApplyBuildingDamage(uint entityId, int amount)
         {
             var building = FindBuilding(entityId);

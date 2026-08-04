@@ -1991,6 +1991,19 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             for (var occ = 0; occ < BuildingStats.Occupants(building.Tier); occ++)
                 SpawnFleeingOccupant(building.Footprint[0]);
             _cityVersion++;
+            // 2026-08 bugfix (creator report: "areas are NOT being
+            // reclaimed... for new player to create new buildings"):
+            // this procedural building has no SimBuilding entity of its
+            // own, so match-core's OWN blocked-hex set (CanPlaceBuilding's
+            // gate) never learned it was destroyed and stayed permanently
+            // blocked -- only THIS file's own BlockedFor cache (used for
+            // movement/pathing, already correct via `_cityVersion++`
+            // above) reopened. Mirrors the automatic unblock
+            // MatchState.ApplyBuildingDamage already does for the
+            // separate RTS SimBuilding roster.
+            if (_simBridge != null)
+                foreach (var hex in building.Footprint)
+                    _simBridge.UnblockProceduralBuildingHex(hex);
             Debug.Log("Building destroyed -- rubble is now walkable.");
         }
         else

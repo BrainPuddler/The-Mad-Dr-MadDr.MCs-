@@ -10947,3 +10947,61 @@ the sim-side mechanism is in place; a Worker/Collector/monster AI
 update that actually ISSUES `ScavengeDebris` orders (the "zombie
 workers, and monsters" part) is explicit follow-up scope per the
 creator's own "we will wire the zombies ghoul-ish units in later."
+
+## 2026-08 bugfix: destroyed-building hexes never reclaimed in real play -- procedural buildings had no path back into match-core's blocked-hex model at all
+
+Creator report: **"Building debris is not being cleared and or
+building's parts harvested by Monsters and the areas are NOT being
+reclaimed as Empty for new player to create new buildings. Error is
+both visual and not programmatically reclassified."**
+
+Root-cause investigation (not a regression in the scavenging feature
+above -- that feature is internally correct, 288/288 tests + DetHarness
+pass): monster-vs-building combat in real play never touches the RTS
+`SimBuilding` roster the scavenge/reclaim feature lives in at all.
+`MonsterAgent`'s `_targetBuilding` field is typed `Building` -- the
+PROCEDURAL citygen building type -- and every attack routes through a
+wholly separate `RuntimeCityBuilder.ApplyBuildingDamage(Building, int)`
+overload operating on Unity's own `_battlefield`/`BuildingRuntimeState`,
+never `MatchState`/`SimBridge`. Since `MatchState.CanPlaceBuilding`
+only ever consults `_blockedToGround` (a snapshot taken once at
+`MatchState.Create` from the initial city model, updated ONLY by the
+`SimBuilding`-specific `ApplyBuildingDamage(uint, int)` overload on
+destruction), a destroyed procedural building's hex -- "the vast
+majority of the map" per `RuntimeCityBuilder.cs`'s own comment --
+stayed permanently blocked in match-core's model no matter how long
+ago it fell. The rubble visual is *also* permanent by design for this
+roster (`Debug.Log("Building destroyed -- rubble is now walkable.")` --
+there was never a timer/decay concept here, unlike the SimBuilding-only
+`RubbleClearTicks`/`DebrisDecayTicks`), so both halves of the report
+("visual" and "not programmatically reclassified") trace to the exact
+same gap: this destruction path was never wired to match-core's build-
+placement state at all. Both the original 20s rubble-clear feature and
+the scavenging follow-up above already carried this exact caveat
+("procedural civilian buildings live in a wholly separate Unity-only
+system with no coupling into match-core's blocked-hex model at all...
+not touched here") -- this pass closes that specific, concrete gap.
+
+**Fix** (3 files, purely additive, no renames, no serialization
+changes): a new `MatchState.UnblockProceduralBuildingHex(HexCoord)` --
+the same `_blockedToGround.Remove` the SimBuilding path already runs
+automatically, exposed directly since a procedural building has no
+`SimBuilding` entity to route the automatic version through. A matching
+`SimBridge.UnblockProceduralBuildingHex(HexCoord)` wrapper, same null-
+conditional contract every other SimBridge query already uses. And one
+call site: `RuntimeCityBuilder.ApplyBuildingDamage(Building, int)`'s
+own `Destroyed` branch now loops `building.Footprint` (multi-hex tiers
+included) and unblocks every hex, right next to the pre-existing rubble
+VFX/occupant-disgorge code that already runs at that exact point.
+Deliberately does NOT add scavenging or timed decay to the procedural
+roster -- it never had that concept, and inventing one here would be
+new, undiscussed scope; this closes the "hex never reopens" defect
+only. `dotnet build`/`dotnet test` both clean on the match-core side
+(288/288, additive method only). No Unity Editor in this environment to
+compile-check the two `unity-client` edits directly -- they follow
+established idioms in both files exactly (`_simBridge?.`/`_match?.`
+null-conditional, `building.Footprint` iteration already used
+identically at this same call site one line above for
+`SpawnFleeingOccupant`) -- flagged as the standing verification gap
+every Unity-side change in this project's history carries until a real
+Editor session confirms it.
