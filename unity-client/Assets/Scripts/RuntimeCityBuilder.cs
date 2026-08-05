@@ -2132,6 +2132,21 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // and IgniteBuildingIfNeeded is a no-op past the first call
             // either way.
             IgniteBuildingIfNeeded(building);
+
+            // 2026-08 (fire-propagation rewrite, creator's own brief:
+            // "Fire always begins at one or more weapon impact locations.
+            // The impact injects an initial burst of heat proportional to
+            // weapon energy"): every hit that lands here (armed and
+            // unarmed alike -- MonsterAgent.TickAttack's own two call
+            // sites both funnel through this one method) feeds the
+            // building's FireCluster its own damage amount as "weapon
+            // energy," on top of whatever ignition already did above.
+            // `cubes` was already resolved at the top of this method;
+            // FireCluster is parented directly under `cubes[0]` by
+            // AttachFireCluster, so a shallow child lookup is enough --
+            // cheap, and only runs once per landed hit, not per frame.
+            var cluster = cubes[0].GetComponentInChildren<FireCluster>();
+            if (cluster != null) cluster.RegisterHit(amount);
         }
     }
 

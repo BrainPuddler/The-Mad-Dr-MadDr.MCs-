@@ -11573,3 +11573,111 @@ counts are chosen from the real geometry values already flowing through
 this code (not new hardcoded literals per tier), consistent with every
 other fix in this saga's own "verify from real numbers, not a guess"
 standard.
+
+## 2026-08: fire rewritten as an internal heat network + external renderer, constrained to the visible arc
+
+Creator pasted a full fire-propagation design brief and asked: **"use
+something like this to spawn fire on buildings. BUT Keep to visible
+area."** The brief (condensed): an INVISIBLE internal network of fire
+cells per building (fuel/temperature/ventilation/burn state), ignited by
+weapon impacts, heat diffusing through neighbouring structure with a
+strong upward bias; a VISIBLE low-poly flame system that never spreads
+on its own but only spawns/grows wherever that invisible network crosses
+an ignition threshold near an exterior surface; ventilation increasing
+burn rate after breakouts; rare embers; growth driven by heat energy
+(bigger/brighter/more-flicker), not a flat flame count; a structural
+bias of roughly +250% upward / 100% sideways / 20% downward. Mid-
+conversation follow-ups added two hard constraints: **"keep system
+simple and performant"** and **"fires must burn on surface of
+building."**
+
+**Replaces** `FireCluster`'s old flat random-timer spawner (`SpawnOne`
+picking a fresh random angle/height every 2-5s until a target count) in
+`DamageFx.cs` with exactly the brief's two-layer model, sized down to
+stay simple:
+
+**The grid IS the visible-area constraint.** Per-building state is a
+tiny fixed 5 (angle) x 3 (height-band) grid -- 15 `FireCell` structs,
+one array allocation in `Init`, zero further heap churn. The 5 angle
+columns span ONLY the existing +-35 degree camera-facing arc (`_baseAngle`,
+unchanged from the earlier "keep it locked to that side" contract) --
+there is no cell, and therefore no possible ignition, outside that
+slice. "Keep to visible area" falls out of the grid's own definition
+rather than needing a separate check.
+
+**Internal network (invisible).** Each cell tracks only Heat and
+Ventilation -- the brief's fuller Fuel/StructuralDamage/BurnState model
+is trimmed, since nothing here needs a building to ever stop burning
+once lit (this file's own long-standing "never removes a fire once lit"
+policy, unchanged). `TickFireNetwork`, throttled to one step per 0.5s
+(not every frame -- the "performant" half of the new constraint),
+diffuses heat from every hot cell to its neighbours, biased
+`UpwardBias`/`SidewaysBias`/`DownwardBias` = 2.5 / 1.0 / 0.2 -- the
+brief's own "+250% / 100% / 20%" figures, verbatim -- scaled by the
+RECEIVING cell's own Ventilation (a cell that's already broken out lets
+heat in faster: "ventilation dramatically increases spread").
+
+**External renderer (visible).** A cell only ever gets a real
+`FirePlume` when its Heat crosses `IgnitionThreshold` (`IgniteCell`) --
+the visible system never spawns or spreads independently, it only
+reacts to what the invisible network already decided, matching the
+brief's own "external fire renderer... queries the internal fire
+network" contract. An already-ignited cell's continuing heat instead
+GROWS its existing flame (new `FirePlume.SetHeatScale`, feeding both the
+flame-shard mesh size and the point light's flicker intensity) --
+"larger flames, taller flames, brighter emissive lighting, stronger
+flicker... only after sufficient heat accumulates should additional
+exterior fire nodes appear."
+
+**"Fires must burn on surface of building"** (the creator's own
+follow-up, mid-rewrite): `IgniteCell`'s placement math -- `dist =
+footprintRadius * 1.6`, height bands capped at 0.28/0.5/0.72 of the
+building's height (all still safely under the roofline, per the earlier
+"not on roofs" direction), and the existing `PickClearAngle`
+line-of-sight search against `Camera.main` -- is BYTE-FOR-BYTE the same
+formula the prior random-timer spawner used, the one already confirmed
+correct ("yes now on building now"). This rewrite only changed WHEN and
+WHICH cell within the arc ignites, never the geometry that puts a point
+on the building's own surface once it does.
+
+**Impact = heat source.** New `FireCluster.RegisterHit(float energy)`,
+called from `RuntimeCityBuilder.ApplyBuildingDamage` for every landed
+hit (`cubes[0].GetComponentInChildren<FireCluster>()`, right after the
+existing `IgniteBuildingIfNeeded` call), injects heat proportional to
+that hit's own damage amount into a FIXED `_originCellIndex` (the visible
+arc's own centre, low/window band -- exactly where the very first flame
+has always landed). A real per-hit 3D impact point does not exist
+anywhere in this pipeline today (`MonsterAgent.TickAttack`'s own closest
+analogue, `bp`, is a footprint-hex-center approximation already spent on
+the weapon FX beam endpoint, never threaded through `ApplyBuildingDamage`)
+-- plumbing a new position parameter through several attack-pipeline
+layers for a result the visible-arc contract already makes largely
+cosmetic (fire only ever renders camera-facing regardless of which real
+side was hit) lost to "keep the system simple" once weighed against
+that cost. A fraction of each hit's heat also bleeds straight to the
+origin's own neighbours (mostly upward), so "higher-energy impacts
+ignite multiple adjacent cells immediately" can happen within the SAME
+tick a big hit lands, not just via next-tick diffusion.
+
+**Embers**, "rare but dramatic": a small per-tick chance
+(`MaybeSpawnEmber`) for an already-hot ignited cell to instantly push
+ONE grid-adjacent unignited neighbour to ignition, capped at one per
+tick. Since a grid neighbour is by definition only a cell-width away,
+this can never manifest as fire racing across an intact wall --
+satisfying the brief's own 1-2m secondary-crawl cap through the grid's
+own geometry, no separate distance check needed.
+
+**Sizing/count ceiling is unchanged** -- the previous entry's area-based
+`_maxIgnitedCells`/`_sizeScale` math (burnable wall area from real
+height/footprintRadius, tier count as a floor, 10-point ceiling, 1.0-3.0x
+size range matching smoke's own tier table) still runs in `Init` and now
+simply bounds how many of the 15 grid cells are allowed to ignite,
+instead of a flat spawn counter -- no re-tuning needed, it slotted
+straight into the new model.
+
+No Unity Editor in this environment to watch this render live. Every
+placement formula that puts a flame ON the building is untouched from
+the already-confirmed-working version; what changed is purely the
+invisible timing/sequencing layer above it (heat, ventilation, embers) --
+verified by code tracing against the creator's own brief numbers (2.5/
+1.0/0.2 structural bias, 1-2m crawl cap, "rare" embers), not a guess.
