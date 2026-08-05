@@ -57,6 +57,10 @@ public class DamageFxProfile : ScriptableObject
     [Range(0.25f, 4f)]
     public float FireSpawnRateMultiplier = 1f;
 
+    [Tooltip("2026-08 (creator direction: \"randomize if projectile will cause a fire. Goal make the fire pattern look organic, not procedural\"): the chance any ONE landed projectile hit actually feeds heat into FireCluster's own internal network (FireCluster.RegisterHit) -- 1.0 = every hit counts (the old, fully deterministic behavior); lower values mean some hits land with no visible fire consequence at all, so identical combat doesn't produce an identical, mechanically-lockstepped fire pattern every time. Doesn't affect hit-rate/urgency tracking (those still see every real hit, since they represent actual attack pressure, not the fire's own visible response) or the very first ignition (\"spawn fire when under attack\" still fires the instant combat starts, unconditionally). 2026-08 default: 0.6.")]
+    [Range(0.1f, 1f)]
+    public float FireIgnitionChancePerHit = 0.6f;
+
     private static DamageFxProfile _default;
 
     /// <summary>Safe, in-code fallback so any reader that hasn't assigned

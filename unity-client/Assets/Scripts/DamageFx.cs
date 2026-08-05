@@ -1170,7 +1170,16 @@ public class FireCluster : MonoBehaviour
     /// `hpFraction01` falls. Both feed `CurrentSimTickInterval` (ticks
     /// faster) and raise `_maxIgnitedCells` above its area-based floor
     /// (`_baseMaxIgnitedCells`) here, capped at `MaxFireCountCeiling`
-    /// either way.</summary>
+    /// either way.
+    ///
+    /// 2026-08 follow-up (creator direction: "randomize if projectile
+    /// will cause a fire. Goal make the fire pattern look organic, not
+    /// procedural"): hit-rate/urgency tracking above runs unconditionally
+    /// for every real hit (that's genuine attack pressure), but whether
+    /// THIS hit's own heat actually reaches the network is gated behind
+    /// `DamageFxProfile.Active.FireIgnitionChancePerHit` -- a hit that
+    /// fails the roll deals its damage and is fully counted for pacing
+    /// purposes, it just doesn't visibly stoke the fire this time.</summary>
     public void RegisterHit(float energy, float hpFraction01)
     {
         if (_cells == null || energy <= 0f) return;
@@ -1186,6 +1195,18 @@ public class FireCluster : MonoBehaviour
 
         _urgency = Mathf.Clamp01(1f - Mathf.Clamp01(hpFraction01));
         _maxIgnitedCells = Mathf.Min(MaxFireCountCeiling, _baseMaxIgnitedCells + Mathf.RoundToInt(_urgency * MaxUrgencyBonusCells));
+
+        // 2026-08 (creator direction: "randomize if projectile will cause
+        // a fire. Goal make the fire pattern look organic, not
+        // procedural"): hit-rate/urgency above still see EVERY real hit
+        // -- that's actual attack pressure, not this hit's own visible
+        // fire consequence -- but whether THIS hit's own energy actually
+        // reaches the heat network is now a per-hit roll. Skipping some
+        // hits (rather than feeding heat every single time, in lockstep
+        // with the damage numbers) is what keeps the resulting pattern
+        // from reading as a mechanical, obviously-simulated response to
+        // combat.
+        if (RandomFloat01(_hitCount * 733) > DamageFxProfile.Active.FireIgnitionChancePerHit) return;
 
         var heat = energy * ImpactHeatPerDamage;
         var column = PickWeightedColumn(_hitCount);

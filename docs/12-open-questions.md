@@ -12055,3 +12055,34 @@ SpawnPrim`), not assumed; the mob-mentality/melee-exemption mechanics are
 new, reasoned constructions built directly to the creator's own stated
 constraints ("shouldn't happen all the time," "melee attacks and
 building contact").
+
+## 2026-08 follow-up: randomize whether a landed hit contributes to fire
+
+Creator direction: **"randomize if projectile will cause a fire. Goal
+make the fire pattern look organic, NOT non procedural"** (read as "not
+[obviously] procedural" -- the whole thrust of this fire saga, from the
+heat-network rewrite through per-cell Flammability, has been making the
+spread read as organic rather than a visibly mechanical simulation
+response).
+
+Previously every landed hit unconditionally fed heat into `FireCluster`
+via `RegisterHit` -- a strict 1:1 relationship between damage numbers
+and fire growth that, however organically the heat then diffused, was
+itself perfectly deterministic and lockstepped with combat. New: a
+per-hit roll (`DamageFxProfile.Active.FireIgnitionChancePerHit`, default
+0.6, `[0.1, 1]`) decides whether THIS hit's energy actually reaches the
+heat network at all -- a failed roll still deals real damage, it just
+has no visible fire consequence. Deliberately scoped narrowly:
+hit-rate/urgency tracking (`_hitRateEma`/`_urgency`, driving ignition
+pacing and the fire-count ceiling) still runs on EVERY real hit
+unconditionally, since those represent actual attack pressure, not this
+hit's own visible response -- randomizing them too would have made
+"number of attack points"/"time to destruction" pacing itself noisy,
+which wasn't asked for. The very first ignition (`IgniteBuildingIfNeeded`,
+"spawn fire when under attack") is untouched -- it was never gated on
+`RegisterHit` to begin with, so a building still always shows fire the
+instant combat starts.
+
+No Unity Editor in this environment to watch this render live -- a
+straightforward, narrowly-scoped probability gate, reasoned directly
+from the creator's own stated goal rather than guessed at.
