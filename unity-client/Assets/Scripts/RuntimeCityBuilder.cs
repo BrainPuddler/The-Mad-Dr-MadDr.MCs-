@@ -64,6 +64,13 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     [Tooltip("The human player's faction (docs/23 §1, plus FactionId.Mixed as of the 2026-07 amendment). Set by FactionPickerHud when showFactionPicker is on; otherwise this Inspector value is used directly -- same 'Inspector field is the source of truth until a picker opts in' pattern as `preset`.")]
     public FactionId chosenFaction = FactionId.MadDoctor;
 
+    [Header("Opponent faction picker (2026-08, off by default -- unchanged behavior)")]
+    [Tooltip("Shows an in-game 'choose your opponent's faction' screen, letting the player pick which of the four FactionId races the single-player AI-antagonist plays as (creator direction: 'pick the opponent race that I'd like from the four different factions available'). Off by default so every existing scene keeps working byte-for-byte unchanged. Shown AFTER the human's own FactionPickerHud (if that's also on) and BEFORE the region picker -- both are 'which faction' questions, naturally grouped before 'which city.'")]
+    public bool showOpponentPicker = false;
+
+    [Tooltip("Set by OpponentFactionPickerHud when showOpponentPicker is on and the player confirms a choice; null otherwise. BeginMatch falls back to the original docs/12 Q13 default (Army, or Hive if the human picked Army) when this is null, so leaving the picker off reproduces the exact prior behavior. Deliberately NOT excluding FactionId.Mixed here -- unlike the docs/12 Q13 default's own 'never Mixed' rule, an explicit player CHOICE to field a Mixed opponent is a real pick, not a spontaneous AI default; still gated behind MixedFactionUnlock.IsUnlocked the same way the human's own FactionPickerHud gates it.")]
+    public FactionId? opponentFactionOverride = null;
+
     [Header("docs/27 Phase A dev check (off by default)")]
     [Tooltip("Wires the FIRST spawned monster to docs/27's SimBridge/interpolated-view pipeline instead of its normal Time.deltaTime movement, so a Move order on it is decided by match-core and rendered by interpolation -- the actual Editor smoke test docs/27 Phase A has been waiting on (nothing else in this environment can check it). Left-click that monster, right-click to move it, same as always. Every other monster (and every other order kind on this one) is completely unaffected.")]
     public bool simDrivenDemo = false;
@@ -261,6 +268,20 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             return;
         }
 
+        // 2026-08: the opponent-faction picker goes next -- AFTER the
+        // human's own choice (FactionPickerHud, above), BEFORE the region
+        // picker (both faction questions naturally precede "which city").
+        // FactionPickerHud.Confirm() itself chains here too when both are
+        // on; this branch only fires when showFactionPicker is OFF but
+        // showOpponentPicker is on by itself.
+        if (showOpponentPicker)
+        {
+            var opponentPicker = gameObject.GetComponent<OpponentFactionPickerHud>();
+            if (opponentPicker == null) opponentPicker = gameObject.AddComponent<OpponentFactionPickerHud>();
+            opponentPicker.Init(this);
+            return;
+        }
+
         // docs/23 Phase 8's own still-open "region picker" item: off by
         // default (BeginMatch runs immediately, identical to every prior
         // session's behavior) -- opting in defers generation until
@@ -306,7 +327,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // an AI opponent spontaneously gets.
         _simBridge = gameObject.GetComponent<SimBridge>();
         if (_simBridge == null) _simBridge = gameObject.AddComponent<SimBridge>();
-        var opponentFaction = chosenFaction == FactionId.HumanArmy ? FactionId.AlienHive : FactionId.HumanArmy;
+        // 2026-08: an explicit player pick (OpponentFactionPickerHud, via
+        // opponentFactionOverride) wins outright; otherwise fall back to
+        // the original docs/12 Q13 default unchanged, so leaving the new
+        // picker off reproduces the exact prior behavior byte-for-byte.
+        var opponentFaction = opponentFactionOverride ?? (chosenFaction == FactionId.HumanArmy ? FactionId.AlienHive : FactionId.HumanArmy);
         _simBridge.StartMatch(unchecked((uint)seed), new List<FactionId> { chosenFaction, opponentFaction }, _city);
         SpawnStartingBases();
 

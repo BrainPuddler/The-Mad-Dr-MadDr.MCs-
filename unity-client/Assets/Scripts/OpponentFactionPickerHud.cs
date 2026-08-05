@@ -2,30 +2,34 @@ using MadDr.MatchCore;
 using UnityEngine;
 
 /// <summary>
-/// 2026-07 amendment (docs/12, docs/23 §1 2026-07 update): "player first
-/// must choose faction from one of the races or the mixed" -- a pre-match
-/// screen offering the four <see cref="FactionId"/> options, wired the
-/// exact same way <see cref="RegionPickerHud"/> already established for
-/// the region choice: an opt-in component (<see cref="RuntimeCityBuilder.
-/// showFactionPicker"/>, off by default so every existing scene keeps
-/// working byte-for-byte unchanged), IMGUI, centered on screen (no
-/// city/camera exists yet), sets one field on the builder then calls back
-/// into the SAME entry point every non-picker scene already uses.
+/// 2026-08 (creator direction: "It should allow me to pick the opponent
+/// race that I'd like from the four different factions available") -- a
+/// pre-match screen offering all four <see cref="FactionId"/> options for
+/// the single-player AI-antagonist, wired the exact same way <see
+/// cref="FactionPickerHud"/> (the human's own faction choice) already
+/// established: an opt-in component (<see cref="RuntimeCityBuilder.
+/// showOpponentPicker"/>, off by default so every existing scene keeps
+/// working byte-for-byte unchanged), IMGUI, centered on screen.
 ///
-/// Shown BEFORE the region picker when both are enabled (<see
-/// cref="RuntimeCityBuilder.Start"/>'s own ordering) -- the creator's own
-/// words put faction first ("player first must choose faction... [then]
-/// choose your city" reads naturally in that order), and a chosen
-/// faction's bonuses/handicaps don't depend on which city gets picked
-/// next, so there's no correctness reason either could not go first --
-/// this is a deliberate UX ordering choice, not a technical constraint.
+/// Shown AFTER <see cref="FactionPickerHud"/> (if that's also on) and
+/// BEFORE <see cref="RegionPickerHud"/> when all three are enabled --
+/// see <see cref="RuntimeCityBuilder.Start"/>'s own picker chain and
+/// <see cref="FactionPickerHud.Confirm"/>'s own chaining for the exact
+/// ordering. Sets <see cref="RuntimeCityBuilder.opponentFactionOverride"/>
+/// then calls back into the same chain every other picker uses.
 ///
-/// <see cref="FactionId.Mixed"/> is drawn greyed-out and unclickable
-/// unless <see cref="MixedFactionUnlock.IsUnlocked"/> -- see that class's
-/// own header for why it's gated and what still needs to call
-/// MarkUnlocked for real.
+/// Deliberately does NOT exclude the human's own <see
+/// cref="RuntimeCityBuilder.chosenFaction"/> from the option list -- a
+/// mirror matchup (same race on both sides) is a real, legitimate RTS
+/// choice, not a mistake to guard against. <see cref="FactionId.Mixed"/>
+/// is drawn greyed-out and unclickable unless <see cref="
+/// MixedFactionUnlock.IsUnlocked"/>, the same gate <see
+/// cref="FactionPickerHud"/> already applies to the human's own pick --
+/// an explicit player CHOICE to field a Mixed opponent is a real pick,
+/// not the docs/12 Q13 "never Mixed" AI-default rule (which only governs
+/// what happens when this picker is off).
 /// </summary>
-public class FactionPickerHud : MonoBehaviour
+public class OpponentFactionPickerHud : MonoBehaviour
 {
     private struct Option
     {
@@ -38,8 +42,9 @@ public class FactionPickerHud : MonoBehaviour
         }
     }
 
-    // Blurbs summarize FactionLumenTable's real docs/23 §7 numbers, not
-    // invented flavor text -- see FactionLumenModifier.cs for the source.
+    // Same blurb text FactionPickerHud uses -- these summarize
+    // FactionLumenTable's real docs/23 §7 numbers, not invented flavor
+    // text, and apply identically regardless of which side fields them.
     private static readonly Option[] Options =
     {
         new Option(FactionId.MadDoctor, "Day: -10% regen. Night: +15% regen, +10% speed."),
@@ -81,7 +86,7 @@ public class FactionPickerHud : MonoBehaviour
         GUI.DrawTexture(panelRect, Texture2D.whiteTexture);
         GUI.color = Color.white;
 
-        DrawShadowedLabel(new Rect(panelRect.x, panelRect.y + Gap * 0.5f, panelRect.width, TitleHeight), "Choose your faction", new Color(0.95f, 0.9f, 0.7f, 1f));
+        DrawShadowedLabel(new Rect(panelRect.x, panelRect.y + Gap * 0.5f, panelRect.width, TitleHeight), "Choose your opponent's faction", new Color(0.95f, 0.9f, 0.7f, 1f));
 
         var listX = panelRect.x + Gap;
         var listY = panelRect.y + TitleHeight + Gap;
@@ -121,21 +126,13 @@ public class FactionPickerHud : MonoBehaviour
     {
         if (_confirmed || _builder == null) return;
         _confirmed = true;
-        _builder.chosenFaction = choice;
+        _builder.opponentFactionOverride = choice;
 
-        // same chaining shape RegionPickerHud.Confirm already established:
-        // if the opponent-faction picker is ALSO enabled, show it next
-        // (2026-08 -- both are "which faction" questions, naturally
-        // grouped before the region picker's "which city"); otherwise
-        // fall through to the region-picker-or-BeginMatch check exactly
-        // as before this addition.
-        if (_builder.showOpponentPicker)
-        {
-            var opponent = _builder.gameObject.GetComponent<OpponentFactionPickerHud>();
-            if (opponent == null) opponent = _builder.gameObject.AddComponent<OpponentFactionPickerHud>();
-            opponent.Init(_builder);
-        }
-        else if (_builder.showRegionPicker)
+        // same chaining shape FactionPickerHud.Confirm already established
+        // for its own tail: if the region picker is ALSO enabled, show it
+        // next rather than duplicating BeginMatch's own call; otherwise
+        // start the match directly.
+        if (_builder.showRegionPicker)
         {
             var region = _builder.gameObject.GetComponent<RegionPickerHud>();
             if (region == null) region = _builder.gameObject.AddComponent<RegionPickerHud>();

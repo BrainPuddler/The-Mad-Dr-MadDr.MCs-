@@ -11234,3 +11234,69 @@ and grounded/non-flying units get `FlightLift == 0` in every case (the
 field starts at 0 and is only ever driven upward by `_canFly` logic),
 so behavior for every non-flying unit -- the majority of the roster --
 is provably unchanged.
+
+## 2026-08 follow-up: opponent-faction picker -- AND a status audit that found the single-player "AI opponent" doesn't actually act yet
+
+Creator question, then direction: **"Do you have an AI opponent code
+implemented, and a startup game selector giving me multiple levels of
+opponents?"**, then **"It should allow me to pick the opponent race
+that I'd like from the four different factions available."**
+
+**Status audit (research only, no assumptions):**
+- `SkirmishCommander`/`CommanderPersonality` (`packages/match-core/src`)
+  are real, tested match-core logic -- a per-unit combat/movement
+  command source (Attack/AttackAnomaly/Salvage/Advance/Retreat/
+  SeizeEmitter) with a dial-able personality (Aggression/Caution/Greed/
+  Territoriality/Opportunism/Discipline, each `[0,1]`, five named
+  presets plus a procedural generator). **No difficulty concept exists
+  anywhere in the codebase** -- personality traits are flavor axes, not
+  a skill dial, and a repo-wide search for "difficulty" returns zero
+  hits.
+- **It is not wired into Unity at all.** Zero references to either
+  class anywhere in `unity-client/`; `SimBridge.Pump`'s own `_match.
+  Tick(...)` call only ever receives commands from `_pending`, which
+  only player input ever populates. Player 1 (the would-be opponent)
+  gets a faction assigned and a starting HQ+Factory spawned
+  (`SpawnStartingBases`), but nothing ever ticks a commander for it --
+  it is a static, inert base that never produces a unit or issues an
+  order.
+- Compounding this: **match-core has no unit-production AI command at
+  all** -- `SkirmishCommander`'s own header states outright that it
+  fights with an army it's already been handed, nothing about building
+  one. A live AI opponent needs BOTH a Unity-side driver loop ticking
+  `SkirmishCommander` every frame AND a whole build-order/production AI
+  layer that doesn't exist yet in any form -- a real, separate epic, not
+  attempted here.
+- No pre-match picker offered an opponent choice of any kind before
+  this: `RegionPickerHud` only picks a city preset, `FactionPickerHud`
+  only picks the HUMAN's own faction. The opponent's faction was a
+  hardcoded formula (`chosenFaction == HumanArmy ? AlienHive :
+  HumanArmy`, docs/12 Q13: "AI-only Army/Hive antagonists... deliberately
+  never Mixed").
+
+**What shipped: the opponent-faction picker, scoped honestly to what it
+actually changes.** New `OpponentFactionPickerHud.cs`, a close mirror of
+the existing `FactionPickerHud.cs` (same IMGUI look, same four
+`FactionId` options, same `MixedFactionUnlock.IsUnlocked` gate on
+Mixed) -- opt-in (`RuntimeCityBuilder.showOpponentPicker`, off by
+default, same "every existing scene keeps working byte-for-byte
+unchanged" discipline every picker in this file already follows), shown
+after the human's own `FactionPickerHud` (if also on) and before the
+region picker in `Start()`'s chain. Sets a new nullable
+`opponentFactionOverride` field; `BeginMatch()` now reads `
+opponentFactionOverride ?? (the original docs/12 Q13 formula)`, so
+leaving the picker off reproduces the exact prior default with zero
+behavior change. Deliberately does NOT exclude a mirror matchup (same
+race both sides) from the option list -- a real, legitimate choice, not
+a mistake to guard against.
+
+**Explicitly flagged, not silently implied as "now you have an AI
+opponent":** this picker only changes WHICH FACTION the still-inert
+player-1 base gets assigned. It does not make that base act in any way
+-- the commander-wiring and production-AI gaps above are unchanged and
+substantial, real follow-up work, not a quick add. No Unity Editor in
+this environment to compile-check; the new file closely mirrors
+`FactionPickerHud.cs` field-for-field and method-for-method (including
+inheriting that file's own untracked `.meta` state -- Unity generates
+one fresh on next Editor open, same as it still owes `FactionPickerHud.cs`
+one today).
