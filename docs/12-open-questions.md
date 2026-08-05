@@ -11681,3 +11681,93 @@ the already-confirmed-working version; what changed is purely the
 invisible timing/sequencing layer above it (heat, ventilation, embers) --
 verified by code tracing against the creator's own brief numbers (2.5/
 1.0/0.2 structural bias, 1-2m crawl cap, "rare" embers), not a guess.
+
+## 2026-08 follow-up: raycast-pinned surface placement, camera-weighted spread, urgency/attack-rate driven speed
+
+Creator report on the rewrite above: **"fires is sometimes in the tile
+but not on the building. BURNING is ONLY allowed ON the building
+surfaces including roof decoration and other features. Cheat
+[skew] probability of flames on surfaces facing the camera closest to
+the camera. winder [wider] spread of spawn points not just clustered in
+one spot or a burn line. Allow some crawling. increase the speed of the
+spread based on number of attack points and amount of time before
+building is destroyed. shorter time more spawns."**
+
+**Root cause of "in the tile but not on the building."** The rewrite's
+`IgniteCell` placed every point at ONE fixed radial distance
+(`footprintRadius * 1.6`, inherited unchanged from the pre-rewrite
+version) regardless of angle. A real building's massing cube is a
+non-circular box (18m-wide square on a single hex, wider/longer for
+multi-hex footprints) -- a single fixed distance can only be exactly
+right for one specific angle; at others it either falls short of the
+real wall (still floating in open tile-air, short of any geometry) or
+overshoots well past it. This had never been wrong enough to notice
+against a single-hex Small/Medium building, but became visible once the
+heat network started igniting points at genuinely different angles
+across the visible arc instead of one hand-tuned spot.
+
+**Fix: `PickSurfacePoint` replaces `PickClearAngle`.** Casts a real
+`Physics.Raycast` inward from well outside the footprint at the
+candidate angle/height and uses the ACTUAL hit point (nudged out along
+the hit normal by a small `SurfaceOffset` so the flame sits just proud
+of the mesh, not clipped into it) -- pinned to real geometry for every
+angle and every footprint shape, not a guessed standoff distance.
+Verified via `RuntimeCityBuilder.SpawnCube`: the building's own massing
+cube is created with `keepCollider = true` and its collider is
+registered into `_buildingByCollider`, so it's a confirmed, live,
+already-relied-upon raycast target -- this isn't a new collider being
+added for the purpose. Dressing (`BuildingDresser.cs` -- windows,
+cornices, water towers, "roof decoration and other features") has no
+collider of its own (grepped, confirmed empty), so a raycast can only
+ever land on the shared massing-cube silhouette; since dressing is
+built directly onto/around that same box, a point pinned to its surface
+still reads as on the building, near its decoration, without needing to
+add colliders to every dressing piece. Falls back to the old fixed-
+distance guess only if every candidate angle's raycast AND camera-LOS
+check both fail -- still never blocks a fire point from spawning.
+
+**"Cheat [skew] probability... facing the camera... wider spread...
+not a burn line."** The rewrite's `RegisterHit` fed every ongoing hit
+into ONE fixed origin cell -- combined with the strong upward diffusion
+bias, that reliably produced a single vertical column of fire rather
+than a spread facade (the "burn line" the creator flagged; predictable
+in hindsight from the bias ratio, not something the original rewrite's
+reasoning had actually traced through). Fixed with two changes:
+`RegisterHit` now picks a WEIGHTED random angle column per hit
+(`PickWeightedColumn`, weights `{1,2,3,2,1}` across the 5 columns --
+center 3x more likely than either edge, "skewed" toward the
+camera-facing side without ever fully excluding the edges, which is
+what keeps the spread wide rather than just moving the cluster to
+dead-center); and `SidewaysBias` was raised from the brief's literal
+1.0 ("100%") to 1.6, so ordinary diffusion crawls sideways more readily
+once heat exists in more than one column ("allow some crawling").
+Upward/downward bias (2.5x/0.2x) are untouched -- buoyancy still
+dominates, just not so completely that lateral spread can't keep up.
+
+**"Increase the speed of the spread based on number of attack points
+and ... time before building is destroyed. shorter time more spawns."**
+`RegisterHit`'s signature gained `hpFraction01` (`CurrentHp / MaxHp`,
+already available at its `RuntimeCityBuilder.ApplyBuildingDamage` call
+site via the freshly-computed `next` state) and now tracks `_hitRateEma`,
+a smoothed hits-per-second read off real `Time.time` gaps between calls
+-- there's no real attacker-identity tracking anywhere in this pipeline
+to count distinct "attack points" directly, but more simultaneous
+attackers necessarily means hits land closer together in time, which
+this observes without needing to know who's hitting. `_urgency` (rises
+toward 1 as `hpFraction01` falls toward 0) and `_hitRateEma` both feed
+`CurrentSimTickInterval` (the simulation ticks faster, down to a
+`MinSimTickInterval` floor so it can never become a per-frame cost) and
+raise `_maxIgnitedCells` above its area-based floor (up to
+`MaxUrgencyBonusCells` = 3 extra points, still capped at
+`MaxFireCountCeiling` = 10) -- both together mean a building close to
+death, or one being hit by several attackers at once, visibly grows
+fire faster and further than the same building taking occasional single
+hits. Ember chance (`MaybeSpawnEmber`) also scales with `_urgency`.
+
+No Unity Editor in this environment to watch this render live. The
+raycast fix in particular is a from-first-principles correction (traced
+against `SpawnCube`'s own confirmed collider setup and `BuildingDresser`'s
+confirmed lack of one), not a guess; the spread/speed changes are tuned
+constants reasoned from the brief's own numbers and this saga's repeated
+"verify, don't guess" standard, but -- unlike the raycast fix -- have no
+external ground truth to check against beyond that reasoning.

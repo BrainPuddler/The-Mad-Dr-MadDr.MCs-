@@ -658,61 +658,75 @@ public class FirePlume : MonoBehaviour
 /// spawner with exactly that two-layer model, sized down to stay
 /// "simple and performant" (creator direction, same message) --
 /// per-building state is a tiny fixed 5x3 grid (15 <see cref="FireCell"/>
-/// structs, no heap churn after `Init`), ticked at a throttled 0.5s
-/// interval, not every frame.
+/// structs, no heap churn after `Init`), ticked at a throttled interval,
+/// not every frame.
 ///
 /// **The grid IS the visible-area constraint, by construction.** Its 5
 /// angle columns span ONLY the existing +-35 degree camera-facing arc
 /// (`_baseAngle`, unchanged from the prior "keep it locked to that side"
 /// contract) -- there is no cell, and therefore no possible ignition or
-/// visible flame, outside that slice. This satisfies "keep to visible
-/// area" structurally rather than as a separate check bolted on after
-/// the fact.
+/// visible flame, outside that slice.
 ///
 /// **Internal network (invisible):** each <see cref="FireCell"/> tracks
 /// Heat and Ventilation only (no separate Fuel/StructuralDamage fields --
 /// the brief's fuller model; trimmed for "simple and performant" since
 /// nothing here needs a building to ever stop burning once lit, matching
-/// this file's own long-standing "never removes a fire once lit"
-/// convention for every other FX class). `TickFireNetwork` diffuses heat
-/// from every hot cell to its neighbours once per sim tick, biased
-/// `UpwardBias`/`SidewaysBias`/`DownwardBias` (2.5x / 1.0x / 0.2x --
-/// literally the brief's own "+250% / 100% / 20%" figures) and scaled by
-/// the RECEIVING cell's own Ventilation (a cell that has already broken
-/// out lets heat in faster, matching "ventilation dramatically increases
-/// spread" / "fire visibly accelerates after new openings appear").
+/// this file's own "never removes a fire once lit" convention for every
+/// other FX class). `TickFireNetwork` diffuses heat from every hot cell
+/// to its neighbours once per sim tick, biased `UpwardBias`/
+/// `SidewaysBias`/`DownwardBias` (2.5x / 1.6x / 0.2x -- see the follow-up
+/// below for why sideways moved off the brief's own literal "100%") and
+/// scaled by the RECEIVING cell's own Ventilation.
 ///
 /// **External renderer (visible):** a cell only ever gets a real
 /// `FirePlume` when `TickFireNetwork` finds its Heat crossed
 /// `IgnitionThreshold` (`IgniteCell`) -- the visible system never spawns
 /// or spreads on its own, it only ever reacts to what the invisible
-/// network already decided, exactly the brief's "external fire renderer
-/// ... queries the internal fire network" contract. An already-ignited
-/// cell's own continuing heat instead grows its EXISTING flame
-/// (`FirePlume.SetHeatScale`) -- brighter, bigger, stronger flicker --
-/// matching "fire growth should use heat energy... only after sufficient
-/// heat accumulates should additional exterior fire nodes appear."
+/// network already decided. An already-ignited cell's own continuing
+/// heat instead grows its EXISTING flame (`FirePlume.SetHeatScale`).
 ///
-/// **Impact = heat source.** <see cref="RegisterHit"/> (called from
-/// `RuntimeCityBuilder.ApplyBuildingDamage` for every landed hit) injects
-/// heat proportional to that hit's own damage amount into a fixed
-/// `_originCellIndex` -- see that method's own doc comment for why a
-/// FIXED cell, not a true per-hit 3D impact point.
+/// 2026-08 follow-up (creator report: "fires is sometimes in the tile
+/// but not on the building. BURNING is ONLY allowed ON the building
+/// surfaces including roof decoration and other features. Cheat
+/// probability of flames on surfaces facing the camera closest to the
+/// camera. winder spread of spawn points not just clustered in one spot
+/// or a burn line. Allow some crawling. increase the speed of the
+/// spread based on number of attack points and amount of time before
+/// building is destroyed. shorter time more spawns"): four changes on
+/// top of the model above --
 ///
-/// **Embers** (`MaybeSpawnEmber`): a rare, low-probability chance per
-/// tick for an already-hot ignited cell to instantly heat one adjacent
-/// UNignited neighbour past threshold -- "occasionally eject burning
-/// embers... rare but dramatic," and because it can only ever jump to a
-/// grid-adjacent cell (a few metres away at most, same spacing as
-/// ordinary diffusion), it can never "race across an intact wall," same
-/// spirit as the brief's own 1-2m secondary-crawl cap.
+/// 1. **On-surface placement** (`PickSurfacePoint`, replacing the old
+///    fixed-distance `PickClearAngle`): a real `Physics.Raycast` against
+///    the building's own massing-cube collider finds where a candidate
+///    angle/height actually meets real geometry, instead of assuming a
+///    single standoff distance works for every angle of a non-circular
+///    footprint -- see that method's own doc comment for the full
+///    root-cause writeup.
+/// 2. **Camera-facing weight** (`AngleColumnWeights`, used by
+///    `PickWeightedColumn`): ongoing hits (`RegisterHit`) are no longer
+///    funneled into one fixed origin cell -- they land in a WEIGHTED
+///    random column, skewed toward the arc's own centre (the most
+///    directly camera-facing angle) but not exclusively there, so
+///    heat -- and therefore fire -- starts from several lateral points
+///    across the visible facade instead of stacking into one vertical
+///    "burn line." `SidewaysBias` was also raised (1.0 -> 1.6) so
+///    ordinary diffusion crawls sideways more readily once heat exists
+///    in more than one column.
+/// 3. **Urgency + attack-rate driven speed** (`_urgency`, `_hitRateEma`):
+///    `RegisterHit` now also receives the building's current HP fraction
+///    -- `_urgency` rises toward 1 as HP falls toward zero ("amount of
+///    time before building is destroyed... shorter time more spawns"),
+///    and `_hitRateEma` is a smoothed hits-per-second read off real
+///    `Time.time` gaps between calls ("number of attack points": more
+///    simultaneous attackers means hits land closer together in time).
+///    Both feed `CurrentSimTickInterval` (ticks faster) and raise
+///    `_maxIgnitedCells` above its area-based floor (more points allowed)
+///    as either climbs.
 ///
-/// Placement math within a cell (`dist = footprintRadius * 1.6`, height
-/// bands capped below the roofline) is UNCHANGED from the prior random-
-/// timer version -- that geometry was hard-won across several rounds of
-/// "still don't see the fire" (see this class's git history) and none of
-/// it was in question here, only WHEN/WHERE WITHIN the arc a point
-/// ignites.</summary>
+/// Embers (`MaybeSpawnEmber`) are unchanged in spirit -- rare,
+/// grid-adjacent-only jumps -- but their chance now also scales with
+/// `_urgency`, so "allow some crawling" picks up along with everything
+/// else as a building nears destruction.</summary>
 public class FireCluster : MonoBehaviour
 {
     private float _height;
@@ -721,8 +735,8 @@ public class FireCluster : MonoBehaviour
     private float _sizeScale;
 
     // ---- sizing (unchanged from the prior area-based pass -- still the
-    // "how many points, how big" ceiling; now bounds the GRID instead of
-    // a flat spawn counter) ----
+    // "how many points, how big" ceiling; now the FLOOR `_maxIgnitedCells`
+    // rises above as urgency/attack-rate climb, see RegisterHit) ----
 
     private const float AreaPerFirePoint = 300f;
     private const int MaxFireCountCeiling = 10;
@@ -746,6 +760,17 @@ public class FireCluster : MonoBehaviour
     private static readonly int[] GridAngleOffsets = { -28, -14, 0, 14, 28 };
     private static readonly float[] GridHeightFracs = { 0.28f, 0.5f, 0.72f };
 
+    /// <summary>Center-skewed pick weights for `PickWeightedColumn`,
+    /// index-aligned with `GridAngleOffsets` -- the middle column (0
+    /// degrees off `_baseAngle`, i.e. most directly camera-facing) is 3x
+    /// as likely to receive a hit's heat as either edge column. "Cheat
+    /// [skew] probability of flames on surfaces facing the camera closest
+    /// to the camera" without ever fully excluding the edges (still
+    /// weight 1, not 0) -- that's what keeps the spread "wider," not
+    /// clustered dead-center either.</summary>
+    private static readonly int[] AngleColumnWeights = { 1, 2, 3, 2, 1 };
+    private const int AngleColumnWeightSum = 9;
+
     private struct FireCell
     {
         public float Heat;
@@ -758,20 +783,40 @@ public class FireCluster : MonoBehaviour
     private float[] _heatDelta; // reused scratch buffer -- one alloc in Init, zero per tick
     private int _originCellIndex;
     private int _ignitedCount;
-    private int _maxIgnitedCells;
+    private int _baseMaxIgnitedCells; // the area-based floor from Init, never lowered
+    private int _maxIgnitedCells;     // live cap: baseMaxIgnitedCells + urgency bonus, see RegisterHit
     private int _tickCounter;
+    private int _hitCount;
     private float _simTimer;
+    private float _urgency;    // 0 at full HP, -> 1 as the building nears destruction
+    private float _hitRateEma; // smoothed hits/second, fed by RegisterHit's own Time.time gaps
+    private float _lastHitTime = -1f;
 
-    private const float SimTickInterval = 0.5f; // throttled -- "keep system simple and performant"
+    private const float SimTickInterval = 0.5f;    // base tick -- "keep system simple and performant"
+    private const float MinSimTickInterval = 0.12f; // fastest this ever ticks, however high urgency/hit-rate climb
+    private const float HitRateSmoothing = 0.3f;
+    private const float MaxHitRateForSpeedup = 3f;  // cap so a pathological burst can't tick every single frame
+    private const float HitRateSpeedupFactor = 0.6f;
+    private const float UrgencySpeedupFactor = 1.5f;
+    private const int MaxUrgencyBonusCells = 3;     // "shorter time [to destruction], more spawns"
+
     private const float BaselineVentilation = 1f;
     private const float VentilationOnIgnite = 1.5f;
     private const float VentilationNeighborBleed = 0.15f;
     private const float IgnitionThreshold = 1f;
     private const float InitialImpactHeat = 1.2f; // > IgnitionThreshold: origin cell ignites the instant Init runs, same "starts with 1 immediately" guarantee the old spawner made
     private const float BaseDiffusionRate = 0.12f;
-    // "Structural Bias" -- the brief's own +250% / 100% / 20% figures, verbatim.
+    // "Structural Bias": upward/downward are the brief's own +250%/20%
+    // figures, verbatim. Sideways raised 1.0 -> 1.6 (creator follow-up:
+    // "winder spread... Allow some crawling") -- literal buoyancy physics
+    // says heat shouldn't travel sideways FASTER than it rises, so this
+    // stops short of matching Upward, but a flat 1.0 combined with a
+    // single seed point was producing one vertical column before any
+    // meaningful lateral crawl happened; 1.6 lets sideways keep pace
+    // better once `PickWeightedColumn` has already seeded more than one
+    // column (see RegisterHit).
     private const float UpwardBias = 2.5f;
-    private const float SidewaysBias = 1.0f;
+    private const float SidewaysBias = 1.6f;
     private const float DownwardBias = 0.2f;
     private const float HeatForMaxScale = 3f;
     private const float HeatScaleCap = 1.6f;
@@ -779,6 +824,8 @@ public class FireCluster : MonoBehaviour
     private const float EmberHeatFloor = 1.6f;
     private const float ImpactHeatPerDamage = 0.01f;
     private const float NeighborImpactBleedFrac = 0.35f;
+    private const float SurfaceOffset = 0.12f;  // outward nudge along the hit normal so a flame sits just proud of the surface, not clipped into it
+    private const float LosProbeOffset = 0.6f;  // a bigger nudge used ONLY for the camera-visibility test, so testing from a point almost touching the collider doesn't self-occlude against its own building
 
     public void Init(float height, float footprintRadius, int targetCount)
     {
@@ -786,7 +833,8 @@ public class FireCluster : MonoBehaviour
         _footprintRadius = footprintRadius;
         var area = BurnableSurfaceArea(height, footprintRadius);
         var areaBasedCap = Mathf.RoundToInt(area / AreaPerFirePoint);
-        _maxIgnitedCells = Mathf.Clamp(Mathf.Max(Mathf.Clamp(targetCount, 1, 4), areaBasedCap), 1, MaxFireCountCeiling);
+        _baseMaxIgnitedCells = Mathf.Clamp(Mathf.Max(Mathf.Clamp(targetCount, 1, 4), areaBasedCap), 1, MaxFireCountCeiling);
+        _maxIgnitedCells = _baseMaxIgnitedCells;
         _sizeScale = Mathf.Clamp(1f + area / SizeScaleReferenceArea, 1f, MaxSizeScale);
         _baseAngle = CameraFacingAngle();
 
@@ -831,8 +879,24 @@ public class FireCluster : MonoBehaviour
         if (_cells == null) return;
         _simTimer -= Time.deltaTime;
         if (_simTimer > 0f) return;
-        _simTimer = SimTickInterval;
+        _simTimer = CurrentSimTickInterval();
         TickFireNetwork();
+    }
+
+    /// <summary>2026-08 (creator direction: "increase the speed of the
+    /// spread based on number of attack points and amount of time before
+    /// building is destroyed. shorter time more spawns"): the base 0.5s
+    /// tick shrinks as either `_hitRateEma` (more simultaneous attackers
+    /// land hits closer together in time -- see `RegisterHit`) or
+    /// `_urgency` (this building's own HP fraction falling toward zero)
+    /// climbs, clamped at `MinSimTickInterval` so neither can push this
+    /// into a per-frame cost. Faster ticking alone already means more
+    /// spawns over the same real time, since `_maxIgnitedCells` (also
+    /// raised by urgency, see `RegisterHit`) simply gets reached sooner.</summary>
+    private float CurrentSimTickInterval()
+    {
+        var speedup = 1f + Mathf.Min(_hitRateEma, MaxHitRateForSpeedup) * HitRateSpeedupFactor + _urgency * UrgencySpeedupFactor;
+        return Mathf.Max(MinSimTickInterval, SimTickInterval / speedup);
     }
 
     /// <summary>One simulation step: diffuse heat from every hot cell to
@@ -892,11 +956,10 @@ public class FireCluster : MonoBehaviour
     }
 
     /// <summary>Spawns this cell's real, visible `FirePlume` -- the ONLY
-    /// place in this class that ever creates one. Placement math
-    /// (`dist`/`PickClearAngle`/height-band-under-roofline) is byte-for-
-    /// byte the same formula the prior random-timer `SpawnOne` used, just
-    /// fed this cell's own fixed angle offset/height band from the grid
-    /// tables instead of a per-spawn random jitter.</summary>
+    /// place in this class that ever creates one. Placement now comes
+    /// from `PickSurfacePoint` (a real raycast against the building's own
+    /// collider) instead of a fixed standoff distance -- see that
+    /// method's own doc comment for why.</summary>
     private void IgniteCell(int index)
     {
         _cells[index].Ignited = true;
@@ -906,15 +969,12 @@ public class FireCluster : MonoBehaviour
 
         var a = index / GridHeightBands;
         var b = index % GridHeightBands;
-        var dist = _footprintRadius * 1.6f;
         var heightFrac = GridHeightFracs[b];
-        var jitterDeg = PickClearAngle(GridAngleOffsets[a], dist, heightFrac);
-        var angle = _baseAngle + jitterDeg * Mathf.Deg2Rad;
-        var offset = new Vector3(Mathf.Cos(angle) * dist, _height * heightFrac, Mathf.Sin(angle) * dist);
+        var worldPoint = PickSurfacePoint(GridAngleOffsets[a], heightFrac);
 
         var go = new GameObject("FirePlume");
         go.transform.SetParent(transform, false);
-        go.transform.localPosition = offset;
+        go.transform.position = worldPoint;
         var plume = go.AddComponent<FirePlume>();
         plume.Init(_sizeScale);
         _cells[index].Plume = plume;
@@ -937,45 +997,73 @@ public class FireCluster : MonoBehaviour
         _cells[idx].Ventilation = Mathf.Min(_cells[idx].Ventilation + VentilationNeighborBleed, VentilationOnIgnite - 0.1f);
     }
 
-    /// <summary>2026-08 (creator direction: "use something like this to
-    /// spawn fire on buildings ... Fire always begins at one or more
-    /// weapon impact locations. The impact injects an initial burst of
-    /// heat proportional to weapon energy"): called once per landed hit
-    /// from `RuntimeCityBuilder.ApplyBuildingDamage`, with that hit's own
-    /// damage amount standing in for "weapon energy."
+    /// <summary>2026-08 (creator direction: "winder spread of spawn
+    /// points not just clustered in one spot or a burn line... Cheat
+    /// [skew] probability of flames on surfaces facing the camera closest
+    /// to the camera... increase the speed of the spread based on number
+    /// of attack points and amount of time before building is destroyed.
+    /// shorter time more spawns"): called once per landed hit from
+    /// `RuntimeCityBuilder.ApplyBuildingDamage`, with that hit's own
+    /// damage amount standing in for "weapon energy" and `hpFraction01`
+    /// (`CurrentHp / MaxHp`, already available at that call site) telling
+    /// this cluster how close to destruction the building now is.
     ///
-    /// This pipeline has no true 3D impact-surface point to work with --
-    /// `MonsterAgent.TickAttack`'s own closest analogue (`bp`, a nearest-
-    /// footprint-hex-center approximation) is already spent on the
-    /// weapon FX beam/shot endpoint and isn't threaded through
-    /// `ApplyBuildingDamage` today, and there's no mesh-surface raycast
-    /// anywhere in the attack pipeline to produce a real hit point from.
-    /// Every hit therefore feeds the SAME fixed `_originCellIndex` (set
-    /// once in `Init`, at the visible arc's own centre/low band) rather
-    /// than a different cell per hit location. "Keep the system simple
-    /// and performant" (creator direction) weighed against plumbing a new
-    /// position parameter through several attack-pipeline layers for a
-    /// result the "keep fire to the visible area" contract already makes
-    /// largely cosmetic (fire only ever renders on the camera-facing
-    /// side regardless of which side was actually hit) -- simple wins.
+    /// Earlier this fed every hit into ONE fixed origin cell -- combined
+    /// with the strong upward bias, that produced a single vertical "burn
+    /// line" instead of a spread facade. `PickWeightedColumn` now spreads
+    /// hits across several angle columns, weighted toward (never
+    /// exclusively) the camera-facing centre -- see `AngleColumnWeights`.
+    /// A fraction of each hit's heat still bleeds to its own column's
+    /// immediate neighbours (mostly upward), so "higher-energy impacts
+    /// ignite multiple adjacent cells immediately" still holds per-hit,
+    /// just from a varying starting column instead of always the same one.
     ///
-    /// "Higher-energy impacts ignite multiple adjacent cells immediately":
-    /// a fraction of the injected heat also bleeds straight to the
-    /// origin's own neighbours (mostly upward, matching the same
-    /// structural bias the tick-by-tick diffusion uses), so a single big
-    /// hit can push a neighbour over threshold in the SAME tick it lands,
-    /// not just via gradual diffusion next tick.</summary>
-    public void RegisterHit(float energy)
+    /// `_hitRateEma` (a smoothed hits-per-second read off real `Time.time`
+    /// gaps between calls) is this method's own proxy for "number of
+    /// attack points" -- there is no real attacker-identity tracking in
+    /// this pipeline, but more simultaneous attackers necessarily means
+    /// hits land closer together in time, which this can observe directly
+    /// without needing to know who's hitting. `_urgency` rises as
+    /// `hpFraction01` falls. Both feed `CurrentSimTickInterval` (ticks
+    /// faster) and raise `_maxIgnitedCells` above its area-based floor
+    /// (`_baseMaxIgnitedCells`) here, capped at `MaxFireCountCeiling`
+    /// either way.</summary>
+    public void RegisterHit(float energy, float hpFraction01)
     {
         if (_cells == null || energy <= 0f) return;
+        _hitCount++;
+
+        var now = Time.time;
+        if (_lastHitTime > 0f)
+        {
+            var dt = Mathf.Max(0.05f, now - _lastHitTime);
+            _hitRateEma = Mathf.Lerp(_hitRateEma, 1f / dt, HitRateSmoothing);
+        }
+        _lastHitTime = now;
+
+        _urgency = Mathf.Clamp01(1f - Mathf.Clamp01(hpFraction01));
+        _maxIgnitedCells = Mathf.Min(MaxFireCountCeiling, _baseMaxIgnitedCells + Mathf.RoundToInt(_urgency * MaxUrgencyBonusCells));
+
         var heat = energy * ImpactHeatPerDamage;
-        _cells[_originCellIndex].Heat += heat;
+        var column = PickWeightedColumn(_hitCount);
+        var cellIndex = CellIndex(column, 0); // low/window band -- same band the very first flame always starts in
+        _cells[cellIndex].Heat += heat;
         var bleed = heat * NeighborImpactBleedFrac;
-        var a = _originCellIndex / GridHeightBands;
-        var b = _originCellIndex % GridHeightBands;
-        AddHeatIfValid(a - 1, b, bleed);
-        AddHeatIfValid(a + 1, b, bleed);
-        AddHeatIfValid(a, b + 1, bleed * UpwardBias);
+        AddHeatIfValid(column - 1, 0, bleed);
+        AddHeatIfValid(column + 1, 0, bleed);
+        AddHeatIfValid(column, 1, bleed * UpwardBias);
+    }
+
+    private int PickWeightedColumn(int salt)
+    {
+        var roll = ((GetInstanceID() + salt * 733) & 0xFFFF) % AngleColumnWeightSum;
+        var cum = 0;
+        for (var a = 0; a < GridAngleSegments; a++)
+        {
+            cum += AngleColumnWeights[a];
+            if (roll < cum) return a;
+        }
+        return GridAngleSegments / 2;
     }
 
     private void AddHeatIfValid(int a, int b, float amount)
@@ -988,20 +1076,20 @@ public class FireCluster : MonoBehaviour
     /// ... these should be rare but dramatic": a small per-tick chance
     /// for an already-hot, already-ignited cell to instantly push ONE
     /// grid-adjacent unignited neighbour to ignition, bypassing the
-    /// normal gradual diffusion climb. Capped at one ember per tick (a
-    /// cascade would stop reading as "rare") and, since a neighbour is by
-    /// definition only a cell-width away (a few metres at most, the same
-    /// spacing ordinary diffusion already uses), it can never manifest as
-    /// fire "racing across an intact wall" -- the brief's own 1-2m
-    /// secondary-crawl cap, satisfied by the grid's own geometry rather
-    /// than a separate distance check.</summary>
+    /// normal gradual diffusion climb -- "allow some crawling." Capped at
+    /// one ember per tick (a cascade would stop reading as "rare") and,
+    /// since a neighbour is by definition only a cell-width away, it can
+    /// never manifest as fire "racing across an intact wall." Chance
+    /// scales with `_urgency` (see `RegisterHit`) so crawling picks up
+    /// along with everything else as a building nears destruction.</summary>
     private void MaybeSpawnEmber()
     {
         if (_ignitedCount >= _maxIgnitedCells) return;
+        var chance = EmberChancePerTick * (1f + _urgency);
         for (var i = 0; i < _cells.Length; i++)
         {
             if (!_cells[i].Ignited || _cells[i].Heat < EmberHeatFloor) continue;
-            if (RandomFloat01(i) > EmberChancePerTick) continue;
+            if (RandomFloat01(i) > chance) continue;
             var a = i / GridHeightBands;
             var b = i % GridHeightBands;
             var target = PickUnignitedNeighbor(a, b);
@@ -1037,42 +1125,68 @@ public class FireCluster : MonoBehaviour
         return ((GetInstanceID() + (_tickCounter * 977) + salt * 733) & 0xFFFF) / 65536f;
     }
 
-    /// <summary>2026-08 (creator question: "could the fire be spawning
-    /// outside of one building but inside another adjacent one? Fire
-    /// should look for a clear line of sight to camera to pick initial
-    /// spawn points"): searches a small, deterministic set of candidate
-    /// angles -- `primaryJitterDeg` first (so an already-clear point keeps
-    /// reading exactly as before this change), then progressively wider
-    /// offsets, each still clamped inside the SAME +-35 degree arc around
-    /// `_baseAngle` that "keep it locked to that side"/"keep to visible
-    /// area" already commits this cluster to -- for the first one whose
-    /// candidate WORLD position has an unobstructed <see
-    /// cref="Physics.Linecast(Vector3, Vector3)"/> to `Camera.main`.
-    /// Deliberately does NOT filter which collider it hit (a passing car
-    /// or citizen counts as "occluded" too, not just a neighbouring
-    /// building) -- for a one-off spawn-time pick, treating any
-    /// obstruction as reason to try the next candidate is simpler and
-    /// safer than maintaining a building-only allowlist. Falls back to
-    /// `primaryJitterDeg` untouched if every candidate is blocked, or if
-    /// no `Camera.main` exists yet to test against -- this NEVER prevents
-    /// a fire point from spawning, only prefers a clearer one when it can
-    /// find one.</summary>
+    /// <summary>2026-08 follow-up (creator report: "fires is sometimes in
+    /// the tile but not on the building. BURNING is ONLY allowed ON the
+    /// building surfaces including roof decoration and other features"):
+    /// replaces the old `PickClearAngle`, which placed every point at a
+    /// single FIXED radial distance (`footprintRadius * 1.6`) regardless
+    /// of angle -- a crude approximation that could fall short of a real
+    /// wall (still "in the tile," floating in open air short of any
+    /// geometry) or overshoot well past it, depending on where a
+    /// non-circular footprint's true face/corner actually sits relative
+    /// to that one fixed number.
+    ///
+    /// This casts a real `Physics.Raycast` INWARD from well outside the
+    /// footprint (`_footprintRadius * 3`) at the candidate angle/height,
+    /// and uses the ACTUAL hit point (nudged out along the hit normal by
+    /// `SurfaceOffset` so the flame sits just proud of the surface rather
+    /// than clipped into it) -- pinned to real geometry for every angle
+    /// and every footprint shape, not a generic standoff distance. Only
+    /// the building's own massing cube carries a collider (dressing --
+    /// windows, cornices, water towers, "roof decoration and other
+    /// features" -- is visual-only, no collider of its own), so a hit
+    /// always lands on that shared silhouette; since dressing is built
+    /// directly onto/around that same box, a point pinned to its surface
+    /// still reads as on the building, near its decoration, not floating
+    /// apart from either.
+    ///
+    /// Same candidate-search shape as the old method (`primaryJitterDeg`
+    /// first, then progressively wider offsets, all within the SAME +-35
+    /// degree visible arc) -- but a candidate is now rejected for EITHER
+    /// a missed raycast (no real surface there) OR an occluded camera
+    /// line of sight (tested from a point pushed further out,
+    /// `LosProbeOffset`, than the flame's own placement, so the test
+    /// doesn't self-occlude against the very surface it's standing on).
+    /// Falls back to the OLD fixed-distance approximation only if every
+    /// candidate fails both tests -- this still never prevents a fire
+    /// point from spawning, it only risks (rarely) not sitting exactly on
+    /// real geometry that one time.</summary>
     private static readonly int[] AngleSearchOffsets = { 0, 14, -14, 28, -28, 35, -35 };
 
-    private int PickClearAngle(int primaryJitterDeg, float dist, float heightFrac)
+    private Vector3 PickSurfacePoint(int primaryJitterDeg, float heightFrac)
     {
+        var probeDist = _footprintRadius * 3f;
+        var targetY = _height * heightFrac;
         var cam = Camera.main;
-        if (cam == null) return primaryJitterDeg;
         for (var i = 0; i < AngleSearchOffsets.Length; i++)
         {
             var jitter = Mathf.Clamp(primaryJitterDeg + AngleSearchOffsets[i], -35, 35);
             var candidateAngle = _baseAngle + jitter * Mathf.Deg2Rad;
-            var localOffset = new Vector3(Mathf.Cos(candidateAngle) * dist, _height * heightFrac, Mathf.Sin(candidateAngle) * dist);
-            var worldPoint = transform.TransformPoint(localOffset);
-            if (!Physics.Linecast(worldPoint, cam.transform.position))
-                return jitter;
+            var dirIn = new Vector3(-Mathf.Cos(candidateAngle), 0f, -Mathf.Sin(candidateAngle));
+            var rayOrigin = transform.position + new Vector3(Mathf.Cos(candidateAngle) * probeDist, targetY, Mathf.Sin(candidateAngle) * probeDist);
+            RaycastHit hit;
+            if (!Physics.Raycast(rayOrigin, dirIn, out hit, probeDist)) continue;
+            if (cam != null)
+            {
+                var losProbe = hit.point + hit.normal * LosProbeOffset;
+                if (Physics.Linecast(losProbe, cam.transform.position)) continue;
+            }
+            return hit.point + hit.normal * SurfaceOffset;
         }
-        return primaryJitterDeg;
+
+        var fallbackAngle = _baseAngle + primaryJitterDeg * Mathf.Deg2Rad;
+        var fallbackDist = _footprintRadius * 1.6f;
+        return transform.position + new Vector3(Mathf.Cos(fallbackAngle) * fallbackDist, targetY, Mathf.Sin(fallbackAngle) * fallbackDist);
     }
 }
 

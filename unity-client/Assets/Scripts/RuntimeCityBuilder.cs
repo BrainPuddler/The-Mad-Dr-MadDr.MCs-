@@ -2136,17 +2136,22 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // 2026-08 (fire-propagation rewrite, creator's own brief:
             // "Fire always begins at one or more weapon impact locations.
             // The impact injects an initial burst of heat proportional to
-            // weapon energy"): every hit that lands here (armed and
-            // unarmed alike -- MonsterAgent.TickAttack's own two call
-            // sites both funnel through this one method) feeds the
-            // building's FireCluster its own damage amount as "weapon
-            // energy," on top of whatever ignition already did above.
+            // weapon energy" -- follow-up: "increase the speed of the
+            // spread based on ... amount of time before building is
+            // destroyed. shorter time more spawns"): every hit that lands
+            // here (armed and unarmed alike -- MonsterAgent.TickAttack's
+            // own two call sites both funnel through this one method)
+            // feeds the building's FireCluster its own damage amount as
+            // "weapon energy," plus this building's OWN current HP
+            // fraction (`next`, the just-computed post-damage state) so
+            // the cluster can speed up as the building nears destruction.
             // `cubes` was already resolved at the top of this method;
             // FireCluster is parented directly under `cubes[0]` by
             // AttachFireCluster, so a shallow child lookup is enough --
             // cheap, and only runs once per landed hit, not per frame.
             var cluster = cubes[0].GetComponentInChildren<FireCluster>();
-            if (cluster != null) cluster.RegisterHit(amount);
+            if (cluster != null)
+                cluster.RegisterHit(amount, next.MaxHp > 0 ? (float)next.CurrentHp / next.MaxHp : 0f);
         }
     }
 
