@@ -2159,6 +2159,35 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // either way.
             IgniteBuildingIfNeeded(building, hitHex);
 
+            // 2026-08 (creator direction: "monsters should attack all
+            // buildings that will be destroyed in the attack. goal make
+            // it realistic that the building are logically destroyed"):
+            // HP is shared across a multi-hex building's WHOLE footprint
+            // (`current.ApplyDamage` above, `_battlefield.Buildings` is
+            // keyed by `Building`, not by hex) -- every hex of a
+            // Large/Medium multi-hex structure is already GOING to
+            // collapse together the instant HP hits zero (the Destroyed
+            // branch above already shatters every cube in `cubes` at
+            // once). Up to now, only the SPECIFIC hex actually being hit
+            // ever showed fire -- meaning a whole multi-hex footprint
+            // could suddenly turn to rubble while only one corner had
+            // ever visibly burned. As this building's own HP fraction
+            // falls, progressively ignite MORE of its own other hexes
+            // too (still capped by each hex's own idempotent
+            // `_ignitedCubes` guard, so this is a cheap no-op past the
+            // first time any given hex lights up) -- by the time it's
+            // truly near death, the whole structure is burning, not just
+            // the one point actually under fire, so the eventual full-
+            // footprint collapse reads as earned rather than a surprise.
+            if (building.Footprint.Count > 1)
+            {
+                var hpFraction = next.MaxHp > 0 ? (float)next.CurrentHp / next.MaxHp : 0f;
+                var urgency = Mathf.Clamp01(1f - hpFraction);
+                var targetIgnitedHexes = Mathf.Clamp(Mathf.CeilToInt(building.Footprint.Count * urgency), 1, building.Footprint.Count);
+                for (var i = 0; i < targetIgnitedHexes; i++)
+                    IgniteBuildingIfNeeded(building, building.Footprint[i]);
+            }
+
             // 2026-08 (fire-propagation rewrite, creator's own brief:
             // "Fire always begins at one or more weapon impact locations.
             // The impact injects an initial burst of heat proportional to

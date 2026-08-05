@@ -12086,3 +12086,51 @@ instant combat starts.
 No Unity Editor in this environment to watch this render live -- a
 straightforward, narrowly-scoped probability gate, reasoned directly
 from the creator's own stated goal rather than guessed at.
+
+## 2026-08 follow-up: progressive multi-hex ignition for logical destruction; confirmed melee/unarmed already damage + can ignite
+
+Creator direction: **"monsters should attack all buildings that will be
+destroyed in the attack. goal make it realistic that the building are
+logically destroyed,"** then, separately: **"non projectile monsters
+should be able to do damage to buildings and can sometimes start
+fires."**
+
+**The second message needed no code change** -- verified against the
+actual `TickAttack` structure before concluding that: the `isProjectile`
+gate added in the attack-hierarchy round only wraps the LOS/collateral/
+reposition block; `IgniteBuildingIfNeeded` and `ApplyBuildingDamage`
+(which in turn rolls `RegisterHit`'s own `FireIgnitionChancePerHit`) both
+sit OUTSIDE that gate and run unconditionally for melee-armed and
+unarmed monsters exactly the same as for projectile ones. Confirmed
+already true, not silently assumed.
+
+**The first message, read in continuity with the earlier "multiple
+building in it's template" direction:** HP is shared across a multi-hex
+`Building`'s WHOLE footprint (`_battlefield.Buildings` keyed by
+`Building`, not by hex) -- every hex of a Medium/Large multi-hex
+structure was ALREADY going to collapse together the instant HP hit
+zero (`ApplyBuildingDamage`'s `Destroyed` branch already shatters every
+cube in `cubes` at once). The gap: only the SPECIFIC hex actually being
+hit ever showed fire, so a whole multi-hex footprint could suddenly turn
+to rubble while only one corner had ever visibly burned -- not "logically
+destroyed," a surprise collapse instead of an earned one.
+
+**Fix, in `RuntimeCityBuilder.ApplyBuildingDamage`.** As a multi-hex
+building's own HP fraction falls, progressively ignite more of its OTHER
+footprint hexes too, on top of the specifically-hit one (which still
+always ignites first, unconditionally, per the earlier "should catch
+fire first" direction): `targetIgnitedHexes = Ceil(footprintCount *
+urgency)`, where `urgency = 1 - hpFraction` -- at full health only the
+hit hex burns, and by the time the building is near death nearly (or
+fully) every hex is alight. Reuses the EXISTING idempotent per-hex
+`IgniteBuildingIfNeeded`/`_ignitedCubes` guard entirely -- calling it
+again for an already-ignited hex is a cheap no-op, so this is purely
+"ignite more hexes over time," no new fire mechanics, no new state.
+Single-hex buildings (`Footprint.Count == 1`, the common case) are
+completely unaffected -- the loop only runs for genuinely multi-hex
+structures.
+
+No Unity Editor in this environment to watch this render live -- reused
+entirely existing, already-tested ignition machinery; the only new logic
+is the urgency-to-hex-count formula itself, straightforward arithmetic
+reasoned directly from the creator's own "logically destroyed" goal.
