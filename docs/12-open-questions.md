@@ -11410,3 +11410,48 @@ standing gap as every Unity-side change in this project's history. The
 existing `[DamageFx]` console log line and debug marker remain the
 fastest way to confirm the new height in a real Play session if
 anything still looks off.
+
+## 2026-08 follow-up: a fire point can land inside an adjacent building in a dense block -- line-of-sight search added
+
+Creator question, verified before writing any code rather than assumed
+either way: **"could the fire be spawning outside of one building but
+inside another adjacent one? Fire should look for a clear line of sight
+to camera to pick initial spawn points."**
+
+**Verified the risk is real, with numbers already in this codebase.**
+Hex spacing is 20m center-to-center (`HexCoord.HexMeters`); each
+building's own rendered massing cube is 18m wide (`RuntimeCityBuilder.
+BuildingFootprintHalfExtent`, 9m half-extent). That constant's own doc
+comment already establishes adjacent buildings' corners can overlap
+into a neighbouring hex's space (half-diagonal ~12.73m against a hex's
+own ~11.55m circumradius). Fire's own radial placement distance
+(`footprintRadius * 1.6`, ~12.8m for a single-hex building) sits right
+at that same edge -- comfortably outside its OWN building at every
+angle, but with no guarantee about whatever building occupies the
+NEXT hex over in a dense block.
+
+**Fix, in `DamageFx.cs`'s `FireCluster.SpawnOne`.** New `PickClearAngle`
+searches a small, deterministic set of candidate angles -- the
+originally-computed jittered angle first, then progressively wider
+offsets -- all still clamped inside the SAME +-35 degree arc around
+`_baseAngle` the "keep it locked to that side" contract already
+established (this does NOT reopen the full 360-degree spread that
+contract removed). For each candidate, `Physics.Linecast` from that
+candidate's real WORLD position (via `transform.TransformPoint`, not
+an identity-rotation assumption) to `Camera.main` decides whether
+anything -- another building, or incidentally a passing car/citizen,
+deliberately not filtered since treating any obstruction as "try the
+next candidate" is simpler than maintaining a building-only allowlist
+for a one-off spawn-time pick -- blocks the view; the first clear
+candidate wins. Falls back to the original angle if every candidate is
+blocked or no camera exists yet -- this can only ever prefer a clearer
+point, never prevent a fire point from spawning at all. The probe
+tests the EXACT height (`heightFrac`, from the roofline fix above)
+each point will actually spawn at, not an approximation -- `heightFrac`
+was moved to compute before the angle search specifically so the two
+stay in sync.
+
+No Unity Editor in this environment to watch this render live. `Physics.
+Linecast` is a one-off cost per spawn point (1-4 times total per
+building's whole lifetime, not per-frame), so the added searches carry
+no meaningful performance cost.

@@ -691,8 +691,6 @@ public class FireCluster : MonoBehaviour
         // `CameraFacingAngle`), so every point this cluster ever spawns
         // stays on the SAME face of the building instead of wrapping
         // around to whichever side happens to be away from the camera.
-        var jitterDeg = ((salt >> 8) & 0xFFFF) % 71 - 35;
-        var angle = _baseAngle + jitterDeg * Mathf.Deg2Rad;
         // 2026-08 (creator direction: "the fire should come from the
         // building, be attached to the roof, or the windows"): EVERY
         // point (including the first) now lands 30-90% out toward the
@@ -741,6 +739,24 @@ public class FireCluster : MonoBehaviour
         // the one confirmed-visible effect this round, nothing about its
         // placement is in question.
         var dist = _footprintRadius * 1.6f;
+        var jitterDeg = ((salt >> 8) & 0xFFFF) % 71 - 35;
+        // 2026-08 (creator question: "could the fire be spawning outside
+        // of one building but inside another adjacent one?"): a real,
+        // verified risk, not a hypothetical -- BuildingFootprintHalfExtent's
+        // own doc comment (RuntimeCityBuilder.cs) already establishes that
+        // adjacent buildings' rendered corners can overlap into a
+        // neighbouring hex's space (18m-wide boxes on a 20m hex grid),
+        // and `dist` above sits right at that same edge for a single-hex
+        // building. Clearing THIS building's own silhouette (what `dist`
+        // alone guarantees) says nothing about whatever else is standing
+        // between a candidate point and the camera in a dense block.
+        // `PickClearAngle` searches a small set of angles within the SAME
+        // +-35 camera-facing arc (never widening it -- "keep it locked to
+        // that side" above still holds) for one with an actually-
+        // unobstructed line of sight to the camera, falling back to the
+        // original jittered angle if every candidate is blocked (a fire
+        // point that's occasionally partly occluded is still far better
+        // than this attack ever failing to ignite anything at all).
         // 2026-08 VERIFIED root cause (creator direction: "place fire on
         // walls and windows of building... not on roofs", then confirmed
         // after this shipped: "I SEE SMOKE NO FIRE"): height 1.0 above
@@ -768,6 +784,10 @@ public class FireCluster : MonoBehaviour
         // clear of both street level (smoke's own territory) and the
         // roofline (explicitly excluded, per "not on roofs").
         var heightFrac = 0.3f + ((salt >> 16) & 0xFFFF) / 65536f * 0.35f;   // 0.30-0.65 of height
+        // computed BEFORE the angle search below so PickClearAngle's own
+        // line-of-sight probe tests the EXACT height this point will
+        // actually spawn at, not an approximation of it.
+        var angle = _baseAngle + PickClearAngle(jitterDeg, dist, heightFrac) * Mathf.Deg2Rad;
         var offset = new Vector3(Mathf.Cos(angle) * dist, _height * heightFrac, Mathf.Sin(angle) * dist);
 
         var go = new GameObject("FirePlume");
@@ -810,6 +830,45 @@ public class FireCluster : MonoBehaviour
         {
             DamageFx.SpawnDebugMarker(go.transform.position);
         }
+    }
+
+    /// <summary>2026-08 (creator question: "could the fire be spawning
+    /// outside of one building but inside another adjacent one? Fire
+    /// should look for a clear line of sight to camera to pick initial
+    /// spawn points"): searches a small, deterministic set of candidate
+    /// angles -- `primaryJitterDeg` first (so an already-clear point keeps
+    /// reading exactly as before this change), then progressively wider
+    /// offsets, each still clamped inside the SAME +-35 degree arc around
+    /// `_baseAngle` that "keep it locked to that side" already commits
+    /// this cluster to -- for the first one whose candidate WORLD position
+    /// has an unobstructed <see cref="Physics.Linecast(Vector3, Vector3)"/>
+    /// to `Camera.main`. Deliberately does NOT filter which collider it
+    /// hit (a passing car or citizen counts as "occluded" too, not just a
+    /// neighbouring building) -- for a one-off spawn-time pick, treating
+    /// any obstruction as reason to try the next candidate is simpler and
+    /// safer than maintaining a building-only allowlist, and a transient
+    /// occluder at the exact instant of ignition is a rare, harmless
+    /// edge case this same search already tries multiple angles against.
+    /// Falls back to `primaryJitterDeg` untouched if every candidate is
+    /// blocked, or if no `Camera.main` exists yet to test against --
+    /// this NEVER prevents a fire point from spawning, only prefers a
+    /// clearer one when it can find one.</summary>
+    private static readonly int[] AngleSearchOffsets = { 0, 14, -14, 28, -28, 35, -35 };
+
+    private int PickClearAngle(int primaryJitterDeg, float dist, float heightFrac)
+    {
+        var cam = Camera.main;
+        if (cam == null) return primaryJitterDeg;
+        for (var i = 0; i < AngleSearchOffsets.Length; i++)
+        {
+            var jitter = Mathf.Clamp(primaryJitterDeg + AngleSearchOffsets[i], -35, 35);
+            var candidateAngle = _baseAngle + jitter * Mathf.Deg2Rad;
+            var localOffset = new Vector3(Mathf.Cos(candidateAngle) * dist, _height * heightFrac, Mathf.Sin(candidateAngle) * dist);
+            var worldPoint = transform.TransformPoint(localOffset);
+            if (!Physics.Linecast(worldPoint, cam.transform.position))
+                return jitter;
+        }
+        return primaryJitterDeg;
     }
 }
 
