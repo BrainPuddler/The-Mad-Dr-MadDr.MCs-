@@ -1,14 +1,16 @@
 # 29. Fire propagation system
 
-**Status: implemented and iterated through several real rounds (2026-08),
+**Status: implemented and iterated through many real rounds (2026-08),
 no Unity Editor available to confirm any of it visually.** This doc
 consolidates the fire/smoke attack-damage VFX system — `DamageFx.cs`'s
-`FireCluster`/`FirePlume`/`SmokePlume`/`SmokePuff` classes, plus the two
-call sites that drive them (`RuntimeCityBuilder` for procedural civilian
-buildings, `BaseDresser` for the RTS building roster) — into one place,
-instead of leaving it spread across a dozen `docs/12` decision-log
+`FireCluster`/`FirePlume`/`SmokePlume`/`SmokePuff` classes, the two call
+sites that drive them (`RuntimeCityBuilder` for procedural civilian
+buildings, `BaseDresser` for the RTS building roster), and — as of §1.6 —
+the `MonsterAgent`-side attack-hierarchy logic that decides which
+building even reaches this pipeline in the first place — into one place,
+instead of leaving it spread across two dozen `docs/12` decision-log
 entries. If you're picking this system up cold: read §0.5 first for how
-it got here, then §1-3 for how it actually works today, then §5-6 for
+it got here, then §1-3.5 for how it actually works today, then §5-6 for
 what's deliberately not built yet.
 
 ## 0.5. History (read this first)
@@ -29,10 +31,13 @@ uses.
 | 7 | Full fire-propagation brief: "use something like this to spawn fire on buildings. BUT Keep to visible area... keep system simple and performant" | The flat random-timer spawner had no concept of heat, ventilation, or impact-driven ignition at all | Rewrote as the two-layer internal-heat-network / external-renderer model this doc describes (§0-3) | **Reasoned, not independently re-confirmed** |
 | 8 | "fires is sometimes in the tile but not on the building. BURNING is ONLY allowed ON the building surfaces... Cheat probability of flames on surfaces facing the camera closest to the camera. winder spread... not a burn line. Allow some crawling. increase the speed of the spread based on number of attack points and amount of time before building is destroyed" | (a) placement used one fixed radial distance for every angle, wrong for a non-circular footprint; (b) every ongoing hit fed one fixed cell, and the strong upward bias turned that into a single vertical column | (a) `PickSurfacePoint` raycasts against the building's own massing-cube collider instead of guessing a distance; (b) `RegisterHit` spreads across a camera-weighted set of angle columns, `SidewaysBias` raised 1.0→1.6; `_urgency`/`_hitRateEma` speed up ticking and raise the fire-count ceiling | **Reasoned, not independently re-confirmed** |
 | 9 | "if an attacked target has multiple building in it's template then any buildings hit my monster's weapon fire should catch fire first. decrease but do not eliminate[] the spawn facing camera preference" + a visual-variation brief (persistent per-instance seed for height/width/brightness/flicker/lean/emissive/growth/lifetime; organic, non-grid-readable spread; no new objects, no per-frame allocations, no expensive searches) | Multi-hex buildings (Medium/Large tiers really do span 1/2/4 hexes) always ignited/fed heat to their FIRST hex's cube regardless of where an attacker actually was; every flame's visual properties were driven by shared constants, not per-instance, so adjacent flames could look identical; heat diffusion had no per-cell variance, so spread read as a uniform radiating circle | `hitHex` (from `MonsterAgent`'s existing `bp`) threaded through `IgniteBuildingIfNeeded`/`ApplyBuildingDamage`/`RegisterHit` via `FootprintIndexOf`, so each hex ignites/feeds independently; `AngleColumnWeights` pulled `{1,2,3,2,1}`→`{2,3,4,3,2}`; `FirePlume` samples 9 persistent jittered multipliers once in `Awake` (§1.5); new per-cell `FireCell.Flammability` (§1) folded into `SpreadHeat` | **Reasoned, not independently re-confirmed** |
+| 10 | "Monsters should try to attack only the target building(s)... try not to shoot through other building" + "Based on monster aggression, monster could collaterally destroy other building if blocked... Player owned building are the only buildings immune" + "Non projectile equipped monsters should be able to damage buildings through weapon swings or melee attacks and building contact" | No obstruction check existed anywhere in the firing pipeline (`WeaponFx.Beam`/`ShotAtPoint` drew straight through anything); no per-creature aggression stat existed to gate a new collateral-attack decision; player-owned `SimBuilding` visuals are collider-less so a raycast can never detect them | `MonsterAgent.HasClearLineOfSight`/`TickAttackReposition` gate projectile weapons only (`isProjectile = armed && Weapon.Kind != Melee` — melee/unarmed always get a clear shot, no line-of-fire to obstruct); a civilian blocker rolls this creature's own genome `fury` (reused, no new schema) as aggression for a FULL retarget (`_originalTargetBuilding`, resumed once the blocker dies); a player-building blocker (detected via a `SimBridge` position scan, not the raycast) always forces reposition instead, no roll; `MonsterCombatProfile.MobMentalityBonus` adds an aggression bonus when a nearby monster is already mid collateral-attack | **Reasoned, not independently re-confirmed; melee/unarmed damage+ignition-eligibility confirmed unchanged by re-reading the actual gated code path** |
+| 11 | "randomize if projectile will cause a fire. Goal make the fire pattern look organic, NOT non procedural" | Every landed hit fed `RegisterHit`'s heat network unconditionally — a strict 1:1 relationship between damage numbers and fire growth, itself perfectly deterministic regardless of how organically the heat then diffused | New `DamageFxProfile.FireIgnitionChancePerHit` (default 0.6): a per-hit roll gates only the heat-injection portion of `RegisterHit`; hit-rate/urgency tracking still sees every real hit unconditionally (real attack pressure, not this hit's own visible response) | **Reasoned, not independently re-confirmed** |
+| 12 | "monsters should attack all buildings that will be destroyed in the attack. goal make it realistic that the building are logically destroyed" | HP is shared across a multi-hex building's WHOLE footprint (destruction was already structure-wide, `ApplyBuildingDamage`'s `Destroyed` branch already shatters every cube at once) but only the specifically-hit hex ever showed fire leading up to that — a whole footprint could suddenly turn to rubble while only one corner had ever visibly burned | `ApplyBuildingDamage` now progressively ignites more of a multi-hex building's OTHER footprint hexes as its HP fraction falls (`targetIgnitedHexes = Ceil(footprintCount * urgency)`), on top of the always-first-ignited hit hex — reuses the existing idempotent per-hex ignition guard entirely, no new fire mechanics | **Reasoned, not independently re-confirmed** |
 
 **Rows 1-6 are creator-confirmed against real reported symptoms in
 sequence** (each report describes what the previous fix actually
-produced). **Rows 7-9 are the current architecture** — internally
+produced). **Rows 7-12 are the current architecture** — internally
 consistent and traced against the creator's own brief/report numbers,
 but this environment has no Editor, so nothing past row 6 has been seen
 rendered.
@@ -142,6 +147,48 @@ ignites independently from wherever it's actually being hit, and a
 later-rebuilt hex (a fresh `GameObject`, fresh reference) automatically
 starts unignited again.
 
+**Progressive whole-structure ignition as HP falls.** HP is shared
+across a multi-hex building's WHOLE footprint (`_battlefield.Buildings`
+is keyed by `Building`, not by hex) — every hex was already going to
+collapse together the instant HP hit zero (`ApplyBuildingDamage`'s
+`Destroyed` branch already shatters every cube in one pass). The gap:
+only the specifically-hit hex ever showed fire on the way there, so a
+whole footprint could suddenly turn to rubble while only one corner had
+ever visibly burned — not "logically destroyed," a surprise instead of
+an earned collapse. Fixed in `ApplyBuildingDamage`: as the building's own
+HP fraction falls, `targetIgnitedHexes = Ceil(footprintCount * urgency)`
+(`urgency = 1 - hpFraction`) more of its OTHER footprint hexes get
+`IgniteBuildingIfNeeded` calls too, on top of the hit hex (which still
+always ignites first, unconditionally). At full health only the hit hex
+burns; near death, nearly (or fully) every hex is alight. Reuses the
+SAME idempotent per-hex guard `_ignitedCubes` already provides — calling
+it again for an already-lit hex is a cheap no-op, so this is purely
+"ignite more hexes over time," no new state, no new mechanics.
+Single-hex buildings (`Footprint.Count == 1`, the common case) are
+completely unaffected — the loop only runs for genuinely multi-hex
+structures.
+
+## 1.6. Which building gets attacked at all — the attack hierarchy (MonsterAgent, not this file)
+
+Everything above assumes `MonsterAgent` has already decided which
+`Building` (and which of its hexes) to hit this tick. That decision
+itself lives in `MonsterAgent.TickAttack`, NOT in `DamageFx.cs`, but
+it's worth cross-referencing here since it's what feeds every
+`RegisterHit`/`IgniteBuildingIfNeeded` call in this whole system:
+**Target > Collateral > Reposition.** A monster with a real projectile
+weapon (`isProjectile = armed && Weapon.Kind != Melee` — melee/unarmed
+are exempt entirely, no line of fire to obstruct) checks line of sight
+to its target before firing; if blocked by ANOTHER building, a player-
+owned one is never a valid collateral target (forces reposition, no
+roll), a civilian one rolls this creature's own genome `fury` (reused as
+"aggression," no new genome schema) — success does a FULL retarget
+through this exact fire/damage/collapse pipeline, not a scripted one-off
+smash, resuming the original target once the collateral one is
+destroyed. `MonsterCombatProfile.MobMentalityBonus` lets a nearby
+monster's own ongoing collateral attack raise THIS creature's odds of
+joining in, without ever guaranteeing it. Full detail: `docs/12`'s own
+"attack hierarchy" entries.
+
 ## 2. Placement — PickSurfacePoint
 
 `IgniteCell` never guesses a fire point's world position — it asks
@@ -205,15 +252,45 @@ pipeline, but more simultaneous attackers necessarily means hits land
 closer together in time) both feed:
 
 - `CurrentSimTickInterval` — the sim ticks faster (down to
-  `MinSimTickInterval`, 0.12s) as either climbs.
+  `MinSimTickInterval`, 0.12s) as either climbs, ALSO multiplied by the
+  creator-facing `DamageFxProfile.FireSpawnRateMultiplier` (default 1.0,
+  see §4).
 - `_maxIgnitedCells` — raised above its area-based floor
-  (`_baseMaxIgnitedCells`) by up to `MaxUrgencyBonusCells` (3), capped at
-  `MaxFireCountCeiling` (10).
+  (`_baseMaxIgnitedCells`) by up to `MaxUrgencyBonusCells` (6, raised
+  from 3 — "make it look logical the building would collapse"), capped
+  at `MaxFireCountCeiling` (15, the grid's own true max, raised from 10 —
+  a building right at the edge of destruction can now have nearly its
+  ENTIRE visible facade on fire, not still capped a third short of full
+  coverage).
 
 Net effect: a building near destruction, or one being hit by several
 attackers at once, visibly grows fire faster and further than the same
 building taking occasional single hits — "shorter time [to destruction],
 more spawns."
+
+## 3.4. Randomized per-hit ignition — "not mechanical"
+
+"randomize if projectile will cause a fire. Goal make the fire pattern
+look organic, NOT non procedural" (read as "not [obviously] procedural"
+— the throughline of this whole system, from the heat-network rewrite
+through per-cell `Flammability`, has been making spread read as organic
+rather than a visibly mechanical simulation response). Every landed hit
+used to feed `RegisterHit`'s heat network unconditionally — a strict 1:1
+relationship between damage and fire growth, itself perfectly
+deterministic no matter how organically the heat then diffused.
+
+`RegisterHit` now rolls `DamageFxProfile.FireIgnitionChancePerHit`
+(default 0.6, `[0.1, 1]`) per hit BEFORE the heat-injection lines run — a
+failed roll still deals real damage (this happens in
+`RuntimeCityBuilder.ApplyBuildingDamage`, upstream of `RegisterHit`
+entirely), it just has no visible fire consequence that time. Deliberately
+narrow: `_hitRateEma`/`_urgency` tracking still runs on EVERY real hit
+unconditionally — that represents actual attack pressure, not this hit's
+own visible response, so randomizing it too would have made the ignition-
+pacing/fire-count-ceiling math itself noisy, which wasn't asked for. The
+very first ignition (`IgniteBuildingIfNeeded`, "spawn fire when under
+attack") is untouched — it was never gated on `RegisterHit` to begin
+with, so a building still always shows fire the instant combat starts.
 
 ## 3.5. Persistent per-instance visual variation
 
@@ -245,29 +322,42 @@ to `Vector3.one`, so every OTHER consumer is byte-for-byte unaffected;
 only `FirePlume.SpawnPuff` calls it, with `(widthJitter, heightJitter,
 widthJitter)`.
 
-## 4. DamageFxProfile — the tuning surface
+## 4. DamageFxProfile / MonsterCombatProfile — the tuning surfaces
 
 `DamageFxProfile.cs` (a `ScriptableObject`, same pattern as
-`CityLightingProfile`) holds the fire/smoke SIZE knobs:
+`CityLightingProfile`) holds the fire/smoke knobs:
 `SmokeResizePct`/`SmokeGrowthMultiplier`/`SmokeRiseSpeed`/
 `SmokeWindSpeed`, `FireResizePct` (point-light range/intensity only),
-`FireSizeBoostPct` (flame-mesh size, default 1.18). Everything ELSE in
-this doc — grid layout, heat/ventilation constants, bias ratios, urgency
-tuning — lives as `private const` fields directly on `FireCluster` in
-`DamageFx.cs`, not on the profile asset; they're simulation tuning, not
-per-playtest visual knobs, so there was no ask (yet) to expose them at
-runtime.
+`FireSizeBoostPct` (flame-mesh size, default 1.18), `FireSpawnRateMultiplier`
+(default 1.0, multiplies `CurrentSimTickInterval`'s existing speedup
+factor — "give me an inspector setting for spawn rate of fires"), and
+`FireIgnitionChancePerHit` (default 0.6, §3.4's per-hit organic-pattern
+roll). Everything ELSE in this doc — grid layout, heat/ventilation
+constants, bias ratios, urgency tuning — lives as `private const` fields
+directly on `FireCluster` in `DamageFx.cs`, not on the profile asset;
+they're simulation tuning, not per-playtest visual knobs, so there was
+no ask (yet) to expose them at runtime.
+
+A SEPARATE new `MonsterCombatProfile.cs` (same ScriptableObject pattern,
+its own `Assets > Create > MadDr > Monster Combat Profile` menu, wired
+into `RuntimeCityBuilder` identically) holds the first entry in a
+combat/AI-behavior tuning domain, distinct from either fire/smoke or
+lighting: `MobMentalityBonus`/`MobMentalityRadius` (§1.6's mob-mentality
+aggression bonus). Not a fire-system asset itself, but referenced here
+since it directly shapes which building `MonsterAgent` ends up feeding
+into this whole pipeline.
 
 ## 5. What's wired up today vs. what's still a stub for later
 
 | Path | Status |
 | --- | --- |
-| Procedural civilian buildings (`RuntimeCityBuilder`) | Full pipeline: ignition on in-range, per-hex `RegisterHit` on every landed hit (§1.5), raycast placement, persistent visual variation |
-| Multi-hex buildings (Medium/Large tiers) | Each footprint hex ignites/feeds independently, from whichever hex is actually under fire (§1.5) |
-| RTS building roster (`BaseDresser`) | Ignition + placement shared (same `FireCluster`/`AttachFireCluster`); **`RegisterHit` is NOT wired here** — `BaseDresser`'s own damage path never calls it, so RTS-roster buildings ignite but their fire never speeds up/spreads from urgency or attack rate the way procedural buildings' does; also single-hex only today (no multi-hex footprint concept on that roster) |
+| Procedural civilian buildings (`RuntimeCityBuilder`) | Full pipeline: ignition on in-range (gated behind line-of-sight for projectile weapons, §1.6), per-hex `RegisterHit` on every landed hit (§1.5), randomized per-hit fire contribution (§3.4), raycast placement, persistent visual variation |
+| Multi-hex buildings (Medium/Large tiers) | Each footprint hex ignites/feeds independently from whichever hex is actually under fire; OTHER hexes progressively ignite too as the building's shared HP falls, so a full-footprint collapse reads as earned (§1.5) |
+| Collateral/attack-hierarchy targeting | Live in `MonsterAgent`, cross-referenced §1.6 — which building even reaches this pipeline is now itself a real decision (Target > Collateral > Reposition), not just "whatever's under the cursor" |
+| RTS building roster (`BaseDresser`) | Ignition + placement shared (same `FireCluster`/`AttachFireCluster`); **`RegisterHit` is NOT wired here** — `BaseDresser`'s own damage path never calls it, so RTS-roster buildings ignite but their fire never speeds up/spreads from urgency or attack rate the way procedural buildings' does; also single-hex only today (no multi-hex footprint concept on that roster), so the progressive-ignition mechanic above never applies to it either |
 | Real per-hit 3D impact points | Not implemented — see §6 |
 | Fuel depletion / fire going out | Not implemented — deliberate, see §1 |
-| Fire spreading to an ADJACENT building | Not implemented — the grid is scoped to one building only |
+| Fire spreading to an ADJACENT (separate) building | Not implemented — the grid is scoped to one `Building`'s own footprint only; a "collateral" attack (§1.6) retargets a whole separate building deliberately via monster AI, which is different from fire itself leaping across |
 | Structural/roof collapse triggered by fire | Not implemented — "not on roofs" stands; fire never reaches the true roofline band |
 | Water/hydrant dousing fire | Not implemented — `WaterJet`/hydrant FX (`DamageFx.WaterJet`) is a separate, unrelated system today |
 
@@ -283,6 +373,12 @@ runtime.
 - **Wire `RegisterHit` into `BaseDresser`'s own damage path** so RTS
   roster buildings get the same urgency/attack-rate speed-up procedural
   buildings do (see §5's gap).
+- **Give player-owned `SimBuilding`s real colliders + a `BaseDresser`-side
+  registry**, mirroring `RuntimeCityBuilder._buildingByCollider`/
+  `BuildingFromCollider` -- would let §1.6's line-of-sight check detect
+  them via the SAME raycast civilian buildings already use, instead of
+  the separate `SimBridge` position-scan (`IsBlockedByPlayerBuilding`)
+  it needs today purely because they're collider-less.
 - **Cross-building embers.** Today's embers (§1) only ever jump within
   one building's own 15-cell grid. A building fully engulfed next to a
   dense block could plausibly ignite a neighbour — would need a way for
@@ -310,9 +406,16 @@ No Unity Editor exists in this environment — every fix past §0.5 row 6
 is reasoned from the creator's own reports/briefs and traced against
 real code (`SpawnCube`'s actual collider setup, `BuildingDresser`'s
 actual lack of one, `CityGenerator.cs`'s own tier-footprint-size
-comment, the brief's own literal percentages), not guessed. Nothing
-here has been confirmed by an actual render since the heat-network
-rewrite (row 7) shipped — treat rows 7-9 as "reasoned and internally
-consistent," not "confirmed working," until a real Play-mode/screenshot
-report comes back, the same standard `docs/28` holds its own
-unconfirmed rows to.
+comment, `GenomeDto.cs`'s own `Brain.Params` shape, the brief's own
+literal percentages), not guessed. Nothing here has been confirmed by an
+actual render since the heat-network rewrite (row 7) shipped — treat
+rows 7-12 as "reasoned and internally consistent," not "confirmed
+working," until a real Play-mode/screenshot report comes back, the same
+standard `docs/28` holds its own unconfirmed rows to. If you're picking
+this up cold and want the single most likely next real-world check: a
+sustained attack on a genuinely multi-hex (Medium/Large-tier) building,
+watched all the way to collapse, would exercise nearly everything in
+rows 9-12 at once (per-hex ignition, progressive whole-structure
+spread, randomized per-hit contribution, and — if a second building
+happens to be in the way — the collateral-attack hierarchy) in one
+session.
