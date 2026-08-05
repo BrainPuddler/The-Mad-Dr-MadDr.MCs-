@@ -464,6 +464,24 @@ public class SmokePlume : MonoBehaviour
 /// cref="SmokePuff.InitFlame"/>) instead of drifting in a dead-straight
 /// line, the actual "licking" motion real flame has that a constant-
 /// velocity puff never could.</summary>
+/// <summary>2026-08 (creator direction: "Each visible fire instance
+/// should receive a persistent random seed. Randomize independently:
+/// flame height, width, brightness, flicker speed, animation phase,
+/// lean angle, emissive intensity, growth rate, lifetime. Adjacent
+/// flames should never look cloned... Do not increase the number of
+/// fire objects unnecessarily... Avoid per-frame allocations. Avoid
+/// expensive searches. Maintain deterministic behaviour"): one
+/// `FirePlume` IS "a visible fire instance" -- its own `GetInstanceID()`
+/// (already this file's standing convention for deterministic, non-
+/// `UnityEngine.Random` variety) is its persistent seed, sampled ONCE in
+/// `Awake` into the jitter fields below, then reused for as long as the
+/// plume lives. No new fields beyond these plain floats, no new
+/// GameObjects/components, nothing computed per-frame beyond a handful
+/// of already-existing multiplies -- every `FirePuff` this plume ever
+/// spawns (still the SAME pooled-nothing/reused-`SmokePuff` model as
+/// before) just reads these instead of a flat constant, so puffs from
+/// the SAME plume share a coherent "personality" while DIFFERENT plumes
+/// (each with their own instance ID) never line up.</summary>
 public class FirePlume : MonoBehaviour
 {
     private float _timer;
@@ -471,6 +489,28 @@ public class FirePlume : MonoBehaviour
     private float _flickerPhase;
     private float _sizeScale = 1f;
     private float _heatScale = 1f;
+
+    // ---- persistent per-instance visual-variation seed ----
+    private float _heightJitter = 1f;
+    private float _widthJitter = 1f;
+    private float _brightnessJitter = 1f;
+    private float _emissiveJitter = 1f;
+    private float _growthJitter = 1f;
+    private float _lifetimeJitter = 1f;
+    private float _flickerSpeedJitter = 1f;
+    private float _leanYaw;
+    private float _leanTilt;
+
+    /// <summary>Deterministic 0..1 hash off this instance's own persistent
+    /// seed plus a salt (distinguishes which property is being sampled) --
+    /// same GetInstanceID()-bit-masking idiom `RandomFloat01`/`Hash01`
+    /// already use elsewhere in this file, just local to this class since
+    /// nothing outside `FirePlume` needs it.</summary>
+    private static float Jitter(int seed, int salt, float min, float max)
+    {
+        var t = ((seed + salt * 92821) & 0xFFFF) / 65536f;
+        return Mathf.Lerp(min, max, t);
+    }
 
     /// <summary>2026-08 (creator direction: "Larger building get more
     /// fires and larger fires"): `sizeScale` comes from <see
@@ -504,8 +544,22 @@ public class FirePlume : MonoBehaviour
 
     private void Awake()
     {
-        _timer = (GetInstanceID() & 7) * 0.03f;
-        _flickerPhase = (GetInstanceID() & 255) * 0.37f;
+        var seed = GetInstanceID();
+        _timer = (seed & 7) * 0.03f;
+        // "animation phase" -- already persistent-per-instance via `seed`,
+        // unchanged from before this pass, just noted here alongside its
+        // siblings rather than re-derived.
+        _flickerPhase = (seed & 255) * 0.37f;
+
+        _heightJitter = Jitter(seed, 1, 0.8f, 1.25f);
+        _widthJitter = Jitter(seed, 2, 0.8f, 1.25f);
+        _brightnessJitter = Jitter(seed, 3, 0.85f, 1.15f);
+        _emissiveJitter = Jitter(seed, 4, 0.8f, 1.3f);
+        _growthJitter = Jitter(seed, 5, 0.75f, 1.35f);
+        _lifetimeJitter = Jitter(seed, 6, 0.8f, 1.3f);
+        _flickerSpeedJitter = Jitter(seed, 7, 0.75f, 1.35f);
+        _leanYaw = Jitter(seed, 8, 0f, 360f);
+        _leanTilt = Jitter(seed, 9, 4f, 16f);
 
         _glow = gameObject.AddComponent<Light>();
         _glow.type = LightType.Point;
@@ -531,8 +585,10 @@ public class FirePlume : MonoBehaviour
     {
         // fast, irregular flicker (two mismatched sine frequencies beat
         // against each other rather than one clean pulse, which reads as
-        // mechanical, not like fire)
-        _flickerPhase += Time.deltaTime * 9f;
+        // mechanical, not like fire). `_flickerSpeedJitter` (persistent
+        // per-instance, see Awake) means different flames flicker at
+        // visibly different rates, not a shared metronome.
+        _flickerPhase += Time.deltaTime * 9f * _flickerSpeedJitter;
         var flicker = 0.7f + Mathf.Abs(Mathf.Sin(_flickerPhase) * 0.6f + Mathf.Sin(_flickerPhase * 2.3f) * 0.4f) * 0.5f;
         // this REPLACES a previously-hardcoded `0.35f` literal with the
         // live profile value (default 0.35, so default behavior is
@@ -541,8 +597,10 @@ public class FirePlume : MonoBehaviour
         // Read fresh every frame (not cached from Awake) so an Inspector
         // change affects an ALREADY-burning building's glow immediately.
         // `_heatScale` (see SetHeatScale) is the "brighter emissive
-        // lighting, stronger flicker" half of heat-driven growth.
-        _glow.intensity = DamageFxProfile.Active.FireResizePct * flicker * _heatScale;
+        // lighting, stronger flicker" half of heat-driven growth;
+        // `_brightnessJitter` is this instance's own persistent variation
+        // on top of that.
+        _glow.intensity = DamageFxProfile.Active.FireResizePct * flicker * _heatScale * _brightnessJitter;
 
         _timer -= Time.deltaTime;
         if (_timer > 0f) return;
@@ -595,20 +653,37 @@ public class FirePlume : MonoBehaviour
     /// larger flames, taller flames" from the creator's own brief, read
     /// fresh on every puff so a point already burning visibly grows as
     /// its own internal cell keeps accumulating heat under sustained
-    /// attack, not just once at spawn.</summary>
+    /// attack, not just once at spawn.
+    ///
+    /// 2026-08 follow-up (creator direction: persistent per-instance
+    /// visual variation, see this class's own doc comment): `size` above
+    /// is now split into an independent `_widthJitter`/`_heightJitter`
+    /// pair (via `SmokePuff.SetScaleAxisMultiplier` -- `SmokePuff.Update`
+    /// otherwise always applies a UNIFORM scale every frame off its own
+    /// `_baseScale`, so setting a non-uniform `localScale` here alone
+    /// would just get overwritten the next frame; this is a real,
+    /// backward-compatible opt-in, defaulting to `Vector3.one` for every
+    /// OTHER `SmokePuff` consumer -- smoke/dust/water/muzzle are
+    /// byte-for-byte unaffected). Color brightness/emissive intensity/
+    /// growth rate/lifetime each get their own persistent multiplier;
+    /// `_leanYaw`/`_leanTilt` apply a fixed rotation so every puff from
+    /// THIS plume leans the same consistent direction (a coherent lick,
+    /// not each puff twitching a new random way) while still differing
+    /// from every OTHER plume's own lean.</summary>
     private void SpawnPuff()
     {
         var go = new GameObject("FirePuff");
         go.transform.SetParent(transform, false);
         var id = go.GetInstanceID();
         go.transform.position = transform.position + new Vector3(((id & 3) - 1.5f) * 0.1f, 0f, (((id >> 2) & 3) - 1.5f) * 0.1f);
+        go.transform.rotation = Quaternion.Euler(_leanTilt, _leanYaw, 0f);
         var smokeResizePct = DamageFxProfile.Active.SmokeResizePct;
         // this initial scale only holds for one frame -- SmokePuff.Update
         // (below) overwrites it uniformly every frame off _baseScale, the
         // same "explicit spawn scale is cosmetically moot" precedent
         // SmokePlume/DustBurstFx's own spawn-time scale already sets.
         var size = 1.1f * smokeResizePct * DamageFxProfile.Active.FireSizeBoostPct * _sizeScale * _heatScale;
-        go.transform.localScale = new Vector3(size, size, size);
+        go.transform.localScale = new Vector3(size * _widthJitter, size * _heightJitter, size * _widthJitter);
 
         var meshFilter = go.AddComponent<MeshFilter>();
         meshFilter.sharedMesh = ProceduralMeshKit.FlameShard(5, id * 0.017f);
@@ -616,10 +691,11 @@ public class FirePlume : MonoBehaviour
 
         var mat = new Material(ShaderUtil.FindRenderableShader());
         var warm = ((id >> 4) & 3) == 0;
-        mat.color = warm ? new Color(0.95f, 0.55f, 0.12f, 0.9f) : new Color(0.98f, 0.78f, 0.2f, 0.9f);
+        var baseColor = warm ? new Color(0.95f, 0.55f, 0.12f, 0.9f) : new Color(0.98f, 0.78f, 0.2f, 0.9f);
+        mat.color = new Color(Mathf.Clamp01(baseColor.r * _brightnessJitter), Mathf.Clamp01(baseColor.g * _brightnessJitter), Mathf.Clamp01(baseColor.b * _brightnessJitter), baseColor.a);
         LabMeshBuilder.MakeTransparent(mat);
         mat.EnableKeyword("_EMISSION");
-        mat.SetColor("_EmissionColor", (warm ? new Color(0.95f, 0.35f, 0.05f) : new Color(1f, 0.65f, 0.1f)) * 2.5f);
+        mat.SetColor("_EmissionColor", (warm ? new Color(0.95f, 0.35f, 0.05f) : new Color(1f, 0.65f, 0.1f)) * 2.5f * _emissiveJitter);
         // 2026-08 (creator direction: "figure out how to verify fire is
         // being seen and make sure it is NOT hidden by smoke"): both fire
         // and smoke materials go through the SAME MakeTransparent, which
@@ -643,7 +719,11 @@ public class FirePlume : MonoBehaviour
         // it, unlike smoke's own sustained 3.2s puffs. Tripled to
         // 1.5-2.22s so a flame actually holds on screen long enough to be
         // seen, not just technically rendered for a few frames.
-        go.AddComponent<SmokePuff>().InitFlame(mat, 1.5f + ((id >> 6) & 3) * 0.24f, size * 0.8f, 0.9f, size);
+        var life = (1.5f + ((id >> 6) & 3) * 0.24f) * _lifetimeJitter;
+        var growth = size * 0.8f * _growthJitter;
+        var puff = go.AddComponent<SmokePuff>();
+        puff.InitFlame(mat, life, growth, 0.9f, size);
+        puff.SetScaleAxisMultiplier(new Vector3(_widthJitter, _heightJitter, _widthJitter));
     }
 }
 
@@ -762,19 +842,42 @@ public class FireCluster : MonoBehaviour
 
     /// <summary>Center-skewed pick weights for `PickWeightedColumn`,
     /// index-aligned with `GridAngleOffsets` -- the middle column (0
-    /// degrees off `_baseAngle`, i.e. most directly camera-facing) is 3x
-    /// as likely to receive a hit's heat as either edge column. "Cheat
-    /// [skew] probability of flames on surfaces facing the camera closest
-    /// to the camera" without ever fully excluding the edges (still
-    /// weight 1, not 0) -- that's what keeps the spread "wider," not
-    /// clustered dead-center either.</summary>
-    private static readonly int[] AngleColumnWeights = { 1, 2, 3, 2, 1 };
-    private const int AngleColumnWeightSum = 9;
+    /// degrees off `_baseAngle`, i.e. most directly camera-facing) is
+    /// still favored over either edge column, but not as strongly as the
+    /// original `{1,2,3,2,1}` pass (a flat 3x centre-vs-edge ratio).
+    ///
+    /// 2026-08 follow-up (creator direction, alongside a fuller visual-
+    /// variation brief: "decrease but do not eliminate[] the spawn facing
+    /// camera preference"): ratio pulled down to 2x (`{2,3,4,3,2}`) --
+    /// the centre still wins on average ("do not eliminate"), but the
+    /// gap to the edges is smaller, letting hits land further round the
+    /// arc more often, which reads as organically wider spread once
+    /// combined with this cell's own new per-cell `Flammability` variance
+    /// (see `FireCell`) instead of the camera weighting alone carrying
+    /// all of "keep it wide."</summary>
+    private static readonly int[] AngleColumnWeights = { 2, 3, 4, 3, 2 };
+    private const int AngleColumnWeightSum = 14;
 
+    /// <summary>2026-08 (creator direction: "Fire should spread as
+    /// irregular islands connected by branching fingers, leaving
+    /// temporary gaps, hesitating in some areas, suddenly accelerating in
+    /// others... The player should never be able to identify the
+    /// underlying simulation grid"): `Flammability` is a fixed, PERSISTENT
+    /// per-cell multiplier (set once in `Init`, from a deterministic hash
+    /// -- see that method's own comment) folded into `SpreadHeat`
+    /// alongside `Ventilation`. Some cells are inherently a little
+    /// quicker to catch, some a little slower, purely from this one extra
+    /// float -- no new objects, no per-frame allocation, no expensive
+    /// search, and (since it's hashed off THIS `FireCluster` instance's
+    /// own `GetInstanceID()`, freshly assigned every time a new one is
+    /// created) genuinely different each time a building catches fire
+    /// again, while staying perfectly reproducible within any ONE
+    /// ignition for debugging.</summary>
     private struct FireCell
     {
         public float Heat;
         public float Ventilation;
+        public float Flammability;
         public bool Ignited;
         public FirePlume Plume;
     }
@@ -826,6 +929,9 @@ public class FireCluster : MonoBehaviour
     private const float NeighborImpactBleedFrac = 0.35f;
     private const float SurfaceOffset = 0.12f;  // outward nudge along the hit normal so a flame sits just proud of the surface, not clipped into it
     private const float LosProbeOffset = 0.6f;  // a bigger nudge used ONLY for the camera-visibility test, so testing from a point almost touching the collider doesn't self-occlude against its own building
+    private const float MinFlammability = 0.6f; // "hesitating in some areas"
+    private const float MaxFlammability = 1.5f; // "suddenly accelerating in others"
+    private const int FlammabilitySalt = 5000;  // offset clear of MaybeSpawnEmber's own RandomFloat01(i) salt range, purely to keep the two uses visibly independent in code, not a correctness requirement
 
     public void Init(float height, float footprintRadius, int targetCount)
     {
@@ -839,7 +945,18 @@ public class FireCluster : MonoBehaviour
         _baseAngle = CameraFacingAngle();
 
         _cells = new FireCell[GridAngleSegments * GridHeightBands];
-        for (var i = 0; i < _cells.Length; i++) _cells[i].Ventilation = BaselineVentilation;
+        for (var i = 0; i < _cells.Length; i++)
+        {
+            _cells[i].Ventilation = BaselineVentilation;
+            // deterministic per-cell hash off THIS instance's own
+            // GetInstanceID() (see RandomFloat01) -- reproducible within
+            // one ignition (debugging), freshly different across separate
+            // ignitions of "the same" building (a new FireCluster
+            // GameObject gets a new instance ID every time), same
+            // property the rest of this file's own jitter already relies
+            // on (see FirePlume's persistent per-instance seed).
+            _cells[i].Flammability = Mathf.Lerp(MinFlammability, MaxFlammability, RandomFloat01(FlammabilitySalt + i));
+        }
         _heatDelta = new float[_cells.Length];
 
         // "Fire always begins at ... weapon impact locations": the origin
@@ -951,7 +1068,12 @@ public class FireCluster : MonoBehaviour
         if (toAngle < 0 || toAngle >= GridAngleSegments) return; // no wrap -- the grid IS the visible arc, nothing propagates past its edge
         if (toBand < 0 || toBand >= GridHeightBands) return;
         var toIndex = CellIndex(toAngle, toBand);
-        var amount = _cells[fromIndex].Heat * BaseDiffusionRate * bias * _cells[toIndex].Ventilation;
+        // Flammability (see FireCell's own doc comment): a fixed per-cell
+        // multiplier alongside Ventilation -- some cells inherently catch
+        // a little faster or slower, which is what turns an otherwise
+        // perfectly even radiating diffusion into "irregular islands...
+        // hesitating in some areas, suddenly accelerating in others."
+        var amount = _cells[fromIndex].Heat * BaseDiffusionRate * bias * _cells[toIndex].Ventilation * _cells[toIndex].Flammability;
         _heatDelta[toIndex] += amount;
     }
 
@@ -1233,6 +1355,23 @@ public class SmokePuff : MonoBehaviour
     private float _swayFreq;
     private float _swayPhase;
 
+    // 2026-08 (creator direction: "randomize independently: flame
+    // height, width"): defaults to Vector3.one -- every EXISTING puff
+    // kind (smoke/dust/water/muzzle) never calls SetScaleAxisMultiplier,
+    // so `Update`'s scale line below is byte-for-byte unchanged for all
+    // of them. Only `FirePlume.SpawnPuff` sets this, to a plume's own
+    // persistent (X=width, Y=height, Z=width) jitter, so height and
+    // width can differ from each other -- `Update`'s own uniform `scale`
+    // float still drives the OVERALL size/growth-over-life exactly as
+    // before, this just un-does the "always a perfect cube" constraint
+    // on top of it.
+    private Vector3 _scaleAxisMultiplier = Vector3.one;
+
+    public void SetScaleAxisMultiplier(Vector3 multiplier)
+    {
+        _scaleAxisMultiplier = multiplier;
+    }
+
     // 2026-08 (creator direction: "always smooth fading out of upper
     // large chunks of smoke"): false (linear alpha fade, `1f - t`,
     // completely unchanged) for every existing puff kind -- only
@@ -1368,7 +1507,7 @@ public class SmokePuff : MonoBehaviour
         var scale = _useGrowthMultiplier
             ? _baseScale * Mathf.Lerp(1f, _growthMultiplier, t)
             : _baseScale * Mathf.Lerp(_startScaleFraction, 1f, t) + t * _growth;
-        transform.localScale = new Vector3(scale, scale, scale);
+        transform.localScale = new Vector3(scale * _scaleAxisMultiplier.x, scale * _scaleAxisMultiplier.y, scale * _scaleAxisMultiplier.z);
         if (_mat != null)
         {
             // smoke (_easeFade) uses a smoothstep ease instead of a

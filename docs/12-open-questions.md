@@ -11771,3 +11771,100 @@ confirmed lack of one), not a guess; the spread/speed changes are tuned
 constants reasoned from the brief's own numbers and this saga's repeated
 "verify, don't guess" standard, but -- unlike the raycast fix -- have no
 external ground truth to check against beyond that reasoning.
+
+## 2026-08 follow-up: per-hex hit-first ignition for multi-hex buildings, persistent per-flame visual variation, organic spread
+
+Creator direction, quoting docs/29 as reference: **"if an attacked
+target has multiple building in it's template then any buildings hit my
+monster's weapon fire should catch fire first. decrease but do not
+eliminate[] the spawn facing camera preference and apply below. [a
+visual-variation brief: persistent per-instance random seed for flame
+height/width/brightness/flicker speed/animation phase/lean angle/
+emissive intensity/growth rate/lifetime, adjacent flames never cloned,
+no new fire objects, reuse existing pools, no per-frame allocations, no
+expensive searches, deterministic but organic -- islands, branching
+fingers, gaps, hesitation, sudden acceleration, eventual merging into
+sheets, a unique burn pattern even for the same building burned
+twice]."**
+
+**Multi-hex hit-first ignition.** Verified first: `BuildingStats`'s own
+tier comment (`CityGenerator.cs`) confirms Medium/Large tiers really do
+span multiple hexes (1/2/4), each with its own massing cube
+(`RuntimeCityBuilder`'s `cubes` list -- one per footprint hex, same
+index order as `building.Footprint`). Previously `IgniteBuildingIfNeeded`/
+`ApplyBuildingDamage` always operated on `cubes[0]` regardless of which
+hex an attacker was actually hitting -- a multi-hex building's fire
+always started on its first hex, never wherever combat was actually
+happening. Fixed by threading the attacker's own nearest-footprint-hex
+(`MonsterAgent.TickAttack`'s existing `bp`, converted to a `HexCoord`
+via `_builder.HexAt(bp)` -- the SAME point the weapon FX beam/shot
+already converges on, just not previously passed any further) through
+both methods as a new `HexCoord hitHex` parameter. `RuntimeCityBuilder.
+FootprintIndexOf(Building, HexCoord)` resolves which massing cube that
+hex corresponds to (a plain linear scan -- footprints top out at 4
+hexes, nowhere near the "expensive search" the visual-variation brief
+warns against, and it only runs once per landed hit, not per frame).
+Ignition tracking moved from a `HashSet<Building>` (`_ignitedBuildings`)
+to `HashSet<GameObject>` (`_ignitedCubes`, one entry per massing cube)
+so each hex of a multi-hex structure ignites independently -- keying by
+the cube's own `GameObject` reference (rather than a compound key) also
+means a rebuilt hex starts fresh automatically, since the OLD cube was
+already `Object.Destroy`'d and can never collide with the new one's
+distinct reference. `RegisterHit` (per-hit heat feed) now resolves the
+SAME hit hex's own `FireCluster`, so a multi-hex building's un-hit
+hexes never hear about damage landing on a different one.
+
+**Decreased camera-facing preference.** `FireCluster.AngleColumnWeights`
+(the weighted pick `RegisterHit` uses to spread ongoing hits across
+angle columns) pulled from `{1,2,3,2,1}` (3x centre-vs-edge ratio) to
+`{2,3,4,3,2}` (2x) -- the centre still wins on average ("do not
+eliminate"), but less dominantly, so hits land further round the visible
+arc more often.
+
+**Persistent per-instance visual variation.** New `FirePlume.Jitter(seed,
+salt, min, max)` -- the same `GetInstanceID()`-hash idiom this file
+already uses everywhere for deterministic, non-`UnityEngine.Random`
+variety -- samples 9 persistent multipliers ONCE in `Awake` (height,
+width, brightness, emissive intensity, growth rate, lifetime, flicker
+speed, plus a fixed lean yaw/tilt; "animation phase" was already
+persistent-per-instance via the existing `_flickerPhase` seed, unchanged).
+No new fields beyond plain floats, no new GameObjects, nothing computed
+per-frame beyond a handful of multiplies already happening. Height/width
+independence needed one small, backward-compatible extension to the
+SHARED `SmokePuff` class (used by smoke/dust/water/muzzle too, not just
+fire): a new `SetScaleAxisMultiplier(Vector3)`, defaulting to
+`Vector3.one` so every OTHER consumer is byte-for-byte unaffected --
+`Update()`'s own uniform-scale line was otherwise going to overwrite any
+non-uniform spawn-time scale on the very next frame regardless of what
+`FirePlume` set it to. Because every `FirePlume` already has its own
+distinct instance ID, "adjacent flames never look cloned" and "unique
+burn pattern even for the same building destroyed multiple times" both
+fall out of the SAME mechanism already in use, not a new one -- a fresh
+`FirePlume`/`FireCluster` GameObject gets a fresh instance ID every time
+one is created, reproducible within any one ignition (debugging) but
+naturally different across separate ones.
+
+**Organic, non-grid-readable spread.** New `FireCell.Flammability` -- a
+fixed per-cell multiplier (0.6-1.5x), hashed once per cell in
+`FireCluster.Init` off the cluster's own instance ID (same
+determinism-vs-freshness property as the visual jitter above), folded
+into `SpreadHeat` alongside `Ventilation`. This is the whole mechanism:
+one extra float per cell (15 cells total), no new objects, no per-frame
+allocation, one extra multiply in an already-existing per-tick loop.
+Some cells inherently catch a little faster or slower than a uniform
+diffusion model would predict, which is what turns "heat radiates
+outward at a fixed rate" into "irregular islands... hesitating in some
+areas, suddenly accelerating in others" without needing a heavier
+simulation. `SidewaysBias` (already raised in the prior round, see
+above) and the existing rare-ember mechanic (unchanged) both continue
+contributing their own share of "branching fingers"/"gaps" on top of
+this.
+
+No Unity Editor in this environment to watch any of this render live.
+The multi-hex fix is verified against real code (the tier-count comment,
+the `cubes`/`Footprint` index-order invariant `ApplyBuildingDamage`'s
+own Destroyed branch already relies on) rather than assumed; the visual-
+variation and organic-spread mechanisms are new, reasoned constructions
+built to the brief's own explicit constraints (no new objects, no
+per-frame allocations, no expensive searches, deterministic-but-fresh),
+not screenshot-confirmed.

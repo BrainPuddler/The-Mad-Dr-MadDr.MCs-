@@ -28,10 +28,11 @@ uses.
 | 6 | "yes now on building now. Remove firedebug spheres. Increase the size of fire by 18%... spawn a number of fires... Larger building get more fires and larger fires. Set a sensible limit based of building's burnable surface area" | Debug sphere no longer needed; fire count/size were a flat 4-tier table with no notion of a building's real size | Debug marker code deleted; `DamageFxProfile.FireSizeBoostPct` (1.18 default); fire count/size now derive from `8 * footprintRadius * height` (a burnable-wall-area proxy) instead of a tier lookup, tier count kept as a floor | **Confirmed fixed** (count/size scaling not independently re-confirmed) |
 | 7 | Full fire-propagation brief: "use something like this to spawn fire on buildings. BUT Keep to visible area... keep system simple and performant" | The flat random-timer spawner had no concept of heat, ventilation, or impact-driven ignition at all | Rewrote as the two-layer internal-heat-network / external-renderer model this doc describes (§0-3) | **Reasoned, not independently re-confirmed** |
 | 8 | "fires is sometimes in the tile but not on the building. BURNING is ONLY allowed ON the building surfaces... Cheat probability of flames on surfaces facing the camera closest to the camera. winder spread... not a burn line. Allow some crawling. increase the speed of the spread based on number of attack points and amount of time before building is destroyed" | (a) placement used one fixed radial distance for every angle, wrong for a non-circular footprint; (b) every ongoing hit fed one fixed cell, and the strong upward bias turned that into a single vertical column | (a) `PickSurfacePoint` raycasts against the building's own massing-cube collider instead of guessing a distance; (b) `RegisterHit` spreads across a camera-weighted set of angle columns, `SidewaysBias` raised 1.0→1.6; `_urgency`/`_hitRateEma` speed up ticking and raise the fire-count ceiling | **Reasoned, not independently re-confirmed** |
+| 9 | "if an attacked target has multiple building in it's template then any buildings hit my monster's weapon fire should catch fire first. decrease but do not eliminate[] the spawn facing camera preference" + a visual-variation brief (persistent per-instance seed for height/width/brightness/flicker/lean/emissive/growth/lifetime; organic, non-grid-readable spread; no new objects, no per-frame allocations, no expensive searches) | Multi-hex buildings (Medium/Large tiers really do span 1/2/4 hexes) always ignited/fed heat to their FIRST hex's cube regardless of where an attacker actually was; every flame's visual properties were driven by shared constants, not per-instance, so adjacent flames could look identical; heat diffusion had no per-cell variance, so spread read as a uniform radiating circle | `hitHex` (from `MonsterAgent`'s existing `bp`) threaded through `IgniteBuildingIfNeeded`/`ApplyBuildingDamage`/`RegisterHit` via `FootprintIndexOf`, so each hex ignites/feeds independently; `AngleColumnWeights` pulled `{1,2,3,2,1}`→`{2,3,4,3,2}`; `FirePlume` samples 9 persistent jittered multipliers once in `Awake` (§1.5); new per-cell `FireCell.Flammability` (§1) folded into `SpreadHeat` | **Reasoned, not independently re-confirmed** |
 
 **Rows 1-6 are creator-confirmed against real reported symptoms in
 sequence** (each report describes what the previous fix actually
-produced). **Rows 7-8 are the current architecture** — internally
+produced). **Rows 7-9 are the current architecture** — internally
 consistent and traced against the creator's own brief/report numbers,
 but this environment has no Editor, so nothing past row 6 has been seen
 rendered.
@@ -106,6 +107,41 @@ never manifest as fire racing across an intact wall (the brief's own
 1-2m secondary-crawl cap, satisfied by the grid's own geometry rather
 than a separate distance check).
 
+**Flammability — organic, non-grid-readable spread.** Each `FireCell`
+also carries a fixed `Flammability` multiplier (0.6-1.5x), hashed once
+per cell in `Init` off `FireCluster`'s own `GetInstanceID()` and folded
+into `SpreadHeat` alongside `Ventilation`. This single extra float per
+cell (no new objects, no per-frame allocation) is what turns an
+otherwise perfectly even radiating diffusion into "irregular islands...
+hesitating in some areas, suddenly accelerating in others" — some cells
+inherently catch a little faster or slower than a uniform model would
+predict. Deterministic within any ONE ignition (same instance ID → same
+map, reproducible for debugging) but freshly different every time a
+`FireCluster` is created (a fresh GameObject always gets a fresh
+instance ID, even for "the same" building burned again in a later
+match) — "a unique burn pattern even when the same building is
+destroyed multiple times," from the same mechanism, no extra state
+needed.
+
+## 1.5. Multi-hex buildings — which hex actually catches fire
+
+Medium/Large-tier buildings genuinely span multiple hexes (1/2/4 per
+`CityGenerator.cs`'s own tier table), each with its own massing cube
+(`RuntimeCityBuilder`'s `cubes` list, one per footprint hex, same index
+order as `building.Footprint`). Ignition and ongoing heat feed both
+resolve WHICH hex via `hitHex` — a `HexCoord` `MonsterAgent.TickAttack`
+already computes (`NearestFootprintPoint`, converted via
+`_builder.HexAt`) as the same point its weapon FX beam/shot converges
+on, now threaded through `IgniteBuildingIfNeeded`/`ApplyBuildingDamage`.
+`RuntimeCityBuilder.FootprintIndexOf(Building, HexCoord)` maps that hex
+to its massing cube (a plain linear scan, capped at 4 iterations for
+the largest tier — nowhere near "expensive," and it only runs once per
+landed hit). Ignition tracking is per-cube (`HashSet<GameObject>
+_ignitedCubes`), not per-building, so each hex of a multi-hex structure
+ignites independently from wherever it's actually being hit, and a
+later-rebuilt hex (a fresh `GameObject`, fresh reference) automatically
+starts unignited again.
+
 ## 2. Placement — PickSurfacePoint
 
 `IgniteCell` never guesses a fire point's world position — it asks
@@ -148,14 +184,16 @@ exactly on real geometry that one time.
 ## 3. Spread control — camera weighting, urgency, attack rate
 
 **Camera-facing weight.** `RegisterHit` (called once per landed hit from
-`RuntimeCityBuilder.ApplyBuildingDamage`) no longer feeds every hit into
-one fixed cell — `PickWeightedColumn` picks a column weighted
-`{1,2,3,2,1}` across the 5 angle columns (center 3x more likely than
-either edge), so heat starts from several lateral points across the
-visible facade, skewed toward — never exclusive to — the most directly
-camera-facing angle. This is what fixed the "burn line" (§0.5 row 8):
-combined with the strong upward bias, a single fixed origin reliably
-produced one vertical stack.
+`RuntimeCityBuilder.ApplyBuildingDamage`, now for the SPECIFIC hex it
+landed on — see §1.5) no longer feeds every hit into one fixed cell —
+`PickWeightedColumn` picks a column weighted `{2,3,4,3,2}` across the 5
+angle columns (center 2x more likely than either edge — pulled down
+from an original `{1,2,3,2,1}`/3x pass per "decrease but do not
+eliminate the spawn facing camera preference"), so heat starts from
+several lateral points across the visible facade, skewed toward — never
+exclusive to — the most directly camera-facing angle. This is what
+fixed the "burn line" (§0.5 row 8): combined with the strong upward
+bias, a single fixed origin reliably produced one vertical stack.
 
 **Urgency and attack rate.** `RegisterHit(float energy, float
 hpFraction01)` receives the building's current HP fraction alongside
@@ -177,6 +215,36 @@ attackers at once, visibly grows fire faster and further than the same
 building taking occasional single hits — "shorter time [to destruction],
 more spawns."
 
+## 3.5. Persistent per-instance visual variation
+
+"Each visible fire instance should receive a persistent random seed...
+adjacent flames should never look cloned." One `FirePlume` IS a "visible
+fire instance" — its own `GetInstanceID()` (this file's standing
+deterministic-hash convention, never `UnityEngine.Random`) is sampled
+ONCE in `Awake` via a small local `Jitter(seed, salt, min, max)` helper
+into 9 persistent multipliers: height, width, brightness, emissive
+intensity, growth rate, lifetime, flicker speed, plus a fixed lean
+yaw/tilt. "Animation phase" was already persistent-per-instance via the
+pre-existing `_flickerPhase` seed — unchanged, just counted among the
+nine.
+
+Every `FirePuff` a plume spawns over its life reads these instead of a
+flat shared constant, so puffs from the SAME plume share a coherent
+"personality" (a consistent lean direction, a consistently faster/
+slower flicker) while DIFFERENT plumes — each with their own instance
+ID — never line up. No new fields beyond plain floats, no new
+GameObjects/components, nothing computed per-frame beyond a handful of
+multiplies already happening.
+
+**Height/width independence needed one shared-class extension.**
+`SmokePuff` (reused by smoke/dust/water/muzzle, not just fire) always
+applied a UNIFORM scale every frame off its own `_baseScale` — setting a
+non-uniform `localScale` at spawn alone would get silently overwritten
+the next frame. New `SmokePuff.SetScaleAxisMultiplier(Vector3)` defaults
+to `Vector3.one`, so every OTHER consumer is byte-for-byte unaffected;
+only `FirePlume.SpawnPuff` calls it, with `(widthJitter, heightJitter,
+widthJitter)`.
+
 ## 4. DamageFxProfile — the tuning surface
 
 `DamageFxProfile.cs` (a `ScriptableObject`, same pattern as
@@ -194,8 +262,9 @@ runtime.
 
 | Path | Status |
 | --- | --- |
-| Procedural civilian buildings (`RuntimeCityBuilder`) | Full pipeline: ignition on in-range, `RegisterHit` on every landed hit, raycast placement |
-| RTS building roster (`BaseDresser`) | Ignition + placement shared (same `FireCluster`/`AttachFireCluster`); **`RegisterHit` is NOT wired here** — `BaseDresser`'s own damage path never calls it, so RTS-roster buildings ignite but their fire never speeds up/spreads from urgency or attack rate the way procedural buildings' does |
+| Procedural civilian buildings (`RuntimeCityBuilder`) | Full pipeline: ignition on in-range, per-hex `RegisterHit` on every landed hit (§1.5), raycast placement, persistent visual variation |
+| Multi-hex buildings (Medium/Large tiers) | Each footprint hex ignites/feeds independently, from whichever hex is actually under fire (§1.5) |
+| RTS building roster (`BaseDresser`) | Ignition + placement shared (same `FireCluster`/`AttachFireCluster`); **`RegisterHit` is NOT wired here** — `BaseDresser`'s own damage path never calls it, so RTS-roster buildings ignite but their fire never speeds up/spreads from urgency or attack rate the way procedural buildings' does; also single-hex only today (no multi-hex footprint concept on that roster) |
 | Real per-hit 3D impact points | Not implemented — see §6 |
 | Fuel depletion / fire going out | Not implemented — deliberate, see §1 |
 | Fire spreading to an ADJACENT building | Not implemented — the grid is scoped to one building only |
@@ -240,9 +309,10 @@ runtime.
 No Unity Editor exists in this environment — every fix past §0.5 row 6
 is reasoned from the creator's own reports/briefs and traced against
 real code (`SpawnCube`'s actual collider setup, `BuildingDresser`'s
-actual lack of one, the brief's own literal percentages), not guessed.
-Nothing here has been confirmed by an actual render since the heat-
-network rewrite (row 7) shipped — treat rows 7-8 as "reasoned and
-internally consistent," not "confirmed working," until a real
-Play-mode/screenshot report comes back, the same standard `docs/28`
-holds its own unconfirmed rows to.
+actual lack of one, `CityGenerator.cs`'s own tier-footprint-size
+comment, the brief's own literal percentages), not guessed. Nothing
+here has been confirmed by an actual render since the heat-network
+rewrite (row 7) shipped — treat rows 7-9 as "reasoned and internally
+consistent," not "confirmed working," until a real Play-mode/screenshot
+report comes back, the same standard `docs/28` holds its own
+unconfirmed rows to.

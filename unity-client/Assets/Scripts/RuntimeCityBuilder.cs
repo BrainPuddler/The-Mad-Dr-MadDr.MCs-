@@ -163,7 +163,20 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     // work once ignition can happen with zero damage yet dealt, so it's
     // now a real tracked set, same shape as BaseDresser's own
     // `_damagedHandled`.
-    private readonly HashSet<Building> _ignitedBuildings = new HashSet<Building>();
+    //
+    // 2026-08 follow-up (creator direction: "if an attacked target has
+    // multiple building in it's template then any buildings hit my
+    // monster's weapon fire should catch fire first"): tracked PER
+    // MASSING-CUBE (one entry per footprint hex a multi-hex building
+    // owns), not per Building -- so each hex of a Large/Medium multi-hex
+    // structure can ignite independently, from whichever one an attacker
+    // is actually hitting, instead of every hit collapsing onto the
+    // building's first hex. Keying by the cube `GameObject` itself
+    // (rather than a (Building, HexCoord) pair) also means a hex that's
+    // later cleared and rebuilt automatically starts fresh -- the OLD
+    // cube was `Object.Destroy`'d, so its stale HashSet entry can never
+    // collide with the new cube's own distinct GameObject reference.
+    private readonly HashSet<GameObject> _ignitedCubes = new HashSet<GameObject>();
     private Transform _buildingsHost;
     private Transform _monstersHost;
     private readonly List<MonsterAgent> _monsters = new List<MonsterAgent>();
@@ -1954,7 +1967,15 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return false;
     }
 
-    public void ApplyBuildingDamage(Building building, int amount)
+    /// <summary>2026-08 (creator direction: "if an attacked target has
+    /// multiple building in it's template then any buildings hit my
+    /// monster's weapon fire should catch fire first"): the specific
+    /// footprint hex `MonsterAgent.TickAttack` resolved this hit against
+    /// (`NearestFootprintPoint`, the same point its own weapon FX beam/
+    /// shot converges on) -- see `FootprintIndexOf`'s own doc comment for
+    /// how it picks which of a multi-hex building's own massing cubes
+    /// this hit's fire feedback (ignition + `RegisterHit`) applies to.</summary>
+    public void ApplyBuildingDamage(Building building, int amount, HexCoord hitHex)
     {
         BuildingRuntimeState current = null;
         foreach (var state in _battlefield.Buildings)
@@ -2131,7 +2152,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // TickAttack's in-range check first still ignites correctly,
             // and IgniteBuildingIfNeeded is a no-op past the first call
             // either way.
-            IgniteBuildingIfNeeded(building);
+            IgniteBuildingIfNeeded(building, hitHex);
 
             // 2026-08 (fire-propagation rewrite, creator's own brief:
             // "Fire always begins at one or more weapon impact locations.
@@ -2141,22 +2162,48 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // destroyed. shorter time more spawns"): every hit that lands
             // here (armed and unarmed alike -- MonsterAgent.TickAttack's
             // own two call sites both funnel through this one method)
-            // feeds the building's FireCluster its own damage amount as
-            // "weapon energy," plus this building's OWN current HP
-            // fraction (`next`, the just-computed post-damage state) so
-            // the cluster can speed up as the building nears destruction.
-            // `cubes` was already resolved at the top of this method;
-            // FireCluster is parented directly under `cubes[0]` by
-            // AttachFireCluster, so a shallow child lookup is enough --
-            // cheap, and only runs once per landed hit, not per frame.
-            var cluster = cubes[0].GetComponentInChildren<FireCluster>();
+            // feeds the SPECIFIC hex's FireCluster (`FootprintIndexOf`,
+            // 2026-08 follow-up: "any buildings hit... should catch fire
+            // first" -- a multi-hex building's other, un-hit hexes must
+            // NOT hear about a hit that landed on a different one) its own
+            // damage amount as "weapon energy," plus this building's OWN
+            // current HP fraction (`next`, the just-computed post-damage
+            // state) so the cluster can speed up as the building nears
+            // destruction. `cubes` was already resolved at the top of this
+            // method; only runs once per landed hit, not per frame.
+            var hitCubeIndex = FootprintIndexOf(building, hitHex);
+            var hitCube = hitCubeIndex < cubes.Count ? cubes[hitCubeIndex] : cubes[0];
+            var cluster = hitCube.GetComponentInChildren<FireCluster>();
             if (cluster != null)
                 cluster.RegisterHit(amount, next.MaxHp > 0 ? (float)next.CurrentHp / next.MaxHp : 0f);
         }
     }
 
+    /// <summary>2026-08 (creator direction: "if an attacked target has
+    /// multiple building in it's template then any buildings hit my
+    /// monster's weapon fire should catch fire first"): which of a
+    /// building's own footprint hexes (and therefore which massing cube
+    /// -- `RuntimeCityBuilder`'s `cubes` list holds exactly one per
+    /// footprint hex, same index order as `building.Footprint`, per
+    /// `ApplyBuildingDamage`'s own Destroyed-branch comment) a given hit
+    /// hex corresponds to. A plain linear scan over `IReadOnlyList
+    /// &lt;HexCoord&gt;` (no `IndexOf` on that interface) -- footprints
+    /// here top out at a handful of hexes (Large tier: 4), so this is
+    /// nowhere near the "expensive search" territory the visual-variation
+    /// follow-up warns against; it only ever runs once per landed hit,
+    /// not per frame. Falls back to index 0 if `hitHex` somehow isn't
+    /// part of this building's own footprint -- defensive only, since
+    /// every real caller derives `hitHex` from `NearestFootprintPoint` on
+    /// this SAME building.</summary>
+    private static int FootprintIndexOf(Building building, HexCoord hitHex)
+    {
+        for (var i = 0; i < building.Footprint.Count; i++)
+            if (building.Footprint[i] == hitHex) return i;
+        return 0;
+    }
+
     /// <summary>2026-08 (creator direction: "spawn fire when under
-    /// attack"): ignites this building's smoke+fire cluster the moment
+    /// attack"): ignites the SPECIFIC hex's smoke+fire cluster the moment
     /// it's under active assault, called from <see cref="MonsterAgent.
     /// TickAttack"/> the instant an attacker is confirmed in range and
     /// begins fighting -- BEFORE any damage has necessarily landed
@@ -2164,15 +2211,32 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// to a second or more past the moment combat visibly starts, per the
     /// creator's own prior direction: "as soon as a building is in combat
     /// we need to see the smoke and fire"). Idempotent via <see
-    /// cref="_ignitedBuildings"/> -- a building ignites at most once,
-    /// same "never re-fire" contract the old HP-based gate had, just
-    /// tracked explicitly now that ignition can happen with zero damage
-    /// yet dealt.</summary>
-    public void IgniteBuildingIfNeeded(Building building)
+    /// cref="_ignitedCubes"/> -- a given hex ignites at most once, same
+    /// "never re-fire" contract the old HP-based gate had, just tracked
+    /// explicitly (and now per-cube, not per-building -- see that field's
+    /// own doc comment) now that ignition can happen with zero damage yet
+    /// dealt.
+    ///
+    /// 2026-08 follow-up (creator direction: "if an attacked target has
+    /// multiple building in it's template then any buildings hit my
+    /// monster's weapon fire should catch fire first"): `hitHex` picks
+    /// WHICH of this building's own footprint hexes (via
+    /// `FootprintIndexOf`) actually catches fire -- a Large/Medium
+    /// multi-hex structure no longer always ignites its first hex
+    /// regardless of where an attacker is actually standing; each hex
+    /// ignites independently, from whichever one is actually under
+    /// fire.</summary>
+    public void IgniteBuildingIfNeeded(Building building, HexCoord hitHex)
     {
-        if (building == null || !_ignitedBuildings.Add(building)) return;
+        if (building == null) return;
         List<GameObject> cubes;
         if (!_cubesByBuilding.TryGetValue(building, out cubes) || cubes.Count == 0) return;
+
+        var cubeIndex = FootprintIndexOf(building, hitHex);
+        if (cubeIndex >= cubes.Count) cubeIndex = 0;
+        var cube = cubes[cubeIndex];
+        if (!_ignitedCubes.Add(cube)) return;
+
         BuildingRuntimeState current = null;
         foreach (var state in _battlefield.Buildings)
             if (ReferenceEquals(state.Building, building)) { current = state; break; }
@@ -2189,8 +2253,8 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // instead of the RTS roster's fixed-size silhouette table.
         var footprintRadius = Mathf.Sqrt(building.Footprint.Count) * (float)HexCoord.HexMeters * 0.4f;
         // 2026-08 follow-up BUGFIX (creator report: "I still do not see
-        // the fire"): cubes[0].transform.position.y is NOT ground level
-        // -- SpawnCube(hex, height/2f, height, ...) centers the massing
+        // the fire"): cube.transform.position.y is NOT ground level --
+        // SpawnCube(hex, height/2f, height, ...) centers the massing
         // cube at HALF the building's height (a primitive "sitting on
         // the ground" is positioned at its own vertical middle). Every
         // height-fraction offset AttachSmoke/AttachFireCluster compute
@@ -2200,8 +2264,8 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // own doc comment for the full writeup; -height*0.5f is the
         // correction back to true ground level.
         var groundOffset = -height * 0.5f;
-        DamageFx.AttachSmoke(cubes[0].transform, height, footprintRadius, BuildingStats.SmokeScale(building.Tier), groundOffset);
-        DamageFx.AttachFireCluster(cubes[0].transform, height, footprintRadius, BuildingStats.FireCount(building.Tier), groundOffset);
+        DamageFx.AttachSmoke(cube.transform, height, footprintRadius, BuildingStats.SmokeScale(building.Tier), groundOffset);
+        DamageFx.AttachFireCluster(cube.transform, height, footprintRadius, BuildingStats.FireCount(building.Tier), groundOffset);
     }
 
     /// <summary>2026-08 (creator direction: "assign some salvage parts
@@ -2218,7 +2282,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// reclaims the hex the instant the pile is fully cleared. Silent
     /// no-op if the building isn't actually Destroyed, has nothing left
     /// to loot, or `amount` isn't positive -- same bad-input contract as
-    /// <see cref="ApplyBuildingDamage(Building, int)"/>.</summary>
+    /// <see cref="ApplyBuildingDamage(Building, int, HexCoord)"/>.</summary>
     public void ScavengeBuildingDebris(Building building, int playerIndex, int amount)
     {
         if (_simBridge == null || amount <= 0) return;

@@ -164,7 +164,7 @@ public class SimBridge : MonoBehaviour
 
     /// <summary>2026-08 bugfix: unblocks a hex in the sim's own build-
     /// placement gate, for the PROCEDURAL building destruction path
-    /// (<see cref="RuntimeCityBuilder.ApplyBuildingDamage(Building, int)"/>),
+    /// (<see cref="RuntimeCityBuilder.ApplyBuildingDamage(Building, int, HexCoord)"/>),
     /// which has no <see cref="SimBuilding"/> entity of its own to route
     /// through <see cref="MatchState.ApplyBuildingDamage(uint, int)"/>'s
     /// own automatic unblock. Silent no-op if no match is running, same
