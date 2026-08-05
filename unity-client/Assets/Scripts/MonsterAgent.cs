@@ -1675,6 +1675,16 @@ public class MonsterAgent : MonoBehaviour
         if (flat.magnitude <= reach)
         {
             _path = null;
+            // 2026-08 (creator direction: "spawn fire when under attack"):
+            // ignite the instant this attacker is actually in range and
+            // engaging -- BEFORE the armed/unarmed branches below, which
+            // gate the first actual HIT behind weapon cadence (TryFireAtPoint)
+            // or a 1s unarmed cooldown. Waiting for that first successful
+            // hit could delay visible fire/smoke feedback by a second or
+            // more past the moment combat visibly starts. Idempotent
+            // (RuntimeCityBuilder.IgniteBuildingIfNeeded's own guard), so
+            // this is a cheap no-op on every tick after the first.
+            if (_builder != null) _builder.IgniteBuildingIfNeeded(_targetBuilding);
             if (flat.sqrMagnitude > 0.01f)
                 transform.rotation = Quaternion.Slerp(transform.rotation,
                     Quaternion.LookRotation(flat.normalized, Vector3.up), dt * 4f);

@@ -153,6 +153,17 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     // either already destroyed or repurposed as squished dressing, not
     // the actual visible rubble silhouette).
     private readonly Dictionary<Building, List<GameObject>> _debrisChunksByBuilding = new Dictionary<Building, List<GameObject>>();
+    // 2026-08 (creator direction: "spawn fire when under attack"):
+    // idempotency guard for IgniteBuildingIfNeeded -- a building ignites
+    // at most once, the moment an attacker is confirmed in range and
+    // actively fighting it (MonsterAgent.TickAttack), not gated on a hit
+    // actually landing. Previously this idempotency was a side effect of
+    // "current.CurrentHp == current.MaxHp is only ever true on the first
+    // damage application" inside ApplyBuildingDamage; that trick doesn't
+    // work once ignition can happen with zero damage yet dealt, so it's
+    // now a real tracked set, same shape as BaseDresser's own
+    // `_damagedHandled`.
+    private readonly HashSet<Building> _ignitedBuildings = new HashSet<Building>();
     private Transform _buildingsHost;
     private Transform _monstersHost;
     private readonly List<MonsterAgent> _monsters = new List<MonsterAgent>();
@@ -2110,51 +2121,67 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 }
             }
 
-            // 2026-08 (creator direction: "as soon as a building is in
-            // combat we need to see the smoke and fire"): this used to be
-            // gated behind the SAME `Damaged` crossing (<=50% HP, docs/18
-            // SS3) the darkening above uses -- fine when Structure HP was
-            // small, but the newly-bumped high-HP tiers (1000-10000) could
-            // now take a long beating with zero fire/smoke feedback before
-            // crossing that threshold. `current.CurrentHp == current.MaxHp`
-            // is true only on this building's very FIRST damage
-            // application (HP only ever decreases, no repair path), so
-            // this still fires exactly once per building -- just on first
-            // hit instead of first crossing into Damaged. Deliberately
-            // independent of the Damaged-darkening block above: a
-            // building can now show fire/smoke while still Intact-tinted.
-            if (current.CurrentHp == current.MaxHp && cubes.Count > 0)
-            {
-                var height = BuildingHeight(building);
-                // 2026-08 (creator report: "what happen to my low poly
-                // fire for when buildings were under attack" -> traced
-                // to AttachFire having only ever been wired to the
-                // SEPARATE RTS-building roster, BaseDresser.cs, never to
-                // THIS path -- the one monsters actually damage via
-                // TickAttack/ApplyBuildingDamage, the vast majority of
-                // the map. Same fire-cluster call BaseDresser now makes,
-                // scaled off this building's own real footprint size
-                // (hex count) instead of the RTS roster's fixed-size
-                // silhouette table.
-                var footprintRadius = Mathf.Sqrt(building.Footprint.Count) * (float)HexCoord.HexMeters * 0.4f;
-                // 2026-08 follow-up BUGFIX (creator report: "I still do
-                // not see the fire"): cubes[0].transform.position.y is
-                // NOT ground level -- SpawnCube(hex, height/2f, height,
-                // ...) centers the massing cube at HALF the building's
-                // height (a primitive "sitting on the ground" is
-                // positioned at its own vertical middle). Every
-                // height-fraction offset AttachSmoke/AttachFireCluster
-                // compute was therefore landing half a building-height
-                // too high -- fire in particular ended up floating ~50%
-                // of the building's own height above its actual roofline.
-                // See DamageFx.AttachSmoke's own doc comment for the full
-                // writeup; -height*0.5f is the correction back to true
-                // ground level.
-                var groundOffset = -height * 0.5f;
-                DamageFx.AttachSmoke(cubes[0].transform, height, footprintRadius, BuildingStats.SmokeScale(building.Tier), groundOffset);
-                DamageFx.AttachFireCluster(cubes[0].transform, height, footprintRadius, BuildingStats.FireCount(building.Tier), groundOffset);
-            }
+            // 2026-08 (creator direction: "spawn fire when under attack"):
+            // ignition itself moved OUT of this method -- see
+            // IgniteBuildingIfNeeded's own doc comment for why (TickAttack
+            // now calls it directly the instant an attacker is in range,
+            // instead of waiting for a hit to land here). Still called
+            // here too, as a defensive fallback: any damage source that
+            // reaches ApplyBuildingDamage without having gone through
+            // TickAttack's in-range check first still ignites correctly,
+            // and IgniteBuildingIfNeeded is a no-op past the first call
+            // either way.
+            IgniteBuildingIfNeeded(building);
         }
+    }
+
+    /// <summary>2026-08 (creator direction: "spawn fire when under
+    /// attack"): ignites this building's smoke+fire cluster the moment
+    /// it's under active assault, called from <see cref="MonsterAgent.
+    /// TickAttack"/> the instant an attacker is confirmed in range and
+    /// begins fighting -- BEFORE any damage has necessarily landed
+    /// (weapon cooldown/travel time could otherwise delay ignition by up
+    /// to a second or more past the moment combat visibly starts, per the
+    /// creator's own prior direction: "as soon as a building is in combat
+    /// we need to see the smoke and fire"). Idempotent via <see
+    /// cref="_ignitedBuildings"/> -- a building ignites at most once,
+    /// same "never re-fire" contract the old HP-based gate had, just
+    /// tracked explicitly now that ignition can happen with zero damage
+    /// yet dealt.</summary>
+    public void IgniteBuildingIfNeeded(Building building)
+    {
+        if (building == null || !_ignitedBuildings.Add(building)) return;
+        List<GameObject> cubes;
+        if (!_cubesByBuilding.TryGetValue(building, out cubes) || cubes.Count == 0) return;
+        BuildingRuntimeState current = null;
+        foreach (var state in _battlefield.Buildings)
+            if (ReferenceEquals(state.Building, building)) { current = state; break; }
+        if (current == null || current.Stage == DamageStage.Destroyed) return;
+
+        var height = BuildingHeight(building);
+        // 2026-08 (creator report: "what happen to my low poly fire for
+        // when buildings were under attack" -> traced to AttachFire
+        // having only ever been wired to the SEPARATE RTS-building
+        // roster, BaseDresser.cs, never to THIS path -- the one monsters
+        // actually damage via TickAttack/ApplyBuildingDamage, the vast
+        // majority of the map. Same fire-cluster call BaseDresser makes,
+        // scaled off this building's own real footprint size (hex count)
+        // instead of the RTS roster's fixed-size silhouette table.
+        var footprintRadius = Mathf.Sqrt(building.Footprint.Count) * (float)HexCoord.HexMeters * 0.4f;
+        // 2026-08 follow-up BUGFIX (creator report: "I still do not see
+        // the fire"): cubes[0].transform.position.y is NOT ground level
+        // -- SpawnCube(hex, height/2f, height, ...) centers the massing
+        // cube at HALF the building's height (a primitive "sitting on
+        // the ground" is positioned at its own vertical middle). Every
+        // height-fraction offset AttachSmoke/AttachFireCluster compute
+        // was therefore landing half a building-height too high -- fire
+        // in particular ended up floating ~50% of the building's own
+        // height above its actual roofline. See DamageFx.AttachSmoke's
+        // own doc comment for the full writeup; -height*0.5f is the
+        // correction back to true ground level.
+        var groundOffset = -height * 0.5f;
+        DamageFx.AttachSmoke(cubes[0].transform, height, footprintRadius, BuildingStats.SmokeScale(building.Tier), groundOffset);
+        DamageFx.AttachFireCluster(cubes[0].transform, height, footprintRadius, BuildingStats.FireCount(building.Tier), groundOffset);
     }
 
     /// <summary>2026-08 (creator direction: "assign some salvage parts

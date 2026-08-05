@@ -11300,3 +11300,49 @@ this environment to compile-check; the new file closely mirrors
 inheriting that file's own untracked `.meta` state -- Unity generates
 one fresh on next Editor open, same as it still owes `FactionPickerHud.cs`
 one today).
+
+## 2026-08 follow-up: fire ignition moved from "first hit lands" to "attacker is in range and engaging" -- creator direction: "spawn fire when under attack"
+
+Preceded by a fresh diagnostic pass (no code changes) confirming the
+fire pipeline itself was intact and unregressed by unrelated recent
+work: `MonsterAgent.TickAttack` -> `RuntimeCityBuilder.
+ApplyBuildingDamage` -> `DamageFx.AttachFireCluster`, with the two
+`[DamageFx]` console log lines and the unmissable magenta debug marker
+sphere (both from an earlier debugging round) still in place and
+unconditional. That pass found the existing gate --
+`current.CurrentHp == current.MaxHp`, i.e. "the very first point of
+damage this building has ever taken" -- was already close to instant,
+but still waits for a hit to actually LAND, which the armed/unarmed
+branches gate behind weapon cadence (`TryFireAtPoint`'s cooldown) or a
+flat 1s unarmed-bash cooldown. The creator's own follow-up ("spawn fire
+when under attack") asks for something strictly earlier: the moment
+combat visibly STARTS, not the moment the first hit registers.
+
+**What changed.** Ignition itself moved out of `ApplyBuildingDamage`
+into a new, idempotent `RuntimeCityBuilder.IgniteBuildingIfNeeded
+(Building)` (body unchanged from the old inline block -- same
+`AttachSmoke`/`AttachFireCluster` calls, same footprint-derived sizing,
+same ground-offset correction). `MonsterAgent.TickAttack` now calls it
+directly the instant `flat.magnitude <= reach` is confirmed (attacker
+physically in range and about to fight this tick) -- BEFORE the armed/
+unarmed branches that gate the actual hit. `ApplyBuildingDamage` still
+calls the same method too, as a defensive fallback for any damage
+source that reaches it without having gone through `TickAttack`'s
+in-range check first (the method is a no-op past the first successful
+call either way, so calling it from both places is free).
+
+Idempotency previously fell out of the HP check as a side effect (HP
+only ever decreases, so "still at max HP" is only ever true once); that
+trick stops working once ignition can fire before any damage has been
+dealt at all, so it's now a real `HashSet<Building> _ignitedBuildings`
+guard, same shape `BaseDresser`'s own `_damagedHandled` set already
+uses for the separate RTS-roster path.
+
+**Net effect:** a building now visibly catches fire/smokes the instant
+an attacker closes to range and starts fighting it, not up to a second
+or more later once the first shot/bash actually connects. No Unity
+Editor in this environment to compile-check or watch this live --
+same standing gap as every Unity-side change in this project's
+history; the diagnostic tools from the prior debugging round (console
+logs, magenta marker) are unchanged and still the fastest way to
+confirm this actually renders in a real Play session.
