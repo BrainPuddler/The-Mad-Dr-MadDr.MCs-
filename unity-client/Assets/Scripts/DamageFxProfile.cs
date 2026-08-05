@@ -49,8 +49,9 @@ public class DamageFxProfile : ScriptableObject
     [Range(0.02f, 10f)]
     public float FireResizePct = 6.0f;
 
-    [Tooltip("Diagnostic only -- spawns a big (8-unit), fully opaque, bright magenta sphere at the FIRST fire point on every building that catches fire, self-destructing after 45s. Nothing like the real flame shard on purpose: if this can't be spotted either, the problem isn't fire's own size/color/transparency, it's something else (camera culling mask, Scene-vs-Game view, etc). 2026-08 default: true, while fire visibility is still an open question -- creator direction: \"figure out how to verify fire is being seen.\" Turn this off once fire itself is confirmed visible; it's not meant to ship on.")]
-    public bool ShowFireDebugMarkers = true;
+    [Tooltip("Flat multiplier on the flame-shard MESH's own size (FirePlume.SpawnPuff), on top of the SmokeResizePct base it's borrowed from -- a fire-only knob, doesn't touch smoke. 2026-08 default: 1.18, per creator direction \"Increase the size of fire by 18%\" once fire's placement (on-building) and visibility were both confirmed correct -- this is a size-only bump, not another visibility diagnostic.")]
+    [Range(0.5f, 4f)]
+    public float FireSizeBoostPct = 1.18f;
 
     private static DamageFxProfile _default;
 

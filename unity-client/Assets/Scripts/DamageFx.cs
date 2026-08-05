@@ -199,43 +199,6 @@ public static class DamageFx
             parentScale.z != 0f ? 1f / parentScale.z : 1f);
     }
 
-    /// <summary>2026-08 (creator direction: "figure out how to verify
-    /// fire is being seen"): a big (4-unit), fully opaque, bright
-    /// emissive sphere -- deliberately NOTHING like the real low-poly
-    /// flame shard, so there's no ambiguity about whether it's visible.
-    /// If this can't be spotted either, the problem isn't fire's own
-    /// size/color/transparency at all. Self-destructs after 20s so it
-    /// doesn't linger as permanent clutter once its job (answering "is it
-    /// even at the position the log claims") is done. Called from
-    /// FireCluster's own first spawn point, gated behind
-    /// DamageFxProfile.ShowFireDebugMarkers.</summary>
-    public static void SpawnDebugMarker(Vector3 at)
-    {
-        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        go.name = "FireDebugMarker";
-        go.transform.position = at;
-        // 2026-08 (creator report: "No do not see magenta sphere"): 4
-        // units and 20s left too little margin against "the camera
-        // wasn't even pointed there yet." Now that ignition also snaps
-        // the camera straight to this point (see FireCluster.SpawnOne),
-        // size/duration matter less for THAT specific failure mode, but
-        // bumped both anyway (4 -> 8 units, 20 -> 45s) for margin against
-        // zoom level and reaction time.
-        go.transform.localScale = Vector3.one * 8f;
-        var collider = go.GetComponent<Collider>();
-        if (collider != null) Object.Destroy(collider);
-
-        var magenta = new Color(1f, 0f, 1f);
-        var mat = new Material(ShaderUtil.FindRenderableShader());
-        mat.color = magenta;
-        mat.EnableKeyword("_EMISSION");
-        mat.SetColor("_EmissionColor", magenta * 3f);
-        var renderer = go.GetComponent<Renderer>();
-        if (renderer != null) renderer.sharedMaterial = mat;
-
-        Object.Destroy(go, 45f);
-    }
-
     /// <summary>One-shot muzzle smoke the instant a gun fires (creator
     /// direction, 2026-07: "guns have smoke when they fire") -- small and
     /// quick next to the building SmokePlume's lazy loop or DustBurstFx's
@@ -506,6 +469,22 @@ public class FirePlume : MonoBehaviour
     private float _timer;
     private Light _glow;
     private float _flickerPhase;
+    private float _sizeScale = 1f;
+
+    /// <summary>2026-08 (creator direction: "Larger building get more
+    /// fires and larger fires"): `sizeScale` comes from <see
+    /// cref="FireCluster"/>'s own burnable-surface-area math (see that
+    /// class's `Init`) -- 1.0 for anything small enough to sit at the old
+    /// tier baseline, up to 3.0 for a genuinely large building. Called
+    /// right after `AddComponent`, i.e. AFTER `Awake` has already set
+    /// `_glow`'s base range -- multiplies that base rather than
+    /// recomputing it, so `FireResizePct`'s own existing range formula is
+    /// still the single source of the UN-scaled baseline.</summary>
+    public void Init(float sizeScale)
+    {
+        _sizeScale = sizeScale;
+        _glow.range *= sizeScale;
+    }
 
     private void Awake()
     {
@@ -581,7 +560,17 @@ public class FirePlume : MonoBehaviour
     /// shader/render order) instead of bumping a number a fifth time.
     /// FireResizePct itself is untouched and still drives the point
     /// light's range/intensity below -- only the flame MESH's size
-    /// changed here.</summary>
+    /// changed here.
+    ///
+    /// 2026-08 follow-up (creator direction: "Increase the size of fire
+    /// by 18%"): the borrowed-from-smoke base above is now multiplied by
+    /// <see cref="DamageFxProfile.Active"/>.FireSizeBoostPct (default
+    /// 1.18) -- a dedicated fire-only knob rather than bumping
+    /// SmokeResizePct itself, since that field is still shared with (and
+    /// still confirmed correctly sized for) smoke. Also multiplied by
+    /// `_sizeScale` (set in `Init`, see that method's own doc comment) so
+    /// a bigger building's fire reads as bigger, not just more
+    /// numerous.</summary>
     private void SpawnPuff()
     {
         var go = new GameObject("FirePuff");
@@ -593,7 +582,7 @@ public class FirePlume : MonoBehaviour
         // (below) overwrites it uniformly every frame off _baseScale, the
         // same "explicit spawn scale is cosmetically moot" precedent
         // SmokePlume/DustBurstFx's own spawn-time scale already sets.
-        var size = 1.1f * smokeResizePct;
+        var size = 1.1f * smokeResizePct * DamageFxProfile.Active.FireSizeBoostPct * _sizeScale;
         go.transform.localScale = new Vector3(size, size, size);
 
         var meshFilter = go.AddComponent<MeshFilter>();
@@ -669,18 +658,75 @@ public class FireCluster : MonoBehaviour
     private int _spawned;
     private float _nextSpawnIn;
     private float _baseAngle;
+    private float _sizeScale;
+
+    // 2026-08 (creator direction: "spawn a number of fires on the
+    // building as attacks continue over time. Larger building get more
+    // fires and larger fires. Set a sensible limit based of building's
+    // burnable surface area"): the flat 2-4 tier table (`BuildingStats.
+    // FireCount`/`BaseDresser.FireCountFor`) had no notion of a
+    // building's actual real size -- a Landmark and a Large capped at
+    // the SAME 4 points regardless of how much taller/wider one actually
+    // was. `_height`/`_footprintRadius` are already the real per-building
+    // numbers (not a coarse 4-step tier lookup) passed in from the two
+    // real call sites (RuntimeCityBuilder.IgniteBuildingIfNeeded for
+    // procedural buildings, BaseDresser for the RTS roster), so an area
+    // derived from THEM scales with whatever that specific building
+    // instance actually measures -- taller AND wider buildings earn more
+    // (and bigger) fire without a new tier-boundary table to keep in
+    // sync with the other two.
+    //
+    // `AreaPerFirePoint`/`MaxFireCountCeiling` pick where that scaling
+    // lands: 300 sqm per additional point keeps the existing tuned tier
+    // numbers exactly as they already were for anything roughly house-to-
+    // storefront sized (small area, area-based count comes out at or
+    // below the tier floor, so `Mathf.Max` below leaves the tier number
+    // untouched -- no regression for anything already dialed in), and
+    // only starts adding MORE points once a building's actual wall area
+    // clears that tier baseline -- exactly the buildings the creator's
+    // report says were being shortchanged. The 10-point ceiling is the
+    // "sensible limit": generous headroom above the old flat 4-point cap
+    // for a genuinely huge structure, without spawning an unreasonable
+    // wall of flame on anything.
+    private const float AreaPerFirePoint = 300f;
+    private const int MaxFireCountCeiling = 10;
+
+    // Same area value also drives per-point SIZE (`_sizeScale`, read by
+    // FirePlume.SpawnPuff) -- "larger fires" for larger buildings, not
+    // just more of them. Reference area/ceiling chosen to land in the
+    // SAME 1.0-3.0x range `BuildingStats.SmokeScale`'s own tier table
+    // already uses for smoke, so a burning Landmark's fire and smoke read
+    // as proportionate to each other, not fire alone racing ahead.
+    private const float SizeScaleReferenceArea = 3000f;
+    private const float MaxSizeScale = 3f;
+
+    /// <summary>Rough burnable wall area: treats `footprintRadius` as a
+    /// half-width (the SAME "not a true radius, just a plan-size proxy"
+    /// approximation `SpawnOne`'s own `dist = footprintRadius * 1.6f`
+    /// line below already leans on) -- four walls, each `2 *
+    /// footprintRadius` wide, times the building's real height. Only
+    /// needs to be internally consistent (bigger real building -> bigger
+    /// number) to drive the two scalings above; not a claim of an exact
+    /// square-meter figure.</summary>
+    private static float BurnableSurfaceArea(float height, float footprintRadius)
+    {
+        return 8f * footprintRadius * height;
+    }
 
     public void Init(float height, float footprintRadius, int targetCount)
     {
         _height = height;
         _footprintRadius = footprintRadius;
+        var area = BurnableSurfaceArea(height, footprintRadius);
         // 2026-08 (creator direction: "2-4 depending on the size of the
-        // building"): safety-clamp ceiling dropped from 8 to 4, matching
-        // BuildingStats.FireCount/BaseDresser.FireCountFor's own new
-        // range -- this is just a defensive bound against a bad caller,
-        // not itself a source of the count, so both tables' own numbers
-        // (2-4) are what actually reach this in practice.
-        _targetCount = Mathf.Clamp(targetCount, 1, 4);
+        // building"): the caller's own tier-based `targetCount` (2-4)
+        // still sets a FLOOR -- an area-based number below what a tier
+        // was already tuned to never shrinks it -- while the area-based
+        // figure can push a genuinely large building's cap higher, up to
+        // `MaxFireCountCeiling`.
+        var areaBasedCap = Mathf.RoundToInt(area / AreaPerFirePoint);
+        _targetCount = Mathf.Clamp(Mathf.Max(Mathf.Clamp(targetCount, 1, 4), areaBasedCap), 1, MaxFireCountCeiling);
+        _sizeScale = Mathf.Clamp(1f + area / SizeScaleReferenceArea, 1f, MaxSizeScale);
         _baseAngle = CameraFacingAngle();
         SpawnOne();
         _nextSpawnIn = NextInterval();
@@ -830,43 +876,15 @@ public class FireCluster : MonoBehaviour
         var go = new GameObject("FirePlume");
         go.transform.SetParent(transform, false);
         go.transform.localPosition = offset;
-        go.AddComponent<FirePlume>();
-
-        // 2026-08 (creator report, after confirming the Console log line
-        // DOES appear: "is it too small? Or wrong colours? or Too
-        // transparent?"): the log proves AttachFireCluster runs and
-        // computes a sane position -- it does NOT prove anything at that
-        // position is actually visible on screen, which is exactly the
-        // open question. Rather than guess at size/color/alpha again (six
-        // rounds of that already), drop an UNMISSABLE marker at the
-        // FIRST point's exact world position: a big, bright, fully-lit
-        // (no transparency, no low-poly subtlety) primitive sphere,
-        // nothing like the real flame shard. If the creator can't spot
-        // THIS either, the bug is categorically not about fire's own
-        // size/shape/color -- it's something else entirely (camera
-        // culling mask, a Scene-vs-Game view mixup, etc.) and this rules
-        // that whole size-tuning direction out in one look. If they CAN
-        // see the marker but not the real flame next to it, that
-        // conclusively confirms it IS a size/color/transparency problem
-        // with the flame specifically. Gated behind
-        // DamageFxProfile.ShowFireDebugMarkers (default true while this
-        // is still being diagnosed) so it's a one-flip Inspector toggle
-        // to turn off once resolved, not a permanent fixture.
-        //
-        // 2026-08 follow-up (creator direction: "DO NOT move the camera
-        // to the fire"): the camera-glide this comment used to describe
-        // (SimpleCameraRig.FocusOn on ignition) is GONE -- explicitly
-        // rejected. The fix is now upstream of this marker entirely:
-        // `_baseAngle`/`CameraFacingAngle` (see `Init`, above) place the
-        // fire itself on whatever side already faces the camera, so
-        // there's no camera movement to remove a dependency on -- the
-        // marker still helps confirm the flame mesh itself (as opposed
-        // to just this bright placeholder) is visible once placement is
-        // no longer the variable in question.
-        if (DamageFxProfile.Active.ShowFireDebugMarkers && _spawned == 1)
-        {
-            DamageFx.SpawnDebugMarker(go.transform.position);
-        }
+        // 2026-08 (creator report: "yes now on building now"): fire's
+        // placement is confirmed working, so the diagnostic-only magenta
+        // "FireDebugMarker" sphere this used to drop at the first point
+        // (see this file's history for the whole visibility saga it was
+        // built to debug) is gone -- `DamageFx.SpawnDebugMarker` and
+        // `DamageFxProfile.ShowFireDebugMarkers` were removed with it.
+        // `_sizeScale` (see `Init`) is how a bigger building's fire reads
+        // as visibly bigger, not just more numerous.
+        go.AddComponent<FirePlume>().Init(_sizeScale);
     }
 
     /// <summary>2026-08 (creator question: "could the fire be spawning

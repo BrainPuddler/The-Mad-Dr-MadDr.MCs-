@@ -11508,3 +11508,68 @@ fix is from first principles (reading `SpawnCube`'s exact scale
 assignment and Unity's own documented `SetParent`/`lossyScale`
 semantics) and the numbers it predicts match the creator's report
 exactly, not a guess.
+
+## 2026-08 follow-up: fire confirmed on-building -- debug spheres removed, fire grown 18%, count/size now scale off burnable surface area
+
+Creator confirmation and next direction, once fire's placement was
+verified fixed: **"yes now on building now. Remove firedebug spheres.
+Increase the size of fire by 18% and spawn a number of fires on the
+building as attacks continue over time. Larger building get more fires
+and larger fires. Set a sensible limit based of building's burnable
+surface area."**
+
+**Debug spheres removed.** `DamageFx.SpawnDebugMarker` (the big magenta
+diagnostic sphere) and `DamageFxProfile.ShowFireDebugMarkers` are
+deleted outright, along with the `FireCluster.SpawnOne` call site that
+spawned one at the first fire point of every building. They did their
+job -- confirming fire's real position matched the console log during
+the placement saga above -- and aren't needed once that's settled.
+
+**Fire size +18%.** New `DamageFxProfile.FireSizeBoostPct` (default
+1.18), a fire-only knob multiplied into `FirePlume.SpawnPuff`'s
+existing borrowed-from-smoke size formula. Deliberately NOT folded into
+`SmokeResizePct` itself -- that field is shared with (and still
+confirmed correctly sized for) smoke; a fire-only multiplier changes
+only fire.
+
+**Fire count/size now scale off burnable surface area, not a flat
+4-tier table.** The old ceiling (`BuildingStats.FireCount`/
+`BaseDresser.FireCountFor`, 2-4 regardless of how much bigger a
+Landmark actually is than a Large) had no notion of a building's real
+size. `FireCluster.Init` now computes a rough burnable wall area from
+the REAL per-building `height`/`footprintRadius` it already receives
+from both call sites (`RuntimeCityBuilder.IgniteBuildingIfNeeded` for
+procedural buildings, `BaseDresser` for the RTS roster) --
+`8 * footprintRadius * height` (`footprintRadius` treated as a
+half-width, the same approximation `SpawnOne`'s own
+`dist = footprintRadius * 1.6f` already leans on; not a claim of an
+exact square-meter figure, just something that grows correctly with a
+building's real size). That area drives two things:
+
+- **Count**: `areaBasedCap = round(area / 300)`, and the caller's
+  existing tier-based count becomes a FLOOR, not the whole answer --
+  `_targetCount = clamp(max(tierCount, areaBasedCap), 1, 10)`. A
+  building small enough that its area-based number sits below the tier
+  floor renders EXACTLY as before (no regression to anything already
+  tuned); a building whose real wall area clears that floor gets MORE
+  fire points, up to a 10-point ceiling -- the "sensible limit," well
+  above the old flat 4 but not an unreasonable wall of flame either.
+- **Size**: `_sizeScale = clamp(1 + area / 3000, 1, 3)`, read by each
+  spawned `FirePlume.Init` and multiplied into that point's own flame-
+  shard size (and glow-light range). The 1.0-3.0 range deliberately
+  matches `BuildingStats.SmokeScale`'s own existing tier range, so a
+  burning Landmark's fire and smoke stay visually proportionate to each
+  other instead of one effect racing ahead of the other.
+
+Fires still stagger in over a randomized 2-5s interval per point
+(`FireCluster.NextInterval`, unchanged) up to whichever count (tier
+floor or area-based) is now higher -- "as attacks continue over time"
+was already this class's own existing behavior; raising the ceiling is
+what makes that visible growth continue further on a building big
+enough to warrant it, instead of topping out at 4 regardless of size.
+
+No Unity Editor in this environment to watch this render live -- sizes/
+counts are chosen from the real geometry values already flowing through
+this code (not new hardcoded literals per tier), consistent with every
+other fix in this saga's own "verify from real numbers, not a guess"
+standard.
