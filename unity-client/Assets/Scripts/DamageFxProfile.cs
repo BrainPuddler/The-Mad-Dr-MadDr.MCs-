@@ -53,6 +53,10 @@ public class DamageFxProfile : ScriptableObject
     [Range(0.5f, 4f)]
     public float FireSizeBoostPct = 1.18f;
 
+    [Tooltip("Multiplier on how fast NEW fire points ignite (FireCluster.CurrentSimTickInterval) -- how many points a burning building has, not how big any one of them is. 1.0 = unchanged default pacing; above 1 ignites points faster, below 1 slower. Separate from (and multiplies on TOP of) the existing urgency/hit-rate speedup, which already reacts to how close a building is to destruction and how many attackers are hitting it -- this is a flat creator-facing override on top of that automatic behavior. 2026-08 default: 1.0, per creator direction \"give me an inspector setting for spawn rate of fires.\"")]
+    [Range(0.25f, 4f)]
+    public float FireSpawnRateMultiplier = 1f;
+
     private static DamageFxProfile _default;
 
     /// <summary>Safe, in-code fallback so any reader that hasn't assigned

@@ -819,7 +819,17 @@ public class FireCluster : MonoBehaviour
     // rises above as urgency/attack-rate climb, see RegisterHit) ----
 
     private const float AreaPerFirePoint = 300f;
-    private const int MaxFireCountCeiling = 10;
+    // 2026-08 (creator direction: "Increase spawn goal is to make it
+    // look logical the building would collapse"): raised from 10 to the
+    // grid's own true max (GridAngleSegments * GridHeightBands = 15) --
+    // a building right at the edge of destruction should be able to have
+    // nearly its ENTIRE visible facade on fire, not still capped a third
+    // short of full coverage. Paired with MaxUrgencyBonusCells below (3
+    // -> 6) so a small building's own low `_baseMaxIgnitedCells` can
+    // actually climb far enough to reach this higher ceiling as urgency
+    // rises, not just big-area buildings that already started closer to
+    // it.
+    private const int MaxFireCountCeiling = 15;
     private const float SizeScaleReferenceArea = 3000f;
     private const float MaxSizeScale = 3f;
 
@@ -1009,10 +1019,21 @@ public class FireCluster : MonoBehaviour
     /// climbs, clamped at `MinSimTickInterval` so neither can push this
     /// into a per-frame cost. Faster ticking alone already means more
     /// spawns over the same real time, since `_maxIgnitedCells` (also
-    /// raised by urgency, see `RegisterHit`) simply gets reached sooner.</summary>
+    /// raised by urgency, see `RegisterHit`) simply gets reached sooner.
+    ///
+    /// 2026-08 follow-up (creator direction: "give me an inspector
+    /// setting for spawn rate of fires"): `DamageFxProfile.
+    /// FireSpawnRateMultiplier` folds into the SAME `speedup` factor the
+    /// automatic urgency/hit-rate math already computes -- a flat
+    /// creator-facing override layered on top of (not replacing) that
+    /// per-building automatic behavior, read fresh every tick so an
+    /// Inspector drag affects an already-burning building immediately,
+    /// same "live in Play mode" contract every other `DamageFxProfile`
+    /// field already has.</summary>
     private float CurrentSimTickInterval()
     {
         var speedup = 1f + Mathf.Min(_hitRateEma, MaxHitRateForSpeedup) * HitRateSpeedupFactor + _urgency * UrgencySpeedupFactor;
+        speedup *= Mathf.Max(0.01f, DamageFxProfile.Active.FireSpawnRateMultiplier);
         return Mathf.Max(MinSimTickInterval, SimTickInterval / speedup);
     }
 

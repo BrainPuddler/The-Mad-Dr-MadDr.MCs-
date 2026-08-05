@@ -11868,3 +11868,94 @@ variation and organic-spread mechanisms are new, reasoned constructions
 built to the brief's own explicit constraints (no new objects, no
 per-frame allocations, no expensive searches, deterministic-but-fresh),
 not screenshot-confirmed.
+
+## 2026-08 follow-up: line-of-sight targeting (reposition when blocked), fire-count boost near destruction, spawn-rate Inspector knob
+
+Creator direction: **"Monsters should try to attack only the target
+building(s) that will be destroyed in the attack and try not to shoot
+through other building. ONLY the target buildings catch fire but adhere
+to the raycast rule. Increase spawn goal is to make it look logical the
+building would collapse, give me an inspector setting for spawn rate of
+fires. verify understanding before implementing."**
+
+Per the last line, understanding was checked against real code before
+writing anything: `MonsterAgent`'s building targeting turned out to be
+entirely player-directed (right-click `OrderAttack`, never AI auto-
+selected) with a SINGLE `_targetBuilding` at a time -- no existing multi-
+target mechanic -- and the weapon beam/shot (`WeaponFx.Beam`/
+`ShotAtPoint`) had zero obstruction check, drawing straight from muzzle
+to target regardless of what stood in between. Fire already only ever
+ignited `_targetBuilding` (never a bystander), so "only target buildings
+catch fire" was already true; the open question was purely "don't let
+the SHOT itself pass through another building." Confirmed via a
+clarifying question: when blocked, the monster should reposition for a
+clear shot, not hold fire in place or abandon the target.
+
+**Line-of-sight gate + reposition.** New `MonsterAgent.HasClearLineOfSight`
+does a `Physics.Linecast` from muzzle to the hit point; a hit that
+resolves (via `RuntimeCityBuilder.BuildingFromCollider`) back to the
+SAME `_targetBuilding` counts as clear (that's just the shot arriving,
+not an obstruction) -- a hit on any OTHER registered building counts as
+blocked. `TickAttack`'s in-range branch now checks this before firing
+OR igniting (a monster that can't land a hit hasn't genuinely engaged
+yet, so fire shouldn't start before it can either). When blocked, `
+TickAttackReposition`/`FindClearRepositionPoint` search a small ring of
+candidate ground positions around the target (same widening-sweep shape
+`FireCluster.PickSurfacePoint`'s own angle search already uses) and
+direct-steer toward the first clear one -- same "short-range, no A*"
+convention `TickPerch`'s own final-approach block already established,
+not a full re-path. Falls back to holding position if every candidate
+in the sweep is still blocked, retrying next tick.
+
+**Fire-count ceiling raised for "looks logical it would collapse."**
+`FireCluster.MaxFireCountCeiling` raised 10 -> 15 (the grid's own true
+max, `GridAngleSegments * GridHeightBands`) and `MaxUrgencyBonusCells`
+3 -> 6, so a building right at the edge of destruction can have nearly
+its entire visible facade on fire instead of still capped a third short
+of full coverage, and even a small building's own low starting count can
+climb far enough to reach that higher ceiling as urgency rises.
+
+**New Inspector knob.** `DamageFxProfile.FireSpawnRateMultiplier`
+(default 1.0, `[0.25, 4]`) multiplies into `FireCluster.
+CurrentSimTickInterval`'s existing `speedup` factor -- a flat creator-
+facing override layered on top of (not replacing) the automatic urgency/
+hit-rate speedup, read live every tick like every other `DamageFxProfile`
+field.
+
+**Follow-up mid-conversation, not yet implemented:** the creator then
+raised a further mechanic -- "Based on monster aggression, monster could
+collaterally destroy other building if blocked to get to target or
+decide not to reposition and destroy adjacent building too. Player owned
+building are the only buildings immune in that case," then "Some sort of
+attack hierarchy system." Investigated before proposing anything: **no
+per-creature aggression/boldness stat exists anywhere in the AI today**
+-- the closest thing, `fury` (one of the five genome brain axes,
+`packages/genome-core/src/genome.ts`), is a berserk-rage stress mechanic
+never read by `MonsterAgent.cs` at all; the only "Aggression" concept
+that exists in the whole codebase is `CommanderPersonality.Aggression`
+(`packages/match-core/src/CommanderPersonality.cs`), strictly a faction-
+level RTS-commander-AI dial, architecturally separate and not plumbed
+down to individual monsters. Separately, **player-owned `SimBuilding`
+visuals (`BaseDresser.cs`) are built entirely via `RuntimeCityBuilder.
+SpawnPrim`, which explicitly strips its own `Collider` on every piece**
+-- the SAME "dressing is collider-less" fact already established for
+procedural buildings' own dressing, but it means a player building can
+NEVER be detected via the `Physics.Linecast`-based approach this round's
+own targeting fix uses; ownership (`SimBuilding.PlayerIndex`) can only
+be resolved via the existing hex/position-based linear-scan idiom
+(`SimBridge.BuildingAt`/`.PlayerIndex`, the same pattern `MonsterAgent.
+FindOwnFactory` already uses) with no O(1) hex-keyed lookup anywhere in
+`MatchState` to speed it up. Given the collateral-damage mechanic needs
+a genuinely new aggression concept (not just reading an unused one) and
+a detection approach fundamentally different from the LOS raycast this
+round just shipped, this was intentionally NOT implemented yet --
+flagged back to the creator for a design confirmation before building
+it, per the same "verify before implementing" standard this whole round
+was itself run under.
+
+No Unity Editor in this environment to watch any of this render live.
+The LOS/reposition fix is reasoned from real code (confirmed no existing
+obstruction check anywhere in the firing pipeline) and follows an
+established movement-convention precedent (`TickPerch`'s own direct-
+steer block) rather than inventing a new one; the fire-count/spawn-rate
+changes are straightforward constant/knob edits.

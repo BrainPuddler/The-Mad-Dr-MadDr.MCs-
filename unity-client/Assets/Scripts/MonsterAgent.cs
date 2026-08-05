@@ -67,6 +67,13 @@ public class MonsterAgent : MonoBehaviour
     private Building _targetBuilding;
     private Citizen _targetCitizen;
     private UnitCombat _targetUnit;
+    // 2026-08 (creator direction: "try not to shoot through other
+    // building... [when blocked,] reposition for a clear shot"): the
+    // lateral repositioning spot `TickAttack` is currently steering
+    // toward while its line of sight to `_targetBuilding` is blocked by
+    // a DIFFERENT building. Null whenever line of sight is clear or no
+    // attack is in progress -- see `FindClearRepositionPoint`.
+    private Vector3? _repositionTarget;
     private Vector3? _settleTarget;   // shared cluster point to creep toward once idle (group moves only)
     private GroupFacing _groupFacing; // shared arrival-facing token for a group move (see GroupFacing)
 
@@ -1689,6 +1696,31 @@ public class MonsterAgent : MonoBehaviour
             // whichever one is actually under fire, instead of always the
             // building's first hex regardless of where the attack lands.
             var hitHex = _builder != null ? _builder.HexAt(bp) : default(HexCoord);
+
+            // 2026-08 (creator direction: "Monsters should try to attack
+            // only the target building(s) that will be destroyed in the
+            // attack and try not to shoot through other building. ONLY
+            // the target buildings catch fire but adhere to the raycast
+            // rule"): being within weapon range is no longer enough to
+            // fire -- also require an unobstructed line from the muzzle
+            // to the actual hit point. `HasClearLineOfSight` treats the
+            // TARGET building's own collider as "clear" (that's just the
+            // shot arriving, not an obstruction); any DIFFERENT
+            // building's collider in the way means blocked. Ignition
+            // moved here too, alongside firing -- a monster that can't
+            // yet land a hit hasn't genuinely engaged the target, so
+            // fire/smoke shouldn't start before it can. This is a
+            // separate raycast from (and doesn't touch) FireCluster's own
+            // placement raycast (docs/29 SS2) -- "adhere to the raycast
+            // rule" there is unaffected, still governs WHERE on the
+            // target a flame lands, not WHETHER the monster may fire.
+            var muzzle = Muzzle();
+            if (!HasClearLineOfSight(muzzle, bp))
+            {
+                return TickAttackReposition(dt, bp, reach);
+            }
+            _repositionTarget = null;
+
             // 2026-08 (creator direction: "spawn fire when under attack"):
             // ignite the instant this attacker is actually in range and
             // engaging -- BEFORE the armed/unarmed branches below, which
@@ -1706,7 +1738,7 @@ public class MonsterAgent : MonoBehaviour
             {
                 // the shot that plays the FX is the one that dents the
                 // building: cadence-gated by TryFireAtPoint, weapon-scaled
-                if (_fighter.TryFireAtPoint(bp, Muzzle()))
+                if (_fighter.TryFireAtPoint(bp, muzzle))
                     _builder.ApplyBuildingDamage(_targetBuilding, Mathf.RoundToInt((float)_fighter.Weapon.Damage * 3f + 25f), hitHex);
             }
             else
@@ -1731,6 +1763,99 @@ public class MonsterAgent : MonoBehaviour
         }
         RecomputeIfCityChanged();
         return FollowPath(dt, RunOrWalkSpeed());
+    }
+
+    /// <summary>2026-08 (creator direction: "try not to shoot through
+    /// other building"): true if a straight line from `from` to `to`
+    /// either hits nothing, or hits something that resolves back to
+    /// `_targetBuilding` itself (the shot simply arriving at its own
+    /// target isn't an obstruction). Anything else -- a DIFFERENT
+    /// building's massing-cube collider standing in the way -- counts as
+    /// blocked. Deliberately does not special-case units/citizens/props
+    /// that might also have colliders in the path: only a `Building`
+    /// registered in `RuntimeCityBuilder`'s own collider map can block a
+    /// shot here, same "don't over-filter a one-off raycast" reasoning
+    /// `FireCluster.PickSurfacePoint`'s own camera-visibility check
+    /// already uses for its unrelated raycast.</summary>
+    private bool HasClearLineOfSight(Vector3 from, Vector3 to)
+    {
+        if (_builder == null) return true;
+        RaycastHit hit;
+        if (!Physics.Linecast(from, to, out hit)) return true;
+        var blocker = _builder.BuildingFromCollider(hit.collider);
+        return blocker == null || ReferenceEquals(blocker, _targetBuilding);
+    }
+
+    // Candidate angle offsets (degrees) from the attacker's OWN current
+    // bearing to the target, searched nearest-first -- same widening-
+    // sweep shape `FireCluster.PickSurfacePoint`'s own `AngleSearchOffsets`
+    // already uses for an analogous "find the first clear candidate"
+    // search, capped at +-160 degrees so this can't spiral into orbiting
+    // fully around the target building.
+    private static readonly int[] RepositionSearchOffsets = { 25, -25, 50, -50, 80, -80, 120, -120, 160, -160 };
+
+    /// <summary>2026-08 (creator direction, resolving "what should the
+    /// monster do when blocked": "reposition for a clear shot"): searches
+    /// a small ring of candidate ground positions around `targetPoint` at
+    /// `reach`, starting from the attacker's own current bearing and
+    /// sweeping outward (`RepositionSearchOffsets`), returning the first
+    /// one with a clear line of sight back to the target. A direct
+    /// distance-only search, not a full re-path -- the same "short-range,
+    /// no A*" tradeoff `TickPerch`'s own final-approach steer already
+    /// makes, appropriate here since a repositioning hop is meant to be a
+    /// few metres around the SAME building, not a cross-map detour.
+    /// Returns null if every candidate in the sweep is still blocked
+    /// (e.g. boxed in on all sides) -- `TickAttackReposition` holds
+    /// position and retries next tick rather than treating that as a
+    /// hard failure.</summary>
+    private Vector3? FindClearRepositionPoint(Vector3 targetPoint, float reach)
+    {
+        var current = transform.position - targetPoint;
+        current.y = 0f;
+        if (current.sqrMagnitude < 0.01f) current = Vector3.forward;
+        var baseAngle = Mathf.Atan2(current.z, current.x);
+        // stay comfortably inside weapon range at the new spot, not
+        // right at its outer edge
+        var dist = Mathf.Max(4f, reach * 0.85f);
+        var probeHeight = Vector3.up * 1.6f; // rough muzzle-height approximation for the LOS probe, matching Muzzle()'s own general elevation
+        for (var i = -1; i < RepositionSearchOffsets.Length; i++)
+        {
+            var offsetDeg = i < 0 ? 0 : RepositionSearchOffsets[i]; // try the current bearing itself first
+            var angle = baseAngle + offsetDeg * Mathf.Deg2Rad;
+            var candidate = targetPoint + new Vector3(Mathf.Cos(angle) * dist, 0f, Mathf.Sin(angle) * dist);
+            if (HasClearLineOfSight(candidate + probeHeight, targetPoint))
+                return candidate;
+        }
+        return null;
+    }
+
+    /// <summary>Steers directly toward `_repositionTarget` (picking one via
+    /// `FindClearRepositionPoint` if none is set or the last one's been
+    /// reached), same direct-steer/return-velocity convention `TickPerch`'s
+    /// own final-approach block and `FollowPath` both already use --
+    /// mutates `transform.position` itself and returns a velocity
+    /// (metres/second), not a pre-scaled delta. Deliberately slower than
+    /// a normal approach (`RepositionSpeedFraction`) -- this is a small
+    /// tactical sidestep around an obstruction, not a dash.</summary>
+    private const float RepositionSpeedFraction = 0.6f;
+    private const float RepositionArriveDist = 1f;
+
+    private Vector3 TickAttackReposition(float dt, Vector3 targetPoint, float reach)
+    {
+        if (_repositionTarget == null || Vector3.Distance(transform.position, _repositionTarget.Value) < RepositionArriveDist)
+            _repositionTarget = FindClearRepositionPoint(targetPoint, reach);
+
+        if (_repositionTarget == null) return Vector3.zero; // boxed in this tick -- hold and retry next tick
+
+        var toRepos = _repositionTarget.Value - transform.position;
+        toRepos.y = 0f;
+        if (toRepos.sqrMagnitude < 0.01f) return Vector3.zero;
+
+        var dir = toRepos.normalized;
+        var speed = RunOrWalkSpeed() * RepositionSpeedFraction;
+        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 4f);
+        transform.position += dir * Mathf.Min(speed * dt, toRepos.magnitude);
+        return dir * speed;
     }
 
     private Vector3 TickAttackUnit(float dt)
