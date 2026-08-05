@@ -1796,7 +1796,13 @@ public class MonsterAgent : MonoBehaviour
             var isProjectile = armed && _fighter.Weapon.Kind != WeaponKind.Melee;
             if (isProjectile)
             {
-                Building civilianBlocker;
+                // 2026-08 bugfix (creator report: CS0165 "use of
+                // unassigned local variable"): `clear`'s `&&` short-
+                // circuits past `HasClearLineOfSight` entirely whenever
+                // `blockedByPlayer` is true, so its `out civilianBlocker`
+                // never runs on that path -- explicit `= null` here keeps
+                // it definitely-assigned regardless.
+                Building civilianBlocker = null;
                 var blockedByPlayer = IsBlockedByPlayerBuilding(muzzle, bp);
                 var clear = !blockedByPlayer && HasClearLineOfSight(muzzle, bp, out civilianBlocker);
                 if (!clear)
