@@ -74,6 +74,17 @@ public class MonsterAgent : MonoBehaviour
     // a DIFFERENT building. Null whenever line of sight is clear or no
     // attack is in progress -- see `FindClearRepositionPoint`.
     private Vector3? _repositionTarget;
+    // 2026-08 (creator direction: "Based on monster aggression, monster
+    // could collaterally destroy other building if blocked to get to
+    // target or decide not to reposition and destroy adjacent building
+    // too... Some sort of attack hierarchy system"): the REAL target
+    // this monster is on a collateral detour away from -- non-null only
+    // while `_targetBuilding` has been temporarily swapped to a blocking
+    // building it decided to smash through instead of walking around.
+    // See `TickAttack`'s own doc comment for the full attack-hierarchy
+    // ordering (Target > Collateral > Reposition).
+    private Building _originalTargetBuilding;
+    private int _blockRollSalt; // incremented once per fresh blocked-shot decision, salts the aggression roll so it isn't the same result every tick a given block persists
     private Vector3? _settleTarget;   // shared cluster point to creep toward once idle (group moves only)
     private GroupFacing _groupFacing; // shared arrival-facing token for a group move (see GroupFacing)
 
@@ -251,6 +262,14 @@ public class MonsterAgent : MonoBehaviour
     /// to spawn copies of, the same way <see cref="RuntimeCityBuilder.
     /// SpawnMonster"/> already builds any monster from one.</summary>
     public StoredGenomeDto Creature { get { return _creature; } }
+
+    /// <summary>2026-08 (creator direction: "add a roll for increased
+    /// probability for all units, mob mentality. It shouldn't happen all
+    /// the time but if one starts it the others follow"): true while this
+    /// monster is mid collateral-building-attack (see `TickAttack`'s own
+    /// attack-hierarchy doc comment) -- read by OTHER monsters'
+    /// `MobMentalityBonus` check, not by this monster itself.</summary>
+    public bool IsCollateralAttacking { get { return _originalTargetBuilding != null; } }
 
     /// <summary>2026-08 (creator direction: "a quick way for the player
     /// to recognize a monster is a collection unit"): true when this
@@ -663,6 +682,8 @@ public class MonsterAgent : MonoBehaviour
         _targetBuilding = null;
         _targetCitizen = null;
         _targetUnit = null;
+        _originalTargetBuilding = null;   // cancel any in-progress collateral detour (see TickAttack's attack-hierarchy comment)
+        _repositionTarget = null;
         _settleTarget = null;   // any fresh order cancels a pending group-settle creep
         _groupFacing = null;    // and any pending group-arrival facing agreement
         _perchApproach = false;
@@ -1658,10 +1679,51 @@ public class MonsterAgent : MonoBehaviour
         return Vector3.zero;
     }
 
+    /// <summary>2026-08 (creator direction: "Based on monster aggression,
+    /// monster could collaterally destroy other building if blocked to
+    /// get to target or decide not to reposition and destroy adjacent
+    /// building too. Player owned building are the only buildings immune
+    /// in that case" + "Some sort of attack hierarchy system"): this
+    /// method's own attack hierarchy, in priority order --
+    ///
+    /// 1. **Target** (`_targetBuilding`): always the first choice. If the
+    ///    line to it is clear, attack it, full stop.
+    /// 2. **Collateral** (`_originalTargetBuilding` set, `_targetBuilding`
+    ///    temporarily swapped to the blocker): only reachable when (a) the
+    ///    blocker is a civilian/procedural `Building` -- NEVER a player-
+    ///    owned `SimBuilding`, checked first and unconditionally (see
+    ///    `IsBlockedByPlayerBuilding`) -- and (b) a per-block aggression
+    ///    roll against this creature's own genome `fury` (Brain.Params[4],
+    ///    docs/16's existing "berserk tendency" axis, reused rather than
+    ///    minting a new one -- see docs/12's own entry for why) succeeds.
+    ///    Runs through the EXACT SAME fire/damage/collapse pipeline as any
+    ///    real target (a full retarget, not a scripted one-off smash) --
+    ///    once destroyed, the original target automatically resumes.
+    /// 3. **Reposition** (`_repositionTarget`): the fallback whenever
+    ///    neither of the above applies -- blocked by a player building
+    ///    (always), or the aggression roll failed, or a collateral detour
+    ///    is already in progress and hit a SECOND blocker (bounded to one
+    ///    level of detour at a time, not a stack).</summary>
     private Vector3 TickAttack(float dt)
     {
         if (_targetBuilding == null) { GoIdle(); return Vector3.zero; }
-        if (_builder.IsDestroyed(_targetBuilding)) { _targetBuilding = null; GoIdle(); return Vector3.zero; }
+        if (_builder.IsDestroyed(_targetBuilding))
+        {
+            if (_originalTargetBuilding != null)
+            {
+                // collateral detour finished (the blocker is down) --
+                // resume the real target rather than going idle
+                _targetBuilding = _originalTargetBuilding;
+                _originalTargetBuilding = null;
+                if (_builder.IsDestroyed(_targetBuilding)) { _targetBuilding = null; GoIdle(); return Vector3.zero; }
+            }
+            else
+            {
+                _targetBuilding = null;
+                GoIdle();
+                return Vector3.zero;
+            }
+        }
 
         var armed = _fighter != null && _fighter.Weapon != null && _fighter.Weapon.CanAttack;
         // "ground units without projectile weapons must be near the
@@ -1703,21 +1765,81 @@ public class MonsterAgent : MonoBehaviour
             // the target buildings catch fire but adhere to the raycast
             // rule"): being within weapon range is no longer enough to
             // fire -- also require an unobstructed line from the muzzle
-            // to the actual hit point. `HasClearLineOfSight` treats the
+            // to the actual hit point. `ClassifyLineOfSight` treats the
             // TARGET building's own collider as "clear" (that's just the
-            // shot arriving, not an obstruction); any DIFFERENT
-            // building's collider in the way means blocked. Ignition
-            // moved here too, alongside firing -- a monster that can't
-            // yet land a hit hasn't genuinely engaged the target, so
-            // fire/smoke shouldn't start before it can. This is a
+            // shot arriving, not an obstruction); a DIFFERENT registered
+            // building in the way means blocked, either as a civilian
+            // building (eligible for the collateral-attack roll below) or
+            // a player-owned one (never eligible -- see
+            // `IsBlockedByPlayerBuilding`'s own doc comment for why that
+            // needs a separate position-based check, not this raycast).
+            // Ignition moved here too, alongside firing -- a monster that
+            // can't yet land a hit hasn't genuinely engaged the target,
+            // so fire/smoke shouldn't start before it can. This is a
             // separate raycast from (and doesn't touch) FireCluster's own
             // placement raycast (docs/29 SS2) -- "adhere to the raycast
             // rule" there is unaffected, still governs WHERE on the
             // target a flame lands, not WHETHER the monster may fire.
             var muzzle = Muzzle();
-            if (!HasClearLineOfSight(muzzle, bp))
+            // 2026-08 follow-up (creator direction: "Non projectile
+            // equipped monsters should be able to damage buildings
+            // through weapon swings or melee attacks and building
+            // contact"): "try not to shoot through other building" is
+            // fundamentally a RANGED-weapon concern -- a melee swing or
+            // an unarmed bash only ever lands on whatever this monster is
+            // already standing next to, so there is no "line of fire" for
+            // a THIRD building to obstruct in the first place. The whole
+            // LOS/collateral/reposition hierarchy below only runs for a
+            // real projectile weapon (Beam/Bolt/Bullet/Spore/Flame);
+            // Melee and unarmed always get a clear shot at their own
+            // target.
+            var isProjectile = armed && _fighter.Weapon.Kind != WeaponKind.Melee;
+            if (isProjectile)
             {
-                return TickAttackReposition(dt, bp, reach);
+                Building civilianBlocker;
+                var blockedByPlayer = IsBlockedByPlayerBuilding(muzzle, bp);
+                var clear = !blockedByPlayer && HasClearLineOfSight(muzzle, bp, out civilianBlocker);
+                if (!clear)
+                {
+                    // 2026-08 (creator direction: "monster could
+                    // collaterally destroy other building if blocked...
+                    // Player owned building are the only buildings
+                    // immune"): a player building blocking the shot is
+                    // NEVER a valid collateral target -- skip straight to
+                    // repositioning, no aggression roll at all. A
+                    // civilian building only gets rolled against if this
+                    // monster isn't ALREADY mid-detour (see this method's
+                    // own attack-hierarchy doc comment, point 3 -- bounded
+                    // to one level of detour, not a stack).
+                    if (!blockedByPlayer && civilianBlocker != null && _originalTargetBuilding == null)
+                    {
+                        _blockRollSalt++;
+                        var roll = ((GetInstanceID() + _blockRollSalt * 977) & 0xFFFF) / 65536f;
+                        var aggression = _creature != null && _creature.Genome != null && _creature.Genome.Brain != null && _creature.Genome.Brain.Params.Length > 4
+                            ? Mathf.Clamp01((float)_creature.Genome.Brain.Params[4]) // docs/16 fury axis, reused as this creature's own aggression
+                            : 0f;
+                        // 2026-08 (creator direction: "add a roll for
+                        // increased probability for all units, mob
+                        // mentality. It shouldn't happen all the time but
+                        // if one starts it the others follow"): a NEARBY
+                        // monster already mid collateral-attack makes
+                        // THIS roll easier to pass -- an additive bonus
+                        // on top of this creature's own fury-driven
+                        // aggression, not a separate guaranteed trigger,
+                        // so a low-fury monster can still fail the roll
+                        // even with the whole mob already piling on.
+                        if (HasNearbyMobAlreadyAttacking())
+                            aggression = Mathf.Clamp01(aggression + MonsterCombatProfile.Active.MobMentalityBonus);
+                        if (roll < aggression)
+                        {
+                            _originalTargetBuilding = _targetBuilding;
+                            _targetBuilding = civilianBlocker;
+                            _repositionTarget = null;
+                            return Vector3.zero; // re-enter TickAttack fresh next tick against the new target
+                        }
+                    }
+                    return TickAttackReposition(dt, bp, reach);
+                }
             }
             _repositionTarget = null;
 
@@ -1770,20 +1892,103 @@ public class MonsterAgent : MonoBehaviour
     /// either hits nothing, or hits something that resolves back to
     /// `_targetBuilding` itself (the shot simply arriving at its own
     /// target isn't an obstruction). Anything else -- a DIFFERENT
-    /// building's massing-cube collider standing in the way -- counts as
-    /// blocked. Deliberately does not special-case units/citizens/props
-    /// that might also have colliders in the path: only a `Building`
-    /// registered in `RuntimeCityBuilder`'s own collider map can block a
-    /// shot here, same "don't over-filter a one-off raycast" reasoning
+    /// CIVILIAN/procedural building's massing-cube collider standing in
+    /// the way -- counts as blocked, and is returned via `blocker` so the
+    /// caller can weigh a collateral-attack decision against it (see
+    /// `TickAttack`'s own attack-hierarchy doc comment). Deliberately
+    /// does not special-case units/citizens/props that might also have
+    /// colliders in the path: only a `Building` registered in
+    /// `RuntimeCityBuilder`'s own collider map can block a shot here,
+    /// same "don't over-filter a one-off raycast" reasoning
     /// `FireCluster.PickSurfacePoint`'s own camera-visibility check
-    /// already uses for its unrelated raycast.</summary>
-    private bool HasClearLineOfSight(Vector3 from, Vector3 to)
+    /// already uses for its unrelated raycast. Player-owned buildings are
+    /// NEVER returned here -- see `IsBlockedByPlayerBuilding`, a separate
+    /// check, for why they need their own detection path entirely.</summary>
+    private bool HasClearLineOfSight(Vector3 from, Vector3 to, out Building blocker)
     {
+        blocker = null;
         if (_builder == null) return true;
         RaycastHit hit;
         if (!Physics.Linecast(from, to, out hit)) return true;
-        var blocker = _builder.BuildingFromCollider(hit.collider);
-        return blocker == null || ReferenceEquals(blocker, _targetBuilding);
+        var candidate = _builder.BuildingFromCollider(hit.collider);
+        if (candidate == null || ReferenceEquals(candidate, _targetBuilding)) return true;
+        blocker = candidate;
+        return false;
+    }
+
+    // A player building's own footprint half-extent is 9m (docs/12's own
+    // derivation, `RuntimeCityBuilder.BuildingFootprintHalfExtent`) --
+    // 10m gives a little margin without being so wide it starts treating
+    // a building several hexes away as "in the way."
+    private const float PlayerBuildingBlockRadius = 10f;
+
+    /// <summary>2026-08 (creator direction: "Player owned building are
+    /// the only buildings immune"): player-owned `SimBuilding` visuals
+    /// (`BaseDresser.cs`, via `RuntimeCityBuilder.SpawnPrim`) strip their
+    /// OWN collider on every piece -- the exact same "dressing is
+    /// collider-less" fact already established for procedural buildings'
+    /// dressing (docs/29 SS2) -- so `Physics.Linecast`/`HasClearLineOfSight`
+    /// structurally CANNOT ever detect one; the ray passes straight
+    /// through with nothing to hit. Detecting a player building as a shot
+    /// obstruction needs a position-based check instead: a plain linear
+    /// scan over `SimBridge.BuildingAt` (the SAME idiom `FindOwnFactory`
+    /// already uses elsewhere in this file -- "a handful to dozens of
+    /// bases, not hundreds," per match-core's own established assumption,
+    /// so no spatial index is warranted), testing whether each live
+    /// building's own hex position falls within `PlayerBuildingBlockRadius`
+    /// of the muzzle-to-target segment. Checked FIRST and unconditionally
+    /// in `TickAttack` -- a player building blocking the shot always
+    /// forces a reposition, with no aggression roll, no exception.</summary>
+    private bool IsBlockedByPlayerBuilding(Vector3 from, Vector3 to)
+    {
+        var bridge = _builder != null ? _builder.SimBridge : null;
+        if (bridge == null || !bridge.HasMatch) return false;
+        for (var i = 0; i < bridge.BuildingCount; i++)
+        {
+            var b = bridge.BuildingAt(i);
+            if (b == null || b.State == BuildingState.Destroyed) continue;
+            var pos = _builder.WorldOf(b.Hex);
+            if (DistancePointToSegmentXZ(pos, from, to) <= PlayerBuildingBlockRadius)
+                return true;
+        }
+        return false;
+    }
+
+    private static float DistancePointToSegmentXZ(Vector3 p, Vector3 a, Vector3 b)
+    {
+        var pFlat = new Vector3(p.x, 0f, p.z);
+        var aFlat = new Vector3(a.x, 0f, a.z);
+        var bFlat = new Vector3(b.x, 0f, b.z);
+        var ab = bFlat - aFlat;
+        var t = ab.sqrMagnitude > 0.0001f ? Mathf.Clamp01(Vector3.Dot(pFlat - aFlat, ab) / ab.sqrMagnitude) : 0f;
+        return Vector3.Distance(pFlat, aFlat + ab * t);
+    }
+
+    /// <summary>2026-08 (creator direction: "mob mentality... if one
+    /// starts it the others follow"): a plain linear scan over
+    /// `RuntimeCityBuilder.Monsters` (the same "a handful to dozens, not
+    /// hundreds, no spatial index warranted" assumption `FindOwnFactory`/
+    /// `IsBlockedByPlayerBuilding` already lean on elsewhere in this
+    /// file) for any OTHER monster within `MonsterCombatProfile.Active.
+    /// MobMentalityRadius` that's already `IsCollateralAttacking`. Only
+    /// called from inside the already-blocked branch of `TickAttack`, not
+    /// every tick for every monster, so the scan cost is bounded to the
+    /// rare moment a shot is actually obstructed.</summary>
+    private bool HasNearbyMobAlreadyAttacking()
+    {
+        if (_builder == null) return false;
+        var monsters = _builder.Monsters;
+        var radius = MonsterCombatProfile.Active.MobMentalityRadius;
+        var radiusSq = radius * radius;
+        for (var i = 0; i < monsters.Count; i++)
+        {
+            var other = monsters[i];
+            if (other == null || ReferenceEquals(other, this) || !other.IsCollateralAttacking) continue;
+            var d = other.transform.position - transform.position;
+            d.y = 0f;
+            if (d.sqrMagnitude <= radiusSq) return true;
+        }
+        return false;
     }
 
     // Candidate angle offsets (degrees) from the attacker's OWN current
@@ -1823,7 +2028,9 @@ public class MonsterAgent : MonoBehaviour
             var offsetDeg = i < 0 ? 0 : RepositionSearchOffsets[i]; // try the current bearing itself first
             var angle = baseAngle + offsetDeg * Mathf.Deg2Rad;
             var candidate = targetPoint + new Vector3(Mathf.Cos(angle) * dist, 0f, Mathf.Sin(angle) * dist);
-            if (HasClearLineOfSight(candidate + probeHeight, targetPoint))
+            var probeFrom = candidate + probeHeight;
+            Building blocker;
+            if (!IsBlockedByPlayerBuilding(probeFrom, targetPoint) && HasClearLineOfSight(probeFrom, targetPoint, out blocker))
                 return candidate;
         }
         return null;

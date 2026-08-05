@@ -11959,3 +11959,99 @@ obstruction check anywhere in the firing pipeline) and follows an
 established movement-convention precedent (`TickPerch`'s own direct-
 steer block) rather than inventing a new one; the fire-count/spawn-rate
 changes are straightforward constant/knob edits.
+
+## 2026-08 follow-up: the attack hierarchy -- aggression-driven collateral destruction, player-building immunity, mob mentality, melee exemption
+
+Follow-up to the round above, confirmed via two clarifying questions
+before writing any code: **"How should a monster's aggression... be
+determined?" -> "New per-creature genome stat"; "What should
+collaterally destroy... mean mechanically?" -> "Full retarget: treat it
+like a real target."** Then two more creator messages arrived mid-
+implementation: **"Use berserk-rage genome, but also add a roll for
+increased probability for all units, mob mentality. It shouldn't happen
+all the time but if one starts it the others follow. Give me an
+inspector setting for that too"**, and **"Non projectile equipped
+monsters should be able to damage buildings through weapon swings or
+melee attacks and building contact."**
+
+**Aggression source: the existing `fury` genome axis, not a new one.**
+Investigated first (per the standing "verify before implementing"
+practice this whole thread runs under): no per-creature aggression stat
+existed anywhere in the AI -- `MonsterAgent.cs` reads zero genome brain
+axes today. The only "Aggression" concept in the whole codebase is
+`CommanderPersonality.Aggression`, strictly a faction-level RTS-
+commander dial, architecturally unreachable from individual monsters.
+Rather than mint an entirely new `BRAIN_AXES` entry -- a real schema
+change that would ripple through genome-core, mutator-service
+validation/catalog bounds, the golden determinism test, HMAC-signed
+genome format, and docs 06/07/08's own "normative-schema rule" (CLAUDE.md)
+-- the creator's own "use berserk-rage genome" direction confirmed
+reusing `fury` (`Brain.Params[4]`, docs/16's existing "berserk tendency"
+axis, 0..1, already reachable from `MonsterAgent._creature.Genome.Brain.
+Params[4]` with ZERO new plumbing, confirmed via investigation of
+`packages/roster-client/src/GenomeDto.cs`). Genuinely per-creature,
+genuinely genome-driven, no schema-version bump required.
+
+**Attack hierarchy** (`MonsterAgent.TickAttack`, doc-commented in place
+as the authoritative ordering): **Target > Collateral > Reposition.**
+Target always wins if the line is clear. If blocked by a DIFFERENT
+building: a player-owned one is NEVER eligible for collateral attack
+(checked first, unconditionally, forces reposition with no roll at all)
+-- a civilian/procedural one rolls this creature's own `fury`-derived
+aggression (plus the mob-mentality bonus, see below); success does a
+FULL retarget (`_targetBuilding` swapped to the blocker, `
+_originalTargetBuilding` remembers the real target, resumed automatically
+once the blocker is destroyed -- runs through the exact same fire/damage/
+collapse pipeline as any real target, not a scripted one-off smash);
+failure falls through to the existing reposition behavior. Bounded to
+one level of detour at a time (a second blocker while already mid-detour
+always repositions, never stacks).
+
+**Player-building immunity needed a different detection path entirely.**
+Investigated before implementing: player-owned `SimBuilding` visuals
+(`BaseDresser.cs`) are built via `RuntimeCityBuilder.SpawnPrim`, which
+strips its OWN collider on every piece -- the identical "dressing is
+collider-less" fact already established for procedural buildings'
+dressing. A `Physics.Linecast` therefore structurally CANNOT detect a
+player building at all; it passes straight through with nothing to hit.
+New `IsBlockedByPlayerBuilding` does a position-based check instead -- a
+plain linear scan over `SimBridge.BuildingAt`/`.PlayerIndex`/`.Hex` (the
+same "handful to dozens, not hundreds, no spatial index" idiom
+`MonsterAgent.FindOwnFactory` already uses elsewhere in this file),
+testing whether each live building's hex position falls within 10m
+(`PlayerBuildingBlockRadius`, roughly a building's own footprint half-
+extent) of the muzzle-to-target line segment.
+
+**Mob mentality.** New `MonsterAgent.HasNearbyMobAlreadyAttacking` scans
+`RuntimeCityBuilder.Monsters` (same linear-scan idiom) for any OTHER
+monster within a radius that's already mid collateral-attack (`
+IsCollateralAttacking`, true whenever `_originalTargetBuilding != null`).
+If found, this creature's own fury-derived aggression gets an ADDITIVE
+bonus before the roll -- "shouldn't happen all the time" is satisfied by
+this staying a probability nudge, not a forced trigger, so a low-fury
+monster can still fail the roll even with the whole mob already piling
+on. New `MonsterCombatProfile` (a ScriptableObject, mirroring `
+DamageFxProfile`/`CityLightingProfile`'s exact "gather tunables into one
+Inspector asset" pattern -- the first entry in a combat/AI-behavior
+tuning domain distinct from either of those) exposes `MobMentalityBonus`
+(default 0.3) and `MobMentalityRadius` (default 30m), wired into
+`RuntimeCityBuilder` the identical way `damageFxProfile`/`
+DamageFxProfile.Active` already are.
+
+**Melee/unarmed exemption.** "Try not to shoot through other building"
+is fundamentally a ranged-weapon concern -- a melee swing or unarmed
+bash only ever lands on whatever the monster is already standing next
+to, so there's no meaningful "line of fire" for a third building to
+obstruct. The entire LOS/collateral/reposition hierarchy above is now
+gated behind `isProjectile` (`armed && Weapon.Kind != WeaponKind.Melee`)
+-- Melee-weapon and unarmed monsters always get a clear shot at their
+own target, never reposition, never roll for collateral targets (they
+were never blocked to begin with).
+
+No Unity Editor in this environment to watch any of this render live.
+The genome-reuse decision and the player-building collider-less fact are
+both verified against real code (`GenomeDto.cs`, `RuntimeCityBuilder.
+SpawnPrim`), not assumed; the mob-mentality/melee-exemption mechanics are
+new, reasoned constructions built directly to the creator's own stated
+constraints ("shouldn't happen all the time," "melee attacks and
+building contact").

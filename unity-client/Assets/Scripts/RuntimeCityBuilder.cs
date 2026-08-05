@@ -53,6 +53,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     [Tooltip("Fire/smoke puff size knobs. Create one via Assets > Create > MadDr > Damage Fx Profile. Left unassigned, everything falls back to DamageFxProfile.Default's own safe values. Unlike the lighting profile, these are read live -- no rebuild needed to see a change.")]
     public DamageFxProfile damageFxProfile;
 
+    [Header("Monster combat AI")]
+    [Tooltip("Combat/AI behavior knobs (currently: the mob-mentality bonus for collateral building attacks). Create one via Assets > Create > MadDr > Monster Combat Profile. Left unassigned, everything falls back to MonsterCombatProfile.Default's own safe values -- read live, same as Damage Fx Profile.")]
+    public MonsterCombatProfile monsterCombatProfile;
+
     [Header("Region picker (off by default -- unchanged behavior)")]
     [Tooltip("Shows an in-game 'choose your city' screen before generation instead of using the Inspector's preset field directly. Off by default so every existing scene/workflow (Inspector preset, CityGizmo sync) keeps working byte-for-byte unchanged -- this only changes anything when explicitly turned on.")]
     public bool showRegionPicker = false;
@@ -404,6 +408,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // so a match that never touches the Inspector still gets Default's
         // safe values instead of a null Active on the very first puff.
         DamageFxProfile.Active = damageFxProfile != null ? damageFxProfile : DamageFxProfile.Default;
+        MonsterCombatProfile.Active = monsterCombatProfile != null ? monsterCombatProfile : MonsterCombatProfile.Default;
 
         BuildGround();
         BuildTableEdge();
