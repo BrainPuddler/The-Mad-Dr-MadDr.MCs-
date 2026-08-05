@@ -51,6 +51,19 @@ public class RosterFetcher : MonoBehaviour
     /// fail -- e.g. first run, offline, with nothing cached yet.</summary>
     public event Action<string> OnRosterFailed;
 
+    /// <summary>2026-08 (creator direction: "Add a loading bar, when the
+    /// game starts. Call it 'Deploying Army' 0-100%"): real, observable
+    /// progress through the roster fetch, not a faked timer --
+    /// `FetchRosterCoroutine` already fetches each creature as its own
+    /// yield-separated web request (`foreach (var id in menagerie.
+    /// CreatureIds)`), so `(fetched, total)` genuinely advances one step
+    /// per creature. Fired once right after the menagerie response
+    /// resolves `total` (with `fetched = 0`, so a listener knows the
+    /// denominator immediately even before the first creature request
+    /// completes), then again after each creature. `DeployingArmyHud` is
+    /// the consumer.</summary>
+    public event Action<int, int> OnFetchProgress;
+
     /// <summary>2026-08 (docs/12 "Lab stable" half of battalion grouping):
     /// fired once GET /battalions returns, with every named template this
     /// account has saved in the Lab. No local-disk cache fallback like the
@@ -98,6 +111,8 @@ public class RosterFetcher : MonoBehaviour
         }
 
         var creatures = new List<StoredGenomeDto>();
+        var total = menagerie.CreatureIds.Count;
+        OnFetchProgress?.Invoke(0, total);
         foreach (var id in menagerie.CreatureIds)
         {
             var creatureResult = new RequestResult();
@@ -116,6 +131,7 @@ public class RosterFetcher : MonoBehaviour
                 TryFallbackToCache("malformed creature response for " + id + ": " + e.Message);
                 yield break;
             }
+            OnFetchProgress?.Invoke(creatures.Count, total);
         }
 
         // A successful-but-EMPTY live roster must not clobber a good

@@ -12134,3 +12134,64 @@ No Unity Editor in this environment to watch this render live -- reused
 entirely existing, already-tested ignition machinery; the only new logic
 is the urgency-to-hex-count formula itself, straightforward arithmetic
 reasoned directly from the creator's own "logically destroyed" goal.
+
+## 2026-08 follow-up: "Deploying Army" loading bar (0-100%)
+
+Creator direction: **"Add a loading bar, when the game starts. Call it
+'Deploying Army' 0-100%."**
+
+Investigated the actual startup sequence before building anything, since
+a naive "show a bar for N fake seconds" implementation would have been
+easy but dishonest. Findings: `RuntimeCityBuilder.BeginMatch()` is one
+single synchronous method -- city generation, terrain, buildings, camera
+setup -- with zero coroutines/yields anywhere in it. Unity cannot render
+a frame or run `OnGUI` at any point during that call; the whole city
+appears in one stall the instant `BeginMatch` returns. That means no bar
+implementation, however written, could ever visibly animate across the
+city-generation phase specifically -- there's no frame boundary during
+which it could redraw.
+
+The one genuinely async, multi-frame, frame-observable phase in the
+entire startup pipeline is `RosterFetcher.FetchRosterCoroutine` --  a
+real `IEnumerator` using `UnityWebRequest`, fetching the menagerie and
+then each creature as its own yield-separated request. This is also,
+conveniently, the literal "deploying army" moment: each fetched creature
+is what gets spawned onto the battlefield. So the bar covers this phase,
+appearing once the city is already visible (not the literal first
+instant the game starts) and tracking the roster fetch through to the
+spawn.
+
+**Real progress, not a faked timer.** Added `RosterFetcher.
+OnFetchProgress(int fetched, int total)`, fired with `(0, total)` right
+after the menagerie response resolves the creature count, then again
+after each creature's own request completes inside the existing
+`foreach (var id in menagerie.CreatureIds)` loop. `fetched/total`
+therefore genuinely reflects how much of the roster has arrived, not an
+estimate.
+
+**New `DeployingArmyHud`** mirrors the established full-screen-overlay
+convention (`RegionPickerHud`/`FactionPickerHud`: opt-in component,
+centered dark `OnGUI` panel, `DrawShadowedLabel` double-draw, self-
+destroys when done) and `LumenHud`'s bar-fill-rect pattern (reimplemented
+locally since `LumenHud.DrawBar` is private). Subscribes to
+`OnFetchProgress`/`OnRosterReady`/`OnRosterFailed`; reads 0% while the
+menagerie response (and therefore the denominator) hasn't arrived yet,
+`fetched/total` once it has, and is forced to exactly 100% the instant
+the fetch resolves -- success OR failure, since a failed/offline fetch
+(falls back to local cache, or fails outright) still ends the "deploying"
+phase rather than freezing the bar partway. Holds at a visible 100% for
+0.5s before removing itself, so completion actually registers. Wired
+into `RuntimeCityBuilder.BeginMatch()` right alongside the existing
+`RosterFetcher` setup, same idempotent `GetComponent<T>() ??
+AddComponent<T>()` pattern as every other Hud in that method.
+
+Monster spawning itself (`HandleRosterReady`'s spawn loop) is
+synchronous and runs to completion in the same frame `OnRosterReady`
+fires, so it isn't sub-divided into further visible steps -- "100%"
+lines up with the real moment deployment happens even though the spawn
+itself is one more frame-boundary stall, same as `BeginMatch` up front.
+
+No Unity Editor in this environment to watch this render live -- verified
+by re-reading `RosterFetcher`'s existing event signatures
+(`Action<RosterCache, bool>`, `Action<string>`) against the new handler
+methods to confirm they match exactly.

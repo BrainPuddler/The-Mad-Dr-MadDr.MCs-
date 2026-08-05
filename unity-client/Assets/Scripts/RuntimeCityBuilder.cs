@@ -512,6 +512,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         _roster.OnRosterReady += HandleRosterReady;
         _roster.OnRosterFailed += HandleRosterFailed;
         _roster.OnBattalionsReady += HandleBattalionsReady;
+
+        var deployingArmyHud = gameObject.GetComponent<DeployingArmyHud>();
+        if (deployingArmyHud == null) deployingArmyHud = gameObject.AddComponent<DeployingArmyHud>();
+        deployingArmyHud.Init(_roster);
+
         _roster.FetchRoster();
         _roster.FetchBattalions();
     }
