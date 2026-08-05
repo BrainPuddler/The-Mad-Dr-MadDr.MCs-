@@ -87,6 +87,7 @@ public static class DamageFx
     {
         var go = new GameObject("SmokePlume");
         go.transform.SetParent(holder, false);
+        NormalizeScale(go.transform, holder);
         var angle = ((holder.GetInstanceID() & 0xFFFF) % 360) * Mathf.Deg2Rad;
         var groundY = holder.position.y + holderGroundOffset;
         var pos = new Vector3(
@@ -150,6 +151,7 @@ public static class DamageFx
     {
         var go = new GameObject("FireCluster");
         go.transform.SetParent(holder, false);
+        NormalizeScale(go.transform, holder);
         var groundPos = new Vector3(holder.position.x, holder.position.y + holderGroundOffset, holder.position.z);
         go.transform.position = groundPos;
         go.AddComponent<FireCluster>().Init(height, footprintRadius, targetCount);
@@ -160,6 +162,41 @@ public static class DamageFx
         // "still don't see it" report can be checked against the actual
         // numbers instead of guessed at blind.
         Debug.Log("[DamageFx] Fire cluster started on " + holder.name + " at ground " + groundPos + " (roofline will be " + (groundPos.y + height).ToString("F1") + ")");
+    }
+
+    /// <summary>2026-08 (creator report: "Finally found the fire debug
+    /// markers and FireCluster and firedebug sphere are way up in the
+    /// air, high above the building. Could be a scale issue. or a child
+    /// parent. but they are NOT on the buildings." -- creator's own
+    /// hypothesis was correct): `holder` for the procedural-building call
+    /// site is `cubes[0].transform`, and RuntimeCityBuilder.SpawnCube sets
+    /// that cube's OWN `localScale` to `(hexSize*0.9, height, hexSize*0.9)`
+    /// -- e.g. roughly (18, 14.4, 18) for a real building, wildly
+    /// non-uniform. `SetParent(holder, false)` preserves world position
+    /// (fine, and is why the absolute `.position` assignments right after
+    /// it in both call sites land correctly) but does NOT reset the
+    /// child's own `localScale` -- so SmokePlume/FireCluster's wrapper
+    /// silently inherits that scale as its effective (lossyScale) world
+    /// scale. That's invisible for the wrapper's OWN position (set in
+    /// world space), but corrupts every LOCAL offset computed by anything
+    /// parented under IT in turn -- concretely, FireCluster.SpawnOne's
+    /// `go.transform.localPosition = offset` (meant as real meters) gets
+    /// multiplied by the inherited scale when Unity resolves world space,
+    /// e.g. a 7m Y offset x 14.4 height-scale lands ~100m in the air.
+    /// Setting this wrapper's own `localScale` to the component-wise
+    /// inverse of the parent's `lossyScale` right after SetParent cancels
+    /// the inheritance, so 1 local unit under the wrapper is back to being
+    /// 1 real meter. Cheap and called before any position/child math runs.
+    /// No Unity Editor exists in this environment to verify live -- this
+    /// is a from-first-principles fix matching the exact numbers in the
+    /// creator's report, not a guess.</summary>
+    private static void NormalizeScale(Transform child, Transform holder)
+    {
+        var parentScale = holder.lossyScale;
+        child.localScale = new Vector3(
+            parentScale.x != 0f ? 1f / parentScale.x : 1f,
+            parentScale.y != 0f ? 1f / parentScale.y : 1f,
+            parentScale.z != 0f ? 1f / parentScale.z : 1f);
     }
 
     /// <summary>2026-08 (creator direction: "figure out how to verify

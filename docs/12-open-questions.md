@@ -11455,3 +11455,56 @@ No Unity Editor in this environment to watch this render live. `Physics.
 Linecast` is a one-off cost per spawn point (1-4 times total per
 building's whole lifetime, not per-frame), so the added searches carry
 no meaningful performance cost.
+
+## 2026-08 follow-up: fire/smoke wrapper was inheriting its building's own non-uniform scale
+
+Creator report, own hypothesis included and correct: **"Finally found
+the fire debug markers and FireCluster and firedebug sphere are way up
+in the air, high above the building. Could be a scale issue. or a
+child parent. but they are NOT on the buildings."**
+
+**Verified root cause in `RuntimeCityBuilder.SpawnCube`.** The
+procedural-building call site hands `DamageFx.AttachSmoke`/
+`AttachFireCluster` a `holder` transform of `cubes[0].transform` -- the
+building's own rendered massing cube. `SpawnCube` sets that cube's OWN
+`localScale` to `(hexSize * 0.9f, height, hexSize * 0.9f)` -- e.g.
+roughly `(18, 14.4, 18)` for a real building, wildly non-uniform.
+`SetParent(holder, false)` preserves world position (which is why the
+absolute `.position` assignments both call sites already do land
+correctly), but does nothing about the CHILD's own `localScale` --
+neither `SmokePlume`'s nor `FireCluster`'s wrapper GameObject ever
+reset that, so each silently inherited the cube's own scale as its
+effective (`lossyScale`) world scale. Invisible for the wrapper's own
+position, but it corrupts every LOCAL offset computed by anything
+parented under it in turn: `FireCluster.SpawnOne`'s
+`go.transform.localPosition = offset` (computed and intended as real
+meters, per the roofline/line-of-sight fixes above) was being
+multiplied by that inherited scale when Unity resolved final world
+position -- a ~7m Y offset x a ~14.4 height-scale lands close to 100m
+in the air, matching the creator's own "way up in the air, high above
+the building" report exactly. Not a shader, camera, or placement-math
+bug -- every fix in the three entries above computed the RIGHT local
+offset, on the WRONG effective scale.
+
+**Fix, in `DamageFx.cs`.** New private helper `NormalizeScale(child,
+holder)` sets the child's own `localScale` to the component-wise
+inverse of `holder.lossyScale`, cancelling the inherited scale so one
+local unit under the wrapper is back to being one real meter. Called
+immediately after `SetParent` in both `AttachSmoke` and
+`AttachFireCluster`, before any position or child-spawn math runs.
+`AttachFire` (singular, the old single-point predecessor `AttachFireCluster`
+superseded) was left untouched -- confirmed via grep to have no
+remaining callers anywhere in `Assets/Scripts`, so it's dead code, and
+per "don't refactor unrelated code" it isn't worth touching to fix a
+bug nothing can currently trigger. Also checked `DustBurst`,
+`RubblePileFx`/`RubbleDresser.Shatter`/`.Scatter`, `WaterJet`, and
+`BloodSplatter`: all parent under `_buildingsHost` (a plain, never-
+scaled container `GameObject` created once in `BuildBuildings`), not
+under any building's own scaled massing cube, so they were never
+exposed to this bug and needed no change.
+
+No Unity Editor in this environment to watch this render live -- this
+fix is from first principles (reading `SpawnCube`'s exact scale
+assignment and Unity's own documented `SetParent`/`lossyScale`
+semantics) and the numbers it predicts match the creator's report
+exactly, not a guess.
