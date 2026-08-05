@@ -741,7 +741,34 @@ public class FireCluster : MonoBehaviour
         // the one confirmed-visible effect this round, nothing about its
         // placement is in question.
         var dist = _footprintRadius * 1.6f;
-        var offset = new Vector3(Mathf.Cos(angle) * dist, _height * 1.0f, Mathf.Sin(angle) * dist);
+        // 2026-08 VERIFIED root cause (creator direction: "place fire on
+        // walls and windows of building... not on roofs", then confirmed
+        // after this shipped: "I SEE SMOKE NO FIRE"): height 1.0 above
+        // WAS the roofline, exactly -- worked the actual numbers from a
+        // real ignition log rather than guessing again. That report's own
+        // console line ("Fire cluster started on Cube at ground (700.00,
+        // -4.19, 658.18) (roofline will be 10.2)") plus AttachSmoke's own
+        // logged puff height (groundY + height*0.3, i.e. ~0.1 above
+        // ground for that same building) gives two REAL, comparable
+        // numbers: smoke sits ~0.1m up (confirmed visible); fire sat
+        // ~10.2m up -- dead level with the roofline this exact building's
+        // own log reported, on a building only ~14.4m tall. A point
+        // sitting exactly AT a roofline is exactly where a parapet lip,
+        // roof edge, or any roof clutter this file's own history already
+        // blamed for hiding things on taller tiers would occlude it --
+        // and it's also the ONE height a typical RTS camera's downward
+        // look angle is least likely to clear the building's own silhouette
+        // to see. This was never a shader/material/marker bug (see this
+        // class's own commit history for that ruled-out investigation) --
+        // it was always this one number. Height now lands in the WALL
+        // band instead -- 30-65% up the building, varied per point off
+        // `salt` (the same per-point hash already driving this point's
+        // own angle jitter) so a multi-point cluster reads as fire in
+        // several different windows, not one uniform band -- comfortably
+        // clear of both street level (smoke's own territory) and the
+        // roofline (explicitly excluded, per "not on roofs").
+        var heightFrac = 0.3f + ((salt >> 16) & 0xFFFF) / 65536f * 0.35f;   // 0.30-0.65 of height
+        var offset = new Vector3(Mathf.Cos(angle) * dist, _height * heightFrac, Mathf.Sin(angle) * dist);
 
         var go = new GameObject("FirePlume");
         go.transform.SetParent(transform, false);

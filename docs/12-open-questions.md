@@ -11346,3 +11346,67 @@ same standing gap as every Unity-side change in this project's
 history; the diagnostic tools from the prior debugging round (console
 logs, magenta marker) are unchanged and still the fastest way to
 confirm this actually renders in a real Play session.
+
+## 2026-08 follow-up: the ACTUAL fire-invisibility root cause, found by working real numbers instead of guessing again
+
+Creator direction, then decisive evidence: **"place fire on walls and
+windows of building make sure always make sure fire is outside the
+building all normals are visible. not on roofs. verify the results no
+more guessing."** Followed by a live report that resolved the whole
+investigation: **"I SEE SMOKE NO FIRE!"**
+
+**Investigation discipline, since "no more guessing" was explicit.**
+Before touching placement, ruled out every OTHER candidate with actual
+evidence rather than assumption: `LabMeshBuilder.MakeTransparent`
+already does the full URP `_Surface`/`_SURFACE_TYPE_TRANSPARENT` dance
+(not just a Built-in-RP recipe silently failing under URP) -- confirmed
+by reading it, not assumed. `ProceduralMeshKit.FaceOutward` (shared by
+`FlameShard` AND `CloudShard`) is a correct, general convex-outward-
+normal algorithm -- verified by reading the actual cross-product/dot-
+product math, not "the code looks fine." No `cullingMask`/`.layer`
+assignment exists ANYWHERE in this codebase (grepped, zero hits) --
+rules out a camera-layer mismatch outright. The creator's own follow-up
+("I point the camera at the building I'm attacking always") then ruled
+out camera positioning too, which the "I SEE SMOKE" report had already
+proven on its own: smoke rendering at the SAME location the fire log
+reported means the camera was unambiguously pointed at the right place.
+
+**The actual bug, found from the creator's own real ignition log.**
+`AttachFireCluster`'s console line for one specific attack: `"Fire
+cluster started on Cube at ground (700.00, -4.19, 658.18) (roofline
+will be 10.2)"`. Cross-referencing that against `AttachSmoke`'s own
+height formula (`groundY + height*0.3`) for the SAME building gives two
+real, comparable numbers: smoke sits ~0.1m above ground (confirmed
+visible); fire's own placement formula (`_height * 1.0f`, i.e. the
+roofline) put it at 10.2m -- dead level with the roofline THIS EXACT
+building's own log reported, on a structure only ~14.4m tall. A point
+sitting exactly at a roofline is precisely where a parapet lip or roof
+clutter (already blamed for hiding things on taller tiers, several
+entries up this same log) would occlude it, and it's also the height a
+typical RTS downward camera angle is least likely to clear a building's
+own silhouette to see over. Every earlier round of "still don't see it"
+guessed at shader/color/transparency/size; the actual variable was
+always this one number, never touched by any of those six-plus rounds.
+
+**Fix, in `DamageFx.cs`'s `FireCluster.SpawnOne`.** Height changed from
+the flat `_height * 1.0f` (roofline, explicitly excluded now per "not
+on roofs") to `_height * heightFrac`, where `heightFrac` is 0.30-0.65,
+varied per spawn point off the same per-point `salt` hash that already
+drives that point's own angle jitter -- so a multi-point cluster reads
+as fire in several different windows up the wall, not one uniform
+band, comfortably clear of both smoke's own street-level territory and
+the roofline. Radial distance (`footprintRadius * 1.6`, already
+verified geometrically sound for clearing a single-hex building's own
+worst-case corner -- `BuildingFootprintHalfExtent * sqrt(2) ≈ 12.73m`
+against a 12.8m placement) and the debug marker (which spawns wherever
+the first real fire point lands, so it inherits this fix automatically
+with no separate change needed) are both untouched -- neither was ever
+implicated by the evidence, so neither was touched, per the "no more
+guessing" instruction: change only what the numbers actually pointed
+at.
+
+No Unity Editor in this environment to watch this render live -- same
+standing gap as every Unity-side change in this project's history. The
+existing `[DamageFx]` console log line and debug marker remain the
+fastest way to confirm the new height in a real Play session if
+anything still looks off.
