@@ -1324,7 +1324,25 @@ public class FireCluster : MonoBehaviour
     /// Falls back to the OLD fixed-distance approximation only if every
     /// candidate fails both tests -- this still never prevents a fire
     /// point from spawning, it only risks (rarely) not sitting exactly on
-    /// real geometry that one time.</summary>
+    /// real geometry that one time.
+    ///
+    /// 2026-08 (creator direction: "Fire should only be spawned on those
+    /// building only NO others in the Hex"): a THIRD rejection was
+    /// missing. `probeDist` (`_footprintRadius * 3`) casts in from well
+    /// outside this building's own footprint, and the raycast was
+    /// unfiltered -- in a dense city a neighboring building's massing
+    /// cube (every one of which carries its own collider, per this
+    /// method's own header) can sit inside that probe distance and be the
+    /// first thing the ray actually hits, so a flame could visually land
+    /// on a building this attack never touched. This `FireCluster`
+    /// instance is parented 1:1 to the ONE cube it was ignited for
+    /// (`AttachFireCluster`'s `holder` -- per-hex, per
+    /// <c>RuntimeCityBuilder.IgniteBuildingIfNeeded</c>'s own per-hex
+    /// contract, never shared across hexes or buildings), so
+    /// `transform.parent` IS that specific, correct collider -- any hit
+    /// on anything else is rejected exactly like a missed raycast or an
+    /// occluded LOS check, and the search moves to the next candidate
+    /// angle.</summary>
     private static readonly int[] AngleSearchOffsets = { 0, 14, -14, 28, -28, 35, -35 };
 
     private Vector3 PickSurfacePoint(int primaryJitterDeg, float heightFrac)
@@ -1340,6 +1358,7 @@ public class FireCluster : MonoBehaviour
             var rayOrigin = transform.position + new Vector3(Mathf.Cos(candidateAngle) * probeDist, targetY, Mathf.Sin(candidateAngle) * probeDist);
             RaycastHit hit;
             if (!Physics.Raycast(rayOrigin, dirIn, out hit, probeDist)) continue;
+            if (transform.parent != null && hit.collider.transform != transform.parent) continue; // never a different building's collider
             if (cam != null)
             {
                 var losProbe = hit.point + hit.normal * LosProbeOffset;

@@ -12304,3 +12304,69 @@ No Unity Editor in this environment to compile-check `SimBridge.cs`/
 manual review against the file's own proven `SpawnHqForPlayer`/
 `SpawnFactoryForPlayer`/`FindOpenHexWide` patterns, and by the one thing
 that IS runnable here: the full match-core test suite passing green.
+
+## 2026-08 follow-up: fire could visually land on a building the attack never touched
+
+Creator direction: **"Monster should only attack building that will
+specifically be destroyed in the attack and Fire should only be spawned
+on those building only NO others in the Hex. Unless collateral damage is
+flagged and those building will be destroyed too."**
+
+This reads almost verbatim as the creator's own EARLIER direction quoted
+in `MonsterAgent.TickAttack`'s own attack-hierarchy comment ("Monsters
+should try to attack only the target building(s) that will be destroyed
+in the attack and try not to shoot through other building. ONLY the
+target buildings catch fire but adhere to the raycast rule") -- the
+LOS/collateral/reposition system (docs/12's earlier entries) was already
+built specifically to satisfy this. So the first job was verifying
+whether that system was actually doing its job, or whether this is a
+fresh bug report.
+
+**Damage/ignition targeting: confirmed already correct, no change
+needed.** Traced every call site: `MonsterAgent.TickAttack` calls
+`ApplyBuildingDamage`/`IgniteBuildingIfNeeded` exclusively with
+`_targetBuilding` -- never any other reference. `_targetBuilding` is
+either the real, LOS-clear target, or (only when the existing collateral
+aggression roll succeeds) the blocking building it was swapped to for a
+full, legitimate retarget -- exactly "collateral damage is flagged."
+`Projectile.cs`'s own header confirms building shots are "purely
+cosmetic -- the firing unit already applied the structural damage," so a
+projectile's own physical flight/collision can't credit damage to
+whatever it happens to visually pass near either. This half of the
+request was already satisfied.
+
+**The real gap: `FireCluster.PickSurfacePoint`'s placement raycast had
+no filter.** It casts INWARD from `_footprintRadius * 3` outside the
+attacked building's own footprint, at a candidate angle, and returns
+whatever the ray hits first. In a dense city a NEIGHBORING building's own
+massing cube (every building cube carries its own collider) can sit
+within that probe distance and be the first real surface the ray
+touches -- so a flame could render on a building this attack never
+targeted, damaged, or flagged as collateral, purely a visual leak with no
+damage/HP consequence, but exactly the "fire on others in the Hex" the
+creator is reporting. `MaybeSpawnEmber`'s "grid-adjacent crawl" and every
+progressive-ignition path all funnel through this same one method
+(`IgniteCell` -> `PickSurfacePoint`), so this was the single real fix
+point, not several.
+
+**Fix.** Each `FireCluster` instance is parented 1:1 to the one specific
+per-hex massing cube it was ignited for (`RuntimeCityBuilder.
+IgniteBuildingIfNeeded` resolves the exact hit hex's own cube via
+`FootprintIndexOf`, then `DamageFx.AttachFireCluster(cube.transform,
+...)` parents the cluster to it) -- confirmed via `SpawnCube`'s own
+`GameObject.CreatePrimitive(PrimitiveType.Cube)` call that the collider
+lives directly on that same cube GameObject, not a child, so `hit.
+collider.transform` and `transform.parent` are directly comparable.
+`PickSurfacePoint` now rejects any raycast hit whose collider isn't
+`transform.parent`, exactly like its existing "missed raycast" and
+"occluded camera LOS" rejections -- the candidate-search loop just moves
+to the next jitter angle. The old no-raycast-needed fallback (a computed
+point relative to `transform.position`) was already safe by construction
+and untouched.
+
+No Unity Editor in this environment to watch this render live or confirm
+a dense city actually reproduces the leak visually -- fix verified by
+full code-path tracing (`IgniteBuildingIfNeeded` -> `AttachFireCluster`
+-> `FireCluster`'s own parenting -> `SpawnCube`'s collider placement) to
+confirm the parent-collider comparison is checking the right thing, not
+by watching it run.
