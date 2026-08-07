@@ -361,7 +361,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // picker off reproduces the exact prior behavior byte-for-byte.
         var opponentFaction = opponentFactionOverride ?? (chosenFaction == FactionId.HumanArmy ? FactionId.AlienHive : FactionId.HumanArmy);
         _simBridge.StartMatch(unchecked((uint)seed), new List<FactionId> { chosenFaction, opponentFaction }, _city);
-        SpawnStartingBases();
+        SpawnStartingBases(opponentFaction);
 
         // the moon-dial/mana/capture-progress HUD, the build-menu/ghost-
         // cursor/BaseDresser trio, and the component-wallet/supply HUD all
@@ -2541,8 +2541,23 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// offset toward a map edge so the two starts don't crowd each other
     /// -- not the "themed landmark site" docs/23 §2 eventually describes
     /// (no such landmark-selection logic exists anywhere yet), just two
-    /// distinct, valid, non-overlapping hexes.</summary>
-    private void SpawnStartingBases()
+    /// distinct, valid, non-overlapping hexes.
+    ///
+    /// 2026-08 (creator direction: "Create a faction based army generator.
+    /// To start making opponents for the game"): once the AI opponent's
+    /// HQ+Factory are placed, if its faction has a fixed
+    /// <see cref="RosterUnitKind"/> roster (HumanArmy/AlienHive --
+    /// MadDoctor fields bred creatures, never a fixed list, and Mixed
+    /// resolves race a different way, so neither is supported by <see
+    /// cref="ArmyGenerator"/>), generate and field a starting army near its
+    /// HQ. <see cref="CommanderPersonality.Generate(uint)"/> is seeded off
+    /// THIS match's own `seed`, so "this seed's opponent" fields the same
+    /// starting army every time, same determinism convention the rest of
+    /// this project holds to. **These spawned units have no 3D visual yet**
+    /// -- see <see cref="SimBridge.SpawnRosterUnit"/>'s own doc comment for
+    /// the real, separate, not-yet-built gap this doesn't attempt to
+    /// close.</summary>
+    private void SpawnStartingBases(FactionId opponentFaction)
     {
         if (_simBridge == null) return;
 
@@ -2577,6 +2592,46 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var p1Factory = FindOpenHexWide(p1Hq, blocked, claimed, 24);
         claimed.Add(p1Factory);
         _simBridge.SpawnFactoryForPlayer(1, p1Factory);
+
+        if (opponentFaction == FactionId.HumanArmy || opponentFaction == FactionId.AlienHive)
+            SpawnOpponentStartingArmy(opponentFaction, p1Hq, blocked, claimed);
+    }
+
+    /// <summary>v0.1 placeholder starting budget (CLAUDE.md's standing
+    /// "flag the invented number, don't pretend it's balanced" policy,
+    /// same status as every other tuning number in this codebase) -- big
+    /// enough that <see cref="ArmyGenerator"/> fields a real, multi-unit
+    /// opening force for either roster, not a token single unit.</summary>
+    private static readonly Dictionary<ResourceKind, int> OpponentStartingArmyBudget = new Dictionary<ResourceKind, int>
+    {
+        { ResourceKind.Bones, 200 },
+        { ResourceKind.Fuel, 200 },
+        { ResourceKind.Ichor, 200 },
+    };
+
+    /// <summary>2026-08 (creator direction: "Create a faction based army
+    /// generator. To start making opponents for the game"): generate a
+    /// composition via <see cref="ArmyGenerator"/> and field it near the
+    /// opponent's HQ. `CommanderPersonality.Generate(seed)` reuses THIS
+    /// match's own seed (not a fresh random draw) so a given seed's
+    /// opponent always opens with the same army -- the same determinism
+    /// convention every other seeded system in this project holds to.
+    /// Each unit gets its own <see cref="FindOpenHexWide"/> placement,
+    /// claimed into the same set the HQ/Factory hexes above already use,
+    /// so a big army can't stack units on top of each other or the bases.</summary>
+    private void SpawnOpponentStartingArmy(FactionId opponentFaction, HexCoord aroundHex, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
+    {
+        var personality = CommanderPersonality.Generate(unchecked((uint)seed));
+        var composition = ArmyGenerator.Generate(opponentFaction, personality, OpponentStartingArmyBudget, new SimRng(unchecked((uint)seed)));
+        foreach (var (kind, count) in composition)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                var hex = FindOpenHexWide(aroundHex, blocked, claimed, 24);
+                claimed.Add(hex);
+                _simBridge.SpawnRosterUnit(1, hex, kind);
+            }
+        }
     }
 
     /// <summary>Every spawned traffic car -- same minimap use as

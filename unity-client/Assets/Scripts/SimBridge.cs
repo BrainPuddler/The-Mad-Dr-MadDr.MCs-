@@ -86,6 +86,22 @@ public class SimBridge : MonoBehaviour
     public uint SpawnFactoryForPlayer(int playerIndex, HexCoord atHex)
         => _match?.SpawnFactoryForPlayer(playerIndex, atHex) ?? 0;
 
+    /// <summary>2026-08 (creator direction: "Create a faction based army
+    /// generator. To start making opponents for the game"): setup-time
+    /// pass-through to <see cref="MatchState.SpawnRosterUnit"/> -- same
+    /// direct-call, no-op-if-no-match contract as <see
+    /// cref="SpawnHqForPlayer"/>/<see cref="SpawnFactoryForPlayer"/>
+    /// above. Used by <c>RuntimeCityBuilder.SpawnStartingBases</c> to
+    /// field the units <see cref="ArmyGenerator"/> generates for an
+    /// AI opponent. **These units have no Unity-side visual yet** -- no
+    /// mesh/prefab pipeline exists for any <see cref="RosterUnitKind"/>
+    /// (only genome-bred creatures render today, via `MonsterAgent`/
+    /// `MonsterBody`); they exist in the simulation (queryable, fightable,
+    /// salvageable) but are invisible in the 3D scene until that separate
+    /// docs/23 §6 Unity task is done.</summary>
+    public uint SpawnRosterUnit(int playerIndex, HexCoord atHex, RosterUnitKind kind)
+        => _match?.SpawnRosterUnit(playerIndex, atHex, kind) ?? 0;
+
     /// <summary>Queue a REPLACE move order for the NEXT tick boundary --
     /// never applied immediately (docs/27 §5: one-tick input latency is
     /// correct lockstep behavior, not a bug). Drops any waypoints already

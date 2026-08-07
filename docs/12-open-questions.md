@@ -12195,3 +12195,112 @@ No Unity Editor in this environment to watch this render live -- verified
 by re-reading `RosterFetcher`'s existing event signatures
 (`Action<RosterCache, bool>`, `Action<string>`) against the new handler
 methods to confirm they match exactly.
+
+## 2026-08 follow-up: faction-based army generator, to start making opponents real
+
+Preceded by reading through this file's own "AI opponent" status audit
+(above): `SkirmishCommander`/`CommanderPersonality` exist and can DECIDE
+what an army does in battle, and `FactionRoster.cs`'s `UnitRosterDef`
+already prices every unit -- but nothing anywhere could look at a faction
+and produce an actual ARMY (a composition of units) in the first place.
+Player 1 got an inert HQ+Factory and nothing else.
+
+Creator direction: **"Create a faction based army generator. To start
+making opponents for the game. You can interface with the website or be
+web based if necessary. Choose the technology that is best suited for
+the task."**, then **"Ok just do it."**
+
+**Technology call: match-core (C#), not the website.** An army here is
+fundamentally match-core data (`UnitRosterDef`, `ResourceKind` costs,
+`CommanderPersonality`) feeding a live match; a web tool would either
+duplicate that table in TypeScript (diverging from the one source of
+truth) or need a bridge that doesn't exist (match-core has zero reference
+to genome-core, a repo invariant). match-core is also the one piece of
+this whole project actually runnable/verifiable in this environment --
+`dotnet test` works here; there is no Unity Editor.
+
+**New `ArmyGenerator.cs`** (`packages/match-core/src`): pure,
+`MatchState`-free (no city, no tick dependency -- easy to unit-test).
+`Generate(faction, personality, budget, rng)` spends a REAL
+`ResourceKind` wallet (the same currency `UnitRosterDef.Cost` already
+uses -- Bones+Fuel for Army, Ichor for Hive -- never an invented
+cross-faction "points" abstraction) on a weighted-random knapsack fill
+off the canonical `SimRng` (never `Math.Random`), returning how many of
+each `RosterUnitKind` to field. `MadDoctor`/`Mixed` are rejected outright
+(`ArgumentException`) -- `UnitRosterDef.AllDefs` has no entries for
+either (MadDoctor fields bred creatures, never a fixed list; Mixed
+resolves race per-unit a different way), so a budget for either has
+nothing to spend on.
+
+**Only Aggression and Caution drive unit choice** -- deliberately narrow,
+not an oversight. Those two trace to a real composition question ("glass
+cannons or durable line troops?"); the other four `CommanderPersonality`
+traits (Greed/Territoriality/Opportunism/Discipline) already have real
+meaning for `SkirmishCommander`'s IN-BATTLE decisions but no natural
+"which units do I buy" translation -- left unused and documented as such
+rather than faking a mapping.
+
+**A real design correction found mid-build, not shipped broken:** the
+first weighting pass scored units by raw normalized `Power`/`MaxVitality`.
+`FactionRoster`'s still-unbalanced v0.1 numbers (flagged in its own
+header as invented placeholders) happen to make the Human Army `Tank`
+simultaneously the single best unit on BOTH axes -- so every personality,
+Aggression-heavy or Caution-heavy alike, converged on buying mostly Tanks,
+and the two new tests asserting personality actually changes the
+composition failed. Root cause: raw-stat scoring answers "which unit is
+best," not "which unit is the best BUY for a limited budget" -- the
+correct knapsack question. Fixed by scoring PER-COST density
+(`Power`/cost, `MaxVitality`/cost) instead: the cheap `Rifleman` turns out
+to have power-density competitive with the `Tank` (a real, if coincidental,
+v0.1 balance detail), so Aggression-heavy commanders now genuinely favor a
+different mix than Caution-heavy ones. `ArmyGenerator.CostUnits` flattens
+Bones/Fuel/Ichor at parity (1 unit == 1 unit) for this WEIGHTING purpose
+only -- it never touches the exact per-resource budget bookkeeping in
+`Generate`, which stays precise. The two behavioral tests
+(`ArmyGeneratorTests.cs`) measure aggregate density (total stat spent per
+resource unit across 30 generated seeds), not raw per-unit averages --
+average-per-unit is the wrong metric here too, since a Caution army
+buying fewer, pricier, tankier units can read as higher average Power per
+unit than an Aggression army's many cheap power-dense units, inverting
+what the personality actually optimized for.
+
+**11 new tests** (`ArmyGeneratorTests.cs`, 302 total in the package):
+determinism (same seed -> identical output), budget never exceeded on any
+`ResourceKind` line (20 seeds x 2 factions), faction purity, MadDoctor/
+Mixed rejection, empty/insufficient-budget -> empty composition without
+crashing, the Aggression/Caution density skew (above), and a `MaxUnits`
+safety-cap check. `dotnet test Tests~/MatchCore.Tests.csproj` passes
+green, 302/302 -- the one thing in this whole change actually verified
+running, not just reasoned about.
+
+**Unity wiring, honestly scoped.** New `SimBridge.SpawnRosterUnit`
+(mirrors `SpawnHqForPlayer`/`SpawnFactoryForPlayer`'s exact pass-through
+contract). `RuntimeCityBuilder.SpawnStartingBases` now takes the
+opponent's resolved faction; if it's HumanArmy or AlienHive, a new
+`SpawnOpponentStartingArmy` generates a composition (personality and RNG
+both seeded off THIS match's own `seed`, so a given seed's opponent
+always opens with the same army) and fields it near the opponent's HQ via
+the existing `FindOpenHexWide` placement helper, claimed into the same
+hex set the HQ/Factory placements already use so nothing stacks.
+MadDoctor/Mixed opponents (reachable via `OpponentFactionPickerHud`) skip
+this entirely, no-op, doc-commented why.
+
+**Confirmed gap, deliberately not attempted here:** grep across
+`unity-client/` turns up zero code rendering a mesh for any
+`RosterUnitKind` -- only the new `SimBridge` wrapper and an unrelated
+`GrabCursor.cs` comment reference the enum at all. The units this
+generator spawns are real in the simulation (queryable via `SimBridge`,
+fightable, salvageable, exactly like any other `SimUnit`) but **invisible
+in the 3D scene** until docs/23 §6's own already-named Unity task ("Army/
+Hive unit spawning through the same MonsterAgent/MonsterBody pipeline")
+gets built -- a real, separate, larger job, not attempted in this pass.
+Also still true, unchanged by this work: `SkirmishCommander` itself is
+still never ticked from Unity, so this opponent has an army but nothing
+yet decides what it DOES with it -- the next real step toward a live AI
+opponent, not this one.
+
+No Unity Editor in this environment to compile-check `SimBridge.cs`/
+`RuntimeCityBuilder.cs` or watch a match run -- verified by careful
+manual review against the file's own proven `SpawnHqForPlayer`/
+`SpawnFactoryForPlayer`/`FindOpenHexWide` patterns, and by the one thing
+that IS runnable here: the full match-core test suite passing green.
