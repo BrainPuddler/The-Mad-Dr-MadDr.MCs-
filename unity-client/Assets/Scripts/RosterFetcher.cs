@@ -111,7 +111,7 @@ public class RosterFetcher : MonoBehaviour
         }
 
         var creatures = new List<StoredGenomeDto>();
-        var total = menagerie.CreatureIds.Count;
+        var total = menagerie.CreatureIds.Length;
         OnFetchProgress?.Invoke(0, total);
         foreach (var id in menagerie.CreatureIds)
         {
