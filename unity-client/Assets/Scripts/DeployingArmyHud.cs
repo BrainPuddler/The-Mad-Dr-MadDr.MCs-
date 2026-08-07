@@ -1,3 +1,4 @@
+using MadDr.RosterClient;
 using UnityEngine;
 
 /// <summary>
