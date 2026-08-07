@@ -409,6 +409,23 @@ public class WaypointCommander : MonoBehaviour
             return;
         }
 
+        // 2026-08 (creator direction: "check that monsters can harvest
+        // metal and other building salvage"): a destroyed building's own
+        // rubble is deliberately collider-less (RuntimeCityBuilder's own
+        // Destroyed-branch comment: "clicks fall through to the ground"),
+        // so BuildingFromCollider above never resolves a hit here --
+        // right-clicking a wreck's footprint needs its own hex-membership
+        // check instead, same idea as the plain ground-waypoint case just
+        // below but checked FIRST so a wreck's own hex routes to
+        // scavenging rather than just a walk-there order.
+        var scavengeHex = _builder.HexAt(hit.Value.point);
+        var scavengeTarget = _builder.ScavengeableBuildingAt(scavengeHex);
+        if (scavengeTarget != null)
+        {
+            foreach (var a in _selected) a.OrderScavenge(scavengeTarget);
+            return;
+        }
+
         // ground: a waypoint for the whole group. Shift queues. A group
         // spreads into a formation around the spot (one hex each) while
         // WALKING, then creeps in close together once everyone's stopped

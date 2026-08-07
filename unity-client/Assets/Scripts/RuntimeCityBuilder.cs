@@ -2310,32 +2310,36 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// <summary>2026-08 (creator direction: "assign some salvage parts
     /// based on the building size... as the lot is cleaned of parts the
     /// lot debris is decreased until it is completely cleared and is
-    /// available to build on it"): drains up to `amount` of `building`'s
-    /// own remaining scavenge pile, credits `playerIndex`'s wallet that
-    /// much <see cref="ResourceKind.Parts"/> (via the SAME `BankHarvestLoad`
-    /// no-source-entity precedent a harvester's own Blood/Bones/Brains
-    /// delivery already uses -- there is no monster/worker AI issuing
-    /// this yet, same "build the mechanism, wire the AI later" split the
-    /// SEPARATE RTS-building roster's own ScavengeDebris command already
-    /// went through), shrinks the visible rubble proportionally, and
-    /// reclaims the hex the instant the pile is fully cleared. Silent
-    /// no-op if the building isn't actually Destroyed, has nothing left
-    /// to loot, or `amount` isn't positive -- same bad-input contract as
+    /// available to build on it"), 2026-08 follow-up (creator direction:
+    /// "check that monsters can harvest metal and other building
+    /// salvage" -&gt; "carry it home," same tank <see
+    /// cref="MonsterAgent"/>'s Blood/Bones/Brains already use): drains up
+    /// to `amount` of `building`'s own remaining scavenge pile and
+    /// RETURNS the actual amount drained -- the caller (a harvester's own
+    /// <c>CreditHarvestForScavengedDebris</c>) carries that home and
+    /// banks it later via the existing <see cref="BankHarvestLoad"/> path,
+    /// same as an eaten citizen's yield. Deliberately does NOT credit a
+    /// wallet directly anymore (an earlier draft of this method did,
+    /// before any AI actually called it) -- Parts now flows through the
+    /// SAME onboard-tank/deliver-to-Factory loop every other harvested
+    /// resource already uses, not a separate instant-credit shortcut.
+    /// Still shrinks the visible rubble proportionally and reclaims the
+    /// hex the instant the pile is fully cleared. Silent no-op (returns
+    /// 0) if the building isn't actually Destroyed, has nothing left to
+    /// loot, or `amount` isn't positive -- same bad-input contract as
     /// <see cref="ApplyBuildingDamage(Building, int, HexCoord)"/>.</summary>
-    public void ScavengeBuildingDebris(Building building, int playerIndex, int amount)
+    public int DrainBuildingScavenge(Building building, int amount)
     {
-        if (_simBridge == null || amount <= 0) return;
+        if (_simBridge == null || amount <= 0) return 0;
         BuildingRuntimeState current = null;
         foreach (var state in _battlefield.Buildings)
             if (ReferenceEquals(state.Building, building)) { current = state; break; }
-        if (current == null || current.Stage != DamageStage.Destroyed || current.ScavengeRemaining <= 0) return;
+        if (current == null || current.Stage != DamageStage.Destroyed || current.ScavengeRemaining <= 0) return 0;
 
         var before = current.ScavengeRemaining;
         var next = current.WithScavengeConsumed(amount);
         _battlefield = _battlefield.WithBuildingDamage(next);
-
         var actuallyConsumed = before - next.ScavengeRemaining;
-        if (actuallyConsumed > 0) _simBridge.QueueBankHarvestLoadCommand(playerIndex, actuallyConsumed, ResourceKind.Parts);
 
         List<GameObject> chunks;
         if (_debrisChunksByBuilding.TryGetValue(building, out chunks) && chunks.Count > 0 && next.ScavengeValue > 0)
@@ -2351,6 +2355,62 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
         if (next.IsFullyScavenged)
             foreach (var hex in building.Footprint) _simBridge.UnblockProceduralBuildingHex(hex);
+
+        return actuallyConsumed;
+    }
+
+    /// <summary>2026-08 (creator direction: "check that monsters can
+    /// harvest metal and other building salvage"): the debris counterpart
+    /// to <see cref="NearestCitizenTo"/> -- nearest DESTROYED procedural
+    /// building with a nonzero <see cref="BuildingRuntimeState.
+    /// ScavengeRemaining"/> pile, or null if none stands within `within`
+    /// meters of `position`. Called from <see cref="MonsterAgent.
+    /// AcquireTarget"/>'s foraging fallback once a citizen search comes
+    /// up empty. Checks every footprint hex of every destroyed building
+    /// (footprints top out at a handful of hexes, same "nowhere near
+    /// expensive search territory" reasoning <see cref="FootprintIndexOf"/>'s
+    /// own doc comment already makes) rather than just one representative
+    /// point, so a large Landmark wreck is found from whichever edge is
+    /// actually closest.</summary>
+    public Building NearestScavengeableBuildingTo(Vector3 position, float within)
+    {
+        Building best = null;
+        var bestSq = within * within;
+        foreach (var state in _battlefield.Buildings)
+        {
+            if (state.Stage != DamageStage.Destroyed || state.ScavengeRemaining <= 0) continue;
+            foreach (var hex in state.Building.Footprint)
+            {
+                var d = WorldOf(hex) - position;
+                d.y = 0f;
+                if (d.sqrMagnitude < bestSq) { bestSq = d.sqrMagnitude; best = state.Building; }
+            }
+        }
+        return best;
+    }
+
+    /// <summary>2026-08 (creator direction: "check that monsters can
+    /// harvest metal and other building salvage"): which destroyed,
+    /// still-scavengeable building (if any) owns `hex` -- lets
+    /// <see cref="WaypointCommander"/> route a right-click on a wreck's
+    /// own footprint to <see cref="MonsterAgent.OrderScavenge"/>, the
+    /// same way a right-click on a standing building already routes to
+    /// <see cref="MonsterAgent.OrderAttack"/>. A destroyed building's own
+    /// massing-cube collider is gone by the time this would ever be
+    /// asked (see <see cref="ApplyBuildingDamage(Building, int, HexCoord)"/>'s
+    /// Destroyed branch: rubble is deliberately collider-less, "clicks
+    /// fall through to the ground") -- so unlike <see
+    /// cref="BuildingFromCollider"/>, this is a plain hex-membership scan,
+    /// not a collider lookup.</summary>
+    public Building ScavengeableBuildingAt(HexCoord hex)
+    {
+        foreach (var state in _battlefield.Buildings)
+        {
+            if (state.Stage != DamageStage.Destroyed || state.ScavengeRemaining <= 0) continue;
+            foreach (var h in state.Building.Footprint)
+                if (h == hex) return state.Building;
+        }
+        return null;
     }
 
     /// <summary>docs/12 follow-up: the reclaim-eligibility gate for a
@@ -2707,21 +2767,33 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// nonzero. `WalletBlood` itself is left tracking Blood only, purely
     /// because <see cref="HudStatus"/> still reads it as a separate
     /// legacy debug line -- not because anything downstream of THIS
-    /// method needs it anymore.</summary>
-    public void BankHarvestLoad(float blood, float bones, float brains)
+    /// method needs it anymore.
+    ///
+    /// 2026-08 follow-up (creator direction: "check that monsters can
+    /// harvest metal and other building salvage" -&gt; "carry it home"):
+    /// a fourth, optional `parts` lane -- scavenged building debris
+    /// (<see cref="MonsterAgent.CreditHarvestForScavengedDebris"/>) banks
+    /// through this SAME method, same as Blood/Bones/Brains. Defaults to
+    /// 0 so it's silently a no-op for every OTHER existing call shape,
+    /// but this method has exactly one real caller today
+    /// (`MonsterAgent`'s own idle-bank check), which was updated to pass
+    /// its carried Parts lane alongside the other three.</summary>
+    public void BankHarvestLoad(float blood, float bones, float brains, float parts = 0f)
     {
         var bankedBlood = Mathf.RoundToInt(blood);
         var bankedBones = Mathf.RoundToInt(bones);
         var bankedBrains = Mathf.RoundToInt(brains);
-        if (bankedBlood <= 0 && bankedBones <= 0 && bankedBrains <= 0) return;
+        var bankedParts = Mathf.RoundToInt(parts);
+        if (bankedBlood <= 0 && bankedBones <= 0 && bankedBrains <= 0 && bankedParts <= 0) return;
 
         if (bankedBlood > 0) WalletBlood += bankedBlood;
         var haveMatch = _simBridge != null && _simBridge.HasMatch;
         if (bankedBlood > 0 && haveMatch) _simBridge.QueueBankHarvestLoadCommand(0, bankedBlood, ResourceKind.Blood);
         if (bankedBones > 0 && haveMatch) _simBridge.QueueBankHarvestLoadCommand(0, bankedBones, ResourceKind.Bones);
         if (bankedBrains > 0 && haveMatch) _simBridge.QueueBankHarvestLoadCommand(0, bankedBrains, ResourceKind.Brains);
+        if (bankedParts > 0 && haveMatch) _simBridge.QueueBankHarvestLoadCommand(0, bankedParts, ResourceKind.Parts);
         Debug.Log("Harvester banked " + bankedBlood + " blood, " + bankedBones + " bones, " + bankedBrains
-            + " brains. Wallet: " + WalletBlood + " blood.");
+            + " brains, " + bankedParts + " parts. Wallet: " + WalletBlood + " blood.");
     }
 
     /// <summary>docs/26 Phase 10 (Special Attacks System): draws down the

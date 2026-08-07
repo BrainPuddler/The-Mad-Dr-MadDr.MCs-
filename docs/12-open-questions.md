@@ -12370,3 +12370,89 @@ full code-path tracing (`IgniteBuildingIfNeeded` -> `AttachFireCluster`
 -> `FireCluster`'s own parenting -> `SpawnCube`'s collider placement) to
 confirm the parent-collider comparison is checking the right thing, not
 by watching it run.
+
+## 2026-08 follow-up: monsters can now actually harvest building-debris metal (mechanism existed, nothing called it)
+
+Creator direction: **"check that monsters can harvest metal and other
+building salvage and that once all the salvage is removed the area is
+cleaned and cleared so player can build in that area."**
+
+**Status audit (research only, no assumptions), then a real gap found.**
+The reclaim half already worked: `RuntimeCityBuilder.TryReclaimHex`/
+`IsReclaimEligible` is genuinely wired (called every frame
+`BuildGhostCursor` hovers a hex) and unblocks a destroyed building's
+footprint once its wreck is fully scavenged OR `MatchState.
+DebrisDecayTicks` passes unscavenged. But the harvesting half was dead
+code: `RuntimeCityBuilder.ScavengeBuildingDebris` existed, was well-
+formed, and its citygen-core data layer (`BuildingRuntimeState.
+ScavengeRemaining`/`WithScavengeConsumed`) had 8 passing tests -- but
+grepping `MonsterAgent.cs` and `WaypointCommander.cs` for "Scavenge"/
+"Salvage" turned up zero matches in either. No `OrderKind`, no auto-
+forage behavior, no player-issuable right-click route existed to make a
+monster actually do this. The method's own doc comment admitted it
+outright: "there is no monster/worker AI issuing this yet... build the
+mechanism, wire the AI later." Net effect before this: destroyed lots
+cleared eventually, but always by decay timeout, never because anything
+actually hauled the metal off.
+
+**Design fork, asked rather than assumed:** the existing mechanism's own
+signature (instant wallet credit, no tank interaction) matched the
+SEPARATE RTS `SimBuilding` roster's own channel-and-instant-credit
+scavenge model. But it could equally be a "carry it home" model, reusing
+the existing Blood/Bones/Brains onboard-tank/deliver-to-Factory loop
+citizen-eating already has. Asked the creator directly (AskUserQuestion)
+-- answer: **carry it home.**
+
+**What shipped, `MonsterAgent.cs`:** a fourth onboard tank lane,
+`_carriedParts`, pooled into the SAME `TotalCarriedLoad` Blood/Bones/
+Brains already share (one tank, four lanes now). New `OrderKind.
+ScavengeDebris` + `_scavengeBuilding` field (deliberately separate from
+`_targetBuilding` -- that field drives the whole combat attack-hierarchy
+machinery, which has nothing to do with looting a wreck that's already
+down). `OrderScavenge(Building)` mirrors `OrderEat` exactly, down to
+setting `_lastForagePos` so "return to where it was working" behavior
+already built for citizens applies to debris patches too. `TickScavengeDebris`
+mirrors `TickEat`'s exact shape (arrive within reach -> instant gulp ->
+go idle) but reuses `ComputeApproachPath`/`RecomputeIfCityChanged` the
+SAME way `TickAttack` already does for a stationary `Building` target,
+since a wreck never moves -- no re-path-on-drift case needed. New
+`CreditHarvestForScavengedDebris`: unlike Blood/Bones/Brains there's no
+genome-derived gather rate for scrap metal (Parts was never a
+`HarvestProfile` lane), so the gulp is simply "as much as the remaining
+tank room allows," capped by whatever `RuntimeCityBuilder.
+DrainBuildingScavenge` actually had left to give. `AcquireTarget`'s
+existing foraging fallback now ALSO checks `NearestScavengeableBuildingTo`
+(same search radius/origin a citizen search just used) once no citizen
+is found nearby -- citizen-first, debris-second, purely additive, never
+competing with or delaying the existing "chase the nearest human"
+behavior.
+
+**What shipped, `RuntimeCityBuilder.cs`:** `ScavengeBuildingDebris`
+renamed and repurposed to `DrainBuildingScavenge(Building, int) -> int`
+-- drains the pile and shrinks visible rubble/reclaims the hex exactly
+as before, but now RETURNS the amount actually drained instead of
+instant-crediting a wallet (the old instant-credit call was unreachable
+dead code anyway, confirmed zero external callers, so this isn't a
+behavior regression for anything real). New `NearestScavengeableBuildingTo`
+(the debris counterpart to the existing `NearestCitizenTo`) and
+`ScavengeableBuildingAt(HexCoord)` (a plain hex-membership scan, NOT a
+collider lookup -- a destroyed building's massing-cube collider is
+already gone by the time anything asks, per its own Destroyed-branch
+comment: "rubble: clicks fall through to the ground"). `BankHarvestLoad`
+gained a fourth, defaulted `parts` parameter so scavenged Parts banks
+through the exact same delivery path Blood/Bones/Brains already use.
+
+**What shipped, `WaypointCommander.cs`:** a right-click on a destroyed
+building's own footprint hex (checked via the new `ScavengeableBuildingAt`,
+since `BuildingFromCollider`'s raycast can't hit collider-less rubble)
+now routes every selected unit to `OrderScavenge`, the same way a
+right-click on a standing building already routes to `OrderAttack` --
+giving the player explicit, directed control over the mechanic, not just
+the idle auto-forage fallback.
+
+No Unity Editor in this environment to compile-check or watch a
+harvester actually walk to a wreck and gulp -- verified by full manual
+trace of every new call path against the established `TickEat`/
+`OrderEat`/`NearestCitizenTo`/`ComputeApproachPath` precedents each new
+piece mirrors, and by confirming (grep) that `ScavengeBuildingDebris`'s
+old name has zero remaining references anywhere in `unity-client/`.

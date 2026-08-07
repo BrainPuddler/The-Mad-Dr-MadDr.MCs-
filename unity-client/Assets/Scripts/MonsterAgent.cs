@@ -32,7 +32,7 @@ using UnityEngine;
 /// </summary>
 public class MonsterAgent : MonoBehaviour
 {
-    private enum OrderKind { Idle, Move, AttackBuilding, AttackUnit, EatCitizen, Perch, SpecialAttack, AttackMove }
+    private enum OrderKind { Idle, Move, AttackBuilding, AttackUnit, EatCitizen, Perch, SpecialAttack, AttackMove, ScavengeDebris }
 
     /// <summary>Shared "which way does the group face" token for a squad
     /// move order (see OrderMove's groupFacing overload). Stays unlocked
@@ -67,6 +67,15 @@ public class MonsterAgent : MonoBehaviour
     private Building _targetBuilding;
     private Citizen _targetCitizen;
     private UnitCombat _targetUnit;
+    // 2026-08 (creator direction: "check that monsters can harvest metal
+    // and other building salvage"): the destroyed procedural building
+    // this monster is walking to (or already gulping from) for
+    // OrderKind.ScavengeDebris. Deliberately a SEPARATE field from
+    // _targetBuilding, not a reuse of it -- _targetBuilding drives the
+    // whole combat attack-hierarchy machinery above (collateral,
+    // reposition, LOS) that has nothing to do with scavenging a wreck
+    // that's already down.
+    private Building _scavengeBuilding;
     // 2026-08 (creator direction: "try not to shoot through other
     // building... [when blocked,] reposition for a clear shot"): the
     // lateral repositioning spot `TickAttack` is currently steering
@@ -198,6 +207,14 @@ public class MonsterAgent : MonoBehaviour
     private float _carriedBlood;
     private float _carriedBones;
     private float _carriedBrains;
+    // 2026-08 (creator direction: "check that monsters can harvest metal
+    // and other building salvage"): a fourth onboard lane, same shape as
+    // the three above -- gulped from a destroyed procedural building's
+    // ScavengeRemaining pile (RuntimeCityBuilder.DrainBuildingScavenge)
+    // instead of an eaten citizen's HarvestProfile, but pooled into the
+    // SAME tank (TotalCarriedLoad below) and banked the same way on
+    // delivery.
+    private float _carriedParts;
     private HexCoord _homeHex;         // spawn = this harvester's fallback unload point (a Vat stand-in) when no Factory exists
 
     /// <summary>2026-08 (creator direction: "once the harvesting units
@@ -215,7 +232,7 @@ public class MonsterAgent : MonoBehaviour
     /// Capacity` -- the single "how full is the onboard tank" figure
     /// every distance/speed/full-tank check already reasoned about
     /// before the load was split into per-resource lanes.</summary>
-    private float TotalCarriedLoad { get { return _carriedBlood + _carriedBones + _carriedBrains; } }
+    private float TotalCarriedLoad { get { return _carriedBlood + _carriedBones + _carriedBrains + _carriedParts; } }
 
     /// <summary>0..1 tank fill -- public for <see cref="HarvesterMarkerHud"/>'s
     /// own badge fill-bar, same data <see cref="LoadFactor"/> already
@@ -387,6 +404,7 @@ public class MonsterAgent : MonoBehaviour
                 case OrderKind.Perch: return "flying to a rooftop perch";
                 case OrderKind.SpecialAttack: return "using " + (_activeSpecialAttack?.Definition != null ? _activeSpecialAttack.Definition.AbilityName : "a special attack");
                 case OrderKind.AttackMove: return (_isPatrolling ? "patrolling" : "attack-moving") + air;
+                case OrderKind.ScavengeDebris: return "scavenging debris";
                 default: return Perched ? "perched on a rooftop" : "idle";
             }
         }
@@ -588,6 +606,25 @@ public class MonsterAgent : MonoBehaviour
         if (citizen != null) _lastForagePos = citizen.transform.position;
     }
 
+    /// <summary>2026-08 (creator direction: "check that monsters can
+    /// harvest metal and other building salvage"): walk to a destroyed
+    /// procedural building's own wreck and gulp Parts from its remaining
+    /// scavenge pile into the onboard tank -- the citizen-eating loop's
+    /// exact counterpart for building debris (see TickScavengeDebris).
+    /// Self-issued by AcquireTarget's foraging fallback when no citizen
+    /// is nearby, or player-issued via a right-click on a wreck
+    /// (WaypointCommander).</summary>
+    public void OrderScavenge(Building building)
+    {
+        if (building == null) return;
+        ClearTargets();
+        _waypoints.Clear();
+        _path = null;
+        _scavengeBuilding = building;
+        _order = OrderKind.ScavengeDebris;
+        _lastForagePos = NearestFootprintPoint(building);
+    }
+
     /// <summary>Target an enemy unit (a tank): close to weapon range, then
     /// fire on cadence. Issued by the commander (right-click a tank) or
     /// self-issued by AcquireTarget (retaliation / auto-engage).</summary>
@@ -682,6 +719,7 @@ public class MonsterAgent : MonoBehaviour
         _targetBuilding = null;
         _targetCitizen = null;
         _targetUnit = null;
+        _scavengeBuilding = null;
         _originalTargetBuilding = null;   // cancel any in-progress collateral detour (see TickAttack's attack-hierarchy comment)
         _repositionTarget = null;
         _settleTarget = null;   // any fresh order cancels a pending group-settle creep
@@ -1125,10 +1163,11 @@ public class MonsterAgent : MonoBehaviour
             toUnload.y = 0f;
             if (toUnload.magnitude < 2.5f * (float)HexCoord.HexMeters)
             {
-                _builder.BankHarvestLoad(_carriedBlood, _carriedBones, _carriedBrains);
+                _builder.BankHarvestLoad(_carriedBlood, _carriedBones, _carriedBrains, _carriedParts);
                 _carriedBlood = 0f;
                 _carriedBones = 0f;
                 _carriedBrains = 0f;
+                _carriedParts = 0f;
             }
         }
 
@@ -1158,6 +1197,7 @@ public class MonsterAgent : MonoBehaviour
             case OrderKind.AttackBuilding: velocity = TickAttack(dt); break;
             case OrderKind.AttackUnit: velocity = TickAttackUnit(dt); break;
             case OrderKind.EatCitizen: velocity = TickEat(dt); break;
+            case OrderKind.ScavengeDebris: velocity = TickScavengeDebris(dt); break;
             case OrderKind.Perch: velocity = TickPerch(dt); break;
             case OrderKind.SpecialAttack: velocity = TickSpecialAttack(dt); break;
             case OrderKind.Idle: velocity = TickSettle(dt); break;
@@ -1363,6 +1403,18 @@ public class MonsterAgent : MonoBehaviour
                 var searchOrigin = _lastForagePos ?? transform.position;
                 var citizen = _builder.NearestCitizenTo(searchOrigin, searchRadius);
                 if (citizen != null) { OrderEat(citizen); return; }
+
+                // 2026-08 (creator direction: "check that monsters can
+                // harvest metal and other building salvage"): no citizen
+                // nearby -- before giving up and heading home, also
+                // consider a destroyed building's own leftover debris
+                // pile within the SAME search radius/origin a citizen
+                // search just used. Deliberately citizen-first, debris-
+                // second: this only ADDS a fallback, it never competes
+                // with or delays the existing "chase the nearest human"
+                // behavior.
+                var debris = _builder.NearestScavengeableBuildingTo(searchOrigin, searchRadius);
+                if (debris != null) { OrderScavenge(debris); return; }
 
                 if (TotalCarriedLoad > 0.01f)
                 {
@@ -2264,6 +2316,74 @@ public class MonsterAgent : MonoBehaviour
         return FollowPath(dt, (float)_profile.RunMetersPerSecond(_builder.speedDisplayMultiplier) * LoadFactor());
     }
 
+    /// <summary>2026-08 (creator direction: "check that monsters can
+    /// harvest metal and other building salvage"): TickEat's counterpart
+    /// for a destroyed procedural building's wreck -- close to arm's
+    /// reach of its nearest footprint hex, gulp what the tank has room
+    /// for (CreditHarvestForScavengedDebris), then go idle exactly like
+    /// TickEat does after a kill. A wreck never moves, so unlike TickEat
+    /// there's no re-path-on-drift case -- the path is computed once via
+    /// the SAME `ComputeApproachPath` attack orders already use (a
+    /// `Building` is a `Building`, scavenging doesn't need its own
+    /// pathing).</summary>
+    private Vector3 TickScavengeDebris(float dt)
+    {
+        if (_scavengeBuilding == null || _builder == null) { GoIdle(); return Vector3.zero; }
+
+        var bp = NearestFootprintPoint(_scavengeBuilding);
+        var flat = bp - transform.position;
+        flat.y = 0f;
+        if (flat.magnitude <= ScavengeReachMeters)
+        {
+            CreditHarvestForScavengedDebris(_scavengeBuilding);
+            _scavengeBuilding = null;
+            _path = null;
+            GoIdle();
+            return Vector3.zero;
+        }
+
+        if (_path == null)
+        {
+            _path = ComputeApproachPath(_scavengeBuilding);
+            if (_path == null) { GoIdle(); return Vector3.zero; }
+        }
+        RecomputeIfCityChanged();
+        return FollowPath(dt, RunOrWalkSpeed());
+    }
+
+    // same order of magnitude as TickEat's own 3m arrival radius, a
+    // little more generous since a building's footprint is bigger than a
+    // single citizen -- not a precision-tuned number, just "close enough
+    // to plausibly be picking through the rubble."
+    private const float ScavengeReachMeters = 6f;
+
+    /// <summary>Harvest the onboard tank's share of a destroyed
+    /// building's own leftover debris pile, on arrival at
+    /// <see cref="TickScavengeDebris"/>'s reach. Same "scaled to whatever
+    /// room is left in the tank" shape as
+    /// <see cref="CreditHarvestForEatenCitizen"/>, but there's no genome-
+    /// derived gather rate for scrap metal the way there is for Blood/
+    /// Bones/Brains -- Parts isn't a HarvestProfile lane at all, it's the
+    /// separate RTS-economy resource `RuntimeCityBuilder.
+    /// DrainBuildingScavenge` already prices per building tier. So the
+    /// gulp size is simply "as much as the remaining tank room allows,"
+    /// capped by whatever the wreck's own pile still has left --
+    /// `DrainBuildingScavenge` is the single source of truth for how much
+    /// is actually taken (and for shrinking the visible rubble / reclaiming
+    /// the hex once the pile empties), this method only decides how big a
+    /// bite to ask for.</summary>
+    private void CreditHarvestForScavengedDebris(Building building)
+    {
+        if (_harvest == null || _harvest.Capacity <= 0.01f || _builder == null) return;
+        var room = (float)_harvest.Capacity - TotalCarriedLoad;
+        if (room <= 0f) return;
+
+        var ask = Mathf.RoundToInt(room);
+        if (ask <= 0) return;
+        var gained = _builder.DrainBuildingScavenge(building, ask);
+        if (gained > 0) _carriedParts += gained;
+    }
+
     /// <summary>Harvest the onboard tank's share of an eaten citizen
     /// (docs/22): a real harvest tool strips far more per body than teeth
     /// do -- the gathered load is the citizen's yield scaled by this
@@ -2707,6 +2827,8 @@ public class MonsterAgent : MonoBehaviour
         if (_path == null || _pathCityVersion == _builder.CityVersion) return;
         if (_order == OrderKind.AttackBuilding && _targetBuilding != null)
             _path = ComputeApproachPath(_targetBuilding);
+        else if (_order == OrderKind.ScavengeDebris && _scavengeBuilding != null)
+            _path = ComputeApproachPath(_scavengeBuilding);
         else
             _path = ComputePath(_pathGoalHex);
     }
