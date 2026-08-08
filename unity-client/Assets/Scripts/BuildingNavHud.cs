@@ -148,12 +148,34 @@ public class BuildingNavHud : MonoBehaviour
         var prevMatrix = UiScale.Begin();
 
         var screenW = UiScale.Width;
-        var totalWidth = mine.Count * iconSize + (mine.Count - 1) * iconGap;
-        var startX = (screenW - totalWidth) * 0.5f;
-        var y = UiScale.Height - bottomMarginPixels - iconSize;
 
-        var barRect = new Rect(startX - iconGap, y - iconGap - arrowSize - 18f,
-            totalWidth + iconGap * 2f, iconSize + iconGap * 2f + arrowSize + 18f);
+        // 2026-08 (creator report: "buildings icons... are still off the
+        // screen"): a large base could ask for more row width than the
+        // screen has -- iconSize/iconGap were fixed Inspector constants
+        // with no cap on `mine.Count`, so `totalWidth` (and therefore
+        // `startX`) could go negative, pushing the leftmost icons off
+        // BOTH edges regardless of UiScale's own fix (which only
+        // corrects RESOLUTION scaling, not a row that's simply asking
+        // for more space than any screen has). Shrink icon size/gap
+        // uniformly, proportionally, whenever the row would overflow a
+        // safe usable width -- same "scale to fit, never overflow"
+        // philosophy UiScale itself already applies one level up, just
+        // local to this one row instead of the whole screen. Below the
+        // shrink threshold (the common case, a handful of buildings)
+        // this is a no-op: effIconSize/effIconGap equal the Inspector
+        // values exactly, zero behavior change.
+        var usableWidth = screenW - RowSideMargin * 2f;
+        var rawWidth = mine.Count * iconSize + (mine.Count - 1) * iconGap;
+        var shrink = rawWidth > usableWidth && rawWidth > 0f ? usableWidth / rawWidth : 1f;
+        var effIconSize = iconSize * shrink;
+        var effIconGap = iconGap * shrink;
+
+        var totalWidth = mine.Count * effIconSize + (mine.Count - 1) * effIconGap;
+        var startX = (screenW - totalWidth) * 0.5f;
+        var y = UiScale.Height - bottomMarginPixels - effIconSize;
+
+        var barRect = new Rect(startX - effIconGap, y - effIconGap - arrowSize - 18f,
+            totalWidth + effIconGap * 2f, effIconSize + effIconGap * 2f + arrowSize + 18f);
         var e = Event.current;
         PointerOver = e != null && barRect.Contains(e.mousePosition);
 
@@ -166,20 +188,23 @@ public class BuildingNavHud : MonoBehaviour
         for (var i = 0; i < mine.Count; i++)
         {
             var b = mine[i];
-            var rect = new Rect(x, y, iconSize, iconSize);
+            var rect = new Rect(x, y, effIconSize, effIconSize);
             var isHighlighted = HighlightedEntityId == b.EntityId;
             if (isHighlighted) highlighted = b;
 
             DrawIcon(rect, b, isHighlighted);
             if (GUI.Button(rect, GUIContent.none, GUIStyle.none)) SelectAndFocus(b);
 
-            x += iconSize + iconGap;
+            x += effIconSize + effIconGap;
         }
 
-        if (highlighted != null) DrawHighlightDetail(highlighted, mine, startX, y);
+        if (highlighted != null) DrawHighlightDetail(highlighted, mine, startX, y, effIconSize, effIconGap);
 
         UiScale.End(prevMatrix);
     }
+
+    // side margin kept clear of the screen edge even at max shrink.
+    private const float RowSideMargin = 24f;
 
     /// <summary>Above the row: the highlighted building's real name and
     /// its position within its own kind ("Factory 2/3") -- confirms at a
@@ -187,7 +212,7 @@ public class BuildingNavHud : MonoBehaviour
     /// row: the two cycle arrows, only drawn when there's actually
     /// something else of this kind to jump to (an arrow that does nothing
     /// reads as broken, not as "disabled").</summary>
-    private void DrawHighlightDetail(SimBuilding highlighted, List<SimBuilding> mine, float rowStartX, float rowY)
+    private void DrawHighlightDetail(SimBuilding highlighted, List<SimBuilding> mine, float rowStartX, float rowY, float effIconSize, float effIconGap)
     {
         var sameKind = mine.FindAll(b => b.Kind == highlighted.Kind);
         var indexWithinKind = sameKind.FindIndex(b => b.EntityId == highlighted.EntityId);
@@ -196,13 +221,13 @@ public class BuildingNavHud : MonoBehaviour
         var label = sameKind.Count > 1
             ? def.Name + " " + (indexWithinKind + 1) + "/" + sameKind.Count
             : def.Name;
-        DrawShadowedLabel(new Rect(rowStartX, rowY - 18f, iconSize * mine.Count + iconGap * (mine.Count - 1), 16f), label, new Color(0.95f, 0.9f, 0.7f, 1f), TextAnchor.MiddleCenter);
+        DrawShadowedLabel(new Rect(rowStartX, rowY - 18f, effIconSize * mine.Count + effIconGap * (mine.Count - 1), 16f), label, new Color(0.95f, 0.9f, 0.7f, 1f), TextAnchor.MiddleCenter);
 
         if (sameKind.Count <= 1) return;
 
         var highlightIndex = mine.FindIndex(b => b.EntityId == highlighted.EntityId);
-        var iconCenterX = rowStartX + highlightIndex * (iconSize + iconGap) + iconSize * 0.5f;
-        var arrowY = rowY + iconSize + 4f;
+        var iconCenterX = rowStartX + highlightIndex * (effIconSize + effIconGap) + effIconSize * 0.5f;
+        var arrowY = rowY + effIconSize + 4f;
 
         var prevRect = new Rect(iconCenterX - arrowSize - 2f, arrowY, arrowSize, arrowSize);
         var nextRect = new Rect(iconCenterX + 2f, arrowY, arrowSize, arrowSize);

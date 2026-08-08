@@ -12581,3 +12581,81 @@ it -- verified by reading both `keyboard.aKey.isPressed` call sites side
 by side to confirm they're really reading the identical physical key
 with no existing coordination, and by confirming `ctrlHeld` doesn't
 collide with any existing local in `SimpleCameraRig.Update()`.
+
+## 2026-08 follow-up: the UI-scaling fix didn't actually fix the three edge-anchored HUDs it named
+
+Creator report, immediately after the scaling fix above shipped: **"mini
+map, clock, and buildings icons, are still off the screen."**
+
+**Real root cause, found by re-deriving the math rather than re-reading
+the same code again:** `UiScale`'s first version matched UGUI
+`CanvasScaler`'s "Scale With Screen Size" default -- `Mathf.Min` of both
+axis ratios, fitting a fixed 1920x1080 reference canvas INSIDE the real
+screen. That's a fit-inside, LETTERBOXED transform: on any screen whose
+aspect ratio isn't exactly 16:9 (a 16:10 laptop, an ultrawide monitor, a
+resized/non-16:9 Editor Game view -- all ordinary, none exotic), one axis
+has leftover unused space. Since the scale transform anchors at the
+top-left origin `(0,0)`, that leftover gap always lands on the BOTTOM
+and RIGHT -- never the top or left. An element anchored to a bottom or
+right edge of the REFERENCE canvas therefore stops short of the TRUE
+bottom/right edge of the real screen: it doesn't reach the corner it's
+supposed to sit in. That reads exactly as "off the screen," even though,
+technically, its coordinates never left `[0, Screen.width] x [0,
+Screen.height]`.
+
+This explains precisely the three the creator named and no others:
+`Minimap` (bottom-left default), `AnalogClockHud` (top-right default --
+right edge affected), and `BuildingNavHud` (bottom-center) all anchor to
+a bottom or right edge. `HudStatus` and `BuildMenuHud` (both top-left)
+were never touched by this, because the origin `(0,0)` doesn't move
+regardless of aspect ratio -- which is exactly why only the first three
+were the ones reported broken.
+
+**Fix (`UiScale.cs` only -- no other file needed to change): match
+HEIGHT, let reference WIDTH track the real aspect ratio instead of
+staying a fixed constant.** `Height` stays a fixed `ReferenceHeight`
+(1080), but `Width` is now `ReferenceHeight * (Screen.width /
+Screen.height)` -- the reference canvas's OWN aspect ratio always
+exactly equals the real screen's, whatever that is. `Factor` becomes one
+axis only (`Screen.height / ReferenceHeight`, no more `Min` against a
+second, now-unnecessary ratio), so the full reference canvas maps onto
+the full real screen with ZERO leftover gap on either axis, for any
+aspect ratio -- the same "Match: Height" option UGUI's own `CanvasScaler`
+already offers as an alternative to its fit-inside default, chosen here
+specifically because it's the one mode that structurally cannot produce
+an edge gap. A corner-anchored HUD now always reaches its true corner. A
+very wide screen simply gets more reference-space WIDTH to lay content
+out in (more room, positioned correctly against the true wide edges); a
+narrower one gets less -- never a mismatch. Every one of the 15 already-
+wrapped HUD files needed zero edits -- they all correctly read `UiScale.
+Width`/`Height`/call `Begin()`/`End()` already; only this class's own
+internal math changed underneath them.
+
+**A second, genuinely separate bug found and fixed alongside it
+(`BuildingNavHud.cs`):** even with the aspect-ratio fix above, a base
+with enough buildings could still ask for more ROW WIDTH than any screen
+has -- `iconSize`/`iconGap` were fixed Inspector constants with no cap
+on the building count, so `totalWidth` (and therefore the centered
+`startX`) could go negative, pushing the leftmost icons off both edges
+regardless of resolution. This isn't a scaling bug, it's a content-
+overflow bug UiScale was never meant to solve. Fixed locally: whenever
+the row's raw width would exceed a safe usable width (`UiScale.Width`
+minus a fixed side margin), icon size and gap shrink together,
+proportionally, to fit -- the same "scale to fit, never overflow"
+philosophy `UiScale` itself applies one level up the stack, just local
+to this one row. Below the shrink threshold (the ordinary case, a
+handful of buildings) this is a complete no-op -- the effective icon
+size/gap equal the Inspector values exactly, zero behavior change.
+`DrawHighlightDetail` (the label + cycle-arrows drawn above/below the
+highlighted icon) now takes the same effective size/gap as parameters
+rather than reading the raw Inspector fields directly, so the highlight
+UI stays aligned with the (possibly shrunk) row instead of drifting out
+of sync with it.
+
+No Unity Editor in this environment to actually observe a non-16:9
+window or a large base's icon row -- verified by re-deriving the
+`Width`/`Factor` algebra by hand (confirming `Width * Factor` reduces
+exactly to `Screen.width` and `Height * Factor` reduces exactly to
+`Screen.height` for any aspect ratio, not just 16:9) and by re-reading
+every call site of `iconSize`/`iconGap` in `BuildingNavHud.cs` to confirm
+none were missed when introducing `effIconSize`/`effIconGap`.

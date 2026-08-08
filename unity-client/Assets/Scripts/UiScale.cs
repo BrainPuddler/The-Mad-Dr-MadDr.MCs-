@@ -20,10 +20,47 @@ using UnityEngine;
 /// (Scale With Screen Size mode) uses for the newer UI system -- IMGUI
 /// has no built-in equivalent, so this is that pattern hand-rolled for
 /// it. Every existing HUD's pixel constants were authored against
-/// something in the neighborhood of 1920x1080 (`ReferenceWidth`/
-/// `ReferenceHeight` below); they keep working completely unchanged --
-/// this scales the OUTPUT, not the input, so no HUD's own layout math
-/// needs to be rewritten.
+/// something in the neighborhood of 1920x1080 (<see cref="ReferenceHeight"/>
+/// below); they keep working completely unchanged -- this scales the
+/// OUTPUT, not the input, so no HUD's own layout math needs to be
+/// rewritten.
+///
+/// 2026-08 follow-up (creator report: "mini map, clock, and buildings
+/// icons, are still off the screen" -- AFTER the fix above already
+/// shipped): the first version of this class matched CanvasScaler's
+/// "Scale With Screen Size" at `Mathf.Min` of both axis ratios --
+/// fit-inside, LETTERBOXED. That's exactly the bug: fitting a fixed
+/// 1920x1080 canvas inside a screen with a DIFFERENT aspect ratio (any
+/// 16:10 laptop, an ultrawide monitor, a resized/non-16:9 Editor Game
+/// view -- none of which are exotic) leaves an unused gap on ONE axis,
+/// and since the scale transform anchors at the top-left origin, that
+/// gap always falls on the BOTTOM and RIGHT. An element anchored to the
+/// bottom or right edge of the REFERENCE canvas therefore lands short of
+/// the TRUE bottom/right edge of the real screen -- it doesn't touch the
+/// corner it's supposed to, which reads exactly as "off the screen" even
+/// though, technically, it's still within `[0, Screen.width] x [0,
+/// Screen.height]`. `Minimap` (bottom-left), `AnalogClockHud` (top-right
+/// default), and `BuildingNavHud` (bottom-center) are the three worst
+/// hit because ALL of them anchor to a bottom or right edge; `HudStatus`/
+/// `BuildMenuHud` (top-left) were never affected, since the origin
+/// (0,0) doesn't move regardless of aspect ratio -- which is exactly why
+/// only the first three were the ones reported.
+///
+/// **Fix: match HEIGHT, let the reference WIDTH follow the real aspect
+/// ratio instead of staying fixed.** <see cref="Height"/> is still a
+/// fixed <see cref="ReferenceHeight"/>, but <see cref="Width"/> is now
+/// `ReferenceHeight * (Screen.width / Screen.height)` -- the reference
+/// canvas's own aspect ratio always exactly equals the real screen's, so
+/// scaling it by <see cref="Factor"/> (now simply `Screen.height /
+/// ReferenceHeight`, one axis, not a min of two) maps the FULL reference
+/// canvas onto the FULL real screen with zero leftover gap on either
+/// axis, for any aspect ratio -- the same "Match: Height" option
+/// CanvasScaler itself already offers as an alternative to its own
+/// default fit-inside mode, chosen here specifically because it's the
+/// one that can't produce an edge gap. A corner-anchored HUD now always
+/// reaches the true corner; a very wide screen simply gets more
+/// reference-space width to lay out in (more room), a very narrow one
+/// gets less -- never a mismatch.
 ///
 /// **Usage (screen-space panels -- the vast majority of HUDs):**
 /// <code>
@@ -40,7 +77,10 @@ using UnityEngine;
 /// REFERENCE resolution, which is the coordinate space every Rect passed
 /// to GUI calls is now interpreted in (the matrix maps it to the real
 /// screen). Using the real `Screen.width` there would double-apply the
-/// scale and place things off-screen.
+/// scale and place things off-screen. This contract is UNCHANGED by the
+/// letterbox-gap fix above -- every HUD already wrapped in `Begin()`/
+/// `End()` and already reading `Width`/`Height` needed zero further
+/// edits; only this class's own internal math changed.
 ///
 /// **NOT for world-anchored UI.** A few HUDs (health bars, the harvest
 /// status badge, LumenHud's capture-progress markers) project a live 3D
@@ -53,41 +93,54 @@ using UnityEngine;
 /// </summary>
 public static class UiScale
 {
-    /// <summary>The resolution every existing HUD's own pixel constants
-    /// were authored against -- a real, flagged v0.1 estimate (CLAUDE.md's
+    /// <summary>The height every existing HUD's own pixel constants were
+    /// authored against -- a real, flagged v0.1 estimate (CLAUDE.md's
     /// standing policy for invented tuning numbers), not measured from
-    /// any design doc. Chosen because it's the most common desktop
+    /// any design doc. Chosen because 1080p is the most common desktop
     /// resolution and every existing panel (BuildMenuHud's default
     /// (12,140) placement, HudStatus's ~900px-wide status line, LumenHud's
-    /// dial) reads as comfortably-sized, not cramped or lost, at
-    /// roughly this size.</summary>
-    public const float ReferenceWidth = 1920f;
+    /// dial) reads as comfortably-sized, not cramped or lost, at roughly
+    /// this size. Unlike width (see <see cref="Width"/>), this stays a
+    /// fixed constant -- it's the one axis <see cref="Factor"/> matches
+    /// exactly, by design (see this class's own header).</summary>
     public const float ReferenceHeight = 1080f;
+
+    public static float Height { get { return ReferenceHeight; } }
 
     /// <summary>The reference-space width every wrapped HUD should lay
     /// itself out against -- NOT the real `Screen.width` (see this
     /// class's own header for why substituting the real value would
-    /// double-scale). Falls back to <see cref="ReferenceWidth"/> itself
-    /// if queried outside Play mode (`Screen.width` is 0 there).</summary>
-    public static float Width { get { return ReferenceWidth; } }
-
-    public static float Height { get { return ReferenceHeight; } }
+    /// double-scale). Deliberately NOT a fixed constant: it tracks the
+    /// REAL screen's current aspect ratio (`ReferenceHeight * Screen.
+    /// width / Screen.height`) so the reference canvas's own shape always
+    /// matches the real screen's shape exactly -- the fix for the
+    /// "off the screen" letterbox-gap bug this class's header describes.
+    /// Falls back to a plain 16:9 assumption if queried outside Play mode
+    /// (`Screen.width`/`height` are 0 there).</summary>
+    public static float Width
+    {
+        get
+        {
+            var h = Screen.height > 0 ? Screen.height : ReferenceHeight;
+            var w = Screen.width > 0 ? Screen.width : ReferenceHeight * 16f / 9f;
+            return ReferenceHeight * (w / h);
+        }
+    }
 
     /// <summary>Uniform scale factor mapping the reference canvas onto
-    /// the real screen. `Mathf.Min` of the two axis ratios (never
-    /// stretching non-uniformly, never overflowing either dimension) --
-    /// the same "fit inside, letterbox the rest" contract UGUI's
-    /// `CanvasScaler.matchWidthOrHeight` gives at its 0.5 default,
-    /// simplified to the safer of the two extremes (never crops content
-    /// off a very wide or very tall window) since no per-HUD "prefer
-    /// width" dial exists here to tune.</summary>
+    /// the real screen -- simply `Screen.height / ReferenceHeight`, ONE
+    /// axis, not a min of two. Safe to be one axis only because <see
+    /// cref="Width"/> already tracks the real aspect ratio, so scaling
+    /// height alone automatically scales width correctly too (the
+    /// reference canvas's own aspect ratio equals the real screen's by
+    /// construction) -- there is no second, mismatched ratio left to
+    /// take a `Min` against anymore.</summary>
     public static float Factor
     {
         get
         {
-            var w = Screen.width > 0 ? Screen.width : ReferenceWidth;
             var h = Screen.height > 0 ? Screen.height : ReferenceHeight;
-            return Mathf.Min(w / ReferenceWidth, h / ReferenceHeight);
+            return h / ReferenceHeight;
         }
     }
 
