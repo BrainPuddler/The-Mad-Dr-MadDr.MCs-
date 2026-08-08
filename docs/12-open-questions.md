@@ -13054,3 +13054,53 @@ opacity.
 `MadDr.MatchCore.dll` (flightcheck, zero errors traced to either); the
 new size/lateral-range formulas were checked numerically across all
 four building tiers, not just the one used while designing them.
+
+## 2026-08 follow-up: bubbles smaller, light-green/mostly-clear, orbit the brain instead of pooling below it
+
+Creator direction: "more bubble smaller by 35%, light green and mostly
+clear and round the brain not below the brain."
+
+**Root cause of "below the brain," found by actually computing the
+geometry, not guessing:** the previous motion model picked each
+bubble's lateral (X/Z) position independently at random, with no
+relationship to where the brain actually sits. A bubble whose random
+offset happened to land near the jar's own central axis would rise on
+a path that passed close to, or straight through, the brain mesh --
+getting hidden behind/inside it -- while the bubbles that stayed
+clearly visible were disproportionately the ones with larger offsets,
+which (combined with the brain occupying most of the fluid's own
+vertical span) read as pooling in the narrow gap below the brain rather
+than travelling past its sides.
+
+**Fix: bubbles now orbit in the real annular gap between the brain's
+surface and the glass wall.** `BrainJarBubbles.Init` takes the ACTUAL
+computed world radii of the fluid cylinder and the brain sphere
+(previously passed as `radius`, itself really a diameter/scale value
+like every other prim in this file -- see BuildTankShape's own
+comment; `BuildBigBrainShape` now divides by 2 explicitly at the call
+site rather than letting that convention get silently reinterpreted
+inside BrainJarBubbles). Each bubble picks an orbit radius confined to
+that gap (`brainWorldRadius * 1.15` to `fluidWorldRadius * 0.85`) plus
+a starting angle and an angular drift (up to ~2/3 of a full turn over
+one rise) -- every bubble's ascent now necessarily sweeps around the
+brain's circumference instead of through its footprint. The `0.85`
+outer-clearance multiplier (not a tighter-looking `0.9`) was picked
+after checking the worst case numerically (max wobble + max bubble
+size stacked on the outer orbit edge): `0.9` left under 3% clearance
+from the glass wall, `0.85` leaves a comfortable ~8%.
+
+**Size**: diameter fractions cut by 0.65x ("smaller by 35%," not "to
+35%") on top of the earlier visibility fix's own fractions -- an
+explicit reversal of part of that fix, not a re-guess of the numbers.
+
+**Color**: "light green and mostly clear" replaces the earlier
+near-white, alpha-0.62 fill with an actual light-green tint at alpha
+0.3 -- Smoothness nudged 0.85 -> 0.9 so the specular glint (a real air
+bubble's main visibility cue, more than its fill color) still reads
+clearly now that the fill itself is far more transparent.
+
+**Verified for real:** the new orbit-radius bounds were checked
+numerically for worst-case clearance (max wobble amplitude + max
+bubble half-size stacked on the outer edge) before picking the 0.85
+constant, not eyeballed; both files still compile clean against the
+real `MadDr.MatchCore.dll` via the flightcheck harness.

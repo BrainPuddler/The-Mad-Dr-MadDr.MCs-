@@ -433,6 +433,12 @@ public class BaseDresser : MonoBehaviour
         var jarH = fullScale.y * 0.45f;
         var jarCenter = root.transform.position + Vector3.up * (jarBaseY + jarH * 0.5f);
 
+        // Moved up from where the brain mesh itself is actually spawned
+        // further below -- the bubble orbit math needs the brain's real
+        // world radius before it's created, not just its own later
+        // SpawnPrim call. Same value either way, just computed earlier.
+        var brainRadius = radius * 0.75f;
+
         // ---- glass (2026-08: material upgraded in place, same radius/
         // height as before -- see GlassMaterial's own comment) ----
         builder.SpawnPrim(PrimitiveType.Cylinder, jarCenter,
@@ -494,9 +500,17 @@ public class BaseDresser : MonoBehaviour
 
         // 2026-08 ("Add small bubbles suspended within the green
         // liquid... slowly and randomly rise... sparse enough to feel
-        // physical"): see BrainJarBubbles.cs's own class header for why
-        // this is hand-rolled primitives, not a ParticleSystem. Seeded
-        // from this building's own world position so every Big Brain
+        // physical"; follow-up: "round the brain not below the brain"):
+        // see BrainJarBubbles.cs's own class header for why this is
+        // hand-rolled primitives, not a ParticleSystem, and for the
+        // orbit-around-the-brain motion model. `brainRadius`/`radius`
+        // here are SCALE (diameter) values, matching every other prim
+        // in this file (see BuildTankShape's own comment) -- their
+        // REAL world radii (what the orbit math actually needs) are
+        // exactly half that, computed here rather than passing the raw
+        // scale values and risking BrainJarBubbles silently
+        // misinterpreting which convention it received. Seeded from
+        // this building's own world position so every Big Brain
         // building's bubbles are independently phased rather than
         // identical clones of each other, without needing any per-match
         // random state.
@@ -505,7 +519,10 @@ public class BaseDresser : MonoBehaviour
         bubblesGo.transform.position = jarCenter;
         var bubbles = bubblesGo.AddComponent<BrainJarBubbles>();
         var bubbleSeed = Mathf.RoundToInt(root.transform.position.x * 131f + root.transform.position.z * 977f);
-        bubbles.Init(BubbleMaterial(), radius, -fluidHalfHeight, fluidHalfHeight * 2f, 8, bubbleSeed);
+        var fluidWorldRadius = radius * 1.7f * 0.5f;
+        var brainWorldRadius = brainRadius * 0.5f;
+        bubbles.Init(BubbleMaterial(), fluidWorldRadius, brainWorldRadius,
+            -fluidHalfHeight, fluidHalfHeight * 2f, 8, bubbleSeed);
 
         // 2026-07 (creator direction, replacing the pink-sphere-cluster
         // placeholder above with a real low-poly brain + PBR material
@@ -515,8 +532,8 @@ public class BaseDresser : MonoBehaviour
         // gyri/sulci, not just a squashed sphere pair, see that file's
         // own addendum) and BrainTextureKit.cs (the shared-heightfield
         // normal/AO/smoothness/height set) for the actual technique --
-        // this is just the placement + material wiring.
-        var brainRadius = radius * 0.75f;
+        // this is just the placement + material wiring. `brainRadius`
+        // itself is declared earlier now (bubbles need it too).
         var brainMat = BrainMaterial();
         PropLibrary.Spawn(builder, "big-brain-mass", PrimitiveType.Sphere, jarCenter,
             Vector3.one * brainRadius, brainMat, jarHolder.transform);
@@ -902,11 +919,11 @@ public class BaseDresser : MonoBehaviour
         return _eerieGlowMat;
     }
 
-    /// <summary>Pale, faintly luminous, moderately transparent -- reads
-    /// as a small pocket of air/gas rather than a solid ball. One shared
-    /// material for every bubble on every Big Brain building (no per-
-    /// instance color variation needed, unlike the glow disc above), so
-    /// BrainJarBubbles never has to create its own Material instances.
+    /// <summary>A small pocket of air/gas, not a solid ball -- light
+    /// green, mostly clear. One shared material for every bubble on
+    /// every Big Brain building (no per-instance color variation needed,
+    /// unlike the glow disc above), so BrainJarBubbles never has to
+    /// create its own Material instances.
     ///
     /// 2026-08 (creator report: "I can't see them" -- the other half of
     /// the fix, alongside BrainJarBubbles.cs's own size fix): a bubble
@@ -918,20 +935,27 @@ public class BaseDresser : MonoBehaviour
     /// inside a much larger fluid cylinder, that distance is often
     /// nearly identical to the fluid's own, so which one wins the
     /// draw-order tiebreak is effectively undefined and can consistently
-    /// go the WRONG way every frame rather than merely flicker. Bumped a
-    /// touch of extra alpha/brightness too (0.5 -> 0.62, base color
-    /// lifted) so a bubble reads clearly once it's actually compositing
-    /// on top, not just technically present at a hard-to-see opacity.
+    /// go the WRONG way every frame rather than merely flicker.
     /// `renderQueue` is set AFTER `MakeTransparent` (which sets it to the
     /// Transparent queue's default 3000) specifically so this later
-    /// assignment isn't clobbered by it.</summary>
+    /// assignment isn't clobbered by it, forcing bubbles to always
+    /// composite on top of the glass/fluid/rims regardless of that
+    /// distance-sort ambiguity.
+    ///
+    /// 2026-08 follow-up (creator direction: "light green and mostly
+    /// clear"): the near-white fill from the earlier visibility fix is
+    /// replaced with an actual light-green tint at a low alpha -- a real
+    /// air bubble is barely-there fill plus a bright specular glint, not
+    /// a solid tinted sphere, so Smoothness is nudged up a touch (0.85
+    /// -> 0.9) to keep that glint reading clearly now that the fill
+    /// itself is more transparent.</summary>
     private static Material _bubbleMat;
     private static Material BubbleMaterial()
     {
         if (_bubbleMat != null) return _bubbleMat;
         var mat = new Material(ShaderUtil.FindRenderableShader());
-        mat.color = new Color(0.88f, 1f, 0.93f, 0.62f);
-        if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.85f);
+        mat.color = new Color(0.55f, 0.92f, 0.62f, 0.3f);
+        if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.9f);
         LabMeshBuilder.MakeTransparent(mat);
         mat.renderQueue = 3010;   // after the glass/fluid/rims (queue 3000) -- always composites on top of them
         _bubbleMat = mat;

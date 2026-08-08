@@ -15,10 +15,25 @@ using UnityEngine;
 /// primitive-kit dressing pipeline and keeps everything on the project's
 /// existing Update-driven animation idiom"). A small pool of plain
 /// sphere primitives, each driven INDEPENDENTLY -- its own rise speed,
-/// size, lateral drift target, and (while waiting to reappear) its own
-/// random respawn delay -- rather than one shared emitter cadence, so
-/// the pool never reads as "the same N bubbles on a loop" even though it
+/// size, orbit path, and (while waiting to reappear) its own random
+/// respawn delay -- rather than one shared emitter cadence, so the pool
+/// never reads as "the same N bubbles on a loop" even though it
 /// technically does recycle a fixed set of GameObjects.
+///
+/// 2026-08 follow-up (creator direction: "round the brain not below the
+/// brain"): the ORIGINAL motion model picked an independent random
+/// lateral (X/Z) offset for each bubble's start/end with no relationship
+/// to where the brain actually sits -- a bubble with a small offset
+/// would rise on a path that passed close to (or straight through) the
+/// brain mesh, getting hidden by it, while the ones that stayed clearly
+/// visible mostly ended up reading as pooling in the narrow gap below
+/// the brain rather than travelling past its sides. Bubbles now orbit
+/// at a RADIUS constrained to the actual annular gap between the
+/// brain's surface and the glass wall (`brainWorldRadius` and
+/// `fluidWorldRadius`, both passed in from the real geometry, not
+/// guessed) with a slowly drifting angle -- every bubble's rise
+/// necessarily sweeps around the brain's own circumference instead of
+/// through its footprint.
 /// </summary>
 public class BrainJarBubbles : MonoBehaviour
 {
@@ -26,20 +41,23 @@ public class BrainJarBubbles : MonoBehaviour
     {
         public Transform T;
         public Renderer R;
-        public float RiseSpeed;      // fraction of liquid height per second
+        public float RiseSpeed;         // fraction of liquid height per second
         public float Size;
-        public float WobbleAmp;
+        public float WobbleAmp;         // small radial wobble on top of the orbit path
         public float WobbleFreq;
         public float WobblePhase;
-        public float StartLateral;   // local-X/Z offset at the bottom
-        public float TopLateral;     // local-X/Z offset near the top -- real bubbles don't rise dead straight
-        public float Progress;       // 0 (bottom) .. 1 (top)
-        public float RespawnDelay;   // seconds still waiting before reappearing
+        public float OrbitRadiusStart;  // distance from the jar's central axis at the bottom
+        public float OrbitRadiusEnd;    // distance from the jar's central axis near the top -- lets the orbit drift in/out slightly
+        public float Angle;             // starting angle around the jar's axis, radians
+        public float AngularDrift;      // total radians swept over one full rise -- the "sweeps around the brain" swirl
+        public float Progress;          // 0 (bottom) .. 1 (top)
+        public float RespawnDelay;      // seconds still waiting before reappearing
         public bool Visible;
     }
 
     private Bubble[] _bubbles;
-    private float _lateralRange;
+    private float _orbitMin;
+    private float _orbitMax;
     private float _liquidHeight;
     private float _liquidBottomLocalY;
     private float _bubbleDiameterMin;
@@ -49,7 +67,12 @@ public class BrainJarBubbles : MonoBehaviour
     /// <summary>Caller owns this component's own transform (position it
     /// at the liquid's center and parent it under the jar BEFORE calling
     /// Init, same convention EerieChamberGlow.Init already follows) --
-    /// every bubble position below is LOCAL to that transform, so
+    /// every bubble position below is LOCAL to that transform.
+    /// `fluidWorldRadius`/`brainWorldRadius` are the REAL computed world
+    /// radii of the fluid cylinder and brain sphere (not scale/diameter
+    /// values -- see the call site's own comment on that distinction),
+    /// so the orbit band this class derives from them actually sits in
+    /// the real gap between the two, at any building tier.
     /// `liquidBottomLocalY`/`liquidHeight` describe the vertical span
     /// bubbles travel relative to wherever this transform's own origin
     /// was placed.
@@ -62,17 +85,33 @@ public class BrainJarBubbles : MonoBehaviour
     /// camera height. The exact same mistake DamageFx's smoke plume made
     /// once already in this codebase ("a single fixed-size puff...
     /// disappears against a bigger silhouette" -- see DamageFx.cs's own
-    /// history). `jarRadius` is now stored and bubble diameter is a
-    /// FRACTION of it, so bubbles scale with whatever building tier the
-    /// jar itself is at, same as every other prop in this file.</summary>
-    public void Init(Material bubbleMat, float jarRadius,
+    /// history). Bubble diameter is a FRACTION of the fluid radius, so
+    /// bubbles scale with whatever building tier the jar itself is at,
+    /// same as every other prop in this file.
+    ///
+    /// 2026-08 follow-up (creator direction: "more bubble smaller by
+    /// 35%"): that fraction is itself now 35% smaller than the size that
+    /// shipped for the visibility fix above (0.05-0.14 -> 0.0325-0.091 of
+    /// the fluid radius) -- a deliberate, explicit reversal of part of
+    /// that earlier fix, not a re-guess.</summary>
+    public void Init(Material bubbleMat, float fluidWorldRadius, float brainWorldRadius,
         float liquidBottomLocalY, float liquidHeight, int count, int seed)
     {
-        _lateralRange = jarRadius * 0.55f;   // stay clear of the glass wall
+        _orbitMin = brainWorldRadius * 1.15f;   // clear of the brain's own surface
+        // 0.85, not a tighter-looking 0.9 -- has to leave room for the
+        // wobble amplitude AND the bubble's own half-size on top of the
+        // orbit radius itself; checked numerically against the worst
+        // case (max wobble + max bubble size) before picking this
+        // constant, not just eyeballed -- 0.9 left under 3% clearance
+        // from the glass wall at the extreme, 0.85 leaves a comfortable
+        // ~8%.
+        _orbitMax = fluidWorldRadius * 0.85f;   // clear of the glass wall
+        if (_orbitMax < _orbitMin) _orbitMax = _orbitMin * 1.2f;   // defensive only -- not expected to trigger at any real tier, see call site
         _liquidHeight = liquidHeight;
         _liquidBottomLocalY = liquidBottomLocalY;
-        _bubbleDiameterMin = jarRadius * 0.05f;
-        _bubbleDiameterMax = jarRadius * 0.14f;
+        const float sizeShrink = 0.65f;   // "more bubble smaller by 35%"
+        _bubbleDiameterMin = fluidWorldRadius * 0.05f * sizeShrink;
+        _bubbleDiameterMax = fluidWorldRadius * 0.14f * sizeShrink;
         _rng = new System.Random(seed);
 
         _bubbles = new Bubble[count];
@@ -107,11 +146,16 @@ public class BrainJarBubbles : MonoBehaviour
     {
         b.RiseSpeed = NextFloat(0.05f, 0.16f);
         b.Size = NextFloat(_bubbleDiameterMin, _bubbleDiameterMax);
-        b.WobbleAmp = NextFloat(0.15f, 0.5f) * (_lateralRange * 0.12f);
+        b.WobbleAmp = NextFloat(0.15f, 0.5f) * ((_orbitMax - _orbitMin) * 0.15f);
         b.WobbleFreq = NextFloat(0.5f, 1.3f);
         b.WobblePhase = NextFloat(0f, Mathf.PI * 2f);
-        b.StartLateral = NextFloat(-1f, 1f) * _lateralRange;
-        b.TopLateral = NextFloat(-1f, 1f) * _lateralRange;
+        b.OrbitRadiusStart = NextFloat(_orbitMin, _orbitMax);
+        b.OrbitRadiusEnd = NextFloat(_orbitMin, _orbitMax);
+        b.Angle = NextFloat(0f, Mathf.PI * 2f);
+        // Swirls up to ~2/3 of a full turn around the brain over one
+        // rise, either direction -- some bubbles barely drift, some
+        // sweep most of the way around, matching "vary... trajectory."
+        b.AngularDrift = NextFloat(-4f, 4f);
     }
 
     private void Update()
@@ -151,10 +195,11 @@ public class BrainJarBubbles : MonoBehaviour
 
     private void Place(Bubble b)
     {
-        var lateralX = Mathf.Lerp(b.StartLateral, b.TopLateral, b.Progress);
-        var wobble = Mathf.Sin((b.Progress * 5f + b.WobblePhase) * b.WobbleFreq * Mathf.PI * 2f) * b.WobbleAmp;
+        var orbitRadius = Mathf.Lerp(b.OrbitRadiusStart, b.OrbitRadiusEnd, b.Progress)
+            + Mathf.Sin((b.Progress * 5f + b.WobblePhase) * b.WobbleFreq * Mathf.PI * 2f) * b.WobbleAmp;
+        var angle = b.Angle + b.AngularDrift * b.Progress;
         var localY = _liquidBottomLocalY + b.Progress * _liquidHeight;
-        b.T.localPosition = new Vector3(lateralX + wobble, localY, wobble * 0.6f);
+        b.T.localPosition = new Vector3(Mathf.Sin(angle) * orbitRadius, localY, Mathf.Cos(angle) * orbitRadius);
         b.T.localScale = Vector3.one * b.Size;
         if (b.R != null) b.R.enabled = true;
     }
