@@ -13003,3 +13003,54 @@ against the real `MadDr.MatchCore.dll` via the scratch flightcheck
 harness (confirmed zero errors trace to it, same filter-by-source-file
 check as the entry above); the tier-height fractions were checked to
 sum to exactly 1.0 rather than trusted by eye.
+
+## 2026-08 follow-up: bubbles invisible -- two real, independent bugs found and fixed
+
+Creator report: "are the bubbles in the brain tank rendering? I can't
+see them. also make sure they are spawning inside the tank."
+
+**Position was never the problem** -- checked with real arithmetic, not
+assumed: `BrainJarBubbles`'s lateral range and vertical span were
+already correctly derived from the fluid cylinder's own actual
+dimensions, and a worst-case bubble (max wobble, max size) stays
+comfortably inside the fluid's true world radius at every building
+tier (checked Small through Landmark numerically -- worst-case bubble
+edge never exceeds ~77% of the fluid's own radius).
+
+**Bug 1 -- bubbles were functionally invisible from their SIZE alone.**
+`Init` sized every bubble from fixed absolute world-unit constants
+(diameter 0.03-0.09), completely independent of the jar's own scale --
+for a typical jar (radius ~3-4 world units) that's under 3% of the
+jar's radius even at the biggest tier, sub-pixel from RTS camera
+height. Confirmed numerically before touching code (0.9%-2.7% of
+radius). This is the EXACT same mistake class `DamageFx`'s smoke plume
+already made once in this codebase ("a single fixed-size puff...
+disappears against a bigger silhouette"). Fixed by sizing bubbles as a
+FRACTION of `jarRadius` (5%-14%) instead, same "scale with the
+building's own tier" convention every other prop in this file already
+follows -- re-verified numerically across all four tiers that the
+bigger bubbles still stay inside the fluid with margin to spare.
+
+**Bug 2 -- even a correctly-sized bubble could lose a coin-flip against
+the fluid's own transparency.** A bubble sits fully INSIDE the fluid
+cylinder -- two nested alpha-blended, ZWrite-off transparent objects
+(`LabMeshBuilder.MakeTransparent`). Unity sorts same-queue transparent
+objects back-to-front by each renderer's own bounds-CENTER distance
+from camera; a small bubble deep inside a much larger fluid cylinder
+often has a bounds-center distance nearly identical to the fluid's own,
+making the draw-order tiebreak effectively undefined -- and unlike a
+genuine z-fighting flicker, an undefined tiebreak can consistently
+resolve the SAME (wrong) way every single frame, which reads exactly as
+"invisible," not "flickering." Fixed by explicitly setting the bubble
+material's `renderQueue` to 3010 (after `MakeTransparent`'s own default
+3000, so the later assignment isn't clobbered by it) -- forces bubbles
+to always composite on top of the glass/fluid/rim-highlight tier
+regardless of distance-sort ambiguity. Alpha/brightness also nudged up
+slightly (0.5 -> 0.62 alpha) so a compositing-correctly bubble reads
+clearly rather than just being technically present at a hard-to-see
+opacity.
+
+**Verified for real:** both files still compile clean against the real
+`MadDr.MatchCore.dll` (flightcheck, zero errors traced to either); the
+new size/lateral-range formulas were checked numerically across all
+four building tiers, not just the one used while designing them.

@@ -906,15 +906,34 @@ public class BaseDresser : MonoBehaviour
     /// as a small pocket of air/gas rather than a solid ball. One shared
     /// material for every bubble on every Big Brain building (no per-
     /// instance color variation needed, unlike the glow disc above), so
-    /// BrainJarBubbles never has to create its own Material instances.</summary>
+    /// BrainJarBubbles never has to create its own Material instances.
+    ///
+    /// 2026-08 (creator report: "I can't see them" -- the other half of
+    /// the fix, alongside BrainJarBubbles.cs's own size fix): a bubble
+    /// sitting fully INSIDE the fluid cylinder is a second, independent
+    /// transparent object nested inside a first one, both alpha-blended
+    /// with ZWrite off (LabMeshBuilder.MakeTransparent). Unity sorts
+    /// same-queue transparent objects back-to-front by each renderer's
+    /// own bounds-center distance from camera -- for a small bubble deep
+    /// inside a much larger fluid cylinder, that distance is often
+    /// nearly identical to the fluid's own, so which one wins the
+    /// draw-order tiebreak is effectively undefined and can consistently
+    /// go the WRONG way every frame rather than merely flicker. Bumped a
+    /// touch of extra alpha/brightness too (0.5 -> 0.62, base color
+    /// lifted) so a bubble reads clearly once it's actually compositing
+    /// on top, not just technically present at a hard-to-see opacity.
+    /// `renderQueue` is set AFTER `MakeTransparent` (which sets it to the
+    /// Transparent queue's default 3000) specifically so this later
+    /// assignment isn't clobbered by it.</summary>
     private static Material _bubbleMat;
     private static Material BubbleMaterial()
     {
         if (_bubbleMat != null) return _bubbleMat;
         var mat = new Material(ShaderUtil.FindRenderableShader());
-        mat.color = new Color(0.85f, 0.98f, 0.9f, 0.5f);
+        mat.color = new Color(0.88f, 1f, 0.93f, 0.62f);
         if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.85f);
         LabMeshBuilder.MakeTransparent(mat);
+        mat.renderQueue = 3010;   // after the glass/fluid/rims (queue 3000) -- always composites on top of them
         _bubbleMat = mat;
         return _bubbleMat;
     }

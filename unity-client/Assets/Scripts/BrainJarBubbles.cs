@@ -42,6 +42,8 @@ public class BrainJarBubbles : MonoBehaviour
     private float _lateralRange;
     private float _liquidHeight;
     private float _liquidBottomLocalY;
+    private float _bubbleDiameterMin;
+    private float _bubbleDiameterMax;
     private System.Random _rng;   // display-only jitter -- never touches match state/determinism
 
     /// <summary>Caller owns this component's own transform (position it
@@ -50,13 +52,27 @@ public class BrainJarBubbles : MonoBehaviour
     /// every bubble position below is LOCAL to that transform, so
     /// `liquidBottomLocalY`/`liquidHeight` describe the vertical span
     /// bubbles travel relative to wherever this transform's own origin
-    /// was placed.</summary>
+    /// was placed.
+    ///
+    /// 2026-08 (creator report: "I can't see them"): the ORIGINAL version
+    /// sized bubbles from fixed absolute world-unit constants (0.03-0.09)
+    /// completely independent of the jar's own scale -- for a typical
+    /// Big Brain jar (radius on the order of 3-4 world units) that's
+    /// under 3% of the jar's own radius, functionally invisible from RTS
+    /// camera height. The exact same mistake DamageFx's smoke plume made
+    /// once already in this codebase ("a single fixed-size puff...
+    /// disappears against a bigger silhouette" -- see DamageFx.cs's own
+    /// history). `jarRadius` is now stored and bubble diameter is a
+    /// FRACTION of it, so bubbles scale with whatever building tier the
+    /// jar itself is at, same as every other prop in this file.</summary>
     public void Init(Material bubbleMat, float jarRadius,
         float liquidBottomLocalY, float liquidHeight, int count, int seed)
     {
-        _lateralRange = jarRadius * 0.7f;   // stay clear of the glass wall
+        _lateralRange = jarRadius * 0.55f;   // stay clear of the glass wall
         _liquidHeight = liquidHeight;
         _liquidBottomLocalY = liquidBottomLocalY;
+        _bubbleDiameterMin = jarRadius * 0.05f;
+        _bubbleDiameterMax = jarRadius * 0.14f;
         _rng = new System.Random(seed);
 
         _bubbles = new Bubble[count];
@@ -90,7 +106,7 @@ public class BrainJarBubbles : MonoBehaviour
     private void RandomizeMotion(Bubble b)
     {
         b.RiseSpeed = NextFloat(0.05f, 0.16f);
-        b.Size = NextFloat(0.03f, 0.09f);
+        b.Size = NextFloat(_bubbleDiameterMin, _bubbleDiameterMax);
         b.WobbleAmp = NextFloat(0.15f, 0.5f) * (_lateralRange * 0.12f);
         b.WobbleFreq = NextFloat(0.5f, 1.3f);
         b.WobblePhase = NextFloat(0f, Mathf.PI * 2f);
