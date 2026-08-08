@@ -12802,3 +12802,150 @@ actually changed, so fixing all of them was out of scope here and left
 alone rather than silently absorbed into this change; the harness needs
 another proper reconstruction pass (like the 2026-08 one referenced
 earlier in this log), just not as a side effect of a clock bug.
+
+## 2026-08: Big Brain jar "Major Improvement" -- real geometric gyri/sulci, glass/light/bubble/ring pass
+
+Creator direction: a detailed brief to make the Big Brain building's jar
+"anatomically convincing," with clearer old-lab glass, a slow eerie
+underlighting pulse, rising bubbles, and brass/rivet structural rings --
+explicitly "do not redesign the Big Brain Building... modify the
+existing visual without changing its overall shape, proportions, or
+core architectural design." Every existing dimension in
+`BaseDresser.BuildBigBrainShape` (pedestal, jar radius/height, fluid
+fill, brain size, stem, lid) is untouched; everything below is either a
+material upgrade in place or new geometry layered on top.
+
+**Brain mesh -- real geometry, not just a normal map (BrainMesh.cs):**
+the original mesh was two plain squashed UV-spheres leaning entirely on
+BrainTextureKit's normal map for fold detail -- correct per the
+ORIGINAL 2026-07 brief ("geometry stays simple... rely on textures"),
+but a normal map is a lighting trick with zero real depth: it can't
+change the silhouette and does nothing for the underside/edges, which
+THIS brief specifically calls out ("the underside and edges should also
+have believable brain structure"). `AddFoldedUvSphere` adds real per-
+vertex displacement along each vertex's own radial direction, driven by
+a 3-octave noise field (broad smooth bumps, medium smooth bumps, a
+RIDGED fine layer -- `1 - |2n-1|`, the standard turbulence-to-canyon
+transform -- for sharp narrow creases) -- "broad shallow ridges, some
+narrow deep creases" is two different amplitude/sharpness profiles at
+two scales, not one noise field turned up or down. Left and right
+hemispheres use different noise salts (110 vs 210) AND slightly
+different proportions (a stylized nod to real petalia), so they read as
+two organs of the same kind, not a mirror image of one ("avoid
+perfectly symmetrical or mirrored patterns"). A `fissureDamp` factor
+zeroes folding toward each hemisphere's own fissure-facing pole so the
+central groove stays a clean, recognizable division rather than getting
+eaten by noise. Segments bumped 14x10 -> 32x28 per hemisphere (needed
+vertex density for the displacement to read as organic ridges instead
+of faceting); triangle budget landed around 3,500 total -- comfortably
+cheap for a hero prop capped at a handful of instances per match
+(BuildingDef's own 20-Brain cost).
+
+Two correctness traps a normal-map-only mesh never had to worry about,
+both handled explicitly rather than assumed away: (1) POLES -- the
+original mesh collapses every longitude step to one coincident vertex
+at each pole (needed so `RecalculateNormals` doesn't choke on
+degenerate triangles, the exact docs/28 failure mode); naive per-vertex
+noise displacement would pull those "coincident" vertices apart into a
+jittered crown. `poleFactor` forces displacement to exactly zero at
+both poles, ramping to full strength within ~1/6 of the latitude range
+-- also an honest anatomical read (a brain's own lobe tips really are
+smoother than its heavily-folded mid-lateral surface). (2) THE
+LONGITUDE SEAM -- raw `(u, v)` noise sampling wraps discontinuously at
+u=0/u=1 (two different noise-grid cells for what should be the same
+point), which would crack the mesh open along one meridian per
+hemisphere. Fold noise instead samples a genuinely periodic
+`(cos(theta), sin(theta), phi)` embedding (a new 3D value-noise pair,
+`Jitter3`/`ValueNoise3`, local to BrainMesh.cs) where theta=0 and
+theta=2*PI are the SAME input by construction, closing the seam
+exactly rather than approximately.
+
+**Verified with real math, not eyeballed (no Editor here to render
+it):** a standalone harness (`brainverify/`, real Vector3/Mathf/Mesh-
+with-genuine-normal-recalculation stubs, compiling and RUNNING the
+actual `BrainMesh.cs` file) checked 13 properties end to end: vertex/
+triangle counts, no NaN/degenerate normals on any triangle-referenced
+vertex (4 legitimately-unreferenced seam-duplicate pole vertices --
+pre-existing in the ORIGINAL mesh too, unrelated to this change --
+correctly excluded by construction, not exception-listed), exact pole
+coincidence (max drift ~1e-6, floating-point noise) on all 4 poles,
+exact longitude-seam closure (max gap ~1.5e-6) on both hemispheres,
+fissure damping measurably suppressing displacement near the midline
+on both sides, displacement never exceeding the ~11% documented bound
+(max observed 9.3%), left/right hemisphere fold patterns provably NOT
+identical (42/42 sampled UV points differ), and consistent outward-
+facing triangle winding across 1,176 sampled interior triangles. All 13
+passed.
+
+**Glass (`GlassMaterial`/`GlassRimMaterial`):** lower alpha (0.28 ->
+0.22, "much clearer"), high Smoothness (0.93) so URP Lit's own built-in
+dielectric fresnel response gives sharp specular highlights/environment
+reflections with zero custom shader (Metallic stays 0 -- glass isn't a
+metal); `PbrTextureAtlas.Glass` (previously built but never actually
+applied to a transparent material -- its own comment calling it "no
+real transparency" predates `LabMeshBuilder.MakeTransparent`) now
+supplies its diagonal sheen band as the "slightly imperfect, old-
+fashioned" hand-blown-glass read. A thin bright rim band at the glass's
+own top/bottom lip fakes "edge highlight" the cheap, reliable way real
+glass concentrates light at its edge -- not attempted via a custom
+refraction/fresnel Shader Graph, same standing "can't verify a hand-
+authored shader compiles or renders correctly with no Editor" caution
+this codebase applies everywhere else a custom shader is tempting.
+
+**Eerie underlighting (new `EerieChamberGlow.cs`):** a real (but tiny,
+shadowless, short-range) Light paired with a visible emissive glow-disc
+prop near the jar's bottom, both driven by two summed, slightly-
+detuned sine waves (5.2s and 7.9s periods) rather than one -- a single
+sine breathes with an identical rhythm every cycle, which reads as
+mechanical once watched for more than a few seconds; the detuned pair
+drifts in exact shape/peak timing cycle to cycle, which is what "slow,
+organic" pulsing actually looks like without real Perlin-noise
+modulation for something this subtle. Deliberately NOT routed through
+DynamicLightBudget/GlowPointRegistry: that system gates every real
+light behind `DayNightState.NightAmount` (flat 0 all day) and competes
+it against every streetlamp/window/neon for one shared budget -- the
+jar's glow is a permanent feature of this specific building, not a
+city streetlight, and should read the same at noon as at midnight.
+There are at most a handful of Big Brain buildings in any match, so a
+dedicated Update() per instance is trivial, unlike the "hundreds of
+windows" case that budget system exists to solve.
+
+**Bubbles (new `BrainJarBubbles.cs`):** no ParticleSystem -- same
+"primitive-kit dressing pipeline, no Inspector-configured module graph
+this environment has no Editor to verify" convention `DamageFx.cs`'s
+own smoke/fire/dust already established for every other effect in this
+codebase. A small pool (8 per jar) of plain sphere primitives, each
+independently driven: own rise speed, size, lateral wobble amplitude/
+frequency/phase, and (while waiting to reappear after popping at the
+surface) its own random respawn delay and a fully re-randomized motion
+profile -- so the pool never reads as a fixed, predictable cast on a
+loop even though it technically does recycle a fixed set of
+GameObjects. Seeded from each building's own world position, so
+multiple Big Brain buildings in the same match don't share identical
+bubble phasing.
+
+**Brass rings + steel rivets:** squat solid cylinders (not true hollow
+torus geometry -- from any normal camera angle a jar-clamp ring reads
+identically either way, and a solid band is far cheaper), positioned
+right at the glass's own rim so the ring reads as "what's clamping the
+glass in place" rather than a separate decoration. `PbrTextureAtlas`
+gained a `Brass` entry (warm base tone + a separate, coarser "patina
+field" so tarnish reads as distinct aged patches rather than blending
+into ordinary tone variation, plus sparse bright scratches) --
+deliberately does NOT bake a fake rivet-dot texture the way
+`PaintedMetal` does, since the rivets here are real embedded 3D
+geometry (`BaseDresser.SpawnRivets`, small spheres so they read
+correctly as domed studs from any angle with zero orientation math),
+not a texture trick. Reuses `PbrTextureAtlas.Jitter` (relaxed to
+`internal`) for per-rivet angle/radius/size jitter rather than
+inventing a third copy of the same hash.
+
+**Verified for real, not assumed:** all 6 touched/new files (BaseDresser.cs,
+BrainMesh.cs, BrainTextureKit.cs, PbrTextureAtlas.cs, EerieChamberGlow.cs,
+BrainJarBubbles.cs) compile clean against the real `MadDr.MatchCore.dll`
+via the scratch flightcheck harness -- zero errors traced to any of them
+(confirmed by filtering the harness's error output by source file); the
+harness's ~27 pre-existing unrelated errors (stale peer-file/DLL drift,
+already documented in this log's own 2026-08 clock-bug entry above) are
+untouched by this change and were left alone rather than silently
+absorbed into it.

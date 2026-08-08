@@ -29,6 +29,7 @@ public static class PbrTextureAtlas
     private static Texture2D _chrome;
     private static Texture2D _paintedMetal;
     private static Texture2D _glass;
+    private static Texture2D _brass;
 
     public static Texture2D Brick { get { return _brick != null ? _brick : (_brick = BuildBrick()); } }
     public static Texture2D Limestone { get { return _limestone != null ? _limestone : (_limestone = BuildLimestone()); } }
@@ -36,14 +37,29 @@ public static class PbrTextureAtlas
     public static Texture2D Chrome { get { return _chrome != null ? _chrome : (_chrome = BuildChrome()); } }
     public static Texture2D PaintedMetal { get { return _paintedMetal != null ? _paintedMetal : (_paintedMetal = BuildPaintedMetal()); } }
     public static Texture2D Glass { get { return _glass != null ? _glass : (_glass = BuildGlass()); } }
+    /// <summary>2026-08 (Big Brain jar "Major Improvement": "Brass should
+    /// have subtle age, patina, scratches, and surface variation"). Same
+    /// small-atlas placeholder technique as every other entry here --
+    /// warm brass base tone, low-frequency blotchy patina patches (a
+    /// SEPARATE, coarser noise field than the tone mottling, so patina
+    /// reads as distinct aged patches rather than blending into the
+    /// general variation), sparse bright scratches. Deliberately does
+    /// NOT bake a fake rivet-dot grid the way <see cref="PaintedMetal"/>
+    /// does -- the brass ring's rivets are real embedded 3D geometry
+    /// (BaseDresser.SpawnRivets), and a flat texture dot UNDER a real
+    /// domed stud would either be invisible or, worse, misaligned with
+    /// it.</summary>
+    public static Texture2D Brass { get { return _brass != null ? _brass : (_brass = BuildBrass()); } }
 
     /// <summary>A tiny deterministic hash for per-pixel jitter -- NOT
     /// UnityEngine.Random/System.Random (this project's own determinism
     /// discipline, docs/23 §0), and unnecessary anyway: this texture is
     /// built once from fixed (x, y) inputs, so "deterministic" here just
     /// means the same code always produces the same pixel, not that it
-    /// needs to agree with any match/session seed.</summary>
-    private static float Jitter(int x, int y, int salt)
+    /// needs to agree with any match/session seed. Internal (2026-08):
+    /// BaseDresser's rivet placement reuses this same hash for its own
+    /// per-rivet angle/radius jitter rather than duplicating it.</summary>
+    internal static float Jitter(int x, int y, int salt)
     {
         unchecked
         {
@@ -191,6 +207,41 @@ public static class PbrTextureAtlas
             var diag = (x + y) % Size;
             var sheen = diag > Size - 10 || diag < 10 ? 1.6f : 1f;
             pixels[y * Size + x] = baseCol * sheen;
+        }
+        tex.SetPixels32(pixels);
+        tex.Apply(true);
+        return tex;
+    }
+
+    /// <summary>Warm brass base tone + two INDEPENDENT noise fields, not
+    /// one: a fine/coarse tone-mottling blend (same technique as
+    /// <see cref="BuildLimestone"/>) for everyday surface variation, and
+    /// a separate, lower-frequency "patina field" that only shows up
+    /// where it crosses its own threshold -- real tarnish doesn't fade
+    /// in smoothly everywhere, it forms distinct aged PATCHES against
+    /// otherwise-cleaner metal. Sparse bright scratches on top, same
+    /// idiom as <see cref="BuildPaintedMetal"/>.</summary>
+    private static Texture2D BuildBrass()
+    {
+        var tex = NewTexture();
+        var pixels = new Color32[Size * Size];
+        var baseCol = new Color(0.72f, 0.56f, 0.26f);
+        var patinaCol = new Color(0.33f, 0.4f, 0.32f);
+        for (var y = 0; y < Size; y++)
+        for (var x = 0; x < Size; x++)
+        {
+            var coarse = Jitter(x / 6, y / 6, 11);
+            var fine = Jitter(x, y, 12);
+            var tone = 0.85f + (coarse * 0.6f + fine * 0.4f - 0.5f) * 0.3f;
+            var c = baseCol * tone;
+
+            var patinaField = Jitter(x / 9, y / 9, 13);
+            if (patinaField > 0.7f)
+                c = Color.Lerp(c, patinaCol, (patinaField - 0.7f) / 0.3f * 0.65f);
+
+            if (Jitter(x, y, 14) > 0.985f) c = Color.Lerp(c, Color.white, 0.5f);
+
+            pixels[y * Size + x] = c;
         }
         tex.SetPixels32(pixels);
         tex.Apply(true);

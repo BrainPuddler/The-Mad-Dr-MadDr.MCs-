@@ -69,6 +69,10 @@ public class BaseDresser : MonoBehaviour
     private static Material _scaffoldMat;
     private static readonly Dictionary<int, Material> SolidMatsByOwner = new Dictionary<int, Material>();
     private static readonly Dictionary<int, Material> DamagedMatsByOwner = new Dictionary<int, Material>();
+    // 2026-08 (Big Brain jar "Major Improvement"): same cache-by-key
+    // idiom RoadDresser.cs/BuildingDresser.cs already each keep their own
+    // private copy of -- this file didn't need one until now.
+    private static readonly Dictionary<string, Material> TexturedCache = new Dictionary<string, Material>();
 
     // UnderConstruction: one scaffold GameObject per building, a single
     // scaling cube (see the class header for why shape stays generic here).
@@ -403,7 +407,19 @@ public class BaseDresser : MonoBehaviour
     /// designed system (no tech-tree/upgrade mechanic exists anywhere in
     /// match-core today, confirmed by a fresh grep before writing this)
     /// -- this method is the visual half only, flagged rather than
-    /// silently invented.</summary>
+    /// silently invented.
+    ///
+    /// 2026-08 ("Major Improvement" creator direction -- explicit: "Do
+    /// not redesign the Big Brain Building or replace its existing
+    /// visual language... modify the existing visual without changing
+    /// its overall shape, proportions, or core architectural design"):
+    /// every dimension that existed before (pedestal size, jar radius/
+    /// height, fluid fill level, brain size, stem, lid) is UNCHANGED
+    /// below -- this pass only upgrades materials in place (glass,
+    /// brain -- see BrainMesh.cs's own 2026-08 addendum) and ADDS new
+    /// elements the brief calls for (glass edge-highlight rims, the
+    /// bottom glow light, rising bubbles, brass rings + steel rivets)
+    /// without touching any existing size/position number.</summary>
     private void BuildBigBrainShape(GameObject root, Vector3 fullScale)
     {
         var radius = Mathf.Min(fullScale.x, fullScale.z) * 0.26f;
@@ -418,11 +434,27 @@ public class BaseDresser : MonoBehaviour
         var jarH = fullScale.y * 0.45f;
         var jarCenter = root.transform.position + Vector3.up * (jarBaseY + jarH * 0.5f);
 
-        var glassMat = new Material(ShaderUtil.FindRenderableShader());
-        glassMat.color = new Color(0.75f, 0.88f, 0.85f, 0.28f);
-        LabMeshBuilder.MakeTransparent(glassMat);
+        // ---- glass (2026-08: material upgraded in place, same radius/
+        // height as before -- see GlassMaterial's own comment) ----
         builder.SpawnPrim(PrimitiveType.Cylinder, jarCenter,
-            new Vector3(radius * 1.9f, jarH * 0.5f, radius * 1.9f), glassMat, jarHolder.transform);
+            new Vector3(radius * 1.9f, jarH * 0.5f, radius * 1.9f), GlassMaterial(), jarHolder.transform);
+
+        // 2026-08 ("Add subtle glass thickness, reflections, refraction,
+        // and edge highlights"): a thin bright band right at the glass's
+        // own top/bottom lip -- real glass concentrates and catches
+        // light hardest at its edge, and this is the reliable, cheap way
+        // to sell that without a custom refraction/fresnel shader this
+        // environment has no Editor to compile or verify (same standing
+        // caution as every other custom-shader temptation in this
+        // codebase). Radius is a hair larger than the glass itself so it
+        // reads as sitting ON the rim, not inside it.
+        var rimMat = GlassRimMaterial();
+        var rimHalfHeight = jarH * 0.018f;
+        var rimRadius = radius * 1.93f;
+        builder.SpawnPrim(PrimitiveType.Cylinder, jarCenter + Vector3.up * (jarH * 0.5f - rimHalfHeight),
+            new Vector3(rimRadius, rimHalfHeight, rimRadius), rimMat, jarHolder.transform);
+        builder.SpawnPrim(PrimitiveType.Cylinder, jarCenter - Vector3.up * (jarH * 0.5f - rimHalfHeight),
+            new Vector3(rimRadius, rimHalfHeight, rimRadius), rimMat, jarHolder.transform);
 
         var fluidMat = new Material(ShaderUtil.FindRenderableShader());
         var fluidColor = new Color(0.35f, 0.85f, 0.6f);
@@ -430,18 +462,61 @@ public class BaseDresser : MonoBehaviour
         LabMeshBuilder.MakeTransparent(fluidMat);
         fluidMat.EnableKeyword("_EMISSION");
         fluidMat.SetColor("_EmissionColor", fluidColor * 0.6f);
+        var fluidHalfHeight = jarH * 0.46f;
         builder.SpawnPrim(PrimitiveType.Cylinder, jarCenter,
-            new Vector3(radius * 1.7f, jarH * 0.46f, radius * 1.7f), fluidMat, jarHolder.transform);
+            new Vector3(radius * 1.7f, fluidHalfHeight, radius * 1.7f), fluidMat, jarHolder.transform);
+
+        // 2026-08 ("Add a very subtle, slow-pulsing light source at the
+        // bottom of the chamber... illuminate the underside and lower
+        // folds of the brain"): a small emissive glow-disc prop (the
+        // visible SOURCE -- "avoid... a generic video-game point light"
+        // is read as needing something visible to have caused the glow,
+        // not a bare invisible light) plus a real, short-range,
+        // shadowless Light so it actually illuminates the brain mesh's
+        // own underside -- see EerieChamberGlow.cs's own class header
+        // for why this is deliberately NOT routed through
+        // DynamicLightBudget/GlowPointRegistry.
+        var glowCenter = new Vector3(jarCenter.x, jarCenter.y - fluidHalfHeight * 0.82f, jarCenter.z);
+        var glowDiscRadius = radius * 0.5f;
+        var glowGo = builder.SpawnPrim(PrimitiveType.Sphere, glowCenter,
+            new Vector3(glowDiscRadius, glowDiscRadius * 0.3f, glowDiscRadius), EerieGlowMaterial(), jarHolder.transform);
+
+        var lightGo = new GameObject("EerieGlowLight");
+        lightGo.transform.SetParent(jarHolder.transform, false);
+        lightGo.transform.position = glowCenter;
+        var glowLight = lightGo.AddComponent<Light>();
+        glowLight.type = LightType.Point;
+        glowLight.shadows = LightShadows.None;
+        glowLight.lightmapBakeType = LightmapBakeType.Realtime;
+        glowLight.range = jarH * 0.95f;
+        glowLight.color = new Color(0.35f, 1f, 0.55f);
+        var glowAnim = lightGo.AddComponent<EerieChamberGlow>();
+        glowAnim.Init(glowLight, glowGo.GetComponent<Renderer>(), new Color(0.3f, 1.1f, 0.6f) * 1.4f, 3.4f);
+
+        // 2026-08 ("Add small bubbles suspended within the green
+        // liquid... slowly and randomly rise... sparse enough to feel
+        // physical"): see BrainJarBubbles.cs's own class header for why
+        // this is hand-rolled primitives, not a ParticleSystem. Seeded
+        // from this building's own world position so every Big Brain
+        // building's bubbles are independently phased rather than
+        // identical clones of each other, without needing any per-match
+        // random state.
+        var bubblesGo = new GameObject("Bubbles");
+        bubblesGo.transform.SetParent(jarHolder.transform, false);
+        bubblesGo.transform.position = jarCenter;
+        var bubbles = bubblesGo.AddComponent<BrainJarBubbles>();
+        var bubbleSeed = Mathf.RoundToInt(root.transform.position.x * 131f + root.transform.position.z * 977f);
+        bubbles.Init(BubbleMaterial(), radius, -fluidHalfHeight, fluidHalfHeight * 2f, 8, bubbleSeed);
 
         // 2026-07 (creator direction, replacing the pink-sphere-cluster
         // placeholder above with a real low-poly brain + PBR material
         // set): "geometry stays simple while the materials do the heavy
-        // lifting... 500-2,000 triangles... rely on textures to convey
-        // the intricate anatomy." See BrainMesh.cs (the mesh: two
-        // hemispheres + a central fissure + a cerebellum, ~700 tris) and
-        // BrainTextureKit.cs (the shared-heightfield normal/AO/
-        // smoothness/height set) for the actual technique -- this is
-        // just the placement + material wiring.
+        // lifting... rely on textures to convey the intricate anatomy."
+        // See BrainMesh.cs (the mesh -- 2026-08: now real geometric
+        // gyri/sulci, not just a squashed sphere pair, see that file's
+        // own addendum) and BrainTextureKit.cs (the shared-heightfield
+        // normal/AO/smoothness/height set) for the actual technique --
+        // this is just the placement + material wiring.
         var brainRadius = radius * 0.75f;
         var brainMat = BrainMaterial();
         PropLibrary.Spawn(builder, "big-brain-mass", PrimitiveType.Sphere, jarCenter,
@@ -460,6 +535,60 @@ public class BaseDresser : MonoBehaviour
         lidMat.color = new Color(0.72f, 0.74f, 0.78f);
         builder.SpawnPrim(PrimitiveType.Cylinder, jarCenter + Vector3.up * (jarH * 0.52f),
             new Vector3(radius * 2f, jarH * 0.06f, radius * 2f), lidMat, jarHolder.transform);
+
+        // 2026-08 ("Add substantial structural rings around the glass:
+        // brass ring around the top, brass ring around the bottom,
+        // visible steel rivets/bolts... make the chamber feel heavy,
+        // industrial, and physically constructed"): squat solid
+        // cylinders, not true hollow torus geometry -- from any normal
+        // camera angle a jar-clamp ring reads identically either way
+        // (you'd never see "through" the hole), and a solid band is far
+        // cheaper. Sits right where the rim highlight above already is,
+        // reading as "the ring is what's clamping the glass rim in
+        // place" rather than two unrelated decorations stacked there.
+        var ringHalfHeight = jarH * 0.05f;
+        var ringRadius = radius * 1.98f;
+        var topRingCenter = jarCenter + Vector3.up * (jarH * 0.5f - ringHalfHeight * 0.4f);
+        var bottomRingCenter = jarCenter - Vector3.up * (jarH * 0.5f - ringHalfHeight * 0.4f);
+        var brassMat = Brass();
+        builder.SpawnPrim(PrimitiveType.Cylinder, topRingCenter,
+            new Vector3(ringRadius, ringHalfHeight, ringRadius), brassMat, jarHolder.transform);
+        builder.SpawnPrim(PrimitiveType.Cylinder, bottomRingCenter,
+            new Vector3(ringRadius, ringHalfHeight, ringRadius), brassMat, jarHolder.transform);
+
+        var rivetSeedSalt = Mathf.RoundToInt(root.transform.position.x * 53f + root.transform.position.z * 197f);
+        var rivetSize = ringHalfHeight * 1.7f;
+        var rivetPlacementRadius = ringRadius * 0.5f;
+        var steelMat = Steel();
+        SpawnRivets(topRingCenter, rivetPlacementRadius, rivetSize, steelMat, jarHolder.transform, 14, rivetSeedSalt);
+        SpawnRivets(bottomRingCenter, rivetPlacementRadius, rivetSize, steelMat, jarHolder.transform, 14, rivetSeedSalt + 1000);
+    }
+
+    /// <summary>Evenly spaced around `ringCenter`'s own circumference at
+    /// `placementRadius` (in the ring's local XZ plane, i.e. straight out
+    /// from the jar's own central axis), with small per-rivet angle/
+    /// radius/size jitter -- "mechanically embedded rather than
+    /// decorative" is read as real dimensional studs (small spheres, so
+    /// they read correctly as domed rivet heads from any camera angle
+    /// with zero orientation math needed) that aren't laser-perfectly
+    /// spaced, matching this project's own "irregular, naturally
+    /// distributed" world-dressing convention rather than a sterile
+    /// grid. Reuses PbrTextureAtlas.Jitter for the jitter hash rather
+    /// than inventing a third copy of the same hash function.</summary>
+    private void SpawnRivets(Vector3 ringCenter, float placementRadius, float rivetSize,
+        Material rivetMat, Transform parent, int count, int seedSalt)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            var baseAngleDeg = i / (float)count * 360f;
+            var angleJitter = (PbrTextureAtlas.Jitter(i, seedSalt, 101) - 0.5f) * (360f / count) * 0.3f;
+            var angleRad = (baseAngleDeg + angleJitter) * Mathf.Deg2Rad;
+            var radiusJitter = 1f + (PbrTextureAtlas.Jitter(i, seedSalt, 102) - 0.5f) * 0.08f;
+            var r = placementRadius * radiusJitter;
+            var pos = ringCenter + new Vector3(Mathf.Sin(angleRad) * r, 0f, Mathf.Cos(angleRad) * r);
+            var sizeJitter = 1f + (PbrTextureAtlas.Jitter(i, seedSalt, 103) - 0.5f) * 0.12f;
+            builder.SpawnPrim(PrimitiveType.Sphere, pos, Vector3.one * (rivetSize * sizeJitter), rivetMat, parent);
+        }
     }
 
     /// <summary>Defensive fallback only -- every real `BuildingKind`
@@ -547,6 +676,147 @@ public class BaseDresser : MonoBehaviour
         mat.SetColor("_EmissionColor", warmGlow * 0.1f);
         _brainMat = mat;
         return _brainMat;
+    }
+
+    /// <summary>2026-08 ("Major Improvement": "Make the existing chamber
+    /// glass much clearer and more realistic, while retaining an old-
+    /// fashioned, slightly imperfect laboratory-glass appearance").
+    /// Lower alpha than the original (0.28 -> 0.22) so it reads as
+    /// genuinely see-through, high Smoothness so URP Lit's own built-in
+    /// dielectric fresnel response (Metallic stays 0 -- glass isn't a
+    /// metal) gives sharp specular highlights and environment
+    /// reflections without any custom shader. The faint pale green-blue
+    /// tint is a deliberate nod to real antique lab glass (often
+    /// slightly green from iron impurities) -- a happy authentic
+    /// coincidence with the jar's own "eerie green" theme, not invented
+    /// to match it. PbrTextureAtlas.Glass (previously unused for actual
+    /// transparency -- that texture's own comment calling it "no real
+    /// transparency, this project has no transparent-material
+    /// convention yet" predates LabMeshBuilder.MakeTransparent) supplies
+    /// its diagonal sheen band as the "slightly imperfect, hand-blown"
+    /// read the brief asks for, tiled low (2x1) so it reads as a broad
+    /// warp down the cylinder rather than a repeating pattern.
+    ///
+    /// True refraction (bending what's behind the glass) has no slot in
+    /// URP Lit and isn't attempted via a custom Shader Graph -- same
+    /// standing "can't verify a hand-authored shader compiles or renders
+    /// correctly with no Editor" caution BrainTextureKit's own header
+    /// already applies elsewhere in this file's material stack.</summary>
+    private static Material _glassMat;
+    private static Material GlassMaterial()
+    {
+        if (_glassMat != null) return _glassMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(0.8f, 0.9f, 0.86f, 0.22f);
+        if (mat.HasProperty("_BaseMap"))
+        {
+            mat.SetTexture("_BaseMap", PbrTextureAtlas.Glass);
+            mat.SetTextureScale("_BaseMap", new Vector2(2f, 1f));
+        }
+        if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.93f);
+        if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", 0f);
+        LabMeshBuilder.MakeTransparent(mat);
+        _glassMat = mat;
+        return _glassMat;
+    }
+
+    /// <summary>The thin bright band at the glass's own top/bottom lip
+    /// (see BuildBigBrainShape's own comment on why this, not a custom
+    /// fresnel shader, is how this codebase sells "edge highlight").</summary>
+    private static Material _glassRimMat;
+    private static Material GlassRimMaterial()
+    {
+        if (_glassRimMat != null) return _glassRimMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(0.92f, 0.97f, 0.95f, 0.5f);
+        if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.95f);
+        LabMeshBuilder.MakeTransparent(mat);
+        _glassRimMat = mat;
+        return _glassRimMat;
+    }
+
+    /// <summary>The visible emissive SOURCE object EerieChamberGlow's own
+    /// class header explains pairing with the real Light -- a plain,
+    /// opaque, strongly emissive material; EerieChamberGlow drives its
+    /// per-instance brightness via MaterialPropertyBlock the same way
+    /// EmissiveAnimator already does for every other emissive prop in
+    /// this codebase, so this shared/cached Material instance never gets
+    /// mutated directly (SRP-batcher-friendly, same reasoning as
+    /// EmissiveAnimator's own class header).</summary>
+    private static Material _eerieGlowMat;
+    private static Material EerieGlowMaterial()
+    {
+        if (_eerieGlowMat != null) return _eerieGlowMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        var glow = new Color(0.3f, 1f, 0.55f);
+        mat.color = glow;
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", glow * 1.4f);
+        _eerieGlowMat = mat;
+        return _eerieGlowMat;
+    }
+
+    /// <summary>Pale, faintly luminous, moderately transparent -- reads
+    /// as a small pocket of air/gas rather than a solid ball. One shared
+    /// material for every bubble on every Big Brain building (no per-
+    /// instance color variation needed, unlike the glow disc above), so
+    /// BrainJarBubbles never has to create its own Material instances.</summary>
+    private static Material _bubbleMat;
+    private static Material BubbleMaterial()
+    {
+        if (_bubbleMat != null) return _bubbleMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(0.85f, 0.98f, 0.9f, 0.5f);
+        if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.85f);
+        LabMeshBuilder.MakeTransparent(mat);
+        _bubbleMat = mat;
+        return _bubbleMat;
+    }
+
+    /// <summary>Same cache-by-key/base-color/texture/tiling idiom
+    /// RoadDresser.cs's and BuildingDresser.cs's own private MTextured
+    /// copies already use -- extended with an optional Metallic
+    /// parameter (unused by either of those files' own callers so far)
+    /// since brass genuinely is a metal, unlike wet asphalt or painted
+    /// equipment. `smoothness`/`metallic` < 0 means "leave the shader's
+    /// own default alone," matching MTextured's existing sentinel
+    /// convention in the other two files.</summary>
+    private static Material MTextured(string key, float r, float g, float b, Texture2D tex,
+        float smoothness = -1f, float metallic = -1f)
+    {
+        Material mat;
+        if (TexturedCache.TryGetValue(key, out mat) && mat != null) return mat;
+        mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(r, g, b);
+        if (tex != null && mat.HasProperty("_BaseMap"))
+        {
+            mat.SetTexture("_BaseMap", tex);
+            mat.SetTextureScale("_BaseMap", new Vector2(3f, 3f));
+        }
+        if (smoothness >= 0f && mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", smoothness);
+        if (metallic >= 0f && mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", metallic);
+        TexturedCache[key] = mat;
+        return mat;
+    }
+
+    /// <summary>The jar's top/bottom structural rings -- moderately
+    /// smooth/metallic so it reads as worn, handled metal rather than a
+    /// mirror-polish (see BuildBigBrainShape's own comment for the
+    /// ring geometry itself, and PbrTextureAtlas.Brass's own comment for
+    /// the patina/scratch texture).</summary>
+    private static Material Brass()
+    {
+        return MTextured("big-brain-brass", 0.72f, 0.56f, 0.26f, PbrTextureAtlas.Brass, 0.55f, 0.75f);
+    }
+
+    /// <summary>Rivet studs -- flat, untextured steel-gray. At the small
+    /// size a single rivet actually renders (a few dozen pixels at most,
+    /// typical RTS camera height), texture detail wouldn't even be
+    /// visible; the real geometry (BaseDresser.SpawnRivets) is what
+    /// sells "mechanically embedded," not surface texture.</summary>
+    private static Material Steel()
+    {
+        return MTextured("big-brain-steel-rivet", 0.55f, 0.56f, 0.58f, null, 0.55f, 0.85f);
     }
 
     /// <summary>A deliberate approximation of docs/17's own per-faction
