@@ -224,22 +224,17 @@ public class AnalogClockHud : MonoBehaviour
     // fraction of the shorter screen dimension instead of a fixed pixel
     // count) ------------------------------------------------------------
 
-    private bool _loggedZeroScreen;
-
+    // 2026-08 (creator direction: "the ui is not scaling properly to
+    // screen sizes"): reads UiScale.Width/Height (the fixed reference
+    // canvas), not real Screen.width/height -- OnGUI wraps its whole body
+    // in UiScale.Begin(), so this must return Rects in that same
+    // reference space or the matrix would double-scale the clock off-
+    // screen. UiScale's constants are never 0, so the old zero-Screen-
+    // size fallback/warning this replaced no longer applies.
     private Rect GetScreenRect()
     {
-        var screenW = Screen.width;
-        var screenH = Screen.height;
-        // Defensive only -- Screen.width/height should never be 0 once a
-        // real Game view exists, but a 0-size rect would silently draw
-        // nothing (no exception), which is indistinguishable from "the
-        // component isn't running at all" from the creator's side. Log
-        // once so THAT specific cause is distinguishable if it recurs.
-        if (screenW <= 0 || screenH <= 0)
-        {
-            if (!_loggedZeroScreen) { Debug.LogWarning("AnalogClockHud: Screen.width/height reported 0 -- falling back to 1920x1080 for sizing until it recovers."); _loggedZeroScreen = true; }
-            screenW = 1920; screenH = 1080;
-        }
+        var screenW = UiScale.Width;
+        var screenH = UiScale.Height;
         var size = Mathf.Min(screenW, screenH) * sizeFraction;
         if (useCustomPosition) return new Rect(customTopLeftPixels.x, customTopLeftPixels.y, size, size);
         float x, y;
@@ -258,8 +253,9 @@ public class AnalogClockHud : MonoBehaviour
     private void OnGUI()
     {
         if (_faceTex == null) BakeFace();
+        var prevMatrix = UiScale.Begin();
         var rect = GetScreenRect();
-        if (rect.width <= 0f) return;
+        if (rect.width <= 0f) { UiScale.End(prevMatrix); return; }
         var center = new Vector2(rect.x + rect.width * 0.5f, rect.y + rect.height * 0.5f);
 
         // opaque-ish backing so the widget reads against ANY city
@@ -276,6 +272,8 @@ public class AnalogClockHud : MonoBehaviour
 
         DrawHand(center, rect.width, HourHandDeg(DayNightState.CycleProgress), 0.5f, Mathf.Max(2f, rect.width * 0.07f), hourHandColor);
         DrawHand(center, rect.width, MinuteHandDeg(DayNightState.CycleProgress), 0.74f, Mathf.Max(1.5f, rect.width * 0.05f), minuteHandColor);
+
+        UiScale.End(prevMatrix);
     }
 
     private void DrawHand(Vector2 center, float faceSize, float angleDeg, float lengthFraction, float widthPx, Color color)

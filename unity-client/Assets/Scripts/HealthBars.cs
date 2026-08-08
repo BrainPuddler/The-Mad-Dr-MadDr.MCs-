@@ -7,6 +7,14 @@ using UnityEngine;
 /// point to screen and draw a red backing with a green (monster) or amber
 /// (tank) fill. Same OnGUI-is-fine-with-the-new-Input-System note as
 /// HudStatus.
+///
+/// 2026-08 (creator direction: "the ui is not scaling properly to screen
+/// sizes"): deliberately NOT wrapped in UiScale's scale -- every position
+/// here comes from Camera.WorldToScreenPoint, already true screen pixels
+/// regardless of resolution; wrapping it would double-apply the scale
+/// and detach a bar from the combatant it's meant to float over. See
+/// UiScale.cs's own header for the full "screen-space panel vs world-
+/// anchored" distinction.
 /// </summary>
 public class HealthBars : MonoBehaviour
 {

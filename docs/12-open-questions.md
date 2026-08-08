@@ -12456,3 +12456,95 @@ trace of every new call path against the established `TickEat`/
 `OrderEat`/`NearestCitizenTo`/`ComputeApproachPath` precedents each new
 piece mirrors, and by confirming (grep) that `ScavengeBuildingDebris`'s
 old name has zero remaining references anywhere in `unity-client/`.
+
+## 2026-08 follow-up: every HUD now scales with resolution -- previously none did
+
+Creator direction: **"the ui is not scaling properly to screen sizes,
+everything should support dynamic scaling and resolutions."**
+
+**Status audit, confirmed via grep before touching anything:** all 19 of
+this project's `OnGUI()` HUDs draw with raw pixel constants -- `BuildMenuHud`'s
+default panel at a fixed `(12, 140)` offset with a 56px tile size,
+`HudStatus`'s status line at hardcoded `x=13`, `RegionPickerHud`'s
+340px-wide buttons -- and zero resolution-scaling infrastructure existed
+anywhere (the only prior `GUI.matrix` uses were two unrelated LOCAL
+rotations, in `Minimap`/`AnalogClockHud`, for spinning specific elements
+in place, not screen scaling). On any resolution other than whatever a
+panel happened to be eyeballed at, it reads too small, too large, or
+clipped off-screen.
+
+**New `UiScale.cs`:** a uniform `GUI.matrix` scale applied once per HUD's
+`OnGUI()` -- the IMGUI equivalent of UGUI's own `CanvasScaler` "Scale
+With Screen Size" mode, hand-rolled since IMGUI has no built-in
+equivalent. Every existing HUD's pixel constants were authored against
+something near 1920x1080 (`UiScale.ReferenceWidth`/`Height`, a real,
+flagged v0.1 estimate per CLAUDE.md's standing invented-number policy);
+`UiScale.Begin()`/`End()` scale the WHOLE reference canvas to fit the
+real screen (`Mathf.Min` of the two axis ratios -- fit inside, never
+stretch or overflow either dimension), so every existing HUD's own
+layout math keeps working completely unchanged -- this scales the
+OUTPUT, not the input.
+
+**The one real subtlety, worth stating precisely: not every HUD element
+should be wrapped.** Three genuinely different coordinate sources exist
+in this codebase, discovered by reading all 19 files, not assumed:
+1. **Screen-space panels** (the vast majority -- build menu, resource/
+   Lumen panels, faction/region pickers, minimap, battalion lists,
+   status text, the analog clock): authored in fixed reference-canvas
+   pixels. These get wrapped in `UiScale.Begin()/End()`, and any
+   internal `Screen.width`/`Screen.height` read for LAYOUT positioning
+   (centering, corner-anchoring) is swapped for `UiScale.Width`/`Height`
+   -- reading the real values there would double-apply the scale and
+   place things off-screen, since IMGUI's own mouse-event system already
+   transforms `Event.current.mousePosition` into the active matrix's
+   space automatically (confirmed: no extra hit-testing code needed
+   anywhere, `rect.Contains(e.mousePosition)` and `GUI.Button` both just
+   work once the whole panel is consistently wrapped).
+2. **World-anchored markers** (`HealthBars`, `HarvesterMarkerHud`,
+   `LumenHud`'s own capture-progress bars, `ProductionQueueHud`'s
+   floating factory badge): positioned via `Camera.WorldToScreenPoint`,
+   which already returns TRUE screen pixels regardless of any
+   `GUI.matrix`. Wrapping these would double-transform their position
+   and detach them from the object they're meant to float over --
+   deliberately left unwrapped, each with its own doc note explaining
+   why (`LumenHud`/`ProductionQueueHud` needed splitting: their fixed-
+   panel half is wrapped, their world-anchored half is drawn AFTER
+   `UiScale.End()`, in real screen space).
+3. **Real-input-driven overlays** (`WaypointCommander`'s selection
+   marquee): built from `Mouse.current.position` (the New Input System's
+   real screen-pixel cursor), not `Event.current.mousePosition` -- the
+   one case IMGUI's own auto-transform does NOT cover, since it isn't
+   going through IMGUI's event queue at all. Also deliberately left
+   unwrapped; its size is inherently correct at any resolution already
+   (a live drag distance in real pixels, not an authored constant), so
+   nothing is lost by leaving it in real screen space.
+
+Getting the boundary between these three categories right (not just
+uniformly wrapping every `OnGUI()`) is what made this a careful per-file
+read-through rather than a mechanical find-replace -- wrapping a world-
+anchored or real-input element would have introduced a real, resolution-
+dependent positioning bug exactly as bad as the one being fixed.
+
+**`ResourceHud`/`LumenHud`/`AnalogClockHud`** each had their own
+`Screen.width <= 0` startup-fallback dance (log a warning once, fall
+back to 1920x1080) -- removed and replaced by reading `UiScale.Width`/
+`Height` directly, since those constants are never 0; the fallback path
+was defending against a real historical concern that reading the fixed
+reference canvas makes structurally impossible now.
+
+15 of the 19 files were wrapped; 3 (`HealthBars`, `HarvesterMarkerHud`,
+`WaypointCommander`'s marquee) were deliberately left untouched with a
+doc note explaining why; `LumenHud`/`ProductionQueueHud` each needed
+their world-anchored half split out and left unwrapped alongside their
+wrapped fixed-panel half.
+
+No Unity Editor in this environment to watch any of this render at a
+non-reference resolution -- verified by: (1) confirming every `UiScale.
+Begin()` call site has a matching `UiScale.End()` on every code path
+(including early returns), so no HUD can leak a scaled matrix into
+whichever HUD's `OnGUI()` Unity happens to call next this frame (`GUI.
+matrix` is a shared, unreset-between-scripts IMGUI global -- an
+unbalanced call would silently corrupt an unrelated panel); (2) a full
+grep sweep confirming every remaining `Screen.width`/`Screen.height`
+reference in the touched files is one of the three deliberately-real-
+space cases above, not a missed layout call.

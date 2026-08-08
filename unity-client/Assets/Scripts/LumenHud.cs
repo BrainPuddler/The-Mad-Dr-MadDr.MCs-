@@ -161,8 +161,17 @@ public class LumenHud : MonoBehaviour
         DrawCaptureMarkers();
     }
 
+    // 2026-08 (creator direction: "the ui is not scaling properly to
+    // screen sizes"): scaling is applied HERE, wrapping only this fixed
+    // panel -- NOT the whole OnGUI, since DrawCaptureMarkers below is
+    // world-anchored (Camera.WorldToScreenPoint, already true screen
+    // pixels) and must stay outside any GUI.matrix scale or its markers
+    // would detach from the emitters they're meant to float over. See
+    // UiScale.cs's own header for the full "screen-space panel vs
+    // world-anchored" distinction this project's HUDs now follow.
     private void DrawPhaseManaPanel()
     {
+        var prevMatrix = UiScale.Begin();
         var phase = bridge.CurrentLumenPhase;
         var ticksRemaining = bridge.TicksUntilNextLumenPhase;
         var warning = IsTransitionWarning(ticksRemaining, MatchState.TicksPerSecond);
@@ -170,7 +179,7 @@ public class LumenHud : MonoBehaviour
 
         var height = Padding * 2f + PhaseLineHeight + (LineHeight + BarHeight + RowGap);
         var rect = GetPanelRect(height);
-        if (rect.width <= 0f) return;
+        if (rect.width <= 0f) { UiScale.End(prevMatrix); return; }
 
         GUI.color = backingColor;
         GUI.DrawTexture(rect, Texture2D.whiteTexture);
@@ -188,6 +197,8 @@ public class LumenHud : MonoBehaviour
         DrawShadowedLabel(new Rect(x, y, innerWidth, LineHeight), "Mana " + mana + "/" + PlayerState.ManaCap, manaTextColor);
         y += LineHeight;
         DrawBar(new Rect(x, y, innerWidth, BarHeight), Fraction(mana, PlayerState.ManaCap), barBackgroundColor, manaFillColor);
+
+        UiScale.End(prevMatrix);
     }
 
     /// <summary>docs/03's "progress bar visible to both players," drawn
@@ -258,17 +269,16 @@ public class LumenHud : MonoBehaviour
         GUI.color = Color.white;
     }
 
-    private bool _loggedZeroScreen;
-
     private Rect GetPanelRect(float height)
     {
-        var screenW = Screen.width;
-        var screenH = Screen.height;
-        if (screenW <= 0 || screenH <= 0)
-        {
-            if (!_loggedZeroScreen) { Debug.LogWarning("LumenHud: Screen.width/height reported 0 -- falling back to 1920x1080 for sizing until it recovers."); _loggedZeroScreen = true; }
-            screenW = 1920; screenH = 1080;
-        }
+        // Reads UiScale.Width/Height (the fixed reference canvas), not
+        // real Screen.width/height -- DrawPhaseManaPanel wraps its whole
+        // body in UiScale.Begin(), so this must return Rects in that same
+        // reference space. UiScale's constants are never 0, so the old
+        // zero-Screen-size fallback/warning this replaced no longer
+        // applies.
+        var screenW = UiScale.Width;
+        var screenH = UiScale.Height;
         if (useCustomPosition) return new Rect(customTopLeftPixels.x, customTopLeftPixels.y, panelWidth, height);
         float x, y;
         switch (corner)

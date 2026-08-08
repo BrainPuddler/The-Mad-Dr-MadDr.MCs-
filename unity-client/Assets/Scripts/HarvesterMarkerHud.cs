@@ -16,6 +16,14 @@ using UnityEngine;
 /// own fill bar underneath, reusing <see cref="MonsterAgent.
 /// TotalCarriedLoad"/>-style data through a small public accessor rather
 /// than duplicating the capacity math.
+///
+/// 2026-08 (creator direction: "the ui is not scaling properly to screen
+/// sizes"): deliberately NOT wrapped in UiScale's scale -- every position
+/// here comes from Camera.WorldToScreenPoint, already true screen pixels
+/// regardless of resolution; wrapping it would double-apply the scale
+/// and detach the badge from the monster it's meant to float over. See
+/// UiScale.cs's own header for the full "screen-space panel vs world-
+/// anchored" distinction.
 /// </summary>
 public class HarvesterMarkerHud : MonoBehaviour
 {

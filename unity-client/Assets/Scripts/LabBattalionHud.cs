@@ -52,6 +52,7 @@ public class LabBattalionHud : MonoBehaviour
 
         var templates = builder.LabBattalions;
         if (templates == null || templates.Length == 0) { PointerOver = false; return; }
+        var prevMatrix = UiScale.Begin();
 
         var mapRect = minimap.ScreenRect;
         var stackTop = battalionHud != null ? battalionHud.StackTop : mapRect.y;
@@ -78,5 +79,7 @@ public class LabBattalionHud : MonoBehaviour
 
             y += rowHeight;
         }
+
+        UiScale.End(prevMatrix);
     }
 }

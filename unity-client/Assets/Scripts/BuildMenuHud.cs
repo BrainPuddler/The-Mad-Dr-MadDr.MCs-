@@ -149,6 +149,7 @@ public class BuildMenuHud : MonoBehaviour
     private void OnGUI()
     {
         if (bridge == null || !bridge.HasMatch) { PointerOverPanel = false; return; }
+        var prevMatrix = UiScale.Begin();
 
         var defs = BuildingDef.AllDefs;
         var buildableCount = 0;
@@ -204,6 +205,8 @@ public class BuildMenuHud : MonoBehaviour
             var infoColor = infoAffordable ? new Color(0.85f, 0.85f, 0.85f, 1f) : new Color(0.9f, 0.4f, 0.35f, 1f);
             DrawShadowedLabel(infoRect, hovered.Name + " — " + CostLabel(hovered), infoColor, TextAnchor.MiddleLeft);
         }
+
+        UiScale.End(prevMatrix);
     }
 
     /// <summary>One command-card tile: a colored swatch (<see

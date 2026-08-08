@@ -55,6 +55,7 @@ public class BattalionHud : MonoBehaviour
     private void OnGUI()
     {
         if (commander == null || minimap == null) { PointerOver = false; return; }
+        var prevMatrix = UiScale.Begin();
 
         var mapRect = minimap.ScreenRect;
         // stack above RecallHud's own row if it's present, else straight
@@ -66,7 +67,7 @@ public class BattalionHud : MonoBehaviour
 
         var rows = 0;
         foreach (var unused in commander.Battalions) rows++;
-        if (rows == 0) { PointerOver = false; StackTop = stackTop - dockGapPixels; return; }
+        if (rows == 0) { PointerOver = false; StackTop = stackTop - dockGapPixels; UiScale.End(prevMatrix); return; }
 
         var panelWidth = labelWidth + buttonWidth;
         var panelRect = new Rect(mapRect.x, stackTop - rows * rowHeight - dockGapPixels, panelWidth, rows * rowHeight);
@@ -91,5 +92,7 @@ public class BattalionHud : MonoBehaviour
 
             y += rowHeight;
         }
+
+        UiScale.End(prevMatrix);
     }
 }

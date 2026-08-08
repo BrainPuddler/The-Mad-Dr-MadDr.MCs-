@@ -796,6 +796,18 @@ public class WaypointCommander : MonoBehaviour
 
     private static Texture2D _boxTex;
 
+    /// <summary>2026-08 (creator direction: "the ui is not scaling
+    /// properly to screen sizes"): deliberately NOT wrapped in
+    /// UiScale.Begin() -- unlike every other HUD in this project, this
+    /// rect is built from Mouse.current.position (the New Input System's
+    /// REAL screen-pixel cursor position), not Event.current.mousePosition
+    /// (which IMGUI's own matrix would keep in sync automatically).
+    /// Scaling the drawn rect without also correcting its already-real-
+    /// pixel input coordinates would double-apply the scale and draw the
+    /// marquee in the wrong place relative to the actual cursor. Its
+    /// SIZE is inherently correct at any resolution already (it's built
+    /// from a live drag distance in real pixels, not an authored
+    /// constant), so leaving it in real screen space costs nothing.</summary>
     private void OnGUI()
     {
         if (!_leftDown) return;

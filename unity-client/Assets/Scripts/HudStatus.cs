@@ -18,6 +18,7 @@ public class HudStatus : MonoBehaviour
     private void OnGUI()
     {
         if (_builder == null) return;
+        var prevMatrix = UiScale.Begin();
 
         var y = 8f;
         Line(ref y, "🩸 " + _builder.WalletBlood + "   🦴 " + _builder.WalletBones + "   🧠 " + _builder.WalletBrains
@@ -51,6 +52,8 @@ public class HudStatus : MonoBehaviour
         Line(ref y, "A + click: attack-move (auto-engage en route) · P + click: patrol back and forth");
         Line(ref y, "Camera: WASD pan · Q/E rotate · scroll zoom · middle-drag / screen-edge scroll");
         Line(ref y, "G: jump to the unit nearest the cursor");
+
+        UiScale.End(prevMatrix);
     }
 
     private static void Line(ref float y, string text)

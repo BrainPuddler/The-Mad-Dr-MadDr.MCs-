@@ -86,6 +86,7 @@ public class SelectionHud : MonoBehaviour
 
         var groups = GatherGroups();
         if (groups.Count == 0) { PointerOver = false; return; }
+        var prevMatrix = UiScale.Begin();
 
         var mapRect = minimap.ScreenRect;
         var totalWidth = groups.Count * iconSize + (groups.Count - 1) * iconGap;
@@ -108,6 +109,8 @@ public class SelectionHud : MonoBehaviour
             if (GUI.Button(rect, GUIContent.none, GUIStyle.none)) commander.SetSelection(g.Members);
             x += iconSize + iconGap;
         }
+
+        UiScale.End(prevMatrix);
     }
 
     private void DrawIcon(Rect rect, TypeGroup g)

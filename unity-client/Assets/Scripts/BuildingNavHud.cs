@@ -145,11 +145,12 @@ public class BuildingNavHud : MonoBehaviour
 
         var mine = GatherMine();
         if (mine.Count == 0) { PointerOver = false; return; }
+        var prevMatrix = UiScale.Begin();
 
-        var screenW = Screen.width > 0 ? Screen.width : 1920;
+        var screenW = UiScale.Width;
         var totalWidth = mine.Count * iconSize + (mine.Count - 1) * iconGap;
         var startX = (screenW - totalWidth) * 0.5f;
-        var y = Screen.height - bottomMarginPixels - iconSize;
+        var y = UiScale.Height - bottomMarginPixels - iconSize;
 
         var barRect = new Rect(startX - iconGap, y - iconGap - arrowSize - 18f,
             totalWidth + iconGap * 2f, iconSize + iconGap * 2f + arrowSize + 18f);
@@ -176,6 +177,8 @@ public class BuildingNavHud : MonoBehaviour
         }
 
         if (highlighted != null) DrawHighlightDetail(highlighted, mine, startX, y);
+
+        UiScale.End(prevMatrix);
     }
 
     /// <summary>Above the row: the highlighted building's real name and

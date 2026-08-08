@@ -74,10 +74,11 @@ public class ResourceHud : MonoBehaviour
     private void OnGUI()
     {
         if (bridge == null || !bridge.HasMatch) return;
+        var prevMatrix = UiScale.Begin();
 
         var height = Padding * 2f + LineHeight * (Kinds.Length + 1);   // +1 for the supply row
         var rect = GetPanelRect(height);
-        if (rect.width <= 0f) return;
+        if (rect.width <= 0f) { UiScale.End(prevMatrix); return; }
 
         GUI.color = backingColor;
         GUI.DrawTexture(rect, Texture2D.whiteTexture);
@@ -102,6 +103,8 @@ public class ResourceHud : MonoBehaviour
             DrawShadowedLabel(new Rect(x, y, innerWidth, LineHeight), text, atCap ? cappedColor : labelColor);
             y += LineHeight;
         }
+
+        UiScale.End(prevMatrix);
     }
 
     private static void DrawShadowedLabel(Rect rect, string text, Color color)
@@ -113,17 +116,18 @@ public class ResourceHud : MonoBehaviour
         GUI.color = Color.white;
     }
 
-    private bool _loggedZeroScreen;
-
     private Rect GetPanelRect(float height)
     {
-        var screenW = Screen.width;
-        var screenH = Screen.height;
-        if (screenW <= 0 || screenH <= 0)
-        {
-            if (!_loggedZeroScreen) { Debug.LogWarning("ResourceHud: Screen.width/height reported 0 -- falling back to 1920x1080 for sizing until it recovers."); _loggedZeroScreen = true; }
-            screenW = 1920; screenH = 1080;
-        }
+        // 2026-08 (creator direction: "the ui is not scaling properly to
+        // screen sizes"): reads UiScale.Width/Height (the fixed reference
+        // canvas -- see UiScale.cs's own header), not the real Screen.
+        // width/height -- OnGUI wraps this whole panel in UiScale.Begin(),
+        // so every Rect it returns must be in that SAME reference space
+        // or the matrix would double-scale it off-screen. UiScale's own
+        // constants are never 0, so the old zero-Screen-size fallback/
+        // warning this replaced is no longer a real code path.
+        var screenW = UiScale.Width;
+        var screenH = UiScale.Height;
         if (useCustomPosition) return new Rect(customTopLeftPixels.x, customTopLeftPixels.y, panelWidth, height);
         float x, y;
         switch (corner)

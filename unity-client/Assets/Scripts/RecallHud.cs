@@ -41,6 +41,7 @@ public class RecallHud : MonoBehaviour
     private void OnGUI()
     {
         if (commander == null || minimap == null) { PointerOver = false; return; }
+        var prevMatrix = UiScale.Begin();
 
         var mapRect = minimap.ScreenRect;
         var rect = new Rect(mapRect.x, mapRect.y - height - dockGapPixels, width, height);
@@ -49,5 +50,7 @@ public class RecallHud : MonoBehaviour
         PointerOver = e != null && rect.Contains(e.mousePosition);
 
         if (GUI.Button(rect, "Recall")) commander.RecallAll();
+
+        UiScale.End(prevMatrix);
     }
 }

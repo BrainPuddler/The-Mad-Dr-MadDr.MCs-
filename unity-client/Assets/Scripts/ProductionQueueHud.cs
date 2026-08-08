@@ -62,9 +62,10 @@ public class ProductionQueueHud : MonoBehaviour
     {
         if (grabCursor == null || !grabCursor.HasQueuedProduction) { PointerOver = false; return; }
         if (_tex == null) _tex = Texture2D.whiteTexture;
+        var prevMatrix = UiScale.Begin();
 
-        var screenW = Screen.width > 0 ? Screen.width : 1920;
-        var screenH = Screen.height > 0 ? Screen.height : 1080;
+        var screenW = UiScale.Width;
+        var screenH = UiScale.Height;
 
         var items = new System.Collections.Generic.List<(string Label, int Remaining, float Progress)>(grabCursor.ProductionQueue);
         var shown = Mathf.Min(items.Count, maxVisibleTiles);
@@ -115,13 +116,26 @@ public class ProductionQueueHud : MonoBehaviour
         var cancelRect = new Rect(panelX, panelY + tileSize + tileGap, panelWidth, cancelButtonHeight);
         if (GUI.Button(cancelRect, "Cancel All")) grabCursor.CancelAllProduction();
 
+        // 2026-08 (creator direction: "the ui is not scaling properly to
+        // screen sizes"): UiScale.End happens HERE, before the factory
+        // badge -- that badge is projected from a real 3D world position
+        // via Camera.WorldToScreenPoint, which already returns true
+        // screen pixels regardless of any GUI.matrix. Drawing it INSIDE
+        // the scaled block above would double-apply the scale and detach
+        // it from the Factory it's meant to float over -- see this
+        // method's own note just below.
+        UiScale.End(prevMatrix);
         DrawFactoryBadge(items[0].Remaining);
     }
 
     /// <summary>Billboards the front item's remaining count over the
     /// Factory it's actually draining into -- a no-op if the player
     /// somehow has queued production with no live Factory (lost it mid-
-    /// match) or the camera can't see it.</summary>
+    /// match) or the camera can't see it. Deliberately drawn in REAL
+    /// screen-pixel space (called after UiScale.End, not before) -- its
+    /// position comes from Camera.WorldToScreenPoint, already true
+    /// screen pixels, not the reference-resolution canvas the rest of
+    /// this panel is authored against.</summary>
     private void DrawFactoryBadge(int remaining)
     {
         var cam = Camera.main;

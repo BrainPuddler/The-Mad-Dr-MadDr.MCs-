@@ -68,9 +68,10 @@ public class FactionPickerHud : MonoBehaviour
     private void OnGUI()
     {
         if (_builder == null || _confirmed) return;
+        var prevMatrix = UiScale.Begin();
 
-        var screenW = Screen.width > 0 ? Screen.width : 1920;
-        var screenH = Screen.height > 0 ? Screen.height : 1080;
+        var screenW = UiScale.Width;
+        var screenH = UiScale.Height;
 
         var contentHeight = Options.Length * (ButtonHeight + Gap);
         var panelWidth = ButtonWidth + Gap * 2f;
@@ -115,6 +116,8 @@ public class FactionPickerHud : MonoBehaviour
 
             listY += ButtonHeight + Gap;
         }
+
+        UiScale.End(prevMatrix);
     }
 
     private void Confirm(FactionId choice)

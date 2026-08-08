@@ -124,9 +124,10 @@ public class DeployingArmyHud : MonoBehaviour
     private void OnGUI()
     {
         if (_roster == null) return;
+        var prevMatrix = UiScale.Begin();
 
-        var screenW = Screen.width > 0 ? Screen.width : 1920;
-        var screenH = Screen.height > 0 ? Screen.height : 1080;
+        var screenW = UiScale.Width;
+        var screenH = UiScale.Height;
         var panelRect = new Rect((screenW - PanelWidth) * 0.5f, (screenH - PanelHeight) * 0.5f, PanelWidth, PanelHeight);
 
         GUI.color = new Color(0.02f, 0.02f, 0.02f, 0.85f);
@@ -146,6 +147,8 @@ public class DeployingArmyHud : MonoBehaviour
         GUI.Label(new Rect(barRect.x + 1f, barRect.y + 1f, barRect.width, barRect.height), pctLabel, pctStyle);
         GUI.color = Color.white;
         GUI.Label(barRect, pctLabel, pctStyle);
+
+        UiScale.End(prevMatrix);
     }
 
     private static void DrawShadowedLabel(Rect rect, string text, Color color)

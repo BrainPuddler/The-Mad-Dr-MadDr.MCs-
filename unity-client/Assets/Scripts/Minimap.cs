@@ -69,9 +69,19 @@ public class Minimap : MonoBehaviour
     public static bool PointerOver { get; private set; }
 
     /// <summary>Current on-screen rect (corner/margin/custom-position all
-    /// resolved) -- lets other bottom-left HUD elements (SelectionHud) dock
-    /// against the minimap's actual live position instead of duplicating
-    /// its placement math.</summary>
+    /// resolved) -- lets other bottom-left HUD elements (SelectionHud,
+    /// RecallHud, BattalionHud, LabBattalionHud) dock against the
+    /// minimap's actual live position instead of duplicating its
+    /// placement math.
+    ///
+    /// 2026-08 (creator direction: "the ui is not scaling properly to
+    /// screen sizes"): in `UiScale.Width`/`Height` (reference-resolution)
+    /// coordinates, NOT real `Screen.width`/`Screen.height` -- every
+    /// caller above reads this from inside its OWN `UiScale`-wrapped
+    /// `OnGUI()`, so this needs to already be in that same reference
+    /// space for their Rect math (and IMGUI's own matrix-aware mouse hit-
+    /// testing) to line up. See `UiScale.cs`'s own header for the full
+    /// "why one shared reference canvas" reasoning.</summary>
     public Rect ScreenRect { get { return GetScreenRect(); } }
 
     private const int TerrainTexRes = 256;
@@ -267,10 +277,10 @@ public class Minimap : MonoBehaviour
         float x, y;
         switch (corner)
         {
-            case ScreenCorner.BottomLeft: x = marginPixels.x; y = Screen.height - marginPixels.y - sizePixels; break;
-            case ScreenCorner.BottomRight: x = Screen.width - marginPixels.x - sizePixels; y = Screen.height - marginPixels.y - sizePixels; break;
+            case ScreenCorner.BottomLeft: x = marginPixels.x; y = UiScale.Height - marginPixels.y - sizePixels; break;
+            case ScreenCorner.BottomRight: x = UiScale.Width - marginPixels.x - sizePixels; y = UiScale.Height - marginPixels.y - sizePixels; break;
             case ScreenCorner.TopLeft: x = marginPixels.x; y = marginPixels.y; break;
-            default: x = Screen.width - marginPixels.x - sizePixels; y = marginPixels.y; break;
+            default: x = UiScale.Width - marginPixels.x - sizePixels; y = marginPixels.y; break;
         }
         return new Rect(x, y, sizePixels, sizePixels);
     }
@@ -280,6 +290,7 @@ public class Minimap : MonoBehaviour
     private void OnGUI()
     {
         if (_builder == null || _terrainTex == null) return;
+        var prevMatrix = UiScale.Begin();
         var rect = GetScreenRect();
         UpdatePointerOverFlag(rect);
 
@@ -311,6 +322,7 @@ public class Minimap : MonoBehaviour
         HandleInput(rect, texCoords, rig);
 
         GUI.matrix = oldMatrix;
+        UiScale.End(prevMatrix);
     }
 
     private void UpdatePointerOverFlag(Rect rect)

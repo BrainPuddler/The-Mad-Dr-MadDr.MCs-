@@ -218,9 +218,10 @@ public class RegionPickerHud : MonoBehaviour
     private void OnGUI()
     {
         if (_builder == null || _confirmed) return;
+        var prevMatrix = UiScale.Begin();
 
-        var screenW = Screen.width > 0 ? Screen.width : 1920;
-        var screenH = Screen.height > 0 ? Screen.height : 1080;
+        var screenW = UiScale.Width;
+        var screenH = UiScale.Height;
 
         var listHeight = Options.Length * (ButtonHeight + Gap);
         var previewHeight = ThumbnailLabelHeight + ThumbnailSize;
@@ -258,6 +259,8 @@ public class RegionPickerHud : MonoBehaviour
         }
 
         DrawPreview(panelRect, listX + ButtonWidth + Gap, panelRect.y + TitleHeight + Gap);
+
+        UiScale.End(prevMatrix);
     }
 
     private void DrawPreview(Rect panelRect, float x, float y)
