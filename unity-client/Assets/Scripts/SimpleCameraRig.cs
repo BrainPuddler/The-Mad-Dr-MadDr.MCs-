@@ -9,6 +9,11 @@ using UnityEngine.Rendering.Universal;
 /// in this project).
 ///
 ///   WASD / arrows      : pan (relative to view yaw)
+///   CTRL (held)        : suppresses WASD/arrow pan entirely -- lets
+///                        WaypointCommander's A-held/P-held (attack-move/
+///                        patrol) modifiers use the same A/P keys without
+///                        also panning the camera the whole time they're
+///                        held (2026-08 creator direction)
 ///   SHIFT + up/down    : move the camera straight up/down (world Y),
 ///                        clamped so it can never go below MinHeight --
 ///                        overrides the plain up/down-arrow pan for as
@@ -134,12 +139,25 @@ public class SimpleCameraRig : MonoBehaviour
 
         var shiftHeld = keyboard != null && (keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed);
 
+        // 2026-08 (creator direction: "conflict with the A Key for
+        // attacks add a control key modifier where it disables movement
+        // on those keys when depressed"): WaypointCommander's A-held
+        // (attack-move) and P-held (patrol) modes read the SAME `aKey`/
+        // `pKey` this camera also reads for WASD pan -- holding A to line
+        // up an attack-move order was also panning the camera left the
+        // whole time it was held. Ctrl held suppresses WASD/arrow pan
+        // entirely (this block only -- Q/E rotate, Shift+up/down vertical
+        // move, and scroll zoom are untouched), so Ctrl+A (or plain A
+        // once Ctrl is already down for whatever reason) never fights
+        // with the camera.
+        var ctrlHeld = keyboard != null && (keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed);
+
         // yaw-relative pan: keyboard plus edge-scroll fold into one vector.
         // Up/down arrows are excluded while Shift is held -- Shift steals
         // them for the vertical move below instead of also panning
         // forward/back at the same time.
         var pan = Vector3.zero;
-        if (keyboard != null)
+        if (keyboard != null && !ctrlHeld)
         {
             if (keyboard.wKey.isPressed || (keyboard.upArrowKey.isPressed && !shiftHeld)) pan.z += 1f;
             if (keyboard.sKey.isPressed || (keyboard.downArrowKey.isPressed && !shiftHeld)) pan.z -= 1f;

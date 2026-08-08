@@ -12548,3 +12548,36 @@ unbalanced call would silently corrupt an unrelated panel); (2) a full
 grep sweep confirming every remaining `Screen.width`/`Screen.height`
 reference in the touched files is one of the three deliberately-real-
 space cases above, not a missed layout call.
+
+## 2026-08 follow-up: Ctrl suppresses WASD pan, so A-held attack-move stops fighting the camera
+
+Creator direction: **"conflict with the A Key for attacks add a control
+key modifier where it disables movement on those keys when depressed.
+Currently the AWSD movement."**
+
+Root cause, confirmed by reading both sites: `WaypointCommander`'s
+attack-move mode (`docs/23 §5 follow-up`) reads `keyboard.aKey.isPressed`
+-- hold A, then left-click, to attack-move instead of a plain selection
+click (`P` does the same for patrol). `SimpleCameraRig`'s WASD pan reads
+the exact same `aKey`/`wKey`/`sKey`/`dKey` with no awareness of the other
+script at all -- holding A to line up an attack-move order was panning
+the camera left for the entire time A was held, a real, literal key
+conflict between two independent scripts sharing the same physical keys.
+
+**Fix, scoped exactly to what was asked (`SimpleCameraRig.cs`):** a new
+`ctrlHeld` check (same `leftCtrlKey || rightCtrlKey` shape `BuildMenuHud`'s
+own Ctrl/Alt guard already uses) gates ONLY the WASD/arrow pan block --
+Q/E rotate, Shift+up/down vertical move, and scroll zoom are all
+untouched, since the creator's own words named "the AWSD movement"
+specifically, not camera control as a whole. Holding Ctrl+A (or Ctrl+P)
+now attack-moves/patrols without also panning; Ctrl alone simply parks
+the camera in place, a reasonable side effect of "movement disabled
+while held," not a separate feature. `HudStatus`'s on-screen help text
+and `SimpleCameraRig`'s own class-header doc comment both updated to
+name the new modifier, so it's discoverable without reading source.
+
+No Unity Editor in this environment to press the actual keys and watch
+it -- verified by reading both `keyboard.aKey.isPressed` call sites side
+by side to confirm they're really reading the identical physical key
+with no existing coordination, and by confirming `ctrlHeld` doesn't
+collide with any existing local in `SimpleCameraRig.Update()`.
