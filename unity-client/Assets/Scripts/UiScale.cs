@@ -164,4 +164,43 @@ public static class UiScale
     {
         GUI.matrix = previousMatrix;
     }
+
+    /// <summary>
+    /// 2026-08 (creator report, AnalogClockHud: "the hands are now fly
+    /// off the face of the clock, the grandfather clock arm is also not
+    /// attached"): rotates around a pivot given in REFERENCE space (the
+    /// same space every Rect passed to GUI calls inside a Begin()/End()
+    /// block is in) -- plain `GUIUtility.RotateAroundPivot(angle, pivot)`
+    /// does NOT do this when `GUI.matrix` is already non-identity (as it
+    /// always is inside Begin()/End(), since Begin() sets a uniform
+    /// `Factor` scale): its pivot argument is implicitly in whatever
+    /// space the CURRENT `GUI.matrix` maps FROM at that composition step,
+    /// which for a scale-then-rotate stack is the real, POST-scale screen
+    /// space, not reference space. Passing a reference-space point straight
+    /// through pivots around `pivot` instead of the pivot's actual
+    /// on-screen location `pivot * Factor` -- the further `Factor` is
+    /// from 1 (i.e. the further the real screen height is from
+    /// <see cref="ReferenceHeight"/>), the further the rotated element
+    /// (a clock hand, a pendulum rod) swings from its intended anchor,
+    /// exactly matching a hand/pendulum that reads as detached from the
+    /// face it's supposed to pivot on. Every caller rotating something
+    /// inside a Begin()/End() block should use THIS, not
+    /// `GUIUtility.RotateAroundPivot` directly, unless it has first
+    /// proven `Factor == 1` for its use case.
+    ///
+    /// Built as an explicit hand-rolled composition (not a call into
+    /// `GUIUtility.RotateAroundPivot` with a pre-scaled pivot) specifically
+    /// so its own multiply order is under our control and provably
+    /// correct, rather than resting on an assumption about
+    /// `RotateAroundPivot`'s undocumented internal composition order with
+    /// a pre-existing `GUI.matrix` -- this project has no Unity Editor to
+    /// verify that assumption against a real render.
+    /// </summary>
+    public static void RotateAroundReferencePivot(float angleDeg, Vector2 referencePivot)
+    {
+        var screenPivot = referencePivot * Factor;
+        var rotation = Matrix4x4.TRS(screenPivot, Quaternion.Euler(0f, 0f, angleDeg), Vector3.one)
+            * Matrix4x4.TRS(-screenPivot, Quaternion.identity, Vector3.one);
+        GUI.matrix = rotation * GUI.matrix;
+    }
 }

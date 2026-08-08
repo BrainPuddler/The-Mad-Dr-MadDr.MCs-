@@ -33,9 +33,9 @@ using UnityEngine;
 /// The pendulum is deliberately a SEPARATE motion from the hands: the
 /// hands sweep continuously (smooth rotation straight from
 /// CycleProgress, matching "the arms should sweep"); the pendulum
-/// instead snaps between two fixed angles once per `tickIntervalSeconds`
-/// -- a real ticking cadence, not a smooth swing, matching "a ticking
-/// grandfather clock."
+/// swings back and forth continuously too (see the 2026-08 follow-up
+/// below -- the original ticking/snapping behavior was a direct creator
+/// direction that later got explicitly reversed).
 ///
 /// Honesty note (2026-07, no Unity Editor in this environment): the
 /// hand/pendulum ANGLE MATH below is pure and was verified via
@@ -58,13 +58,29 @@ using UnityEngine;
 /// backdrop. Rebuilt with an opaque backing halo (the same trick
 /// Minimap's own frame uses) and a light ivory face with dark hands --
 /// the actual high-contrast convention a real clock uses, which the
-/// original dark-on-dark palette wasn't. If this STILL doesn't show up,
-/// that isolates the problem away from contrast and toward
-/// GetScreenRect/GUIUtility.RotateAroundPivot instead (see the
-/// Placement section) -- worth knowing either way, since
-/// RotateAroundPivot has no other confirmed-working caller in this
-/// codebase (Minimap's own use of it is gated behind `rotateWithCamera`,
-/// which defaults off).
+/// original dark-on-dark palette wasn't.
+///
+/// 2026-08 follow-up (creator report, AFTER the UiScale letterbox-gap
+/// fix landed: "the hands are now fly off the face of the clock, the
+/// grandfather clock arm is also not attached, and should swing smoothy
+/// not tick"): root cause found -- both `DrawHand` and `DrawPendulum`
+/// called `GUIUtility.RotateAroundPivot` with a pivot given in
+/// REFERENCE space, but by the time either runs, `GUI.matrix` already
+/// holds `UiScale.Begin()`'s scale-only matrix, so the pivot needed to
+/// be in real (post-scale) screen space instead -- see
+/// <see cref="UiScale.RotateAroundReferencePivot"/>'s own doc comment
+/// for the full derivation. This bug was DORMANT before the UiScale
+/// wrapping existed (GUI.matrix was identity then, `Factor` was
+/// implicitly 1, and the discrepancy this causes is exactly zero at
+/// Factor == 1) -- it only became visible once scaling was introduced,
+/// which lines up with the creator only reporting it now. Both draw
+/// methods now go through the new shared helper instead of calling
+/// `GUIUtility.RotateAroundPivot` directly. Separately, per the same
+/// report, the pendulum motion itself changed from a discrete once-per-
+/// `tickIntervalSeconds` snap (the original "ticking grandfather clock"
+/// creator direction) to a continuous sine-wave swing -- an explicit
+/// reversal of that earlier direction, not a bug fix; the field was
+/// renamed `swingPeriodSeconds` to match.
 /// </summary>
 public class AnalogClockHud : MonoBehaviour
 {
@@ -78,13 +94,13 @@ public class AnalogClockHud : MonoBehaviour
     public bool useCustomPosition = false;
     public Vector2 customTopLeftPixels = new Vector2(16f, 16f);
 
-    [Header("Pendulum (ticking, deliberately separate from the sweeping hands)")]
+    [Header("Pendulum (smooth continuous swing, deliberately separate motion from the sweeping hands)")]
     [Tooltip("How far the pendulum swings from center, in degrees, each direction.")]
     [Range(2f, 30f)]
     public float pendulumSwingDeg = 12f;
-    [Tooltip("Real seconds between each tick/tock -- 1 = a classic once-a-second cadence.")]
-    [Range(0.2f, 3f)]
-    public float tickIntervalSeconds = 1f;
+    [Tooltip("Real seconds for one full swing cycle (center -> +swing -> center -> -swing -> center). 2 = a classic slow grandfather-clock cadence.")]
+    [Range(0.4f, 6f)]
+    public float swingPeriodSeconds = 2f;
 
     // 2026-07 creator: "I don't see the clock." No compile or runtime
     // errors, other OnGUI HUD elements (HudStatus's own top-left text)
@@ -137,15 +153,18 @@ public class AnalogClockHud : MonoBehaviour
         return Frac01(cycleProgress * 12f) * 360f;
     }
 
-    /// <summary>Discrete tick-tock: alternates between +swingDeg and
-    /// -swingDeg every `intervalSeconds`, snapping rather than
-    /// smoothly swinging -- the "ticking," as distinct from the hands'
-    /// continuous sweep.</summary>
-    public static float PendulumDeg(float timeSeconds, float intervalSeconds, float swingDeg)
+    /// <summary>Continuous back-and-forth swing (2026-08 creator
+    /// direction: "should swing smoothy not tick," reversing the earlier
+    /// "ticking grandfather clock" direction) -- a plain sine wave from
+    /// +swingDeg to -swingDeg and back over one `periodSeconds`, as
+    /// distinct from a real pendulum's slightly non-sinusoidal motion;
+    /// close enough at these small swing angles (<=30 degrees) that the
+    /// difference isn't visually meaningful, and far simpler than
+    /// modeling actual pendulum physics for a HUD decoration.</summary>
+    public static float PendulumDeg(float timeSeconds, float periodSeconds, float swingDeg)
     {
-        if (intervalSeconds <= 0f) return swingDeg;
-        var step = Mathf.FloorToInt(timeSeconds / intervalSeconds);
-        return (step % 2 == 0) ? swingDeg : -swingDeg;
+        if (periodSeconds <= 0f) return 0f;
+        return swingDeg * Mathf.Sin(2f * Mathf.PI * timeSeconds / periodSeconds);
     }
 
     private static float Frac01(float v)
@@ -280,7 +299,7 @@ public class AnalogClockHud : MonoBehaviour
     {
         var length = faceSize * 0.5f * lengthFraction;
         var oldMatrix = GUI.matrix;
-        GUIUtility.RotateAroundPivot(angleDeg, center);
+        UiScale.RotateAroundReferencePivot(angleDeg, center);
         GUI.color = color;
         GUI.DrawTexture(new Rect(center.x - widthPx * 0.5f, center.y - length, widthPx, length), Texture2D.whiteTexture);
         GUI.color = Color.white;
@@ -288,18 +307,19 @@ public class AnalogClockHud : MonoBehaviour
     }
 
     /// <summary>Pivots just inside the bottom edge of the face and hangs
-    /// a rod + bob below it, ticking (not sweeping) left/right --
-    /// deliberately a small addition to the face's own footprint, not a
-    /// second same-size element, so the whole widget still reads as
-    /// "about 1/10th of the screen," not double that.</summary>
+    /// a rod + bob below it, swinging smoothly left/right (see the
+    /// 2026-08 follow-up in this file's own header) -- deliberately a
+    /// small addition to the face's own footprint, not a second same-size
+    /// element, so the whole widget still reads as "about 1/10th of the
+    /// screen," not double that.</summary>
     private void DrawPendulum(Rect faceRect)
     {
         var pivot = new Vector2(faceRect.x + faceRect.width * 0.5f, faceRect.yMax - faceRect.height * 0.08f);
         var rodLength = faceRect.height * 0.35f;
-        var angle = PendulumDeg(Time.time, tickIntervalSeconds, pendulumSwingDeg);
+        var angle = PendulumDeg(Time.time, swingPeriodSeconds, pendulumSwingDeg);
 
         var oldMatrix = GUI.matrix;
-        GUIUtility.RotateAroundPivot(angle, pivot);
+        UiScale.RotateAroundReferencePivot(angle, pivot);
         GUI.color = pendulumColor;
         var rodWidth = Mathf.Max(1.5f, faceRect.width * 0.03f);
         GUI.DrawTexture(new Rect(pivot.x - rodWidth * 0.5f, pivot.y, rodWidth, rodLength), Texture2D.whiteTexture);

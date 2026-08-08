@@ -304,8 +304,14 @@ public class Minimap : MonoBehaviour
 
         var oldMatrix = GUI.matrix;
         var pivot = new Vector2(rect.x + rect.width * 0.5f, rect.y + rect.height * 0.5f);
+        // 2026-08: was plain `GUIUtility.RotateAroundPivot` with a
+        // reference-space pivot -- same latent bug AnalogClockHud's
+        // hands/pendulum had (see UiScale.RotateAroundReferencePivot's
+        // doc comment), just never reported here since this mode
+        // defaults off. Fixed alongside that report rather than left for
+        // whenever `rotateWithCamera` first gets toggled on.
         if (rotateWithCamera && cam != null)
-            GUIUtility.RotateAroundPivot(-cam.transform.eulerAngles.y, pivot);
+            UiScale.RotateAroundReferencePivot(-cam.transform.eulerAngles.y, pivot);
 
         // frame
         GUI.color = new Color(0f, 0f, 0f, 0.6f);

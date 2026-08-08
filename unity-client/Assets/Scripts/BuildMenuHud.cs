@@ -30,11 +30,23 @@ using UnityEngine;
 /// order issuing.
 ///
 /// IMGUI, same layer as every other HUD element in this project (see
-/// HudStatus's header for why). Fixed top-left-BELOW-HudStatus by
-/// default -- HudStatus's own stacked status lines already own the very
-/// top-left corner, so this panel starts far enough down to clear them
-/// (`topOffsetPixels`, developer-tunable) rather than fighting over the
-/// same corner presets <see cref="LumenHud"/>/Minimap/AnalogClockHud use.
+/// HudStatus's header for why). Top-left-BELOW-HudStatus by default --
+/// HudStatus's own stacked status lines already own the very top-left
+/// corner, so this panel starts far enough down to clear them, rather
+/// than fighting over the same corner presets <see cref="LumenHud"/>/
+/// Minimap/AnalogClockHud use.
+///
+/// 2026-08 (creator report: "instructions and icons in the top left ...
+/// overlapping"): `topLeftPixels.y` used to be a fixed guess (140) that
+/// only cleared HudStatus's SHORTEST possible state (nothing selected,
+/// no traffic yet) -- HudStatus's own line count grows with traffic
+/// present and with a single unit selected (3 lines instead of 1), and
+/// at its tallest its text runs well past 140, straight into this
+/// panel's title bar. Now reads <see cref="HudStatus.ContentBottom"/>
+/// (HudStatus's own actual bottom edge that frame, in the same
+/// reference-space pixels) and only falls back to `topLeftPixels.y` as
+/// a floor, so it tracks HudStatus's real height instead of guessing at
+/// its tallest case up front.
 ///
 /// A no-op (renders nothing) until <see cref="Init"/> is called with a
 /// live <see cref="SimBridge"/> that <see cref="SimBridge.HasMatch"/> --
@@ -56,6 +68,7 @@ public class BuildMenuHud : MonoBehaviour
     private const float Padding = 8f;
     private const float TitleHeight = 20f;
     private const float InfoHeight = 20f;
+    private const float HudStatusGap = 12f;
 
     /// <summary>The kind currently selected for placement, or null if the
     /// menu isn't in "place a building" mode. <see cref="BuildGhostCursor"/>
@@ -161,7 +174,8 @@ public class BuildMenuHud : MonoBehaviour
         var panelWidth = gridWidth + Padding * 2f;
         var panelHeight = Padding * 2f + TitleHeight + gridHeight + InfoHeight;
 
-        var rect = new Rect(topLeftPixels.x, topLeftPixels.y, panelWidth, panelHeight);
+        var topY = Mathf.Max(topLeftPixels.y, HudStatus.ContentBottom + HudStatusGap);
+        var rect = new Rect(topLeftPixels.x, topY, panelWidth, panelHeight);
         var e = Event.current;
         var mousePos = e != null ? e.mousePosition : new Vector2(-1f, -1f);
         PointerOverPanel = rect.Contains(mousePos);

@@ -12701,3 +12701,104 @@ close to the corner" regardless of the other two symptoms' actual cause
 -- the corner-anchoring MATH is unchanged, only the breathing-room
 constant. Everything else in this report is intentionally left
 unmodified rather than patched blind.
+
+## 2026-08 follow-up: root cause found -- pivot-rotation bug (hands/pendulum) + a real overlap bug (HudStatus/BuildMenuHud)
+
+Creator report, after the above: **"The hands of the clock are now fly
+off the face of the clock, the grandfather clock arm is also not
+attached, and should swing smoothy not tick. Make sure all text and
+icons have spacing so there is no overlapping."** This landed real
+findings, not more guessing -- the clock rotation issue is the exact
+"toward GetScreenRect/GUIUtility.RotateAroundPivot instead" suspicion
+this file already flagged twice over the past two follow-ups.
+
+**Root cause (clock hands + pendulum):** `AnalogClockHud.DrawHand`/
+`DrawPendulum` called `GUIUtility.RotateAroundPivot(angle, pivot)` with
+`pivot` given in REFERENCE space -- but by the time either runs,
+`GUI.matrix` already holds `UiScale.Begin()`'s scale-only matrix
+(`Factor = Screen.height / 1080`). `RotateAroundPivot` composes as
+`GUI.matrix = T(pivot)*R(angle)*T(-pivot) * GUI.matrix` (pre-multiply --
+the only order under which stacking multiple calls composes sensibly at
+all): the existing scale matrix applies to a point FIRST, and the pivot-
+rotation wraps around that already-scaled result SECOND. That means
+`pivot` needs to be in the SAME (post-scale, real-screen) space the
+rotation is actually operating in -- passing a reference-space pivot
+straight through pivots around the wrong point by exactly
+`pivot * (1 - Factor)`, in real pixels. This bug was DORMANT before
+`UiScale` existed (`GUI.matrix` was identity, `Factor` was implicitly 1,
+and the discrepancy is exactly zero at `Factor == 1`) -- it only became
+live once the letterbox-gap fix wrapped the clock's `OnGUI` in
+`UiScale.Begin()`/`End()`, which lines up exactly with the creator only
+reporting it now, after that fix shipped.
+
+**Verified with real (non-stub) math, not re-derived by hand a third
+time and trusted blind:** a standalone console harness
+(`pivotverify/Program.cs`, hand-rolled 3x3 affine matrices, no
+UnityEngine stubs involved) modeled both the buggy composition and the
+fix across 4 representative `Factor` values (0.75, 1.0, 1.333, 2.0) and
+5 angles, checking whether a point AT the pivot maps back to its own
+correctly-scaled screen position after rotating around itself (the
+defining property of "pivot doesn't move"). The buggy path displaced
+the pivot by **204 to 1932 real pixels** depending on factor/angle --
+enormous relative to a clock face that's only ~100-200px across at
+1080p, more than enough to read as "hands fly off the face" and "the
+pendulum arm isn't attached." The fixed path held the pivot exactly in
+place (sub-nanometer floating-point error) across all 40
+factor x angle combinations tested.
+
+**Fix:** added `UiScale.RotateAroundReferencePivot(angleDeg,
+referencePivot)` -- scales the pivot by `Factor` before composing, built
+as an explicit hand-rolled `Matrix4x4` construction (not a call into
+`GUIUtility.RotateAroundPivot` with a pre-scaled pivot) specifically so
+the multiply order is under our own control and provably correct rather
+than resting on an assumption about `RotateAroundPivot`'s internal
+composition order -- this project has no Unity Editor to check that
+assumption against a real render. `AnalogClockHud.DrawHand`/
+`DrawPendulum` and `Minimap`'s own `rotateWithCamera` mode (same latent
+bug, never reported because that mode defaults off) both switched to
+the new helper.
+
+**Pendulum motion, separately (explicit creator direction reversal, not
+a bug fix):** "should swing smoothy not tick" directly reverses the
+original 2026-07 direction ("a ticking grandfather clock swinging arm").
+`AnalogClockHud.PendulumDeg` changed from a discrete once-per-
+`tickIntervalSeconds` snap between `+swingDeg`/`-swingDeg` to a
+continuous `swingDeg * Sin(2*PI*t/periodSeconds)` sweep; the field was
+renamed `tickIntervalSeconds` -> `swingPeriodSeconds` to match what it
+now represents (one full swing cycle, not a tick cadence).
+
+**Root cause (top-left text/icon overlap):** `BuildMenuHud.
+topLeftPixels.y` was a fixed guess (140) meant to clear `HudStatus`'s
+own stacked status lines below the very top-left corner -- but
+`HudStatus`'s line count is DYNAMIC (a traffic line only once cars
+exist, 1 line vs 3 depending on unit selection), and its worst case
+(traffic present + a single unit selected, showing order/combat/speed
+lines) runs its text well past y=140, straight into `BuildMenuHud`'s own
+title bar and icon grid. Fix: `HudStatus` now publishes
+`ContentBottom` (its own actual bottom edge that frame, in the same
+reference-space pixels every Rect in this file already uses), and
+`BuildMenuHud` positions itself at `Max(topLeftPixels.y,
+HudStatus.ContentBottom + gap)` instead of a fixed guess -- tracks
+HudStatus's real height instead of assuming its tallest case up front.
+No other HUD pair was found sharing a corner closely enough to risk the
+same kind of overlap (checked every panel's `corner`/`marginPixels`/
+`topOffsetPixels` default across the file set).
+
+**Verified for real, not assumed:** the scratch `flightcheck` harness
+(reused from earlier sessions, see below) compiled `UiScale.cs`,
+`AnalogClockHud.cs`, `Minimap.cs`, `HudStatus.cs`, and `BuildMenuHud.cs`
+-- UiScale.cs itself had never actually been added to that harness's
+compile list despite every HUD depending on it, a real gap closed here
+alongside today's edits (along with `MonsterCombatProfile.cs`, a second
+pre-existing gap the same rebuild surfaced). Getting a full harness
+build green surfaced roughly two dozen UNRELATED, pre-existing compile
+errors already baked into the harness before today (a stale
+`MadDr.MatchCore.dll`, several HUD/type files that drifted out of the
+peer-stub list -- `OpponentFactionPickerHud.cs`, `DeployingArmyHud.cs`,
+`ArmyGenerator`, a handful of `BuildingRuntimeState`/`MatchState` API
+drift, missing `Physics.Linecast`/`Vector3.Distance`/`Transform.
+lossyScale` stubs) -- none of them touch the 5 files this report
+actually changed, so fixing all of them was out of scope here and left
+alone rather than silently absorbed into this change; the harness needs
+another proper reconstruction pass (like the 2026-08 one referenced
+earlier in this log), just not as a side effect of a clock bug.

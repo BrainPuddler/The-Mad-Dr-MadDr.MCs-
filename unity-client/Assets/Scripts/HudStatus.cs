@@ -9,6 +9,17 @@ public class HudStatus : MonoBehaviour
     private RuntimeCityBuilder _builder;
     private WaypointCommander _commander;
 
+    // 2026-08 (creator report: "instructions and icons in the top left
+    // ... overlapping"): HudStatus's own line count is dynamic (traffic
+    // line only once cars exist, 1 vs 3 lines depending on selection),
+    // so anything anchored below it with a FIXED offset (BuildMenuHud
+    // was hardcoded to y=140) can land inside HudStatus's own text once
+    // enough lines are showing. Published here, in reference-space
+    // pixels (the same space every Rect in this file is in), so other
+    // top-left panels can read it and stay clear without duplicating
+    // HudStatus's own line-counting logic.
+    public static float ContentBottom { get; private set; }
+
     public void Init(RuntimeCityBuilder builder, WaypointCommander commander)
     {
         _builder = builder;
@@ -53,6 +64,7 @@ public class HudStatus : MonoBehaviour
         Line(ref y, "Camera: WASD pan (Ctrl held disables it) · Q/E rotate · scroll zoom · middle-drag / screen-edge scroll");
         Line(ref y, "G: jump to the unit nearest the cursor");
 
+        ContentBottom = y;
         UiScale.End(prevMatrix);
     }
 
