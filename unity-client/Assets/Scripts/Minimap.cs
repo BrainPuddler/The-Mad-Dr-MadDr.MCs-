@@ -38,7 +38,12 @@ public class Minimap : MonoBehaviour
 
     [Header("Placement (default bottom-left; developer-tunable anywhere)")]
     public ScreenCorner corner = ScreenCorner.BottomLeft;
-    public Vector2 marginPixels = new Vector2(16f, 16f);
+    // 2026-08 (creator report: "the bottom left map is too close to the
+    // corner"): bumped from 16 -- a real, flagged v0.1 tuning number
+    // like every other placement default in this file, not a structural
+    // fix (the corner-anchoring MATH itself is unchanged; this just
+    // gives it more breathing room from the true edge).
+    public Vector2 marginPixels = new Vector2(28f, 28f);
     public float sizePixels = 220f;
     [Tooltip("Bypasses the corner presets entirely for pixel-exact placement anywhere on screen.")]
     public bool useCustomPosition = false;

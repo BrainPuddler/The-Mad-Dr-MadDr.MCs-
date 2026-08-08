@@ -12659,3 +12659,45 @@ exactly to `Screen.width` and `Height * Factor` reduces exactly to
 `Screen.height` for any aspect ratio, not just 16:9) and by re-reading
 every call site of `iconSize`/`iconGap` in `BuildingNavHud.cs` to confirm
 none were missed when introducing `effIconSize`/`effIconGap`.
+
+## 2026-08 follow-up: still-unresolved after the letterbox-gap fix -- an honest status note, not a claimed fix
+
+Creator report, after the letterbox-gap fix above shipped: **"all the
+instructions and icons in the top left are still cropped. the bottom
+left map is too close to the corner too. Clock is 1/4 on the screen."**
+
+**What was re-verified, not assumed:** re-derived `UiScale.Width *
+Factor = Screen.width` and `UiScale.Height * Factor = Screen.height`
+algebraically for both landscape and portrait aspect ratios (both reduce
+correctly, no error found). Separately re-derived `AnalogClockHud`'s own
+size formula end to end: `Mathf.Min(UiScale.Width, UiScale.Height) *
+sizeFraction`, scaled by `Factor`, reduces EXACTLY to `sizeFraction *
+Mathf.Min(Screen.width, Screen.height)` in both the landscape and
+portrait case -- the identical "1/10th of the shorter screen dimension"
+contract the ORIGINAL pre-scaling code already had. No sizing error
+found there either. Also confirmed Unity's default `GUIStyle` (`GUI.
+skin.label`) clipping is `TextClipping.Overflow` -- meaning `HudStatus`'s
+own fixed `900f`-wide `Rect` argument was never actually constraining
+where its long help lines render; a "clamp the width" fix drafted for
+this report was abandoned once that made it clear such a fix wouldn't
+touch the real cropping mechanism at all, whatever that turns out to be.
+
+**Genuinely stuck without observability, said plainly rather than
+guessed past:** every angle traceable through static code reading alone
+has been checked and comes back mathematically correct. The three
+symptoms described (top-left crop, a too-tight corner margin, a
+clock rendering at roughly 4x its intended area) don't have a common
+mechanism I can derive from the code as it stands -- continuing to
+patch speculatively risks papering over the real cause instead of
+finding it. Asked the creator directly for their actual window/screen
+resolution or aspect ratio (a live Unity Editor Game view size, a
+standalone build's resolution, or a monitor's native aspect) -- exactly
+the one variable every scaling formula in this file depends on and that
+this environment (no Unity Editor) has no way to observe or guess.
+
+**One real, low-risk change did ship alongside this:** `Minimap.
+marginPixels` default bumped 16px -> 28px, directly addressing "too
+close to the corner" regardless of the other two symptoms' actual cause
+-- the corner-anchoring MATH is unchanged, only the breathing-room
+constant. Everything else in this report is intentionally left
+unmodified rather than patched blind.
