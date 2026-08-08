@@ -12949,3 +12949,57 @@ harness's ~27 pre-existing unrelated errors (stale peer-file/DLL drift,
 already documented in this log's own 2026-08 clock-bug entry above) are
 untouched by this change and were left alone rather than silently
 absorbed into it.
+
+## 2026-08 follow-up: Big Brain pedestal -- "more ornate yet should feel like a building"
+
+Creator direction, on the same jar: "Make the base more ornate yet
+should feel like a building." The pedestal (`BaseDresser.BuildPedestal`,
+split out of `BuildBigBrainShape`) was one plain owner-tinted drum --
+reads as a plinth/sculpture stand holding the jar up, not architecture.
+
+**Five stacked tiers instead of one drum**, splitting the SAME
+`pedestalH` height budget the caller already passes (footing 0.14,
+body 0.58, molding 0.06, cornice 0.12, cap 0.10 -- verified these sum to
+exactly 1.0, not eyeballed): a flared footing meeting the ground, the
+main body, a thin molding band, a projecting cornice, and a cap ring the
+jar visually rests on. The jar's own placement math (`jarBaseY =
+pedestalH`, set by the caller) is completely untouched -- it still sits
+at exactly the same height, on top of the cap tier now instead of a
+plain drum's own flat top, so the overall composition/proportions this
+building already reads at aren't disturbed by the pedestal getting
+richer underneath it.
+
+**Eight engaged columns** around the body -- picked as the single
+detail that reads "architecture" fastest at a glance, positioned right
+at the body's own outer surface (half-embedded, half-proud) so they
+read as attached pilasters rather than free-standing posts.
+
+**A door + three windows**: a real entrance implies a real interior,
+which is what actually makes a shape read as a BUILDING rather than a
+monument -- a taller/wider recess on the front face (+Z) plus three
+smaller ones on the other faces. These are dark voids, not the
+building's own stone, so (like `jarHolder` before them) they're
+parented under a small `pedestalTrim` holder exempt from `TintShape`'s
+owner-color sweep -- the same "shape carries kind, color carries
+owner/contents" distinction (maddr-aesthetic-preferences skill §5)
+`BuildingDresser.WindowBand` already draws for the city's own
+buildings' windows. A small cornerstone-plaque slab beside the door
+gets its own light stone tone (reusing `PbrTextureAtlas.Limestone`,
+already this project's shared "carved stone" texture via
+`BuildingDresser.Concrete()`) rather than sharing either the dark
+window material or the owner color -- a cornerstone is never painted
+the building's own paint.
+
+Every tier/column stays a DIRECT child of `root` (not a separate
+exempt holder), so the existing owner-color/damaged-state tint sweep
+covers all of it automatically with zero new plumbing -- same as HQ's
+own keep+turret. A flat single hue across an ornate multi-primitive
+shape is the deliberate, correct choice per this codebase's own
+established convention, not a compromise: the tiering/columns/reliefs
+read from geometry and lighting, not color contrast.
+
+**Verified for real, not assumed:** BaseDresser.cs still compiles clean
+against the real `MadDr.MatchCore.dll` via the scratch flightcheck
+harness (confirmed zero errors trace to it, same filter-by-source-file
+check as the entry above); the tier-height fractions were checked to
+sum to exactly 1.0 rather than trusted by eye.

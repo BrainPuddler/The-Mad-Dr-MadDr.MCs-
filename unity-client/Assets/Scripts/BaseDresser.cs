@@ -424,8 +424,7 @@ public class BaseDresser : MonoBehaviour
     {
         var radius = Mathf.Min(fullScale.x, fullScale.z) * 0.26f;
         var pedestalH = fullScale.y * 0.4f;
-        builder.SpawnPrim(PrimitiveType.Cylinder, root.transform.position + Vector3.up * (pedestalH * 0.5f),
-            new Vector3(radius * 2.3f, pedestalH * 0.5f, radius * 2.3f), Placeholder(), root.transform);
+        BuildPedestal(root, radius, pedestalH);
 
         var jarHolder = new GameObject("BrainJar");
         jarHolder.transform.SetParent(root.transform, false);
@@ -562,6 +561,153 @@ public class BaseDresser : MonoBehaviour
         var steelMat = Steel();
         SpawnRivets(topRingCenter, rivetPlacementRadius, rivetSize, steelMat, jarHolder.transform, 14, rivetSeedSalt);
         SpawnRivets(bottomRingCenter, rivetPlacementRadius, rivetSize, steelMat, jarHolder.transform, 14, rivetSeedSalt + 1000);
+    }
+
+    /// <summary>2026-08 (creator direction: "Make the base more ornate
+    /// yet should feel like a building"): the original pedestal was one
+    /// plain drum -- reads as a plinth/sculpture stand, not architecture.
+    /// Subdivides the SAME height budget (`pedestalH`, unchanged -- the
+    /// jar still sits at exactly `pedestalH` above the ground, so the
+    /// overall silhouette/proportions this building already reads at
+    /// are untouched) into five stacked tiers a real stone tower base
+    /// actually has: a flared FOOTING (the part that visibly meets the
+    /// ground), the main BODY, a thin MOLDING band, a projecting
+    /// CORNICE, and a CAP ring the jar visually rests on -- plus engaged
+    /// COLUMNS around the body (the single detail that reads
+    /// "architecture" fastest at a glance) and dark door/window recesses
+    /// (a real entrance implies a real interior, which is what makes a
+    /// shape read as a BUILDING rather than a monument).
+    ///
+    /// Every tier stays a DIRECT child of `root` (not a separate holder
+    /// like `jarHolder`), so <see cref="TintShape"/>'s existing owner-
+    /// color/damaged-state sweep covers all of it automatically, same as
+    /// every other multi-primitive silhouette in this roster (HQ's own
+    /// keep+turret, for instance) -- "shape communicates kind, color
+    /// communicates owner" (maddr-aesthetic-preferences skill, §5) means
+    /// a flat single hue across an ornate shape is the CORRECT choice
+    /// here, not a compromise; the tiering/columns/reliefs read from
+    /// their own geometry and lighting, not from color contrast. Only
+    /// the door/window recesses break from owner color -- real
+    /// window/door openings read as voids into the interior, not as the
+    /// building's own painted material, the same distinction
+    /// BuildingDresser.WindowBand already draws for the city's own
+    /// buildings -- so they're parented under `pedestalTrim`, a small
+    /// holder exempt from `TintShape` the same way `jarHolder` already
+    /// is.</summary>
+    private void BuildPedestal(GameObject root, float radius, float pedestalH)
+    {
+        var origin = root.transform.position;
+
+        // Tier heights sum to exactly pedestalH -- the jar (placed at
+        // `pedestalH` by the caller) still sits precisely on top of the
+        // cap ring, whatever the tier split.
+        var footingH = pedestalH * 0.14f;
+        var bodyH = pedestalH * 0.58f;
+        var moldingH = pedestalH * 0.06f;
+        var corniceH = pedestalH * 0.12f;
+        var capH = pedestalH * 0.10f;
+
+        // Diameters (SpawnPrim's Cylinder scale IS the world diameter --
+        // see BuildTankShape's own comment on this convention). The
+        // cornice/footing project slightly wider than the body, same as
+        // a real stone base's foundation course and crown molding both
+        // overhang the plain wall between them -- a purely decorative
+        // overhang, not a footprint/collision change (this roster's
+        // hex-based footprint is unrelated to dressing geometry).
+        var footingD = radius * 2.55f;
+        var bodyD = radius * 2.1f;
+        var moldingD = radius * 2.25f;
+        var corniceD = radius * 2.6f;
+        var capD = radius * 2.15f;
+
+        // Placeholder(), not a real material: every tier below is a
+        // DIRECT child of `root`, so TintShape overwrites this with the
+        // owner-color material immediately after -- same "the initial
+        // material is never actually seen" convention every other
+        // owner-tinted silhouette in this file already relies on.
+        var stoneMat = Placeholder();
+        var y = 0f;
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (y + footingH * 0.5f),
+            new Vector3(footingD, footingH * 0.5f, footingD), stoneMat, root.transform);
+        y += footingH;
+
+        var bodyBaseY = y;
+        var bodyCenterY = y + bodyH * 0.5f;
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * bodyCenterY,
+            new Vector3(bodyD, bodyH * 0.5f, bodyD), stoneMat, root.transform);
+        y += bodyH;
+
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (y + moldingH * 0.5f),
+            new Vector3(moldingD, moldingH * 0.5f, moldingD), stoneMat, root.transform);
+        y += moldingH;
+
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (y + corniceH * 0.5f),
+            new Vector3(corniceD, corniceH * 0.5f, corniceD), stoneMat, root.transform);
+        y += corniceH;
+
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (y + capH * 0.5f),
+            new Vector3(capD, capH * 0.5f, capD), stoneMat, root.transform);
+        y += capH;   // y now == pedestalH exactly -- the jar's own math is untouched
+
+        // Engaged columns around the body -- the single fastest "this is
+        // architecture, not a plinth" cue. Placed right at the body's
+        // own outer surface so they read as attached pilasters, not
+        // free-standing posts.
+        const int columnCount = 8;
+        var columnDiameter = radius * 0.22f;
+        var columnPlacementRadius = bodyD * 0.52f;
+        for (var i = 0; i < columnCount; i++)
+        {
+            var angle = i / (float)columnCount * 360f * Mathf.Deg2Rad;
+            var pos = origin + new Vector3(Mathf.Sin(angle) * columnPlacementRadius, bodyCenterY,
+                Mathf.Cos(angle) * columnPlacementRadius);
+            builder.SpawnPrim(PrimitiveType.Cylinder, pos,
+                new Vector3(columnDiameter, bodyH * 0.5f, columnDiameter), stoneMat, root.transform);
+        }
+
+        // A real entrance (front, +Z) plus three smaller windows on the
+        // other faces -- door/window VOIDS, not the building's own
+        // stone, so these go under `pedestalTrim` rather than `root`
+        // directly (see this method's own doc comment for why).
+        var pedestalTrim = new GameObject("PedestalTrim");
+        pedestalTrim.transform.SetParent(root.transform, false);
+        var windowMat = PedestalWindowMat();
+        var bodyWorldRadius = bodyD * 0.5f;
+
+        var doorH = bodyH * 0.55f;
+        var doorW = radius * 0.5f;
+        var doorDepth = radius * 0.1f;
+        var doorCenterY = bodyBaseY + doorH * 0.5f + bodyH * 0.06f;
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.forward * (bodyWorldRadius * 0.99f) + Vector3.up * doorCenterY,
+            new Vector3(doorW, doorH, doorDepth), windowMat, pedestalTrim.transform);
+
+        var windowH = bodyH * 0.28f;
+        var windowW = radius * 0.3f;
+        var windowDepth = radius * 0.08f;
+        var windowCenterY = bodyCenterY + bodyH * 0.08f;
+        float[] windowAnglesDeg = { 90f, 180f, 270f };
+        foreach (var deg in windowAnglesDeg)
+        {
+            var rad = deg * Mathf.Deg2Rad;
+            var dir = new Vector3(Mathf.Sin(rad), 0f, Mathf.Cos(rad));
+            var pos = origin + dir * (bodyWorldRadius * 0.99f) + Vector3.up * windowCenterY;
+            builder.SpawnPrim(PrimitiveType.Cube, pos,
+                new Vector3(windowW, windowH, windowDepth), windowMat, pedestalTrim.transform);
+        }
+
+        // A small cornerstone-plaque slab beside the door -- reads as
+        // carved/cast stone or bronze regardless of owner (a real
+        // cornerstone is never painted the building's own color), so it
+        // gets its own light stone tone rather than sharing the dark
+        // window material.
+        var plaqueW = radius * 0.34f;
+        var plaqueH = bodyH * 0.16f;
+        var plaqueDepth = radius * 0.05f;
+        var plaqueCenterY = bodyBaseY + plaqueH * 0.5f + bodyH * 0.04f;
+        var plaquePos = origin + Vector3.forward * (bodyWorldRadius * 0.99f) + Vector3.right * (doorW * 0.5f + plaqueW * 0.7f)
+            + Vector3.up * plaqueCenterY;
+        builder.SpawnPrim(PrimitiveType.Cube, plaquePos, new Vector3(plaqueW, plaqueH, plaqueDepth),
+            PedestalPlaqueMat(), pedestalTrim.transform);
     }
 
     /// <summary>Evenly spaced around `ringCenter`'s own circumference at
@@ -817,6 +963,33 @@ public class BaseDresser : MonoBehaviour
     private static Material Steel()
     {
         return MTextured("big-brain-steel-rivet", 0.55f, 0.56f, 0.58f, null, 0.55f, 0.85f);
+    }
+
+    /// <summary>2026-08 (ornate pedestal: "Make the base more ornate yet
+    /// should feel like a building"). Dark, faintly glassy voids for the
+    /// door/window recesses -- these read as openings into an interior,
+    /// not as the building's own owner-colored stone (see BuildPedestal's
+    /// own doc comment for the full reasoning), so they're deliberately
+    /// NOT one of this file's owner-tint materials.</summary>
+    private static Material _pedestalWindowMat;
+    private static Material PedestalWindowMat()
+    {
+        if (_pedestalWindowMat != null) return _pedestalWindowMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(0.05f, 0.06f, 0.08f);
+        if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.45f);
+        _pedestalWindowMat = mat;
+        return _pedestalWindowMat;
+    }
+
+    /// <summary>The cornerstone plaque's own light stone/bronze tone,
+    /// distinct from both the owner-colored masonry and the dark window
+    /// voids -- reuses PbrTextureAtlas.Limestone (already established as
+    /// this project's shared "carved stone" texture, BuildingDresser's
+    /// own Concrete() material) rather than inventing a fresh one.</summary>
+    private static Material PedestalPlaqueMat()
+    {
+        return MTextured("big-brain-pedestal-plaque", 0.8f, 0.77f, 0.68f, PbrTextureAtlas.Limestone, 0.4f);
     }
 
     /// <summary>A deliberate approximation of docs/17's own per-faction
