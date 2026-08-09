@@ -13321,3 +13321,42 @@ harness itself was out of scope for this change. Both reused calls
 (`SpawnRivets`, `AddComponent<SmokePlume>().Init(...)`) match an
 existing call already proven correct elsewhere in the same file
 byte-for-byte in argument shape.
+
+## Follow-up -- Mad Doctor corner pilasters: thicker, real protrusion instead of flush
+
+Creator direction, verbatim: "the edge objects need to be thicker. and
+protrude more" -- sent alongside a screenshot of the rendered Factory.
+Asked the creator directly which elements "edge objects" meant (the
+just-reworked chimney bands, the corner pilasters, or both) rather than
+guess between two materially different code paths; confirmed: the corner
+pilasters.
+
+Read the actual placement math in both `BuildDoctorFactory` and
+`BuildDoctorControlCentre` (each has its own copy of the same four-corner
+pilaster loop) before changing anything, and found a real geometry bug,
+not just a matter of taste: the old center offset
+(`bodyW*0.5 - pilasterW*0.5`) put the pilaster's OUTER face exactly at
+`bodyW*0.5` -- flush with the wall -- meaning the entire pilaster cube
+sat embedded INSIDE the building volume with nothing sticking out at
+all. "Protrude more" was actually "protrude at all."
+
+Fixed in both methods identically (same fix everywhere the pattern
+exists, not just the one call site the screenshot happened to show):
+
+- `pilasterW` raised from 0.07/0.06 of `fullScale.x` (Factory/Control
+  Centre) to 0.10/0.085 -- about +43% thicker in both.
+- A new `pilasterProtrude = pilasterW * 0.4` term added to the corner
+  offset, shifting each pilaster outward so ~60% of its width still
+  overlaps the wall (reads as attached, not a floating slab) while the
+  remaining ~40% now genuinely sticks out past the building's own
+  silhouette.
+
+**Verified:** checked the new corner extent against the Factory's own
+chimney position (`stackXZ.x = 0.32 * fullScale.x`, stack radius
+`0.065 * fullScale.x`) so the now-larger pilasters don't clip into the
+stack raised in the prior entry -- pilaster inner edge lands at
+`0.39 * fullScale.x`, stack outer edge at `0.385 * fullScale.x`, clear
+by a small margin rather than assumed clear. Confirmed via the scratch
+flightcheck harness that zero build errors trace to `BaseDresser.cs`
+(same pre-existing unrelated harness drift as the prior entry, unchanged
+by this edit).

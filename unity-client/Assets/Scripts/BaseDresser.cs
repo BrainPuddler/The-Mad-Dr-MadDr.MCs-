@@ -538,14 +538,24 @@ public class BaseDresser : MonoBehaviour
         smokeGo.AddComponent<SmokePlume>().Init(1.4f, smokeAngle);
 
         var stoneMat = DoctorStone();
+        // 2026-08 (creator direction: "the edge objects need to be thicker
+        // and protrude more" -- confirmed as the corner pilasters): width
+        // raised 0.07->0.10 of fullScale.x, and the old flush mount (centered
+        // so the pilaster's OUTER face landed exactly at the wall, i.e. it
+        // sat fully embedded/inside the wall with nothing sticking out) is
+        // replaced with a real protrusion -- shifted outward by 40% of the
+        // pilaster's own width, so ~60% of it still overlaps the wall (reads
+        // as attached, not floating) while the remaining ~40% now genuinely
+        // sticks out past the building's own silhouette.
         var pilasterH = bodyH * 0.92f;
-        var pilasterW = fullScale.x * 0.07f;
+        var pilasterW = fullScale.x * 0.1f;
+        var pilasterProtrude = pilasterW * 0.4f;
         float[] signs = { 1f, -1f };
         foreach (var cx in signs)
         foreach (var cz in signs)
         {
             builder.SpawnPrim(PrimitiveType.Cube,
-                origin + new Vector3(cx * (bodyW * 0.5f - pilasterW * 0.5f), pilasterH * 0.5f, cz * (bodyD * 0.5f - pilasterW * 0.5f)),
+                origin + new Vector3(cx * (bodyW * 0.5f - pilasterW * 0.5f + pilasterProtrude), pilasterH * 0.5f, cz * (bodyD * 0.5f - pilasterW * 0.5f + pilasterProtrude)),
                 new Vector3(pilasterW, pilasterH, pilasterW), stoneMat, trim);
         }
 
@@ -651,14 +661,21 @@ public class BaseDresser : MonoBehaviour
             builder.SpawnPrim(PrimitiveType.Sphere, tipPos, Vector3.one * (fullScale.x * 0.018f), brassMat, trim);
         }
 
+        // 2026-08 (creator direction: "the edge objects need to be thicker
+        // and protrude more" -- confirmed as the corner pilasters, same fix
+        // as BuildDoctorFactory's own matching pilasters): width raised
+        // 0.06->0.085 of fullScale.x, plus the same outward-protrusion shift
+        // (40% of the pilaster's own width) replacing the old flush mount
+        // that left the whole pilaster embedded inside the wall.
         var pilasterH = bodyH * 0.92f;
-        var pilasterW = fullScale.x * 0.06f;
+        var pilasterW = fullScale.x * 0.085f;
+        var pilasterProtrude = pilasterW * 0.4f;
         float[] signs = { 1f, -1f };
         foreach (var cx in signs)
         foreach (var cz in signs)
         {
             builder.SpawnPrim(PrimitiveType.Cube,
-                origin + new Vector3(cx * (bodyW * 0.5f - pilasterW * 0.5f), pilasterH * 0.5f, cz * (bodyD * 0.5f - pilasterW * 0.5f)),
+                origin + new Vector3(cx * (bodyW * 0.5f - pilasterW * 0.5f + pilasterProtrude), pilasterH * 0.5f, cz * (bodyD * 0.5f - pilasterW * 0.5f + pilasterProtrude)),
                 new Vector3(pilasterW, pilasterH, pilasterW), stoneMat, trim);
         }
 
