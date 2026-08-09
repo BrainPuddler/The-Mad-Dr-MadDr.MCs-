@@ -13672,3 +13672,57 @@ verification scope and the gaps left deliberately open (no visual mesh
 for roster units, no difficulty axis beyond personality flavor, no
 teams/alliances, human production still not on the lockstep-safe
 command path).
+
+## Follow-up -- actually switching MatchSetupHud on in the real scene
+
+Creator direction, verbatim: "implement the race and ai opponent system
+in actual code within the game."
+
+Investigated what "within the game" meant concretely before assuming the
+prior entry's work already satisfied it, since every prior picker in this
+family (`RegionPickerHud`, the now-retired `FactionPickerHud`/
+`OpponentFactionPickerHud`, and the new `MatchSetupHud`) is opt-in behind
+a boolean that defaults to `false`. Checked the ONE actual playable scene
+this repo has, `unity-client/Assets/Scenes/SampleScene.unity`, and found
+its serialized `RuntimeCityBuilder` component has NEVER carried a
+`showRegionPicker`/`showFactionPicker`/`showOpponentPicker`/
+`showMatchSetupHud` entry at all -- confirmed by grepping the component's
+full serialized field block, which predates every one of those fields
+(added across several different epics, this one included) ever existing.
+Every picker built across this project's whole history has therefore been
+inert as far as the actual running game goes: launching the one real
+scene has always skipped straight to `BeginMatch()` on Unity's own C#
+field defaults, with zero menu ever shown.
+
+**Fix:** added `showMatchSetupHud: 1` (plus an explicit `chosenFaction: 0`
+for clarity, matching its own already-correct code default) to
+`RuntimeCityBuilder`'s serialized block in `SampleScene.unity`, the same
+direct-YAML-edit technique this session's own "57 missing .meta files"
+entry already established as safe/verified in this no-Editor environment
+(a `.meta` guid IS load-bearing for resolving an existing scene
+reference to a script; a plain scalar field addition inside an already-
+correctly-resolved component is a much smaller, lower-risk edit of the
+same general kind). Deliberately did NOT also flip `showRegionPicker` --
+out of scope for "race and ai opponents," and `MatchSetupHud.Confirm()`
+already falls through straight to `BeginMatch()` when it's off, using
+whatever `preset`/`seed` the scene already has.
+
+**Verified, not assumed:** confirmed the `CityBuilt` GameObject carrying
+this component is `m_IsActive: 1` and the component itself `m_Enabled: 1`
+(so `Start()` genuinely runs), confirmed the scene's own `m_Script` guid
+for this component matches `RuntimeCityBuilder.cs.meta`'s real guid
+(`59f1bcb7b35f24dca88b3126df764dd0`) so this isn't sitting on a broken
+script reference the way the historical 57-missing-.meta bug did.
+Deliberately left `aiOpponents` unset in the YAML rather than writing an
+`aiOpponents: []` line -- that field is a `List<AiOpponentConfig>` whose
+element type embeds a `CommanderPersonality` struct with a private
+backing array and validation-only constructor, and there is no live
+Editor available to confirm Unity's own YAML shape for an empty list of
+that type round-trips correctly; the C# field default is already an
+empty list (the exact value intended), so omitting the line reaches the
+same result with zero format-guessing risk. `MatchSetupHud` itself joins
+the same "runtime-`AddComponent`-only, never a scene/prefab reference, no
+committed `.meta` needed" category `RegionPickerHud`/`BattalionHud`/every
+other Hud-family script in this project already established -- confirmed
+by re-checking that category's own reasoning rather than assuming it
+still applied.

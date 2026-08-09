@@ -485,6 +485,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::RuntimeCityBuilder
   seed: 42
   preset: 0
+  showMatchSetupHud: 1
+  chosenFaction: 0
   baseUrl: https://maddr-mutator.onrender.com
   accountId: 6ccf27ec-aab2-4938-a986-4f4e87d35a2f
   speedDisplayMultiplier: 5
