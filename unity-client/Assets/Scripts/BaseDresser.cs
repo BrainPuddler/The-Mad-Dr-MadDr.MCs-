@@ -170,7 +170,29 @@ public class BaseDresser : MonoBehaviour
             // guards this to exactly one fire per building.
             if (b.State == BuildingState.Complete && b.Hp < b.MaxHp && _damagedHandled.Add(b.EntityId))
             {
-                var footprintRadius = fullScale.x * 0.5f;
+                // 2026-08 (creator report: "when buildings are being attacked
+                // the smoke is missing" -- checked positioning/scale/"the
+                // usual suspects" against the CURRENT per-faction trim, not
+                // just re-verified the old math): 0.5 was calibrated back
+                // when a building was just the plain 0.9-fraction box this
+                // formula still reflects -- it predates the whole per-
+                // faction Factory trim epic. AttachSmoke spawns at a hard,
+                // un-raycasted `footprintRadius` offset (unlike
+                // AttachFireCluster, which raycasts to find the real
+                // surface and only uses this as a probe-distance bound), so
+                // if that radius lands INSIDE solid trim instead of past
+                // it, the puff spawns occluded/embedded in that geometry --
+                // reads as "missing," not just "misplaced." Numerically
+                // checked every faction's Factory/Control Centre trim
+                // (BuildDoctorFactory's copper tank, BuildHumanFactory's
+                // cooling tower/housing, etc.) across all four building
+                // tiers: the worst offender (Human Factory's cooling tower)
+                // reaches 0.683x fullScale.x at every tier -- comfortably
+                // past the old 0.5 radius smoke was spawning at. Raised to
+                // 0.8 (margin past 0.683, not just barely clearing it) so
+                // this holds even if a future trim addition reaches a
+                // little further still.
+                var footprintRadius = fullScale.x * 0.8f;
                 DamageFx.AttachSmoke(root.transform, fullScale.y, footprintRadius, SmokeScaleFor(def));
                 DamageFx.AttachFireCluster(root.transform, fullScale.y, footprintRadius, FireCountFor(def));
             }

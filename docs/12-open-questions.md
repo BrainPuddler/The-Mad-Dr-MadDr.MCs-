@@ -13521,3 +13521,68 @@ FOUR tiers** -- not eyeballed at the tier being designed against, and
 not a naive 1D axis-only check (which both missed a real risk and
 falsely flagged a fake one this session before the correct
 nearest-point-on-cube-to-circle-center version was used).
+
+## Bugfix -- damage smoke spawning inside solid trim geometry ("smoke is missing" when attacked)
+
+Creator report, verbatim: "when buildings are being attacked the smoke
+is missing. check positioning scale all the usual suspects."
+
+This exact symptom has a long history in this log (#148-166) with a
+different root cause almost every time -- ground-offset math, inherited
+non-uniform scale, growth caps, roof-clutter occlusion. Re-checked the
+CURRENT pipeline against each of those rather than assuming any one
+still applied, and found a NEW one this time: `BaseDresser.Dress()`
+computes `footprintRadius = fullScale.x * 0.5f` (the value both
+`DamageFx.AttachSmoke` and `AttachFireCluster` use to push the plume
+origin outside the building) -- a constant that predates the entire
+per-faction Factory/Control Centre trim epic (session #91 onward) and
+was only ever checked against the plain 0.9-fraction body box.
+
+`AttachFireCluster` survived that epic unaffected because it raycasts
+to find the real building surface (docs/29, "raycast surface pinning")
+and only uses `footprintRadius` as a probe-distance BOUND. `AttachSmoke`
+has no such correction -- it spawns at a hard, un-raycasted offset. Once
+Factory-kind buildings gained trim that reaches past that old 0.5 radius
+(the copper tank and machinery housing added to `BuildDoctorFactory`,
+the cooling tower and conveyor added to `BuildHumanFactory`), any
+building whose per-building hashed spawn angle (`AttachSmoke`'s own
+`holder.GetInstanceID()`-based angle) happened to land near one of those
+elements would spawn its smoke plume INSIDE that solid geometry instead
+of past it -- occluded/embedded, reading as "missing" rather than
+"misplaced." Since the angle is effectively uniform over 360 degrees
+per building, this wouldn't hit every building, but would hit a real,
+reproducible fraction of them -- consistent with an intermittent-but-
+recurring report rather than a total outage.
+
+**Verified with real numbers, not eyeballed:** computed the actual
+radial reach of every faction's Factory trim element (tank, housing,
+cooling tower, conveyor, chimney, pilasters) from building center across
+all four tiers. Every tier gives the exact same result as a fraction of
+`fullScale.x` (all four tiers use a square `fullScale.x == fullScale.z`
+footprint, so this holds exactly, not approximately): worst offender is
+`BuildHumanFactory`'s cooling tower at 0.683x `fullScale.x`, followed by
+`BuildDoctorFactory`'s tank (0.659x) and machinery housing (0.648x) --
+all comfortably past the old 0.5 radius smoke was spawning at.
+
+**Fix:** `footprintRadius` raised from `fullScale.x * 0.5f` to `* 0.8f`
+-- margin past the verified 0.683x worst case, not just barely clearing
+it, so a future trim addition reaching a little further still won't
+reopen this. Applies to every building kind (not just Factory) since
+it's computed generically in `Dress()`; smaller/less-trimmed kinds just
+get a slightly more generous "outside the building" radius, which is
+harmless -- `AttachFireCluster`'s raycast-based placement is unaffected
+either way (a bigger probe-distance bound only helps it, never hurts).
+
+**Also checked and ruled out, not just skipped:** `_damagedHandled`
+guard logic (fires exactly once per building, no stale-state risk since
+each match starts with a fresh `BaseDresser` instance), `SmokeScaleFor`/
+`FireCountFor` tier tables (no zero/degenerate values), `DamageFxProfile
+.Active`'s fallback-to-`Default` behavior (no null risk), and whether
+this session's own SmokePlume/BuildDoctorFactory edits could have
+introduced a runtime exception that silently aborts `Dress()` mid-loop
+(read every line of both methods for null-refs/negative-scale/
+divide-by-zero risk -- found none; flightcheck already confirmed
+compile-clean). The existing `Debug.Log("[DamageFx] Smoke started on "
+...)` diagnostic line (already in `AttachSmoke`) remains the fastest way
+to confirm in a real Play session whether a plume is spawning at all
+versus spawning-but-occluded, if this report recurs.
