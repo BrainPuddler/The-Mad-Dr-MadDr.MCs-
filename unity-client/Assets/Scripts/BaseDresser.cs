@@ -544,13 +544,23 @@ public class BaseDresser : MonoBehaviour
         PropLibrary.Spawn(builder, "big-brain-stem", PrimitiveType.Cylinder, stemCenter,
             new Vector3(brainRadius * 0.28f, brainRadius * 0.5f, brainRadius * 0.28f), stemMat, jarHolder.transform);
 
-        // chrome lid, sealing the jar -- deliberately a fixed metal color
-        // (not owner-tinted, not glass) rather than a third arbitrary
-        // material choice, since a real jar lid IS just plain metal.
-        var lidMat = new Material(ShaderUtil.FindRenderableShader());
-        lidMat.color = new Color(0.72f, 0.74f, 0.78f);
+        // 2026-08 (creator direction: "make the roof of the big brain the
+        // same material as the base"): the lid -- the building's own
+        // roof, capping the jar the way a roof caps everything below it
+        // -- used to be a fixed chrome-gray, deliberately NOT owner-
+        // tinted. That's reversed here: Placeholder() (a throwaway
+        // material, same as every owner-tinted piece in this file) AND
+        // `root.transform` as the parent instead of `jarHolder.transform`
+        // -- the jarHolder holder tree is specifically what TintShape's
+        // single-level GetChild sweep never reaches (see this method's
+        // own class header), so a fixed match to just one player's color
+        // wouldn't actually stay matched for every OTHER player/damaged
+        // state; parenting the lid where the pedestal's own tiers live
+        // instead means it always resolves to whatever SolidMatFor/
+        // DamagedMatFor the base is ACTUALLY wearing that frame, not an
+        // approximation of it.
         builder.SpawnPrim(PrimitiveType.Cylinder, jarCenter + Vector3.up * (jarH * 0.52f),
-            new Vector3(radius * 2f, jarH * 0.06f, radius * 2f), lidMat, jarHolder.transform);
+            new Vector3(radius * 2f, jarH * 0.06f, radius * 2f), Placeholder(), root.transform);
 
         // 2026-08 ("Add substantial structural rings around the glass:
         // brass ring around the top, brass ring around the bottom,

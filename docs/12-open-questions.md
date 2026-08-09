@@ -13104,3 +13104,29 @@ numerically for worst-case clearance (max wobble amplitude + max
 bubble half-size stacked on the outer edge) before picking the 0.85
 constant, not eyeballed; both files still compile clean against the
 real `MadDr.MatchCore.dll` via the flightcheck harness.
+
+## 2026-08 follow-up: Big Brain roof (the jar lid) now owner-tinted to match the base
+
+Creator direction: "make the roof of the big brain the same material as
+the base." The lid -- the flat cap sealing the jar, this building's own
+roof -- was a fixed chrome-gray, deliberately NOT owner-tinted (a
+2026-07 decision: "a real jar lid IS just plain metal").
+
+A fixed color match to just one player's base tint wouldn't actually
+stay matched for every OTHER player or the Damaged state -- the base's
+own color is dynamic (`SolidMatFor`/`DamagedMatFor`, keyed by
+`playerIndex`), so a hardcoded approximation would only be right for
+whichever color it was eyeballed against. Instead, the lid moved from
+being parented under `jarHolder` (the holder tree `TintShape`'s single-
+level `GetChild` sweep deliberately never reaches, so the jar assembly
+keeps its own glass/brain materials) to `root` directly, alongside the
+pedestal's own tiers -- the exact same mechanism that already keeps the
+footing/body/molding/cornice/cap/columns uniformly owner-tinted. The
+lid now resolves to whatever material the base is ACTUALLY wearing
+every frame (owner color, or the darker Damaged tint once the building
+takes damage), not a fixed guess at it. Its own position is unchanged
+(`SpawnPrim` sets world position directly regardless of parent, so
+changing which transform it's parented under doesn't move it).
+
+**Verified for real:** BaseDresser.cs still compiles clean against the
+real `MadDr.MatchCore.dll` via the flightcheck harness.
