@@ -325,6 +325,16 @@ public class SmokePlume : MonoBehaviour
     private float _timer;
     private float _scale = 1f;
 
+    // 2026-08 (creator direction, chimney ambient smoke follow-up: "thicker
+    // smoke, larger"): optional per-plume density multiplier on top of the
+    // shared 0.8 baseAlpha every SmokePlume has always used -- defaults to
+    // 1f (old behavior, byte-identical) so AttachSmoke's damage-triggered
+    // wall plumes are completely unaffected; only BaseDresser's ambient
+    // chimney call site opts in to a denser look. Alpha math is shared
+    // across every puff kind via SmokePuff, so this stays local to THIS
+    // plume instance rather than touching that shared code's own default.
+    private float _alphaMultiplier = 1f;
+
     // 2026-08 (creator direction, confirming a reference image: diagonal
     // drift/lean like wind-blown smoke instead of climbing straight up):
     // set ONCE per plume (i.e. per building) in Init, not per puff -- every
@@ -355,9 +365,10 @@ public class SmokePlume : MonoBehaviour
     /// is now purely radial -- straight away from wherever the plume
     /// spawned, guaranteed to never lean back toward the building's own
     /// silhouette.</summary>
-    public void Init(float scale, float outwardAngle)
+    public void Init(float scale, float outwardAngle, float alphaMultiplier = 1f)
     {
         _scale = scale;
+        _alphaMultiplier = alphaMultiplier;
         var windSpeed = DamageFxProfile.Active.SmokeWindSpeed;
         _lean = new Vector2(Mathf.Sin(outwardAngle) * windSpeed, Mathf.Cos(outwardAngle) * windSpeed);
     }
@@ -439,12 +450,15 @@ public class SmokePlume : MonoBehaviour
         // cool pale gray (was 0.16/0.15/0.14 sooty near-black) -- see the
         // summary above for why the earlier contrast fix's reasoning no
         // longer applies once shape/position/lean are all pulling their
-        // own weight too.
-        mat.color = new Color(0.68f, 0.7f, 0.74f, 0.8f);
+        // own weight too. `_alphaMultiplier` defaults to 1f (unchanged
+        // 0.8 baseAlpha) for every existing damage-smoke caller -- see
+        // this field's own doc comment on SmokePlume.
+        var baseAlpha = Mathf.Clamp01(0.8f * _alphaMultiplier);
+        mat.color = new Color(0.68f, 0.7f, 0.74f, baseAlpha);
         LabMeshBuilder.MakeTransparent(mat);
         renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, startSize, 0.8f, _lean);
+        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, startSize, baseAlpha, _lean);
     }
 }
 

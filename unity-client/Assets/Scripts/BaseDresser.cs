@@ -535,7 +535,13 @@ public class BaseDresser : MonoBehaviour
         smokeGo.transform.SetParent(trim, false);
         smokeGo.transform.position = stackTop;
         var smokeAngle = ((root.GetInstanceID() & 0xFFFF) % 360) * Mathf.Deg2Rad;
-        smokeGo.AddComponent<SmokePlume>().Init(1.4f, smokeAngle);
+        // 2026-08 (creator direction: "thicker smoke, larger"): scale raised
+        // 1.4->2.2 (bigger puffs) and a 1.25x alpha multiplier opted in via
+        // SmokePlume's new optional 3rd param (0.8 base * 1.25 clamps to a
+        // fully opaque 1.0 at each puff's freshest/densest moment, fading
+        // out as it disperses same as before) -- denser near the stack,
+        // thinning with distance, the same way a real chimney's smoke reads.
+        smokeGo.AddComponent<SmokePlume>().Init(2.2f, smokeAngle, 1.25f);
 
         var stoneMat = DoctorStone();
         // 2026-08 (creator direction: "the edge objects need to be thicker

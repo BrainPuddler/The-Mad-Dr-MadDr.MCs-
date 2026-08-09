@@ -13360,3 +13360,42 @@ by a small margin rather than assumed clear. Confirmed via the scratch
 flightcheck harness that zero build errors trace to `BaseDresser.cs`
 (same pre-existing unrelated harness drift as the prior entry, unchanged
 by this edit).
+
+## Follow-up -- chimney ambient smoke: thicker, larger
+
+Creator direction, verbatim: "thicker smoke, larger" -- a direct
+follow-up to the chimney smoke emitter added two entries above.
+
+The `SmokePlume`/`SmokePuff` classes in `DamageFx.cs` are SHARED across
+every building's damage-triggered smoke, not exclusive to the new
+chimney effect -- their puff alpha (0.8, hardcoded in `SmokePlume.
+SpawnPuff`) and spawn cadence are the product of a long prior tuning
+history in this same log ("smoke way too big", "0.2 resize", "growth
+should never exceed 2x", etc.). Changing that hardcoded value directly
+would have re-opened all of that already-settled tuning for every
+OTHER building's damage smoke too, not just the chimney's ambient
+plume this request is actually about.
+
+Instead, scoped the change the same way the pilaster fix above scoped
+itself to the one body plan that needed it: `SmokePlume.Init` gained an
+optional third parameter, `alphaMultiplier` (defaults to `1f`), threaded
+through to the puff's baseAlpha (`0.8f * alphaMultiplier`, clamped to
+[0,1]). `DamageFx.AttachSmoke`'s own call site still passes only 2
+args, so every existing damage-smoke plume in the game is byte-
+identical to before. Only the chimney's own call site in
+`BaseDresser.cs` opts in:
+
+- `scale` raised 1.4 -> 2.2 (bigger puffs -- "larger").
+- new `alphaMultiplier` of 1.25 (0.8 * 1.25 clamps to fully opaque 1.0
+  at each puff's freshest moment near the stack, fading out with the
+  same easing curve as it disperses -- "thicker", denser smoke close to
+  the source, same way real chimney smoke reads).
+
+**Verified:** grepped every `SmokePlume`/`.Init(` call site in the repo
+to confirm `AttachSmoke`'s is the only other one and that it still uses
+the 2-arg form (default-preserves old behavior, not just assumed to).
+Flightcheck shows the same 3 pre-existing unrelated errors as the prior
+two entries (`Transform.lossyScale`, `Physics.Raycast`/`Linecast`
+missing from the scratch `UnityStub.cs`) at their same original line
+numbers -- confirmed by line number that neither is one of the lines
+this change touched.
