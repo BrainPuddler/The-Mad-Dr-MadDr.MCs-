@@ -13442,3 +13442,82 @@ all four building tiers; clearance ranges from 0.21 (Small) to 0.34
 (Landmark) units, comfortably clear at every tier, not just the one used
 while designing the fix. Flightcheck shows zero errors tracing to
 `BaseDresser.cs`.
+
+## Session style & design notes -- Doctor Factory trim follow-ups (read before next session touches BaseDresser.cs)
+
+Four back-to-back screenshot-driven follow-ups on `BuildDoctorFactory`
+(chimney bands/rivets, corner pilasters, chimney smoke, chimney
+material/shape) surfaced the same handful of patterns repeatedly.
+Distilled here as reusable checks, not a re-narration of the entries
+above -- see those for the specific numbers.
+
+**1. `TintShape` silently swallows anything parented straight to
+`root.transform`.** It overwrites every DIRECT CHILD of a building's
+root to the flat owner-tint color, every frame. Any decorative element
+that's supposed to show its own crafted material (brick, brass, iron,
+stone -- anything textured) MUST be parented under that building's
+non-tinted `Trim` holder (a grandchild of root), never under
+`root.transform` itself. The chimney bug this session (spawned on root
+with the shared `Placeholder()` material, so it silently rendered as
+the same flat block color as the building body -- never actually
+brick-colored at all) is this exact trap. When something reads as
+flatter/blander than intended, check the PARENT before touching the
+material call.
+
+**Known un-fixed instance of the same bug, found but out of scope this
+session:** `BuildHumanFactory`'s own chimney-slot cylinder
+(`BaseDresser.cs` around the `var stackRadius = fullScale.x * 0.09f;`
+line inside that method) is STILL spawned onto `root.transform` with
+`Placeholder()`, exactly the bug just fixed for the Doctor Factory. The
+creator hasn't reported it yet, but it will show the same "flat rod
+instead of its own material" symptom the moment someone looks closely
+at a Human Factory. Worth a proactive pass, not just a reactive one.
+
+**2. "Edge trim" only reads as trim if it actually protrudes.** A
+flush-mounted piece (its outer face landing exactly at the parent
+wall's plane) is geometrically invisible as trim regardless of size --
+check the real center-offset math for genuine outward displacement past
+the surface, not just bigger dimensions. The pilaster fix this session
+was this exact bug: the old formula centered the pilaster so its outer
+face was flush with the wall, meaning 100% of it sat embedded inside
+the building.
+
+**3. "Thin"/"rod" complaints can be BOTH a material bug and a geometry
+bug at once** -- don't stop investigating after fixing one. The chimney
+was both silently mistinted (see #1) AND too aggressively narrowed by
+the prior "longer and narrower" pass; fixing only one would have left
+it still reading wrong.
+
+**4. A hollow/tube read is achievable without an actual hollow mesh** by
+recessing a smaller, darker cylinder just below a solid outer
+cylinder's rim -- reads as "thick wall around a bore" from this game's
+top-down RTS camera angle. Cheap, matches the "no imported-mesh
+pipeline, primitive-kit only" project constraint, and is the same trick
+worth reaching for anywhere else a "hollow" ask comes up (tanks, pipes,
+barrels) rather than reaching for real geometry each time.
+
+**5. Never edit shared, already-tuned VFX/material code for a
+single-caller request.** `SmokePlume`/`SmokePuff` back every building's
+damage-smoke, tuned across a long prior history in this log. The
+chimney's own "thicker, larger" ask was satisfied with a new OPTIONAL
+parameter defaulting to the old behavior, verified via a repo-wide grep
+that every other call site still uses the old N-arg form. Same
+principle as the "per-plan fix, scoped to that plan" rule the
+aesthetic-preferences skill already documents for anatomy code -- it
+applies to shared VFX/material helpers too, not just mount/socket math.
+
+**6. When terse iterative feedback could name more than one on-screen
+element, ask instead of guessing.** Once a building has multiple
+distinct trim features (bands, pilasters, a tank, a chimney), a phrase
+like "the edge objects" or "the metal edging" stops being unambiguous.
+Asked directly which element "edge objects" meant this session rather
+than picking one blind -- cheap compared to a wrong guess costing a full
+round-trip, and matches this creator's own stated preference for
+precision over vibes.
+
+**7. Any radius/protrusion increase needs a real 2D clearance check
+against neighboring geometry on the same building corner, across ALL
+FOUR tiers** -- not eyeballed at the tier being designed against, and
+not a naive 1D axis-only check (which both missed a real risk and
+falsely flagged a fake one this session before the correct
+nearest-point-on-cube-to-circle-center version was used).
