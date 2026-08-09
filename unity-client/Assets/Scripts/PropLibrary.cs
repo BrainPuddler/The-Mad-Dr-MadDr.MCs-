@@ -32,6 +32,14 @@ public static class PropLibrary
         // see BrainMesh's own doc comment for the mesh itself.
         Register("big-brain-mass", () => BrainMesh.BuildBrainMass(1f));
         Register("big-brain-stem", () => BrainMesh.BuildBrainstem(12));
+        // 2026-08 (per-faction Factory/Control Centre "Major Improvement"
+        // pass): a narrow-tipped spike for the Alien faction's
+        // crystalline growths/antennae (6 segments -- fewer than the
+        // lamppost pole's 10, deliberately faceted rather than smooth,
+        // reading as "crystal" instead of "turned metal"), and a wide
+        // gentler taper for the Human Alliance's cooling towers.
+        Register("alien-crystal-spike", () => ProceduralMeshKit.Frustum(1f, 0.15f, 6));
+        Register("human-cooling-tower", () => ProceduralMeshKit.Frustum(1f, 0.7f, 12));
     }
 
     public static void Register(string key, MeshBuilder builder) { Registry[key] = builder; }

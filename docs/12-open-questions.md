@@ -13130,3 +13130,130 @@ changing which transform it's parented under doesn't move it).
 
 **Verified for real:** BaseDresser.cs still compiles clean against the
 real `MadDr.MatchCore.dll` via the flightcheck harness.
+
+## 2026-08: EPIC -- per-faction Factory/Control Centre visual treatments (Mad Doctor gothic-lab / Alien bio-organic / Human aerospace)
+
+Creator direction: apply the Big Brain building's own level of visual
+refinement and thematic storytelling to the Factory and Control Centre
+(Hq) for all three factions, with an explicit constraint set: no
+gameplay/footprint/collision/scale/silhouette changes, no redesign from
+scratch, existing color language preserved (Mad Doctor green, Alien
+purple, Human Alliance blue), performance maintained.
+
+**A real, missing prerequisite closed first, not worked around:**
+`SimBridge.PlayerFaction(int playerIndex)` -- the exact accessor
+`BaseDresser.OwnerBaseColor`'s own long-standing doc comment already
+flagged as absent ("SimBridge has no player-faction accessor yet").
+match-core already tracked this (`PlayerState.Faction`, set once at
+`StartMatch` and never reassigned, `MatchState.Player(int)` already
+public) -- this is a pure passthrough, zero match-core changes, with its
+own bounds guard (`Player(int)` has none of its own) and a
+`FactionId.Mixed` fallback rather than risking an exception. Discovered
+while researching, not assumed: without this, "maintaining the color
+language" would have stayed broken for any player past slot 1 (a third
+Alien player would have rendered flat neutral gray under the OLD
+player-index-keyed tint system) -- exactly the kind of mismatch that
+would have undermined the very requirement being implemented. Fixed at
+the root: `OwnerBaseColor`/`SolidMatFor`/`DamagedMatFor`/`TintShape`
+(the whole owner-tint system every building kind in this file relies
+on) now key on `FactionId` instead of raw player index -- Human
+Alliance's own tint also corrected from the old olive-drab
+approximation to actual blue, an explicit in-scope fix per the same
+direction, not drift.
+
+**The owner-tint/faction-material split, stated once since all six new
+methods follow it identically:** the BODY (and, for Factory, the
+chimney-slot cylinder / for Hq, the turret cube) stays a DIRECT child of
+`root` using `Placeholder()`, exactly like every other kind in this file
+-- this is what keeps "whose building is this" reading correctly via
+color, unchanged from before. Every faction-flavored material (brass,
+cast iron, oxidized copper, crystal, membrane, brushed aluminum, carbon
+fiber, glass) lives on ADDITIONAL detail geometry parented under a
+per-building "Trim" holder transform -- a GRANDCHILD of root, not a
+direct child, so `TintShape`'s own single-level `GetChild` sweep never
+reaches it and overwrites it with the flat owner color. Identical to the
+`jarHolder`/`pedestalTrim` split `BuildBigBrainShape`/`BuildPedestal`
+already established; applied here to two more kinds rather than
+reinvented.
+
+**Six new textures** (`PbrTextureAtlas.cs`, salts 20-34, past every
+salt already in use so nothing accidentally shares a noise field):
+`CastIron`/`OxidizedCopper` (Doctor), `BrushedAluminum` (HORIZONTAL
+banding, deliberately perpendicular to `Chrome`'s own vertical banding
+so the two read as different materials side by side, not a re-tint) /
+`CarbonFiberPanel` (a diagonal-stripe-field XOR weave) for Human,
+`AlienCrystal` (a difference-of-two-shifted-noise-fields vein technique,
+same idiom `BrainTextureKit.VeinMask` uses for blood vessels, reading
+here as crystal facet lines) / `AlienMembrane` (softer, blobbier, no
+vein lines) for Alien.
+
+**Four new shared components**, each reused across multiple faction
+treatments rather than one-off per building: `SlowSpin.cs` (continuous
+rotation -- flywheels, radar dishes, orbiting rings), `Bob.cs` (gentle
+sine-wave levitation -- Alien's hovering crystals/energy sacs),
+`ScrollingTexture.cs` (mutates a Renderer's own `mainTextureOffset` over
+time -- a real zero-geometry moving-conveyor-belt trick, Human
+Factory's own belt), `TeslaArc.cs` (a jittering `LineRenderer` between
+two anchor transforms, Perlin-noise-driven jitter/flicker -- a real
+Unity component, not a ParticleSystem, matching this project's own
+"hand-rolled Update-driven animation" convention throughout). Two new
+`PropLibrary` mesh keys (`alien-crystal-spike`, `human-cooling-tower`,
+both `ProceduralMeshKit.Frustum` at different taper ratios) reused
+across multiple Alien/Human elements rather than authoring bespoke
+meshes per spike/tower.
+
+**A deliberate faction-differentiating choice in the lighting itself,
+not just materials:** Doctor's glow tubes/cores pulse on a real Light +
+`EerieChamberGlow` (slow, eerie, dual-sine -- same technique the Big
+Brain jar's own bottom glow uses); Alien's energy sacs/psychic core
+pulse the same way but in purple; Human's illuminated windows/command
+core deliberately do NOT pulse at all (`HumanBlueLightMat`, steady) --
+"lighting should be clean and functional" is read as a genuine
+per-faction signal, not just a color swap: a steady light reads as more
+"precise" than a wavering one.
+
+**No custom static rotations anywhere** (a deliberate, stated scope
+choice): every existing per-kind shape in this file is axis-aligned
+primitive placement with zero `transform.rotation` calls; leaning
+buttresses, tilted radar dishes, angled crane arms etc. were all
+simplified to upright/axis-aligned equivalents specifically because
+this environment has no Unity Editor to render-verify a rotation
+computed by hand -- SlowSpin's own runtime Y-axis spin is the one
+motion exception, and it's incremental/relative, not a static pose that
+could be silently wrong from frame one.
+
+**A real geometry bug found and fixed via numeric verification, not
+assumed correct:** the Alien Control Centre's original strut-to-crystal
+attachment point used the crystal's own exact bottom tip
+(`crystalCenter - up*(crystalH*0.5)`), which -- checked numerically
+against the actual Landmark-tier numbers, not eyeballed -- sits
+slightly BELOW the roofline the strut is meant to reach up from
+(`crystalH` is only 1.05x the turret height it replaces, at the SAME
+vertical center), producing a NEGATIVE cylinder Y-scale (Unity renders
+that inverted/degenerate, a real bug, not a style nitpick). Fixed by
+attaching the strut 0.25 of `crystalH` above the crystal's true bottom
+instead of at the tip -- re-derived and confirmed the resulting strut
+length (`turretH * (0.5 - crystalH/turretH * 0.25)`) stays positive for
+any `crystalH` up to 2x `turretH`, then checked it numerically positive
+across all four building tiers (Small through Landmark), not just the
+Landmark tier Hq actually renders at.
+
+**Also discovered while researching (documented, not silently
+"fixed"):** `Factory` currently renders at the Large visual-scale
+bucket `(15,10,15)`, not the Medium `(13,7,13)` its own
+`BuildingDef.cs` comment claims -- `FullScaleFor`'s 600/1500/3000
+`MaxHp` thresholds predate a since-landed ~5x building-HP rebalance, so
+`MediumHp=2000` now exceeds the "Large" cutoff. All six new methods were
+sized against the REAL rendered scale (15,10,15)/(18,14,18), confirmed
+via the same research pass rather than trusting the stale comment; the
+tier-table/comment mismatch itself is out of scope for this change and
+left exactly as found.
+
+**Verified for real, not assumed:** every new/changed file (BaseDresser.cs,
+SimBridge.cs, PbrTextureAtlas.cs, PropLibrary.cs, SlowSpin.cs, Bob.cs,
+ScrollingTexture.cs, TeslaArc.cs) compiles clean against the real
+`MadDr.MatchCore.dll` via the scratch flightcheck harness (confirmed
+zero errors trace to any of them, same filter-by-source-file check
+established earlier in this log); several derived-geometry values were
+checked numerically across all four building tiers rather than only the
+tier used while designing them.

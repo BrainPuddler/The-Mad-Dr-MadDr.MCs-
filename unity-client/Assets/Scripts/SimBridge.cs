@@ -149,6 +149,25 @@ public class SimBridge : MonoBehaviour
         return p?.Mana ?? 0;
     }
 
+    /// <summary>2026-08 (per-faction Factory/Control Centre visual
+    /// treatment): the accessor BaseDresser.OwnerBaseColor's own doc
+    /// comment already flagged as missing -- "SimBridge has no player-
+    /// faction accessor yet," forcing that method to approximate faction
+    /// from PLAYER INDEX instead. match-core already tracks each
+    /// player's real FactionId (PlayerState.Faction, set once at
+    /// StartMatch and never reassigned) -- this is a pure passthrough,
+    /// no match-core changes needed. `Player(int)` has no bounds check of
+    /// its own (`_players[index]`, straight array indexing), so the range
+    /// guard lives here rather than risking an IndexOutOfRangeException
+    /// from a stale/bad index; falls back to FactionId.Mixed (this
+    /// project's own established "don't guess a specific faction's look"
+    /// bucket) rather than a made-up default.</summary>
+    public FactionId PlayerFaction(int playerIndex)
+    {
+        if (_match == null || playerIndex < 0 || playerIndex >= _match.PlayerCount) return FactionId.Mixed;
+        return _match.Player(playerIndex).Faction;
+    }
+
     /// <summary>Live emitter count, 0 if no match is running -- iterate
     /// with <see cref="EmitterAt"/> for a capture-progress HUD.</summary>
     public int EmitterCount => _match?.EmitterCount ?? 0;

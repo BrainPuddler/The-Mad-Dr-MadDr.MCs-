@@ -67,8 +67,10 @@ public class BaseDresser : MonoBehaviour
     public RuntimeCityBuilder builder;
 
     private static Material _scaffoldMat;
-    private static readonly Dictionary<int, Material> SolidMatsByOwner = new Dictionary<int, Material>();
-    private static readonly Dictionary<int, Material> DamagedMatsByOwner = new Dictionary<int, Material>();
+    // 2026-08: keyed by FactionId, not player index -- see OwnerBaseColor's
+    // own doc comment for why the old per-slot keying was a real gap.
+    private static readonly Dictionary<FactionId, Material> SolidMatsByOwner = new Dictionary<FactionId, Material>();
+    private static readonly Dictionary<FactionId, Material> DamagedMatsByOwner = new Dictionary<FactionId, Material>();
     // 2026-08 (Big Brain jar "Major Improvement"): same cache-by-key
     // idiom RoadDresser.cs/BuildingDresser.cs already each keep their own
     // private copy of -- this file didn't need one until now.
@@ -155,10 +157,10 @@ public class BaseDresser : MonoBehaviour
                 root = new GameObject("Building_" + b.Kind + "_" + b.EntityId);
                 root.transform.SetParent(transform, false);
                 root.transform.position = new Vector3(hexWorld.x, groundY, hexWorld.z);
-                BuildCompleteShape(root, b.Kind, fullScale);
+                BuildCompleteShape(root, b.Kind, fullScale, b.PlayerIndex);
                 _completed[b.EntityId] = root;
             }
-            TintShape(root, b.PlayerIndex, b.IsDamaged);
+            TintShape(root, PlayerFactionFor(b.PlayerIndex), b.IsDamaged);
             // 2026-08 (creator direction: "as soon as a building is in
             // combat we need to see the smoke and fire"): was `b.IsDamaged`
             // (<=50% HP) -- now any HP loss at all, so fire/smoke shows on
@@ -258,7 +260,7 @@ public class BaseDresser : MonoBehaviour
     // ---- per-kind silhouettes (all children of `root`, which is
     // already positioned at the hex's ground point) ----
 
-    private void BuildCompleteShape(GameObject root, BuildingKind kind, Vector3 fullScale)
+    private void BuildCompleteShape(GameObject root, BuildingKind kind, Vector3 fullScale, int playerIndex)
     {
         switch (kind)
         {
@@ -276,13 +278,13 @@ public class BaseDresser : MonoBehaviour
                 BuildWatchtowerShape(root, fullScale);
                 break;
             case BuildingKind.Factory:
-                BuildFactoryShape(root, fullScale);
+                BuildFactoryShape(root, fullScale, playerIndex);
                 break;
             case BuildingKind.Defense:
                 BuildBunkerShape(root, fullScale);
                 break;
             case BuildingKind.Hq:
-                BuildHqShape(root, fullScale);
+                BuildHqShape(root, fullScale, playerIndex);
                 break;
             case BuildingKind.BigBrain:
                 BuildBigBrainShape(root, fullScale);
@@ -291,6 +293,23 @@ public class BaseDresser : MonoBehaviour
                 BuildGenericBoxShape(root, fullScale);
                 break;
         }
+    }
+
+    /// <summary>2026-08 ("apply the same level of visual refinement...
+    /// to the Factory and Control Centre for every race"): the ONE
+    /// accessor this whole pass needed that didn't exist yet --
+    /// SimBridge.PlayerFaction (a thin passthrough to match-core's own
+    /// already-tracked PlayerState.Faction, see that method's own doc
+    /// comment). Falls back to FactionId.Mixed -- this project's own
+    /// established "don't guess a specific faction's look" bucket, same
+    /// one PlayerFaction itself falls back to -- if `bridge` is somehow
+    /// unset, so a null reference here can never crash building
+    /// dressing; Mixed-faction buildings (and this defensive fallback)
+    /// render the ORIGINAL, undecorated shape rather than a bespoke
+    /// fourth architectural style nobody asked for.</summary>
+    private FactionId PlayerFactionFor(int playerIndex)
+    {
+        return bridge != null ? bridge.PlayerFaction(playerIndex) : FactionId.Mixed;
     }
 
     /// <summary>BloodStorage/FuelStorage -- a real storage vessel: a
@@ -352,8 +371,30 @@ public class BaseDresser : MonoBehaviour
     }
 
     /// <summary>Factory -- a large body plus a tall thin smokestack
-    /// offset to one corner, the classic factory silhouette.</summary>
-    private void BuildFactoryShape(GameObject root, Vector3 fullScale)
+    /// offset to one corner, the classic factory silhouette. This
+    /// silhouette itself is UNCHANGED by the 2026-08 per-faction pass
+    /// (creator direction: "do not change... overall silhouette... do
+    /// not redesign the buildings from scratch") -- every faction's
+    /// treatment below dresses this exact body+offset-element massing
+    /// rather than replacing it, so "instantly recognizable... even
+    /// before noticing color" has to come from material/detail
+    /// differences, not from three different footprints.</summary>
+    private void BuildFactoryShape(GameObject root, Vector3 fullScale, int playerIndex)
+    {
+        switch (PlayerFactionFor(playerIndex))
+        {
+            case FactionId.MadDoctor: BuildDoctorFactory(root, fullScale); return;
+            case FactionId.AlienHive: BuildAlienFactory(root, fullScale); return;
+            case FactionId.HumanArmy: BuildHumanFactory(root, fullScale); return;
+            default: BuildGenericFactoryShape(root, fullScale); return;   // Mixed / unrecognized -- see PlayerFactionFor's own comment
+        }
+    }
+
+    /// <summary>The pre-2026-08 plain shape, kept verbatim as the Mixed-
+    /// faction/fallback path -- no bespoke fourth architectural style was
+    /// asked for, so Mixed keeps reading exactly as it always has rather
+    /// than guessing at one.</summary>
+    private void BuildGenericFactoryShape(GameObject root, Vector3 fullScale)
     {
         var bodyH = fullScale.y * 0.65f;
         builder.SpawnPrim(PrimitiveType.Cube, root.transform.position + Vector3.up * (bodyH * 0.5f),
@@ -378,8 +419,24 @@ public class BaseDresser : MonoBehaviour
 
     /// <summary>Hq -- a tall keep plus a smaller turret perched off-center
     /// on top, the biggest silhouette in the roster (Landmark-tier scale
-    /// already makes it the largest footprint too).</summary>
-    private void BuildHqShape(GameObject root, Vector3 fullScale)
+    /// already makes it the largest footprint too). Same "silhouette
+    /// unchanged, dressed differently per faction" contract as
+    /// BuildFactoryShape above.</summary>
+    private void BuildHqShape(GameObject root, Vector3 fullScale, int playerIndex)
+    {
+        switch (PlayerFactionFor(playerIndex))
+        {
+            case FactionId.MadDoctor: BuildDoctorControlCentre(root, fullScale); return;
+            case FactionId.AlienHive: BuildAlienControlCentre(root, fullScale); return;
+            case FactionId.HumanArmy: BuildHumanControlCentre(root, fullScale); return;
+            default: BuildGenericHqShape(root, fullScale); return;   // Mixed / unrecognized -- see PlayerFactionFor's own comment
+        }
+    }
+
+    /// <summary>The pre-2026-08 plain shape, kept verbatim as the Mixed-
+    /// faction/fallback path -- same reasoning as
+    /// BuildGenericFactoryShape above.</summary>
+    private void BuildGenericHqShape(GameObject root, Vector3 fullScale)
     {
         var bodyH = fullScale.y * 0.8f;
         builder.SpawnPrim(PrimitiveType.Cube, root.transform.position + Vector3.up * (bodyH * 0.5f),
@@ -388,6 +445,525 @@ public class BaseDresser : MonoBehaviour
         builder.SpawnPrim(PrimitiveType.Cube,
             root.transform.position + Vector3.right * (fullScale.x * 0.18f) + Vector3.up * (bodyH + turretH * 0.5f),
             new Vector3(fullScale.x * 0.3f, turretH, fullScale.z * 0.3f), Placeholder(), root.transform);
+    }
+
+    // ---- 2026-08 per-faction Factory/Control Centre treatments
+    // ("apply the same level of visual refinement and thematic
+    // storytelling used for the upgraded Big Brain Building to the
+    // Factory and Control Centre for every race") --------------------
+    //
+    // Shared design rule across all six methods below, worth stating
+    // once rather than in every method: the BODY (and, for Factory, the
+    // chimney-slot cylinder / for Hq, the turret cube) stays a DIRECT
+    // child of `root` using Placeholder() -- exactly like every other
+    // kind in this file -- so TintShape's existing owner/faction-color
+    // sweep keeps working on it completely unchanged (this is what
+    // keeps "whose building is this" reading correctly at a glance,
+    // silhouette and color both unchanged from before). Every
+    // faction-flavored material below (brass, iron, crystal, aluminum,
+    // carbon fiber, glass, glow) goes on ADDITIONAL detail geometry
+    // parented under a per-building "Trim" holder transform instead --
+    // a GRANDCHILD of root, not a direct child, so TintShape's own
+    // single-level GetChild sweep never reaches it and overwrites it
+    // with the flat owner color. This is the exact same jarHolder/
+    // pedestalTrim split BuildBigBrainShape/BuildPedestal already
+    // established; nothing new here, just applied to two more kinds.
+
+    /// <summary>Mad Doctor faction Factory -- "massive industrial
+    /// laboratory": dark brick body (owner-tinted, unchanged shape) with
+    /// a cast-iron chimney banded in brass, stone corner pilasters,
+    /// gothic window voids, a brass pressure tank, copper pipework, a
+    /// slowly spinning flywheel on a small housing, and a softly
+    /// pulsing green glass tube (a real Light, not just an emissive
+    /// material -- see EerieChamberGlow.cs's own header for why).</summary>
+    private void BuildDoctorFactory(GameObject root, Vector3 fullScale)
+    {
+        var origin = root.transform.position;
+        var bodyH = fullScale.y * 0.65f;
+        var bodyW = fullScale.x * 0.9f;
+        var bodyD = fullScale.z * 0.9f;
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.5f),
+            new Vector3(bodyW, bodyH, bodyD), Placeholder(), root.transform);
+
+        var stackRadius = fullScale.x * 0.09f;
+        var stackXZ = new Vector3(fullScale.x * 0.32f, 0f, fullScale.z * 0.32f);
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + stackXZ + Vector3.up * (fullScale.y * 0.5f),
+            new Vector3(stackRadius * 2f, fullScale.y * 0.5f, stackRadius * 2f), Placeholder(), root.transform);
+
+        var trim = new GameObject("FactoryTrim").transform;
+        trim.SetParent(root.transform, false);
+        var brassMat = Brass();
+
+        for (var i = 1; i <= 3; i++)
+        {
+            var bandY = fullScale.y * (i / 4f);
+            builder.SpawnPrim(PrimitiveType.Cylinder, origin + stackXZ + Vector3.up * bandY,
+                new Vector3(stackRadius * 2.3f, fullScale.y * 0.018f, stackRadius * 2.3f), brassMat, trim);
+        }
+
+        var stoneMat = DoctorStone();
+        var pilasterH = bodyH * 0.92f;
+        var pilasterW = fullScale.x * 0.07f;
+        float[] signs = { 1f, -1f };
+        foreach (var cx in signs)
+        foreach (var cz in signs)
+        {
+            builder.SpawnPrim(PrimitiveType.Cube,
+                origin + new Vector3(cx * (bodyW * 0.5f - pilasterW * 0.5f), pilasterH * 0.5f, cz * (bodyD * 0.5f - pilasterW * 0.5f)),
+                new Vector3(pilasterW, pilasterH, pilasterW), stoneMat, trim);
+        }
+
+        var windowMat = PedestalWindowMat();
+        var windowH = bodyH * 0.5f;
+        var windowW = fullScale.x * 0.08f;
+        float[] windowXFrac = { -0.28f, 0f, 0.28f };
+        foreach (var xf in windowXFrac)
+        {
+            builder.SpawnPrim(PrimitiveType.Cube,
+                origin + new Vector3(xf * bodyW, bodyH * 0.5f, bodyD * 0.5f * 0.99f),
+                new Vector3(windowW, windowH, fullScale.x * 0.02f), windowMat, trim);
+        }
+
+        var tankRadius = fullScale.x * 0.11f;
+        var tankH = bodyH * 0.7f;
+        var tankCenter = origin + Vector3.right * (bodyW * 0.5f + tankRadius * 0.9f);
+        builder.SpawnPrim(PrimitiveType.Cylinder, tankCenter + Vector3.up * (tankH * 0.5f),
+            new Vector3(tankRadius * 2f, tankH * 0.5f, tankRadius * 2f), brassMat, trim);
+        builder.SpawnPrim(PrimitiveType.Sphere, tankCenter + Vector3.up * (tankH * 0.94f),
+            Vector3.one * (tankRadius * 1.6f), brassMat, trim);
+
+        var copperMat = DoctorCopper();
+        var pipeRadius = fullScale.x * 0.018f;
+        float[] pipeXFrac = { -0.2f, 0.2f };
+        foreach (var xf in pipeXFrac)
+        {
+            builder.SpawnPrim(PrimitiveType.Cylinder,
+                origin + new Vector3(xf * bodyW, bodyH * 0.5f, -bodyD * 0.5f - pipeRadius * 1.5f),
+                new Vector3(pipeRadius * 2f, bodyH * 0.5f, pipeRadius * 2f), copperMat, trim);
+        }
+
+        var ironMat = DoctorIron();
+        var housingSize = fullScale.x * 0.22f;
+        var housingCenter = origin + Vector3.forward * (bodyD * 0.5f + housingSize * 0.4f) + Vector3.up * (housingSize * 0.5f);
+        builder.SpawnPrim(PrimitiveType.Cube, housingCenter, Vector3.one * housingSize, ironMat, trim);
+        var wheelD = housingSize * 0.85f;
+        var wheelCenter = housingCenter + Vector3.up * (housingSize * 0.5f + 0.01f);
+        var wheelGo = builder.SpawnPrim(PrimitiveType.Cylinder, wheelCenter,
+            new Vector3(wheelD, housingSize * 0.06f, wheelD), ironMat, trim);
+        wheelGo.AddComponent<SlowSpin>().degreesPerSecond = 25f;
+        SpawnRivets(wheelCenter, wheelD * 0.42f, housingSize * 0.06f, Steel(), trim, 8, 401);
+
+        var tubeCenter = origin + Vector3.left * (bodyW * 0.5f + fullScale.x * 0.03f) + Vector3.up * (bodyH * 0.55f);
+        var glowGo = builder.SpawnPrim(PrimitiveType.Cylinder, tubeCenter,
+            new Vector3(fullScale.x * 0.05f, bodyH * 0.35f, fullScale.x * 0.05f), DoctorGlowMat(), trim);
+        SpawnPulseLight(trim, tubeCenter, glowGo, new Color(0.3f, 1f, 0.5f), new Color(0.3f, 1.1f, 0.5f) * 1.2f, fullScale.x * 0.8f, 2.6f);
+    }
+
+    /// <summary>Mad Doctor faction Control Centre -- "headquarters of a
+    /// brilliant but unstable scientist": dark brick keep (owner-tinted,
+    /// unchanged shape) topped by a stone turret with an iron observatory
+    /// dome, a brass Tesla rod arcing to the dome (a real LineRenderer,
+    /// see TeslaArc.cs), mechanical antenna rods, corner pilasters, and
+    /// an illuminated green core near the base.</summary>
+    private void BuildDoctorControlCentre(GameObject root, Vector3 fullScale)
+    {
+        var origin = root.transform.position;
+        var bodyH = fullScale.y * 0.8f;
+        var bodyW = fullScale.x * 0.75f;
+        var bodyD = fullScale.z * 0.75f;
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.5f),
+            new Vector3(bodyW, bodyH, bodyD), Placeholder(), root.transform);
+
+        var turretH = fullScale.y * 0.35f;
+        var turretSize = fullScale.x * 0.3f;
+        var turretCenter = origin + Vector3.right * (fullScale.x * 0.18f) + Vector3.up * (bodyH + turretH * 0.5f);
+        builder.SpawnPrim(PrimitiveType.Cube, turretCenter,
+            new Vector3(turretSize, turretH, turretSize), Placeholder(), root.transform);
+
+        var trim = new GameObject("HqTrim").transform;
+        trim.SetParent(root.transform, false);
+        var ironMat = DoctorIron();
+        var stoneMat = DoctorStone();
+        var brassMat = Brass();
+
+        var domeTop = turretCenter + Vector3.up * (turretH * 0.5f);
+        var domeRadius = turretSize * 0.55f;
+        builder.SpawnPrim(PrimitiveType.Sphere, domeTop + Vector3.up * (domeRadius * 0.3f),
+            new Vector3(domeRadius * 2f, domeRadius * 1.3f, domeRadius * 2f), ironMat, trim);
+
+        // Tesla rod + a second anchor on the dome surface -- a real
+        // jittering arc between them (TeslaArc.cs).
+        var rodBase = domeTop + Vector3.up * (domeRadius * 0.9f);
+        var rodTip = rodBase + Vector3.up * (turretH * 0.5f);
+        builder.SpawnPrim(PrimitiveType.Cylinder, (rodBase + rodTip) * 0.5f,
+            new Vector3(fullScale.x * 0.012f, (rodTip.y - rodBase.y) * 0.5f, fullScale.x * 0.012f), brassMat, trim);
+        var arcAnchor = domeTop + new Vector3(domeRadius * 0.7f, domeRadius * 0.2f, 0f);
+        builder.SpawnPrim(PrimitiveType.Sphere, arcAnchor, Vector3.one * (fullScale.x * 0.02f), brassMat, trim);
+        SpawnArc(trim, rodTip, arcAnchor, DoctorGlowMat(), new Color(0.55f, 1f, 0.6f, 0.85f), fullScale.x * 0.015f);
+
+        // mechanical antenna rods around the turret roofline
+        var antennaCount = 4;
+        var antennaR = turretSize * 0.42f;
+        for (var i = 0; i < antennaCount; i++)
+        {
+            var angleDeg = i / (float)antennaCount * 360f;
+            var rad = angleDeg * Mathf.Deg2Rad;
+            var basePos = turretCenter + Vector3.up * (turretH * 0.5f) + new Vector3(Mathf.Sin(rad) * antennaR, 0f, Mathf.Cos(rad) * antennaR);
+            var tipPos = basePos + Vector3.up * (fullScale.y * 0.06f);
+            builder.SpawnPrim(PrimitiveType.Cylinder, (basePos + tipPos) * 0.5f,
+                new Vector3(fullScale.x * 0.01f, (tipPos.y - basePos.y) * 0.5f, fullScale.x * 0.01f), brassMat, trim);
+            builder.SpawnPrim(PrimitiveType.Sphere, tipPos, Vector3.one * (fullScale.x * 0.018f), brassMat, trim);
+        }
+
+        var pilasterH = bodyH * 0.92f;
+        var pilasterW = fullScale.x * 0.06f;
+        float[] signs = { 1f, -1f };
+        foreach (var cx in signs)
+        foreach (var cz in signs)
+        {
+            builder.SpawnPrim(PrimitiveType.Cube,
+                origin + new Vector3(cx * (bodyW * 0.5f - pilasterW * 0.5f), pilasterH * 0.5f, cz * (bodyD * 0.5f - pilasterW * 0.5f)),
+                new Vector3(pilasterW, pilasterH, pilasterW), stoneMat, trim);
+        }
+
+        var windowMat = PedestalWindowMat();
+        var windowH = bodyH * 0.35f;
+        var windowW = fullScale.x * 0.07f;
+        float[] windowXFrac = { -0.2f, 0.2f };
+        foreach (var xf in windowXFrac)
+        {
+            builder.SpawnPrim(PrimitiveType.Cube,
+                origin + new Vector3(xf * bodyW, bodyH * 0.55f, bodyD * 0.5f * 0.99f),
+                new Vector3(windowW, windowH, fullScale.x * 0.02f), windowMat, trim);
+        }
+
+        var coreCenter = origin + Vector3.up * (bodyH * 0.22f) + Vector3.forward * (bodyD * 0.5f * 0.98f);
+        var coreGo = builder.SpawnPrim(PrimitiveType.Sphere, coreCenter, Vector3.one * (fullScale.x * 0.09f), DoctorGlowMat(), trim);
+        SpawnPulseLight(trim, coreCenter, coreGo, new Color(0.3f, 1f, 0.5f), new Color(0.3f, 1.1f, 0.5f) * 1.4f, fullScale.x * 1.1f, 3.6f);
+    }
+
+    /// <summary>Alien faction Factory -- "a living energy organism":
+    /// translucent membrane hull DETAIL (the owner-tinted body cube
+    /// underneath stays the same shape/silhouette; the organic read
+    /// comes from bulging energy sacs, ribs, and a crystal growth
+    /// replacing the chimney slot), no visible bolts/rivets anywhere
+    /// (per the brief: "avoid visible bolts and human engineering"),
+    /// gentle hovering (Bob.cs) and slow rotation (SlowSpin.cs) instead
+    /// of anything mechanical-looking.</summary>
+    private void BuildAlienFactory(GameObject root, Vector3 fullScale)
+    {
+        var origin = root.transform.position;
+        var bodyH = fullScale.y * 0.65f;
+        var bodyW = fullScale.x * 0.9f;
+        var bodyD = fullScale.z * 0.9f;
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.5f),
+            new Vector3(bodyW, bodyH, bodyD), Placeholder(), root.transform);
+
+        var trim = new GameObject("FactoryTrim").transform;
+        trim.SetParent(root.transform, false);
+        var crystalMat = AlienCrystalMat();
+        var membraneMat = AlienMembraneMat();
+
+        // crystal growth replacing the chimney slot -- same offset/height
+        // envelope the original silhouette used there, reshaped.
+        var spikeXZ = new Vector3(fullScale.x * 0.32f, 0f, fullScale.z * 0.32f);
+        var spikeH = fullScale.y * 0.9f;
+        var spikeGo = PropLibrary.Spawn(builder, "alien-crystal-spike", PrimitiveType.Cylinder,
+            origin + spikeXZ + Vector3.up * (spikeH * 0.5f),
+            new Vector3(fullScale.x * 0.22f, spikeH, fullScale.x * 0.22f), crystalMat, trim);
+        spikeGo.AddComponent<SlowSpin>().degreesPerSecond = 8f;
+
+        // pulsing energy sacs bulging off two faces
+        var sacPositions = new[]
+        {
+            origin + Vector3.right * (bodyW * 0.5f * 0.9f) + Vector3.up * (bodyH * 0.6f),
+            origin + Vector3.left * (bodyW * 0.5f * 0.9f) + Vector3.up * (bodyH * 0.4f),
+            origin + Vector3.forward * (bodyD * 0.5f * 0.9f) + Vector3.up * (bodyH * 0.5f),
+        };
+        var sacRadius = fullScale.x * 0.14f;
+        for (var i = 0; i < sacPositions.Length; i++)
+        {
+            var sacGo = builder.SpawnPrim(PrimitiveType.Sphere, sacPositions[i], Vector3.one * (sacRadius * 2f), membraneMat, trim);
+            sacGo.AddComponent<Bob>().amplitude = sacRadius * 0.25f;
+            if (i == 0)
+                SpawnPulseLight(trim, sacPositions[i], sacGo, new Color(0.6f, 0.3f, 1f), new Color(0.6f, 0.3f, 1f) * 1.3f, fullScale.x * 0.7f, 3.1f);
+        }
+
+        // organic ribs -- thin vertical crystal struts around the body
+        var ribCount = 6;
+        var ribR = Mathf.Max(bodyW, bodyD) * 0.52f;
+        for (var i = 0; i < ribCount; i++)
+        {
+            var angleDeg = i / (float)ribCount * 360f;
+            var rad = angleDeg * Mathf.Deg2Rad;
+            var pos = origin + new Vector3(Mathf.Sin(rad) * ribR, bodyH * 0.5f, Mathf.Cos(rad) * ribR);
+            builder.SpawnPrim(PrimitiveType.Cylinder, pos,
+                new Vector3(fullScale.x * 0.025f, bodyH * 0.48f, fullScale.x * 0.025f), crystalMat, trim);
+        }
+
+        // hovering crystal growths near the roofline
+        for (var i = 0; i < 3; i++)
+        {
+            var angleDeg = (i / 3f) * 360f + 40f;
+            var rad = angleDeg * Mathf.Deg2Rad;
+            var r = Mathf.Min(bodyW, bodyD) * 0.3f;
+            var pos = origin + new Vector3(Mathf.Sin(rad) * r, bodyH + fullScale.x * 0.1f, Mathf.Cos(rad) * r);
+            var growthH = fullScale.x * 0.28f;
+            var growthGo = PropLibrary.Spawn(builder, "alien-crystal-spike", PrimitiveType.Cylinder, pos,
+                new Vector3(fullScale.x * 0.08f, growthH, fullScale.x * 0.08f), crystalMat, trim);
+            growthGo.AddComponent<Bob>().amplitude = fullScale.x * 0.04f;
+        }
+    }
+
+    /// <summary>Alien faction Control Centre -- "the hive mind": a
+    /// massive floating central crystal (replacing the turret slot,
+    /// same offset/height envelope) with orbiting energy rings, curved
+    /// support struts, crystalline antennae, and a pulsing psychic core.
+    /// No rivets/bolts anywhere, matching the Factory's own restraint.</summary>
+    private void BuildAlienControlCentre(GameObject root, Vector3 fullScale)
+    {
+        var origin = root.transform.position;
+        var bodyH = fullScale.y * 0.8f;
+        var bodyW = fullScale.x * 0.75f;
+        var bodyD = fullScale.z * 0.75f;
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.5f),
+            new Vector3(bodyW, bodyH, bodyD), Placeholder(), root.transform);
+
+        var trim = new GameObject("HqTrim").transform;
+        trim.SetParent(root.transform, false);
+        var crystalMat = AlienCrystalMat();
+
+        var turretH = fullScale.y * 0.35f;
+        var crystalCenter = origin + Vector3.right * (fullScale.x * 0.18f) + Vector3.up * (bodyH + turretH * 0.5f);
+        var crystalH = turretH * 1.05f;
+        var crystalGo = PropLibrary.Spawn(builder, "alien-crystal-spike", PrimitiveType.Cylinder, crystalCenter,
+            new Vector3(fullScale.x * 0.26f, crystalH, fullScale.x * 0.26f), crystalMat, trim);
+        crystalGo.AddComponent<Bob>().amplitude = fullScale.x * 0.05f;
+        crystalGo.AddComponent<SlowSpin>().degreesPerSecond = 6f;
+
+        // Curved supports, approximated as vertical struts from the roof
+        // up to a point PARTWAY up the crystal (0.25 of its own height
+        // above center-minus-half, not the crystal's exact bottom tip).
+        // Checked numerically before picking that fraction: the crystal
+        // is only slightly taller than the turret slot it replaces
+        // (crystalH = turretH * 1.05) at the SAME vertical center the
+        // turret used, so its own bottom tip sits barely BELOW the
+        // roofline (bodyH) -- attaching a strut there would compute a
+        // negative height (Unity Cylinder with a negative Y-scale
+        // renders inverted/degenerate, not just "wrong looking," a real
+        // bug, not a style nitpick). Attaching 0.25 of crystalH above
+        // the true bottom instead makes the strut length exactly
+        // `turretH * (0.5 - crystalH/turretH * 0.25)`, which stays
+        // positive for any crystalH up to 2x turretH -- comfortably
+        // covers the actual 1.05x used here with real margin, not by
+        // coincidence.
+        var strutAttachY = crystalCenter.y - crystalH * 0.25f;
+        float[] strutXFrac = { -0.12f, 0.12f };
+        foreach (var xf in strutXFrac)
+        {
+            var top = new Vector3(crystalCenter.x, strutAttachY, crystalCenter.z);
+            var basePos = origin + new Vector3(fullScale.x * 0.18f + xf * fullScale.x, bodyH, 0f);
+            builder.SpawnPrim(PrimitiveType.Cylinder, (top + basePos) * 0.5f,
+                new Vector3(fullScale.x * 0.018f, (top.y - basePos.y) * 0.5f, fullScale.x * 0.018f), crystalMat, trim);
+        }
+
+        // two orbiting energy rings at different heights, spinning opposite directions
+        var ringRadii = new[] { fullScale.x * 0.42f, fullScale.x * 0.3f };
+        var ringHeights = new[] { crystalCenter.y - crystalH * 0.1f, crystalCenter.y + crystalH * 0.25f };
+        var ringSpeeds = new[] { 14f, -10f };
+        for (var i = 0; i < 2; i++)
+        {
+            var ringGo = builder.SpawnPrim(PrimitiveType.Cylinder,
+                new Vector3(crystalCenter.x, ringHeights[i], crystalCenter.z),
+                new Vector3(ringRadii[i] * 2f, fullScale.x * 0.012f, ringRadii[i] * 2f), crystalMat, trim);
+            ringGo.AddComponent<SlowSpin>().degreesPerSecond = ringSpeeds[i];
+        }
+
+        // crystalline antennae around the roofline
+        var antennaCount = 5;
+        var antennaR = Mathf.Min(bodyW, bodyD) * 0.4f;
+        for (var i = 0; i < antennaCount; i++)
+        {
+            var angleDeg = i / (float)antennaCount * 360f;
+            var rad = angleDeg * Mathf.Deg2Rad;
+            var pos = origin + new Vector3(Mathf.Sin(rad) * antennaR, bodyH, Mathf.Cos(rad) * antennaR);
+            var spikeH = fullScale.x * 0.16f;
+            PropLibrary.Spawn(builder, "alien-crystal-spike", PrimitiveType.Cylinder, pos + Vector3.up * (spikeH * 0.5f),
+                new Vector3(fullScale.x * 0.05f, spikeH, fullScale.x * 0.05f), crystalMat, trim);
+        }
+
+        // pulsing psychic core at the crystal's own heart
+        var coreGo = builder.SpawnPrim(PrimitiveType.Sphere, crystalCenter, Vector3.one * (fullScale.x * 0.1f), AlienGlowMat(), trim);
+        SpawnPulseLight(trim, crystalCenter, coreGo, new Color(0.62f, 0.3f, 1f), new Color(0.62f, 0.3f, 1f) * 1.5f, fullScale.x * 1.2f, 4.2f);
+    }
+
+    /// <summary>Human Alliance faction Factory -- "advanced automated
+    /// manufacturing": aluminum body detail with a carbon-fiber
+    /// conveyor strip (a real scrolling-texture belt, ScrollingTexture.cs
+    /// -- zero extra geometry), a banded aluminum cooling tower
+    /// replacing the chimney slot, a simple loading crane, and a steady
+    /// (non-pulsing -- see HumanBlueLightMat's own comment) illuminated
+    /// maintenance-bay window. Deliberately NO rivets anywhere ("avoid
+    /// unnecessary ornamentation"), the one faction here that skips
+    /// them entirely.</summary>
+    private void BuildHumanFactory(GameObject root, Vector3 fullScale)
+    {
+        var origin = root.transform.position;
+        var bodyH = fullScale.y * 0.65f;
+        var bodyW = fullScale.x * 0.9f;
+        var bodyD = fullScale.z * 0.9f;
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.5f),
+            new Vector3(bodyW, bodyH, bodyD), Placeholder(), root.transform);
+
+        var stackRadius = fullScale.x * 0.09f;
+        var stackXZ = new Vector3(fullScale.x * 0.32f, 0f, fullScale.z * 0.32f);
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + stackXZ + Vector3.up * (fullScale.y * 0.5f),
+            new Vector3(stackRadius * 2f, fullScale.y * 0.5f, stackRadius * 2f), Placeholder(), root.transform);
+
+        var trim = new GameObject("FactoryTrim").transform;
+        trim.SetParent(root.transform, false);
+        var aluminumMat = HumanAluminum();
+        var carbonMat = HumanCarbon();
+
+        // cooling-tower banding around the chimney-slot cylinder
+        for (var i = 1; i <= 2; i++)
+        {
+            var bandY = fullScale.y * (i / 3f);
+            builder.SpawnPrim(PrimitiveType.Cylinder, origin + stackXZ + Vector3.up * bandY,
+                new Vector3(stackRadius * 2.25f, fullScale.y * 0.02f, stackRadius * 2.25f), aluminumMat, trim);
+        }
+
+        // conveyor strip along one side, scrolling
+        var conveyorW = bodyD * 0.7f;
+        var conveyorGo = builder.SpawnPrim(PrimitiveType.Cube,
+            origin + Vector3.right * (bodyW * 0.5f + fullScale.x * 0.04f) + Vector3.up * (fullScale.x * 0.06f),
+            new Vector3(fullScale.x * 0.08f, fullScale.x * 0.05f, conveyorW), carbonMat, trim);
+        conveyorGo.AddComponent<ScrollingTexture>().speed = new Vector2(0f, 0.6f);
+
+        // cooling towers near a corner
+        float[] towerXFrac = { -0.32f };
+        foreach (var xf in towerXFrac)
+        {
+            var towerH = bodyH * 0.55f;
+            PropLibrary.Spawn(builder, "human-cooling-tower", PrimitiveType.Cylinder,
+                origin + new Vector3(xf * bodyW, towerH * 0.5f, -bodyD * 0.5f - fullScale.x * 0.08f),
+                new Vector3(fullScale.x * 0.16f, towerH, fullScale.x * 0.16f), aluminumMat, trim);
+        }
+
+        // loading crane -- a post + a horizontal arm, both axis-aligned
+        var craneH = bodyH * 1.15f;
+        var cranePos = origin + Vector3.left * (bodyW * 0.5f + fullScale.x * 0.05f);
+        builder.SpawnPrim(PrimitiveType.Cube, cranePos + Vector3.up * (craneH * 0.5f),
+            new Vector3(fullScale.x * 0.04f, craneH, fullScale.x * 0.04f), aluminumMat, trim);
+        builder.SpawnPrim(PrimitiveType.Cube, cranePos + Vector3.up * craneH + Vector3.forward * (fullScale.z * 0.15f),
+            new Vector3(fullScale.x * 0.04f, fullScale.x * 0.04f, fullScale.z * 0.3f), aluminumMat, trim);
+
+        // illuminated maintenance-bay window -- steady, not pulsing
+        var windowH = bodyH * 0.4f;
+        var windowW = fullScale.x * 0.22f;
+        builder.SpawnPrim(PrimitiveType.Cube,
+            origin + Vector3.up * (bodyH * 0.5f) + Vector3.forward * (bodyD * 0.5f * 0.99f),
+            new Vector3(windowW, windowH, fullScale.x * 0.02f), HumanBlueLightMat(), trim);
+
+        // roof ventilation
+        float[] ventXFrac = { -0.15f, 0.15f };
+        foreach (var xf in ventXFrac)
+        {
+            builder.SpawnPrim(PrimitiveType.Cylinder,
+                origin + new Vector3(xf * bodyW, bodyH + fullScale.x * 0.03f, 0f),
+                new Vector3(fullScale.x * 0.05f, fullScale.x * 0.03f, fullScale.x * 0.05f), aluminumMat, trim);
+        }
+    }
+
+    /// <summary>Human Alliance faction Control Centre -- "modern orbital
+    /// command headquarters": aluminum keep with a slowly rotating
+    /// communication dish on the reinforced tower (SlowSpin.cs -- a safe
+    /// vertical spin, no tilted mount, so it reads as a radar sweep
+    /// without needing any static rotation this environment has no
+    /// Editor to render-verify), sensor towers, an antenna cluster, and
+    /// a steady illuminated blue observation-deck band.</summary>
+    private void BuildHumanControlCentre(GameObject root, Vector3 fullScale)
+    {
+        var origin = root.transform.position;
+        var bodyH = fullScale.y * 0.8f;
+        var bodyW = fullScale.x * 0.75f;
+        var bodyD = fullScale.z * 0.75f;
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.5f),
+            new Vector3(bodyW, bodyH, bodyD), Placeholder(), root.transform);
+
+        var turretH = fullScale.y * 0.35f;
+        var turretSize = fullScale.x * 0.3f;
+        var turretCenter = origin + Vector3.right * (fullScale.x * 0.18f) + Vector3.up * (bodyH + turretH * 0.5f);
+        builder.SpawnPrim(PrimitiveType.Cube, turretCenter,
+            new Vector3(turretSize, turretH, turretSize), Placeholder(), root.transform);
+
+        var trim = new GameObject("HqTrim").transform;
+        trim.SetParent(root.transform, false);
+        var aluminumMat = HumanAluminum();
+
+        // communication dish -- a shallow, wide, flat-facing-up disc
+        var dishR = turretSize * 0.6f;
+        var dishGo = builder.SpawnPrim(PrimitiveType.Cylinder, turretCenter + Vector3.up * (turretH * 0.5f + fullScale.x * 0.02f),
+            new Vector3(dishR * 2f, fullScale.x * 0.02f, dishR * 2f), aluminumMat, trim);
+        dishGo.AddComponent<SlowSpin>().degreesPerSecond = 18f;
+        builder.SpawnPrim(PrimitiveType.Cylinder, turretCenter + Vector3.up * (turretH * 0.5f + fullScale.x * 0.05f),
+            new Vector3(fullScale.x * 0.02f, fullScale.x * 0.03f, fullScale.x * 0.02f), aluminumMat, dishGo.transform);
+
+        // sensor towers around the roofline
+        var sensorCount = 3;
+        var sensorR = turretSize * 0.5f;
+        for (var i = 0; i < sensorCount; i++)
+        {
+            var angleDeg = i / (float)sensorCount * 360f + 60f;
+            var rad = angleDeg * Mathf.Deg2Rad;
+            var basePos = turretCenter + Vector3.up * (turretH * 0.5f) + new Vector3(Mathf.Sin(rad) * sensorR, 0f, Mathf.Cos(rad) * sensorR);
+            var h = fullScale.y * 0.05f;
+            builder.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (h * 0.5f),
+                new Vector3(fullScale.x * 0.012f, h * 0.5f, fullScale.x * 0.012f), aluminumMat, trim);
+            builder.SpawnPrim(PrimitiveType.Sphere, basePos + Vector3.up * h, Vector3.one * (fullScale.x * 0.018f), aluminumMat, trim);
+        }
+
+        // antenna cluster near the turret base
+        var antennaCount = 4;
+        var antennaR = fullScale.x * 0.04f;
+        for (var i = 0; i < antennaCount; i++)
+        {
+            var angleDeg = i / (float)antennaCount * 360f;
+            var rad = angleDeg * Mathf.Deg2Rad;
+            var basePos = turretCenter - Vector3.up * (turretH * 0.5f) + new Vector3(Mathf.Sin(rad) * antennaR, 0f, Mathf.Cos(rad) * antennaR);
+            var h = fullScale.y * 0.09f;
+            builder.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (h * 0.5f),
+                new Vector3(fullScale.x * 0.008f, h * 0.5f, fullScale.x * 0.008f), aluminumMat, trim);
+        }
+
+        // illuminated blue observation-deck band -- steady
+        var deckH = bodyH * 0.16f;
+        var deckMat = HumanBlueLightMat();
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.62f) + Vector3.forward * (bodyD * 0.5f * 0.99f),
+            new Vector3(bodyW * 0.6f, deckH, fullScale.x * 0.015f), deckMat, trim);
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.62f) + Vector3.right * (bodyW * 0.5f * 0.99f),
+            new Vector3(fullScale.x * 0.015f, deckH, bodyD * 0.6f), deckMat, trim);
+    }
+
+    /// <summary>Shared by every faction's pulsing-light detail (the
+    /// Doctor green tube/core, the Alien energy sac/psychic core) --
+    /// wires up a real Light + EerieChamberGlow the same way
+    /// BuildBigBrainShape's own bottom-glow does, so this isn't
+    /// reimplemented six times with slightly different boilerplate.
+    /// `glowGo` is the visible emissive source object (already spawned
+    /// by the caller); the Light itself is a new child of `parent`.</summary>
+    private void SpawnPulseLight(Transform parent, Vector3 worldPos, GameObject glowGo, Color lightColor, Color emissionPeak, float range, float intensity)
+    {
+        var lightGo = new GameObject("PulseLight");
+        lightGo.transform.SetParent(parent, false);
+        lightGo.transform.position = worldPos;
+        var light = lightGo.AddComponent<Light>();
+        light.type = LightType.Point;
+        light.shadows = LightShadows.None;
+        light.lightmapBakeType = LightmapBakeType.Realtime;
+        light.range = range;
+        light.color = lightColor;
+        lightGo.AddComponent<EerieChamberGlow>().Init(light, glowGo.GetComponent<Renderer>(), emissionPeak, intensity);
     }
 
     /// <summary>BigBrain -- creator direction, 2026-07: "The big brain
@@ -1045,45 +1621,210 @@ public class BaseDresser : MonoBehaviour
         return MTextured("big-brain-pedestal-plaque", 0.8f, 0.77f, 0.68f, PbrTextureAtlas.Limestone, 0.4f);
     }
 
-    /// <summary>A deliberate approximation of docs/17's own per-faction
-    /// palette register, keyed by PLAYER INDEX rather than a real
-    /// `FactionId` lookup -- `SimBridge` has no player-faction accessor
-    /// yet. Index 0 (today's demo always fields MadDoctor there) reads
-    /// as a sickly organic/gothic green; index 1 (Human Army) reads as
-    /// olive-drab military; anything else is a neutral gray rather than
-    /// guessing a faction it has no data for.</summary>
-    private static Color OwnerBaseColor(int playerIndex)
+    // ---- 2026-08 per-faction Factory/Control Centre materials
+    // ("apply the same level of visual refinement... to the Factory and
+    // Control Centre for every race") ----------------------------------
+
+    /// <summary>Mad Doctor faction: dark heavy cast-iron framework
+    /// (chimneys, machinery housings).</summary>
+    private static Material DoctorIron() => MTextured("faction-doctor-iron", 0.22f, 0.22f, 0.23f, PbrTextureAtlas.CastIron, 0.32f, 0.55f);
+
+    /// <summary>Mad Doctor faction: oxidized copper pipework.</summary>
+    private static Material DoctorCopper() => MTextured("faction-doctor-copper", 0.6f, 0.36f, 0.22f, PbrTextureAtlas.OxidizedCopper, 0.4f, 0.7f);
+
+    /// <summary>Mad Doctor faction: dark brick walls -- reuses
+    /// PbrTextureAtlas.Brick (the same texture the CITY's own civilian
+    /// buildings use, BuildingDresser.Brick) tinted darker/cooler, not a
+    /// fresh texture -- brick coursing reads the same regardless of
+    /// which building it's on; only the tone needs to shift toward
+    /// "old, mysterious, gothic" instead of a lived-in row house.</summary>
+    private static Material DoctorDarkBrick() => MTextured("faction-doctor-brick", 0.3f, 0.24f, 0.22f, PbrTextureAtlas.Brick, 0.12f);
+
+    /// <summary>Mad Doctor faction: pale weathered stone for buttresses/
+    /// window surrounds -- reuses PbrTextureAtlas.Limestone (same
+    /// texture PedestalPlaqueMat/BuildingDresser.Concrete both already
+    /// share) at a cooler, more weathered tone than either.</summary>
+    private static Material DoctorStone() => MTextured("faction-doctor-stone", 0.52f, 0.51f, 0.48f, PbrTextureAtlas.Limestone, 0.18f);
+
+    /// <summary>Mad Doctor faction: the "green illuminated tubes" --
+    /// opaque, strongly emissive, paired with a real EerieChamberGlow
+    /// pulse the same way the Big Brain jar's own glow disc is (see that
+    /// class's own header for why a real Light, not just emissive
+    /// material, matters here).</summary>
+    private static Material _doctorGlowMat;
+    private static Material DoctorGlowMat()
     {
-        switch (playerIndex)
+        if (_doctorGlowMat != null) return _doctorGlowMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        var glow = new Color(0.25f, 0.95f, 0.45f);
+        mat.color = glow;
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", glow * 1.3f);
+        _doctorGlowMat = mat;
+        return _doctorGlowMat;
+    }
+
+    /// <summary>Human Alliance faction: brushed aluminum panels.</summary>
+    private static Material HumanAluminum() => MTextured("faction-human-aluminum", 0.82f, 0.84f, 0.86f, PbrTextureAtlas.BrushedAluminum, 0.62f, 0.5f);
+
+    /// <summary>Human Alliance faction: carbon-fiber accent panels.</summary>
+    private static Material HumanCarbon() => MTextured("faction-human-carbon", 0.5f, 0.52f, 0.55f, PbrTextureAtlas.CarbonFiberPanel, 0.55f, 0.1f);
+
+    /// <summary>Human Alliance faction: "illuminated blue glass" --
+    /// deliberately STEADY, not pulsing (no EerieChamberGlow pairing,
+    /// unlike Doctor's/Alien's own glow materials) -- "lighting should
+    /// be clean and functional" / "communicate precision" is read as a
+    /// genuine faction-differentiating choice: Doctor pulses slow and
+    /// eerie, Alien pulses organic, Human stays constant. A steady light
+    /// literally reads as more "precise" than a wavering one.</summary>
+    private static Material _humanBlueLightMat;
+    private static Material HumanBlueLightMat()
+    {
+        if (_humanBlueLightMat != null) return _humanBlueLightMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        var glow = new Color(0.3f, 0.6f, 1f);
+        mat.color = glow;
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", glow * 1.2f);
+        _humanBlueLightMat = mat;
+        return _humanBlueLightMat;
+    }
+
+    /// <summary>Alien faction: translucent glowing purple crystal --
+    /// transparent (LabMeshBuilder.MakeTransparent, same technique the
+    /// Big Brain jar's own glass uses) with a faint baked-in emission on
+    /// top of whatever real light lands on it, since "glowing crystal"
+    /// should read even in shadow, not just under direct light.</summary>
+    private static Material _alienCrystalMat;
+    private static Material AlienCrystalMat()
+    {
+        if (_alienCrystalMat != null) return _alienCrystalMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(0.6f, 0.4f, 0.85f, 0.55f);
+        if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", PbrTextureAtlas.AlienCrystal);
+        if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.9f);
+        if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", 0f);
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", new Color(0.55f, 0.25f, 0.9f) * 0.35f);
+        LabMeshBuilder.MakeTransparent(mat);
+        _alienCrystalMat = mat;
+        return _alienCrystalMat;
+    }
+
+    /// <summary>Alien faction: "living surfaces" -- a softer, blobbier,
+    /// less-faceted organic membrane than AlienCrystalMat's own crisp
+    /// crystal read, for hull/body surfaces rather than growths/spikes.</summary>
+    private static Material _alienMembraneMat;
+    private static Material AlienMembraneMat()
+    {
+        if (_alienMembraneMat != null) return _alienMembraneMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(0.5f, 0.28f, 0.58f, 0.85f);
+        if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", PbrTextureAtlas.AlienMembrane);
+        if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.55f);
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", new Color(0.5f, 0.2f, 0.65f) * 0.15f);
+        LabMeshBuilder.MakeTransparent(mat);
+        _alienMembraneMat = mat;
+        return _alienMembraneMat;
+    }
+
+    /// <summary>Alien faction: pure bright emissive purple -- the visible
+    /// SOURCE paired with EerieChamberGlow's real Light, same "avoid...
+    /// a generic video-game point light, pair it with something visible"
+    /// reasoning as the Big Brain jar's own glow disc.</summary>
+    private static Material _alienGlowMat;
+    private static Material AlienGlowMat()
+    {
+        if (_alienGlowMat != null) return _alienGlowMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        var glow = new Color(0.62f, 0.25f, 0.95f);
+        mat.color = glow;
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", glow * 1.5f);
+        _alienGlowMat = mat;
+        return _alienGlowMat;
+    }
+
+    /// <summary>Shared by every faction's Tesla-coil/energy-arc mount --
+    /// creates a LineRenderer + TeslaArc between two freshly-created
+    /// anchor points (`fromLocal`/`toLocal`, positions relative to
+    /// `root`'s own origin) and returns the arc's own GameObject in case
+    /// a caller wants to parent it under a non-owner-tinted holder.
+    /// `arcMat` should already be transparent/emissive-appropriate (see
+    /// TeslaArc.cs's own class header on why a real LineRenderer, not a
+    /// ParticleSystem, is used here).</summary>
+    private GameObject SpawnArc(Transform parent, Vector3 fromWorld, Vector3 toWorld, Material arcMat, Color color, float width)
+    {
+        var fromGo = new GameObject("ArcFrom");
+        fromGo.transform.SetParent(parent, false);
+        fromGo.transform.position = fromWorld;
+        var toGo = new GameObject("ArcTo");
+        toGo.transform.SetParent(parent, false);
+        toGo.transform.position = toWorld;
+
+        var arcGo = new GameObject("Arc");
+        arcGo.transform.SetParent(parent, false);
+        var line = arcGo.AddComponent<LineRenderer>();
+        line.sharedMaterial = arcMat;
+        line.startWidth = width;
+        line.endWidth = width;
+        line.startColor = color;
+        line.endColor = color;
+        var arc = arcGo.AddComponent<TeslaArc>();
+        arc.from = fromGo.transform;
+        arc.to = toGo.transform;
+        return arcGo;
+    }
+
+    /// <summary>docs/17's own per-faction palette register, now keyed by
+    /// a REAL `FactionId` (via <see cref="PlayerFactionFor"/> ->
+    /// `SimBridge.PlayerFaction`) instead of the old PLAYER-INDEX
+    /// approximation this method's own comment used to flag as a known
+    /// gap ("SimBridge has no player-faction accessor yet"). That gap
+    /// mattered more than it looked: a 3+ player match with two Alien
+    /// players, say, would have shown the second one as flat neutral
+    /// gray under the old index-keyed scheme -- not a hypothetical
+    /// edge case, but exactly the kind of mismatch that would have
+    /// undermined 2026-08's own "maintaining the existing color
+    /// language: Mad Doctor green / Alien purple / Human blue" direction
+    /// for anyone not sitting in slot 0 or 1. Human Alliance's own tone
+    /// changes here too, from the old olive-drab military approximation
+    /// to actual blue -- an explicit, in-scope correction per that same
+    /// direction, not an accidental drift.</summary>
+    private static Color OwnerBaseColor(FactionId faction)
+    {
+        switch (faction)
         {
-            case 0: return new Color(0.42f, 0.55f, 0.4f);
-            case 1: return new Color(0.48f, 0.46f, 0.32f);
-            default: return new Color(0.55f, 0.55f, 0.6f);
+            case FactionId.MadDoctor: return new Color(0.42f, 0.55f, 0.4f);
+            case FactionId.HumanArmy: return new Color(0.34f, 0.5f, 0.64f);
+            case FactionId.AlienHive: return new Color(0.5f, 0.36f, 0.62f);
+            default: return new Color(0.55f, 0.55f, 0.6f);   // Mixed / unrecognized -- unchanged neutral gray
         }
     }
 
-    private static Material SolidMatFor(int playerIndex)
+    private static Material SolidMatFor(FactionId faction)
     {
-        if (SolidMatsByOwner.TryGetValue(playerIndex, out var mat) && mat != null) return mat;
+        if (SolidMatsByOwner.TryGetValue(faction, out var mat) && mat != null) return mat;
         mat = new Material(ShaderUtil.FindRenderableShader());
-        mat.color = OwnerBaseColor(playerIndex);
-        SolidMatsByOwner[playerIndex] = mat;
+        mat.color = OwnerBaseColor(faction);
+        SolidMatsByOwner[faction] = mat;
         return mat;
     }
 
-    private static Material DamagedMatFor(int playerIndex)
+    private static Material DamagedMatFor(FactionId faction)
     {
-        if (DamagedMatsByOwner.TryGetValue(playerIndex, out var mat) && mat != null) return mat;
-        var c = OwnerBaseColor(playerIndex);
+        if (DamagedMatsByOwner.TryGetValue(faction, out var mat) && mat != null) return mat;
+        var c = OwnerBaseColor(faction);
         mat = new Material(ShaderUtil.FindRenderableShader());
         mat.color = new Color(c.r * 0.45f, c.g * 0.3f, c.b * 0.3f, 1f);   // darker + a scorched red-shift, same idiom v1 used
-        DamagedMatsByOwner[playerIndex] = mat;
+        DamagedMatsByOwner[faction] = mat;
         return mat;
     }
 
-    private static void TintShape(GameObject root, int playerIndex, bool damaged)
+    private static void TintShape(GameObject root, FactionId faction, bool damaged)
     {
-        var mat = damaged ? DamagedMatFor(playerIndex) : SolidMatFor(playerIndex);
+        var mat = damaged ? DamagedMatFor(faction) : SolidMatFor(faction);
         var t = root.transform;
         for (var i = 0; i < t.childCount; i++)
         {
