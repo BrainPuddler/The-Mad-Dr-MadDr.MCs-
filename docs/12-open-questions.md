@@ -13586,3 +13586,89 @@ compile-clean). The existing `Debug.Log("[DamageFx] Smoke started on "
 ...)` diagnostic line (already in `AttachSmoke`) remains the fastest way
 to confirm in a real Play session whether a plume is spawning at all
 versus spawning-but-occluded, if this report recurs.
+
+## EPIC -- selectable races + 1-4 AI opponents that actually play (docs/30)
+
+Creator direction, verbatim: "create a system where the user can play
+specific races. It should be integrated throughout the game and be
+selectable on the game startup. The menu should allow the user to choose
+race and ai opponents, then enable a begin match button. This is to be
+part of a match system, make it robust and easily expandable." Follow-up:
+1-4 AI opponents, and they must actually play (attack, produce units) with
+distinct personalities, documented.
+
+Full design writeup: [30-race-and-ai-opponent-system.md](30-race-and-ai-opponent-system.md).
+Summary of what this closed, since a pre-implementation investigation
+found more already built than expected: a human race picker and a
+single-opponent AI race picker already existed from an earlier session,
+but as two auto-advancing screens (not one combined menu with a Begin
+Match button as asked), hardcoded to exactly 2 total players, with the
+AI's own decision engine (`SkirmishCommander`) fully built and tested but
+never once instantiated in a live match -- an AI opponent got a race, a
+base, and a one-time starting army, then sat inert forever.
+
+Six phases, each independently `dotnet test`/flightcheck-verified before
+moving to the next:
+
+1. **match-core data model**: `PlayerSetup` struct + `PlayerState.
+   IsAiControlled`/`AiPersonality` (both deliberately excluded from the
+   tick hash, same "DATA, never simulation state" category
+   `CommanderPersonality` already established), `MatchState.Create` split
+   into a new `PlayerSetup`-list overload with the original `FactionId`-
+   list overload now a 4-line wrapper over it -- every existing call site
+   and all 302 pre-existing tests compile and pass unchanged.
+2. **`ProductionAdvisor`** (new match-core class): the deferred half of
+   docs/23 §13 amendment D's "production/build-order AI" -- its own
+   stated prerequisite (a unit-production command) turned out to have
+   already shipped in the worker-economy epic and simply never gotten
+   scoring logic pointed at it. Personality-driven Train/BuildStructure
+   decisions against the REAL `Command` pipeline (not the human's own
+   non-lockstep clone-drag production mechanic, a separate pre-existing
+   gap this flagged but did not fix), reusing `ArmyGenerator`'s existing
+   weighted unit-choice logic rather than reinventing it.
+3. **`AiMatchDriver`** (new match-core class) + `SimBridge` wiring: one
+   commander + one advisor per AI player slot, queried once per tick and
+   fed into the SAME pending-command buffer a human's `QueueXCommand`
+   calls already use -- an AI's orders are indistinguishable from a
+   human's once queued, exactly the lockstep-safety property
+   `SkirmishCommander`'s own header already called for.
+4. **N-player spawn placement**: `SpawnStartingBases` generalized from 2
+   hardcoded players to a loop over N, seed points spread on a ring
+   around the human's own start. Found and fixed a real invariant risk
+   while doing this: an opponent's starting-army composition (`ArmyGenerator`)
+   and its in-match behavior (`AiMatchDriver`) MUST use the exact same
+   `CommanderPersonality` value or a "Berserker"-labeled opponent could
+   field a Turtle-weighted army -- `BeginMatch` now resolves each AI's
+   personality exactly once and threads that single value through both.
+5. **`MatchSetupHud`** (new combined menu): own race + 1-4 AI opponent
+   slots (race + personality each) + Begin Match, replacing (files
+   deleted) the old two-screen `FactionPickerHud`/`OpponentFactionPickerHud`
+   pair. AI opponent races restricted to HumanArmy/AlienHive/Random --
+   not a new restriction, `ArmyGenerator` already had no roster data for
+   MadDoctor/Mixed, surfaced honestly rather than offered as a dead
+   option.
+6. This entry + the docs/30 writeup + docs/00-index.md status row.
+
+**Verified, not assumed:** `dotnet test packages/match-core/Tests~/MatchCore.Tests.csproj`
+green at 311/311 (302 pre-existing + 9 new, covering affordability limits,
+supply-cap respect, and same-seed determinism for both new classes) at
+every phase boundary; flightcheck confirms zero errors trace to any new
+or touched file (`PlayerSetup.cs`/`ProductionAdvisor.cs`/`AiMatchDriver.cs`
+compiled into the real `MadDr.MatchCore.dll` the harness references;
+`MatchSetupHud.cs`/`SimBridge.cs`/`RuntimeCityBuilder.cs` compiled
+directly) -- the DLL had to be manually refreshed into the scratch
+flightcheck directory mid-session after it turned out to be a stale copy,
+a harness-maintenance gotcha worth remembering for the next session that
+touches match-core and Unity in the same pass. A stray doc-comment
+reference to the deleted `FactionPickerHud` in `BuildingNavHud.cs`/
+`DeployingArmyHud.cs` was caught by grep and repointed to `MatchSetupHud`
+rather than left dangling.
+
+**Explicitly NOT verified** (no Unity Editor in this environment, same
+standing limitation as every prior Unity-side change this session): the
+menu's actual on-screen layout/interaction, and a real Play-mode match
+with an AI opponent visibly fighting. See docs/30 §8 and §7 for the full
+verification scope and the gaps left deliberately open (no visual mesh
+for roster units, no difficulty axis beyond personality flavor, no
+teams/alliances, human production still not on the lockstep-safe
+command path).

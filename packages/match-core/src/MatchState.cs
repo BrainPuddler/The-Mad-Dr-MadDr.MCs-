@@ -147,22 +147,44 @@ namespace MadDr.MatchCore
                         _emitters.Add(new SimEmitter(landmark.Site, landmark.Polarity!.Value));
         }
 
-        /// <summary>Start a fresh match. <paramref name="factions"/> is one
-        /// entry per player slot (2..8 for 1v1..4v4). Seed drives the whole
-        /// match's RNG. <paramref name="city"/> is optional -- a match with
-        /// no city (e.g. Phase 1's empty-match determinism proof) simply
-        /// can't spawn/path units yet.</summary>
+        /// <summary>docs/30 (selectable races + AI opponents): start a
+        /// fresh match with per-player AI wiring. <paramref name="players"/>
+        /// is one entry per player slot (2..8 for 1v1..4v4) -- same range
+        /// as the <see cref="FactionId"/>-list overload below, which is now
+        /// a thin wrapper over this one. Seed drives the whole match's RNG.
+        /// <paramref name="city"/> is optional -- a match with no city (e.g.
+        /// Phase 1's empty-match determinism proof) simply can't spawn/path
+        /// units yet.</summary>
+        public static MatchState Create(uint seed, IReadOnlyList<PlayerSetup> players, CityModel? city = null)
+        {
+            if (players == null) throw new ArgumentNullException(nameof(players));
+            if (players.Count < 2 || players.Count > 8)
+                throw new ArgumentOutOfRangeException(nameof(players), "2..8 players (1v1..4v4)");
+
+            var arr = new PlayerState[players.Count];
+            for (var i = 0; i < players.Count; i++)
+                arr[i] = new PlayerState(i, players[i].Faction, DefaultSupplyCap,
+                    players[i].IsAiControlled, players[i].Personality);
+
+            return new MatchState(arr, new SimRng(seed), city);
+        }
+
+        /// <summary>Start a fresh match of all-human players. <paramref
+        /// name="factions"/> is one entry per player slot (2..8 for
+        /// 1v1..4v4). Kept as its own overload -- not just call-site sugar
+        /// -- so every existing caller/test (docs/23 Phase 1 onward)
+        /// compiles and behaves byte-identically: this forwards to the
+        /// <see cref="PlayerSetup"/> overload above with every slot as
+        /// <see cref="PlayerSetup.Human"/>, so nothing about a match built
+        /// this way is any different from before <see cref="PlayerSetup"/>
+        /// existed.</summary>
         public static MatchState Create(uint seed, IReadOnlyList<FactionId> factions, CityModel? city = null)
         {
             if (factions == null) throw new ArgumentNullException(nameof(factions));
-            if (factions.Count < 2 || factions.Count > 8)
-                throw new ArgumentOutOfRangeException(nameof(factions), "2..8 players (1v1..4v4)");
-
-            var players = new PlayerState[factions.Count];
+            var setups = new PlayerSetup[factions.Count];
             for (var i = 0; i < factions.Count; i++)
-                players[i] = new PlayerState(i, factions[i], DefaultSupplyCap);
-
-            return new MatchState(players, new SimRng(seed), city);
+                setups[i] = PlayerSetup.Human(factions[i]);
+            return Create(seed, setups, city);
         }
 
         public int PlayerCount => _players.Length;

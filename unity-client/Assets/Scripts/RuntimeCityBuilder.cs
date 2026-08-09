@@ -61,19 +61,48 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     [Tooltip("Shows an in-game 'choose your city' screen before generation instead of using the Inspector's preset field directly. Off by default so every existing scene/workflow (Inspector preset, CityGizmo sync) keeps working byte-for-byte unchanged -- this only changes anything when explicitly turned on.")]
     public bool showRegionPicker = false;
 
-    [Header("Faction picker (2026-07 amendment, off by default -- unchanged behavior)")]
-    [Tooltip("Shows an in-game 'choose your faction' screen before generation. Off by default so every existing scene keeps working byte-for-byte unchanged. Shown BEFORE the region picker when both are on (see FactionPickerHud's own header for why).")]
-    public bool showFactionPicker = false;
-
-    [Tooltip("The human player's faction (docs/23 §1, plus FactionId.Mixed as of the 2026-07 amendment). Set by FactionPickerHud when showFactionPicker is on; otherwise this Inspector value is used directly -- same 'Inspector field is the source of truth until a picker opts in' pattern as `preset`.")]
+    [Header("Human race (docs/23 §1, plus FactionId.Mixed as of the 2026-07 amendment)")]
+    [Tooltip("The human player's faction. Set by MatchSetupHud when showMatchSetupHud is on; otherwise this Inspector value is used directly -- same 'Inspector field is the source of truth until a picker opts in' pattern as `preset`.")]
     public FactionId chosenFaction = FactionId.MadDoctor;
 
-    [Header("Opponent faction picker (2026-08, off by default -- unchanged behavior)")]
-    [Tooltip("Shows an in-game 'choose your opponent's faction' screen, letting the player pick which of the four FactionId races the single-player AI-antagonist plays as (creator direction: 'pick the opponent race that I'd like from the four different factions available'). Off by default so every existing scene keeps working byte-for-byte unchanged. Shown AFTER the human's own FactionPickerHud (if that's also on) and BEFORE the region picker -- both are 'which faction' questions, naturally grouped before 'which city.'")]
-    public bool showOpponentPicker = false;
+    [Header("Match setup menu (docs/30, off by default -- unchanged behavior)")]
+    [Tooltip("Shows the combined 'choose your race + AI opponents' menu (MatchSetupHud) before generation -- own race, 1-4 AI opponents each with a race and personality, then Begin Match. Off by default so every existing scene keeps working byte-for-byte unchanged. Supersedes the old separate FactionPickerHud/OpponentFactionPickerHud screens (docs/30). Shown BEFORE the region picker when both are on, same ordering rationale the old faction pickers already established (both are 'which faction(s)' questions, naturally grouped before 'which city').")]
+    public bool showMatchSetupHud = false;
 
-    [Tooltip("Set by OpponentFactionPickerHud when showOpponentPicker is on and the player confirms a choice; null otherwise. BeginMatch falls back to the original docs/12 Q13 default (Army, or Hive if the human picked Army) when this is null, so leaving the picker off reproduces the exact prior behavior. Deliberately NOT excluding FactionId.Mixed here -- unlike the docs/12 Q13 default's own 'never Mixed' rule, an explicit player CHOICE to field a Mixed opponent is a real pick, not a spontaneous AI default; still gated behind MixedFactionUnlock.IsUnlocked the same way the human's own FactionPickerHud gates it.")]
-    public FactionId? opponentFactionOverride = null;
+    /// <summary>docs/30 (selectable races + AI opponents): one configured
+    /// AI opponent slot -- set by <see cref="MatchSetupHud"/> when
+    /// <see cref="showMatchSetupHud"/> is on and the player confirms.
+    /// `Personality` is always resolved (never null) by the time <see
+    /// cref="BeginMatch"/> reads it -- "Random" in the menu is rolled to a
+    /// concrete <see cref="CommanderPersonality"/> at confirm time, not
+    /// deferred, so the SAME personality drives both this opponent's
+    /// starting army (<see cref="SpawnOpponentStartingArmy"/>) and its
+    /// in-match behavior (<see cref="AiMatchDriver"/>) -- a "Berserker"-
+    /// labeled opponent fielding a Turtle-weighted starting army would be a
+    /// real bug, not a style nitpick, so this struct is the ONE place that
+    /// value is decided.</summary>
+    [System.Serializable]
+    public struct AiOpponentConfig
+    {
+        public FactionId Faction;
+        public CommanderPersonality Personality;
+
+        public AiOpponentConfig(FactionId faction, CommanderPersonality personality)
+        {
+            Faction = faction;
+            Personality = personality;
+        }
+    }
+
+    /// <summary>Empty by default -- every existing scene/test that never
+    /// touches <see cref="MatchSetupHud"/> leaves this empty, and <see
+    /// cref="BeginMatch"/> falls back to the original docs/12 Q13 default
+    /// single opponent (Army, or Hive if the human picked Army) in that
+    /// case, reproducing the exact prior 2-player behavior byte-for-byte.
+    /// 1-4 entries once <see cref="MatchSetupHud"/> is used (the menu
+    /// itself enforces that range) -- <see cref="BeginMatch"/> places one
+    /// player slot per entry, in order, starting at player index 1.</summary>
+    public List<AiOpponentConfig> aiOpponents = new List<AiOpponentConfig>();
 
     [Header("docs/27 Phase A dev check (off by default)")]
     [Tooltip("Wires the FIRST spawned monster to docs/27's SimBridge/interpolated-view pipeline instead of its normal Time.deltaTime movement, so a Move order on it is decided by match-core and rendered by interpolation -- the actual Editor smoke test docs/27 Phase A has been waiting on (nothing else in this environment can check it). Left-click that monster, right-click to move it, same as always. Every other monster (and every other order kind on this one) is completely unaffected.")]
@@ -283,30 +312,18 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             preset = ConvertPreset(gizmo.preset);
         }
 
-        // 2026-07 amendment: the faction picker goes FIRST when both it
-        // and the region picker are enabled (see FactionPickerHud's own
-        // header for why) -- its own Confirm() chains into the region
-        // picker itself when showRegionPicker is also on, so this check
-        // must run before the region-picker check below, not after.
-        if (showFactionPicker)
+        // docs/30: the combined match-setup menu (own race + 1-4 AI
+        // opponents) goes FIRST when both it and the region picker are
+        // enabled, same ordering rationale the old FactionPickerHud/
+        // OpponentFactionPickerHud pair already established -- its own
+        // Confirm() chains into the region picker itself when
+        // showRegionPicker is also on, so this check must run before the
+        // region-picker check below, not after.
+        if (showMatchSetupHud)
         {
-            var factionPicker = gameObject.GetComponent<FactionPickerHud>();
-            if (factionPicker == null) factionPicker = gameObject.AddComponent<FactionPickerHud>();
-            factionPicker.Init(this);
-            return;
-        }
-
-        // 2026-08: the opponent-faction picker goes next -- AFTER the
-        // human's own choice (FactionPickerHud, above), BEFORE the region
-        // picker (both faction questions naturally precede "which city").
-        // FactionPickerHud.Confirm() itself chains here too when both are
-        // on; this branch only fires when showFactionPicker is OFF but
-        // showOpponentPicker is on by itself.
-        if (showOpponentPicker)
-        {
-            var opponentPicker = gameObject.GetComponent<OpponentFactionPickerHud>();
-            if (opponentPicker == null) opponentPicker = gameObject.AddComponent<OpponentFactionPickerHud>();
-            opponentPicker.Init(this);
+            var matchSetup = gameObject.GetComponent<MatchSetupHud>();
+            if (matchSetup == null) matchSetup = gameObject.AddComponent<MatchSetupHud>();
+            matchSetup.Init(this);
             return;
         }
 
@@ -355,13 +372,38 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // an AI opponent spontaneously gets.
         _simBridge = gameObject.GetComponent<SimBridge>();
         if (_simBridge == null) _simBridge = gameObject.AddComponent<SimBridge>();
-        // 2026-08: an explicit player pick (OpponentFactionPickerHud, via
-        // opponentFactionOverride) wins outright; otherwise fall back to
-        // the original docs/12 Q13 default unchanged, so leaving the new
-        // picker off reproduces the exact prior behavior byte-for-byte.
-        var opponentFaction = opponentFactionOverride ?? (chosenFaction == FactionId.HumanArmy ? FactionId.AlienHive : FactionId.HumanArmy);
-        _simBridge.StartMatch(unchecked((uint)seed), new List<FactionId> { chosenFaction, opponentFaction }, _city);
-        SpawnStartingBases(opponentFaction);
+
+        // docs/30: an explicit MatchSetupHud configuration (aiOpponents,
+        // 1-4 entries) wins outright; an EMPTY list (every scene that never
+        // touches MatchSetupHud) falls back to the original docs/12 Q13
+        // single-opponent default -- same FACTION-SELECTION rule as before
+        // (Army, or Hive if the human picked Army), so leaving the new menu
+        // off reproduces the exact prior matchup unchanged. NOT byte-for-
+        // byte identical at the RNG level, though: SpawnOpponentStartingArmy
+        // now folds `playerIndex` into its seed (needed so 2+ opponents
+        // don't draw from the identical stream), which shifts the SAME
+        // seed's starting-army composition even for this single-opponent
+        // fallback case. A deliberate, flagged scope note, not a silent
+        // regression -- see docs/30/docs/12 for the full writeup.
+        var opponents = aiOpponents.Count > 0
+            ? aiOpponents
+            : new List<AiOpponentConfig>
+              {
+                  new AiOpponentConfig(
+                      chosenFaction == FactionId.HumanArmy ? FactionId.AlienHive : FactionId.HumanArmy,
+                      CommanderPersonality.Generate(unchecked((uint)seed)))
+              };
+
+        var factions = new List<FactionId> { chosenFaction };
+        var playerSetups = new List<PlayerSetup> { PlayerSetup.Human(chosenFaction) };
+        foreach (var ai in opponents)
+        {
+            factions.Add(ai.Faction);
+            playerSetups.Add(PlayerSetup.Ai(ai.Faction, ai.Personality));
+        }
+
+        _simBridge.StartMatch(unchecked((uint)seed), playerSetups, _city);
+        SpawnStartingBases(factions, opponents);
 
         // the moon-dial/mana/capture-progress HUD, the build-menu/ghost-
         // cursor/BaseDresser trio, and the component-wallet/supply HUD all
@@ -2590,34 +2632,58 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return from;
     }
 
+    /// <summary>docs/30 (selectable races + AI opponents): N points around
+    /// `center` for N-1 AI opponents (player 0, the human, always seeds
+    /// from `center` itself unchanged -- see <see
+    /// cref="SpawnStartingBases"/>) -- evenly spaced on a ring so 1-4
+    /// opponents spread out around the human's own start instead of
+    /// stacking toward one fixed offset the way the original single-
+    /// opponent placeholder (`center.Q+18, center.R-9`) did. `radius` is a
+    /// v0.1 placeholder (same order of magnitude as that original offset,
+    /// ~20 hex units out) -- flagged, not claimed balanced, same standing
+    /// policy as every other invented number in this file. The 0.6 R-axis
+    /// scale corrects for this hex grid's own axial-to-roughly-square
+    /// aspect (matching the shape of the original single-opponent offset's
+    /// own Q:R ratio) so the ring reads round on the actual map, not
+    /// squashed.</summary>
+    private static HexCoord[] AiOpponentSeedRing(HexCoord center, int aiOpponentCount, int radius)
+    {
+        var seeds = new HexCoord[aiOpponentCount];
+        for (var i = 0; i < aiOpponentCount; i++)
+        {
+            var angle = (2.0 * System.Math.PI / aiOpponentCount) * i;
+            var q = center.Q + Mathf.RoundToInt(radius * (float)System.Math.Cos(angle));
+            var r = center.R + Mathf.RoundToInt(radius * (float)System.Math.Sin(angle) * 0.6f);
+            seeds[i] = new HexCoord(q, r);
+        }
+        return seeds;
+    }
+
+    /// <summary>v0.1 placeholder seed-ring radius (CLAUDE.md's standing
+    /// "flag the invented number" policy) -- see <see
+    /// cref="AiOpponentSeedRing"/>'s own doc comment.</summary>
+    private const int AiOpponentSeedRingRadius = 20;
+
     /// <summary>2026-07 amendment (docs/12 "give the player one fully
-    /// functional factory on startup"): place both players' starting HQ +
-    /// Factory the instant a match exists, bypassing the worker-economy
-    /// epic's own Collector->Worker->Factory bootstrap chain entirely for
-    /// this ONE starting building per kind per player (see <see
-    /// cref="MatchState.SpawnFactoryForPlayer"/>'s own doc comment).
+    /// functional factory on startup"): place every configured player's
+    /// starting HQ + Factory the instant a match exists, bypassing the
+    /// worker-economy epic's own Collector->Worker->Factory bootstrap chain
+    /// entirely for this ONE starting building per kind per player (see
+    /// <see cref="MatchState.SpawnFactoryForPlayer"/>'s own doc comment).
     /// Site selection is a real, flagged v0.1 placeholder (CLAUDE.md's
-    /// standing policy): player 0 near the city center, the AI opponent
-    /// offset toward a map edge so the two starts don't crowd each other
-    /// -- not the "themed landmark site" docs/23 §2 eventually describes
-    /// (no such landmark-selection logic exists anywhere yet), just two
-    /// distinct, valid, non-overlapping hexes.
+    /// standing policy): player 0 (always human) near the city center,
+    /// each AI opponent seeded from its own point on <see
+    /// cref="AiOpponentSeedRing"/> so 1-4 opponents spread out around the
+    /// human's start instead of crowding one one fixed offset -- not the
+    /// "themed landmark site" docs/23 §2 eventually describes (no such
+    /// landmark-selection logic exists anywhere yet), just distinct, valid,
+    /// non-overlapping hexes.
     ///
-    /// 2026-08 (creator direction: "Create a faction based army generator.
-    /// To start making opponents for the game"): once the AI opponent's
-    /// HQ+Factory are placed, if its faction has a fixed
-    /// <see cref="RosterUnitKind"/> roster (HumanArmy/AlienHive --
-    /// MadDoctor fields bred creatures, never a fixed list, and Mixed
-    /// resolves race a different way, so neither is supported by <see
-    /// cref="ArmyGenerator"/>), generate and field a starting army near its
-    /// HQ. <see cref="CommanderPersonality.Generate(uint)"/> is seeded off
-    /// THIS match's own `seed`, so "this seed's opponent" fields the same
-    /// starting army every time, same determinism convention the rest of
-    /// this project holds to. **These spawned units have no 3D visual yet**
-    /// -- see <see cref="SimBridge.SpawnRosterUnit"/>'s own doc comment for
-    /// the real, separate, not-yet-built gap this doesn't attempt to
-    /// close.</summary>
-    private void SpawnStartingBases(FactionId opponentFaction)
+    /// docs/30: generalizes the original 2-player-only version (player 0 +
+    /// one hardcoded player-1 opponent) to loop over `playerFactions.Count`
+    /// players -- `opponents[i]` (0-indexed) corresponds to player index
+    /// `i + 1`, matching `playerFactions[i + 1]`.</summary>
+    private void SpawnStartingBases(IReadOnlyList<FactionId> playerFactions, IReadOnlyList<AiOpponentConfig> opponents)
     {
         if (_simBridge == null) return;
 
@@ -2645,16 +2711,21 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         claimed.Add(p0Factory);
         _simBridge.SpawnFactoryForPlayer(0, p0Factory);
 
-        var opponentSeed = new HexCoord(center.Q + 18, center.R - 9);
-        var p1Hq = FindOpenHexWide(opponentSeed, blocked, claimed, 24);
-        claimed.Add(p1Hq);
-        _simBridge.SpawnHqForPlayer(1, p1Hq);
-        var p1Factory = FindOpenHexWide(p1Hq, blocked, claimed, 24);
-        claimed.Add(p1Factory);
-        _simBridge.SpawnFactoryForPlayer(1, p1Factory);
+        var opponentSeeds = AiOpponentSeedRing(center, opponents.Count, AiOpponentSeedRingRadius);
+        for (var i = 0; i < opponents.Count; i++)
+        {
+            var playerIndex = i + 1;
+            var hq = FindOpenHexWide(opponentSeeds[i], blocked, claimed, 24);
+            claimed.Add(hq);
+            _simBridge.SpawnHqForPlayer(playerIndex, hq);
+            var factory = FindOpenHexWide(hq, blocked, claimed, 24);
+            claimed.Add(factory);
+            _simBridge.SpawnFactoryForPlayer(playerIndex, factory);
 
-        if (opponentFaction == FactionId.HumanArmy || opponentFaction == FactionId.AlienHive)
-            SpawnOpponentStartingArmy(opponentFaction, p1Hq, blocked, claimed);
+            var faction = opponents[i].Faction;
+            if (faction == FactionId.HumanArmy || faction == FactionId.AlienHive)
+                SpawnOpponentStartingArmy(playerIndex, faction, opponents[i].Personality, hq, blocked, claimed);
+        }
     }
 
     /// <summary>v0.1 placeholder starting budget (CLAUDE.md's standing
@@ -2672,24 +2743,33 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// <summary>2026-08 (creator direction: "Create a faction based army
     /// generator. To start making opponents for the game"): generate a
     /// composition via <see cref="ArmyGenerator"/> and field it near the
-    /// opponent's HQ. `CommanderPersonality.Generate(seed)` reuses THIS
-    /// match's own seed (not a fresh random draw) so a given seed's
-    /// opponent always opens with the same army -- the same determinism
-    /// convention every other seeded system in this project holds to.
-    /// Each unit gets its own <see cref="FindOpenHexWide"/> placement,
-    /// claimed into the same set the HQ/Factory hexes above already use,
-    /// so a big army can't stack units on top of each other or the bases.</summary>
-    private void SpawnOpponentStartingArmy(FactionId opponentFaction, HexCoord aroundHex, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
+    /// opponent's HQ. `personality` is passed IN (not regenerated here) --
+    /// docs/30: this MUST be the exact same value driving this opponent's
+    /// in-match behavior (<see cref="AiMatchDriver"/>, wired via <see
+    /// cref="PlayerSetup.Ai"/> in <see cref="BeginMatch"/>), or a
+    /// "Berserker"-labeled opponent could field a Turtle-weighted starting
+    /// army -- see <see cref="AiOpponentConfig"/>'s own doc comment for why
+    /// this is a real invariant, not a style preference. Budget-seeded off
+    /// this match's own `seed` folded with `playerIndex` (docs/30: N
+    /// opponents must NOT all draw from the identical stream, or opponent 1
+    /// and opponent 2 field identical armies when both resolved from
+    /// "Random") -- same decorrelation formula <see cref="AiMatchDriver"/>
+    /// itself uses for its own per-player RNG streams. Each unit gets its
+    /// own <see cref="FindOpenHexWide"/> placement, claimed into the same
+    /// set the HQ/Factory hexes above already use, so a big army can't
+    /// stack units on top of each other or the bases.</summary>
+    private void SpawnOpponentStartingArmy(int playerIndex, FactionId opponentFaction, CommanderPersonality personality,
+        HexCoord aroundHex, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
     {
-        var personality = CommanderPersonality.Generate(unchecked((uint)seed));
-        var composition = ArmyGenerator.Generate(opponentFaction, personality, OpponentStartingArmyBudget, new SimRng(unchecked((uint)seed)));
+        var rngSeed = unchecked((uint)seed) ^ unchecked((uint)(playerIndex * 0x9E3779B1));
+        var composition = ArmyGenerator.Generate(opponentFaction, personality, OpponentStartingArmyBudget, new SimRng(rngSeed));
         foreach (var (kind, count) in composition)
         {
             for (var i = 0; i < count; i++)
             {
                 var hex = FindOpenHexWide(aroundHex, blocked, claimed, 24);
                 claimed.Add(hex);
-                _simBridge.SpawnRosterUnit(1, hex, kind);
+                _simBridge.SpawnRosterUnit(playerIndex, hex, kind);
             }
         }
     }

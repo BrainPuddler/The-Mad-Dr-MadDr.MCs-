@@ -263,7 +263,7 @@ public class BuildingNavHud : MonoBehaviour
 
     /// <summary>Distinct per-kind colors, the same "shape/color carries
     /// identity" swatch idiom <see cref="RegionPickerHud"/>/<see
-    /// cref="FactionPickerHud"/> already use for their own option rows --
+    /// cref="MatchSetupHud"/> already use for their own option rows --
     /// this project has no real icon sprite art, so a colored square plus
     /// a short abbreviation IS this codebase's established "icon."
     /// Public (2026-08): <see cref="BuildMenuHud"/>'s own StarCraft-style

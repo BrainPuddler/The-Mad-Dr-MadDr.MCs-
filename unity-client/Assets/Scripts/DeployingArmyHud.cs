@@ -23,7 +23,7 @@ using UnityEngine;
 /// Only exists in a scene once <see cref="RuntimeCityBuilder.BeginMatch"/>
 /// starts the roster fetch (added/`Init`'d right alongside it) -- same
 /// "opt-in component, centered OnGUI panel, self-destroys when done"
-/// shape <see cref="RegionPickerHud"/>/<see cref="FactionPickerHud"/>
+/// shape <see cref="RegionPickerHud"/>/<see cref="MatchSetupHud"/>
 /// already establish for a full-screen pre-match overlay, and the same
 /// IMGUI approach every HUD in this project uses (see HudStatus's own
 /// header for why).

@@ -37,6 +37,14 @@ public class SimBridge : MonoBehaviour
     private readonly Dictionary<uint, SimUnitView> _views = new Dictionary<uint, SimUnitView>();
     private double _tickAccumulator;
 
+    /// <summary>docs/30 (selectable races + AI opponents): non-null only
+    /// when <see cref="StartMatch(uint,IReadOnlyList{PlayerSetup},CityModel)"/>
+    /// was used and at least one slot was AI-controlled -- every existing
+    /// call site keeps using the <see cref="FactionId"/>-list overload
+    /// below, which never sets this, so <see cref="Pump"/>'s AI-decision
+    /// step is skipped entirely for every scene that doesn't opt in.</summary>
+    private AiMatchDriver _aiDriver;
+
     /// <summary>How far between the last completed sim tick and the next
     /// one this render frame falls, in [0, 1]. Every sim-driven unit's
     /// view lerps its own prev/curr snapshot by this SAME value.</summary>
@@ -44,15 +52,47 @@ public class SimBridge : MonoBehaviour
 
     public bool HasMatch => _match != null;
 
-    /// <summary>Start a fresh sim for this scene. Call once, before
-    /// spawning any sim-driven unit.</summary>
+    /// <summary>Start a fresh sim for this scene, all-human. Call once,
+    /// before spawning any sim-driven unit. Forwards to the <see
+    /// cref="PlayerSetup"/> overload below with every slot Human -- kept as
+    /// its own overload (not just call-site sugar) so every existing
+    /// caller compiles and behaves byte-identically, same "old overload
+    /// wraps the new one" shape <see cref="MatchState.Create(uint,IReadOnlyList{FactionId},CityModel)"/>
+    /// itself already uses.</summary>
     public void StartMatch(uint seed, IReadOnlyList<FactionId> factions, CityModel city)
     {
-        _match = MatchState.Create(seed, factions, city);
+        var setups = new PlayerSetup[factions.Count];
+        for (var i = 0; i < factions.Count; i++) setups[i] = PlayerSetup.Human(factions[i]);
+        StartMatch(seed, setups, city);
+    }
+
+    /// <summary>docs/30 (selectable races + AI opponents): start a fresh
+    /// sim with per-player AI wiring. Builds an <see cref="AiMatchDriver"/>
+    /// alongside the match itself so <see cref="Pump"/> can start asking it
+    /// for commands from the very first tick -- an all-human `players` list
+    /// still builds one (cheap: <see cref="AiMatchDriver.HasAnyAi"/> is
+    /// false, so <see cref="Pump"/>'s per-tick check is a single bool
+    /// read).</summary>
+    public void StartMatch(uint seed, IReadOnlyList<PlayerSetup> players, CityModel city)
+    {
+        _match = MatchState.Create(seed, players, city);
+        _aiDriver = new AiMatchDriver(_match, seed);
         _pending.Clear();
         _views.Clear();
         _tickAccumulator = 0.0;
         Alpha = 0f;
+    }
+
+    /// <summary>docs/30: bulk-add commands generated OUTSIDE the normal
+    /// per-input `QueueXCommand` wrappers below -- specifically, <see
+    /// cref="AiMatchDriver.DecideCommands"/>'s own already-built <see
+    /// cref="Command"/> structs, which don't need re-deriving from raw
+    /// args. Same pending buffer, same one-tick latency, same lockstep
+    /// contract as every human-issued command -- an AI's orders are
+    /// indistinguishable from a human's once queued.</summary>
+    public void QueueCommands(IReadOnlyList<Command> commands)
+    {
+        for (var i = 0; i < commands.Count; i++) _pending.Add(commands[i]);
     }
 
     /// <summary>Spawn a sim-side unit and register the view that will
@@ -324,6 +364,15 @@ public class SimBridge : MonoBehaviour
         var ticksRun = 0;
         while (_tickAccumulator >= TickInterval && ticksRun < MaxTicksPerFrame)
         {
+            // docs/30: AI players' commands join the SAME pending bundle a
+            // human's QueueXCommand calls already fill -- queued BEFORE
+            // this tick's Tick() call, same one-tick latency contract as
+            // everything else, so an AI's orders are indistinguishable
+            // from a human's once queued. Skipped entirely (a single bool
+            // read) for every scene that never opted into an AI player.
+            if (_aiDriver != null && _aiDriver.HasAnyAi)
+                QueueCommands(_aiDriver.DecideCommands(_match));
+
             _match.Tick(_pending.Count > 0 ? _pending.ToArray() : null);
             _pending.Clear();
             NotifyViews();

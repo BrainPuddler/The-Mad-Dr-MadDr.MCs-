@@ -1,0 +1,253 @@
+using System;
+using System.Collections.Generic;
+using MadDr.CityGen;
+
+namespace MadDr.MatchCore
+{
+    /// <summary>docs/30 (selectable races + AI opponents): the economic
+    /// twin of <see cref="SkirmishCommander"/> -- where that class decides
+    /// what an AI's ARMY does, this class decides what an AI's ECONOMY
+    /// does: train units, expand infrastructure. Same "command SOURCE, not
+    /// part of the simulation" shape (see <see cref="SkirmishCommander"/>'s
+    /// own header for why that separation is load-bearing for lockstep) --
+    /// this reads a <see cref="MatchState"/> and returns <see
+    /// cref="Command"/>s, never mutates anything itself.
+    ///
+    /// This is docs/23 §13 amendment D's deferred "production/build-order
+    /// AI" phase, explicitly split out of <see cref="SkirmishCommander"/>
+    /// (see that class's own "Explicitly deferred, not faked" note) because
+    /// its stated prerequisite -- a unit-PRODUCTION command -- did not
+    /// exist yet. It has since shipped (<see cref="CommandKind.TrainUnit"/>,
+    /// the worker-economy epic): this class is the scoring/wiring half that
+    /// was still missing, now that the command itself is real.
+    ///
+    /// **Personality mapping** (see docs/30 for the full rationale):
+    /// <see cref="CommanderTrait.Aggression"/> sets how large a standing
+    /// army this advisor wants (a fraction of <see
+    /// cref="PlayerState.SupplyCap"/>); <see cref="CommanderTrait.Greed"/>
+    /// sets how much of the current wallet it commits per decision;
+    /// <see cref="CommanderTrait.Territoriality"/> sets how often it
+    /// expands (<see cref="CommandKind.BuildStructure"/>) instead of
+    /// training; <see cref="CommanderTrait.Discipline"/> sets its decision
+    /// cadence, same direction <see cref="SkirmishCommander"/> already uses
+    /// it (low discipline = twitchy re-evaluation, high = commits longer).
+    /// <see cref="CommanderTrait.Caution"/> and <see
+    /// cref="CommanderTrait.Opportunism"/> are deliberately left unused
+    /// here -- same "don't invent a mapping that doesn't have a real
+    /// translation" discipline <see cref="ArmyGenerator"/>'s own header
+    /// already states for its narrower Aggression/Caution-only use of
+    /// personality.</summary>
+    public sealed class ProductionAdvisor
+    {
+        public int PlayerIndex { get; }
+        public CommanderPersonality Personality { get; }
+
+        /// <summary>Economic decisions don't need <see
+        /// cref="SkirmishCommander"/>'s combat-reflex 2-20 tick cadence --
+        /// v0.1 placeholder range (2-6s at <see
+        /// cref="MatchState.TicksPerSecond"/>), flagged as invented like
+        /// every other tuning number in this project.</summary>
+        public const int MinDecisionIntervalTicks = 20;
+        public const int MaxDecisionIntervalTicks = 60;
+
+        public int DecisionIntervalTicks { get; }
+
+        /// <summary>v0.1 placeholder preference order for <see
+        /// cref="CommandKind.BuildStructure"/> -- storage/economy kinds
+        /// before <see cref="BuildingKind.Defense"/>, mirroring
+        /// Territoriality's own doc comment ("map control... over
+        /// immediate income" loosely reinterpreted here as "infrastructure
+        /// before army"). <see cref="BuildingKind.Hq"/> and <see
+        /// cref="BuildingKind.Factory"/> excluded: Hq is generator-placed
+        /// only (never a valid BuildStructure target -- see that enum
+        /// value's own doc comment), and every AI opponent already starts
+        /// with one Factory via <see
+        /// cref="RuntimeCityBuilder.SpawnStartingBases"/> equivalent
+        /// setup-time spawn, so a second one isn't this advisor's job to
+        /// invent a reason for.</summary>
+        private static readonly BuildingKind[] ExpansionPreference =
+        {
+            BuildingKind.BloodStorage,
+            BuildingKind.FuelStorage,
+            BuildingKind.PartsStorage,
+            BuildingKind.HarvestPost,
+            BuildingKind.Defense,
+        };
+
+        private readonly SimRng _rng;
+
+        /// <summary>`seed` drives this advisor's own private RNG stream
+        /// (shopping-list draws via <see cref="ArmyGenerator.Generate"/>
+        /// and the expand-vs-train coin flip) -- separate from <see
+        /// cref="MatchState"/>'s own <see cref="SimRng"/>, same "AI
+        /// decision-making sits outside the tick, never advances the sim's
+        /// own RNG" separation <see cref="SkirmishCommander"/> already
+        /// keeps by having NO RNG at all. Two advisors constructed with the
+        /// same seed make identical decisions given identical states -- the
+        /// same "draw COUNT and VALUE both matter" determinism discipline
+        /// <see cref="CommanderPersonality.Generate(SimRng)"/> already
+        /// documents, so a replay reproduces this advisor's choices
+        /// exactly.</summary>
+        public ProductionAdvisor(int playerIndex, CommanderPersonality personality, uint seed)
+        {
+            if (playerIndex < 0) throw new ArgumentOutOfRangeException(nameof(playerIndex));
+            PlayerIndex = playerIndex;
+            Personality = personality;
+            var span = MaxDecisionIntervalTicks - MinDecisionIntervalTicks;
+            DecisionIntervalTicks = MinDecisionIntervalTicks + (int)Math.Round(personality.Discipline * span);
+            _rng = new SimRng(seed);
+        }
+
+        /// <summary>True on frames this advisor actually thinks. Mirrors
+        /// <see cref="SkirmishCommander.IsDecisionFrame"/>'s own
+        /// shape.</summary>
+        public bool IsDecisionFrame(int frame) => frame % DecisionIntervalTicks == 0;
+
+        /// <summary>The commands to hand to <see cref="MatchState.Tick"/>
+        /// this frame -- at most one per decision (either one expansion or
+        /// one training push across this player's idle production
+        /// buildings), never both in the same call. Empty on a
+        /// non-decision frame or if this player's faction has no army
+        /// roster at all (<see cref="ArmyGenerator"/> only supports
+        /// HumanArmy/AlienHive -- see that class's own header).</summary>
+        public IReadOnlyList<Command> DecideCommands(MatchState state)
+        {
+            if (state == null) throw new ArgumentNullException(nameof(state));
+            var commands = new List<Command>();
+            if (!IsDecisionFrame(state.Frame)) return commands;
+
+            var player = state.Player(PlayerIndex);
+
+            // Territoriality -> how often this decision goes to expansion
+            // instead of training.
+            var expandRoll = _rng.IntRange(1000);
+            var goExpand = expandRoll < (int)(Personality.Territoriality * 1000);
+
+            if (goExpand && TryQueueExpansion(state, player, commands))
+                return commands;
+
+            // Aggression -> target standing-army size, as a fraction of
+            // supply cap (docs/23 §13-E: 60 base / 20-40 units at scale --
+            // this deliberately never claims the full cap, leaving room
+            // for the "don't spam" ceiling that range already implies).
+            var targetSupplyFraction = 0.4 + Personality.Aggression * 0.5;
+            var targetSupply = (int)(player.SupplyCap * targetSupplyFraction);
+            if (player.SupplyUsed < targetSupply)
+                TryQueueTraining(state, player, commands);
+
+            return commands;
+        }
+
+        private bool TryQueueExpansion(MatchState state, PlayerState player, List<Command> commands)
+        {
+            var hqHex = FindOwnHq(state);
+            if (hqHex == null) return false;
+
+            foreach (var kind in ExpansionPreference)
+            {
+                var def = BuildingDef.Get(kind);
+                var affordable = true;
+                foreach (var (resource, amount) in def.Cost)
+                {
+                    if (player.Wallet(resource) < amount) { affordable = false; break; }
+                }
+                if (!affordable) continue;
+
+                var hex = FindOpenHexForBuilding(state, hqHex.Value, kind);
+                if (hex == null) continue;
+
+                commands.Add(new Command(PlayerIndex, CommandKind.BuildStructure,
+                    unchecked((uint)kind), hex.Value.Q, hex.Value.R));
+                return true;
+            }
+            return false;
+        }
+
+        private void TryQueueTraining(MatchState state, PlayerState player, List<Command> commands)
+        {
+            List<uint>? idleProducers = null;
+            for (var i = 0; i < state.BuildingCount; i++)
+            {
+                var b = state.BuildingAt(i);
+                if (b.PlayerIndex != PlayerIndex || b.State != BuildingState.Complete) continue;
+                if (b.Kind != BuildingKind.Factory) continue;
+                if (b.TrainingKind != null) continue;
+                (idleProducers ??= new List<uint>()).Add(b.EntityId);
+            }
+            if (idleProducers == null) return;
+
+            // Greed -> how much of the current wallet this decision commits
+            // to a shopping list. ArmyGenerator.Generate throws for
+            // MadDoctor/Mixed (no roster) -- caught, not guarded against in
+            // advance, so the failure reason stays exactly what
+            // ArmyGenerator itself already documents rather than a
+            // silently-duplicated check here.
+            var spendFraction = 0.2 + Personality.Greed * 0.6;
+            var budget = new Dictionary<ResourceKind, int>(Resources.Count);
+            for (var i = 0; i < Resources.Count; i++)
+            {
+                var kind = (ResourceKind)i;
+                budget[kind] = (int)(player.Wallet(kind) * spendFraction);
+            }
+
+            IReadOnlyList<(RosterUnitKind Kind, int Count)> shoppingList;
+            try
+            {
+                shoppingList = ArmyGenerator.Generate(player.Faction, Personality, budget, _rng);
+            }
+            catch (ArgumentException)
+            {
+                return;
+            }
+            if (shoppingList.Count == 0) return;
+
+            // One TrainUnit per idle producer, highest-priority (roster
+            // order, per ArmyGenerator's own stable-output contract)
+            // still-affordable kind from the shopping list -- CanTrainUnit
+            // itself re-validates affordability against the LIVE wallet
+            // (not the budget snapshot above, which shrinks as earlier
+            // producers in this same loop are queued), so this never
+            // double-spends across multiple idle buildings in one
+            // decision.
+            foreach (var buildingId in idleProducers)
+            {
+                foreach (var (kind, count) in shoppingList)
+                {
+                    if (count <= 0) continue;
+                    if (!state.CanTrainUnit(PlayerIndex, buildingId, kind)) continue;
+                    commands.Add(new Command(PlayerIndex, CommandKind.TrainUnit, buildingId, (int)kind));
+                    break;
+                }
+            }
+        }
+
+        private HexCoord? FindOwnHq(MatchState state)
+        {
+            for (var i = 0; i < state.BuildingCount; i++)
+            {
+                var b = state.BuildingAt(i);
+                if (b.PlayerIndex == PlayerIndex && b.Kind == BuildingKind.Hq && b.State != BuildingState.Destroyed)
+                    return b.Hex;
+            }
+            return null;
+        }
+
+        /// <summary>Ring-search out from `center` (mirrors <see
+        /// cref="MatchState"/>'s own private `FindOpenHexNear`'s shape,
+        /// reusing the SAME public <see cref="HexCoord.Ring"/> that method
+        /// walks) for the nearest hex <see
+        /// cref="MatchState.CanPlaceBuilding"/> actually accepts for
+        /// `kind` -- the one shared validity check <see
+        /// cref="MatchState.CanPlaceBuilding"/>'s own doc comment already
+        /// establishes, so this can never queue a placement the sim would
+        /// then silently reject.</summary>
+        private HexCoord? FindOpenHexForBuilding(MatchState state, HexCoord center, BuildingKind kind)
+        {
+            for (var ring = 1; ring <= 6; ring++)
+                foreach (var hex in center.Ring(ring))
+                    if (state.CanPlaceBuilding(PlayerIndex, kind, hex))
+                        return hex;
+            return null;
+        }
+    }
+}

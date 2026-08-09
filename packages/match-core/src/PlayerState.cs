@@ -64,11 +64,32 @@ namespace MadDr.MatchCore
         public const int ManaCap = 100;
         public int Mana { get; private set; }
 
-        public PlayerState(int playerIndex, FactionId faction, int supplyCap)
+        /// <summary>docs/30 (selectable races + AI opponents): whether this
+        /// player slot is driven by <see cref="AiMatchDriver"/> instead of
+        /// external (human) input. Setup data, same category as
+        /// <see cref="Faction"/> -- but unlike Faction, it has NO influence
+        /// on <see cref="MatchState.Tick"/>'s own math (only on which
+        /// external process decides what <see cref="Command"/>s to submit;
+        /// once a command arrives, Tick processes it identically regardless
+        /// of source) -- so, like <see cref="AiPersonality"/> just below,
+        /// it is deliberately left OUT of <see cref="WriteTo"/>'s hash.</summary>
+        public bool IsAiControlled { get; }
+
+        /// <summary>The AI's decision-weighting profile, or null for a
+        /// human-controlled player. <see cref="CommanderPersonality"/>'s own
+        /// header already documents it as "DATA, never simulation state...
+        /// not part of the tick hash" -- <see cref="WriteTo"/> omits this
+        /// field for the exact same reason.</summary>
+        public CommanderPersonality? AiPersonality { get; }
+
+        public PlayerState(int playerIndex, FactionId faction, int supplyCap,
+            bool isAiControlled = false, CommanderPersonality? aiPersonality = null)
         {
             PlayerIndex = playerIndex;
             Faction = faction;
             SupplyCap = supplyCap;
+            IsAiControlled = isAiControlled;
+            AiPersonality = aiPersonality;
             for (var i = 0; i < _walletCap.Length; i++) _walletCap[i] = int.MaxValue;
         }
 
@@ -166,7 +187,7 @@ namespace MadDr.MatchCore
 
         public PlayerState Clone()
         {
-            var c = new PlayerState(PlayerIndex, Faction, SupplyCap)
+            var c = new PlayerState(PlayerIndex, Faction, SupplyCap, IsAiControlled, AiPersonality)
             {
                 SupplyUsed = SupplyUsed,
                 SalvagedOrigins = SalvagedOrigins,
