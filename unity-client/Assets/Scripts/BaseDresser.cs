@@ -485,21 +485,57 @@ public class BaseDresser : MonoBehaviour
         builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.5f),
             new Vector3(bodyW, bodyH, bodyD), Placeholder(), root.transform);
 
-        var stackRadius = fullScale.x * 0.09f;
+        // 2026-08 (creator direction: "the Factory smoke stack needs to be
+        // longer and narrower"): radius cut from 0.09 to 0.065 of fullScale.x
+        // (narrower), height raised from a flat fullScale.y (flush with the
+        // building's own roofline) to 1.4x that (visibly taller than the
+        // building it rises from) -- same "diameter"/"height*0.5 = center
+        // offset" Cylinder convention every other primitive in this method
+        // already uses.
+        var stackRadius = fullScale.x * 0.065f;
+        var stackHeight = fullScale.y * 1.4f;
         var stackXZ = new Vector3(fullScale.x * 0.32f, 0f, fullScale.z * 0.32f);
-        builder.SpawnPrim(PrimitiveType.Cylinder, origin + stackXZ + Vector3.up * (fullScale.y * 0.5f),
-            new Vector3(stackRadius * 2f, fullScale.y * 0.5f, stackRadius * 2f), Placeholder(), root.transform);
+        var stackTop = origin + stackXZ + Vector3.up * stackHeight;
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + stackXZ + Vector3.up * (stackHeight * 0.5f),
+            new Vector3(stackRadius * 2f, stackHeight * 0.5f, stackRadius * 2f), Placeholder(), root.transform);
 
         var trim = new GameObject("FactoryTrim").transform;
         trim.SetParent(root.transform, false);
         var brassMat = Brass();
 
+        // 2026-08 (creator direction: "the metal edging on the building need
+        // to extend further out of the building add rivets"): band diameter
+        // multiplier raised from 2.3 to 2.8x the (now narrower) stack radius
+        // -- a bigger overhang past the stack's own surface than before, not
+        // just an unchanged ring shrunk along with the stack -- and each band
+        // gets its own scattered rivet ring via the same SpawnRivets helper
+        // the jar lid/base rings already use, at that band's own outer
+        // radius so the studs sit flush on the band's rim.
+        var bandMult = 2.8f;
+        var rivetSize = fullScale.x * 0.012f;
+        var steelMatStack = Steel();
         for (var i = 1; i <= 3; i++)
         {
-            var bandY = fullScale.y * (i / 4f);
-            builder.SpawnPrim(PrimitiveType.Cylinder, origin + stackXZ + Vector3.up * bandY,
-                new Vector3(stackRadius * 2.3f, fullScale.y * 0.018f, stackRadius * 2.3f), brassMat, trim);
+            var bandY = stackHeight * (i / 4f);
+            var bandCenter = origin + stackXZ + Vector3.up * bandY;
+            builder.SpawnPrim(PrimitiveType.Cylinder, bandCenter,
+                new Vector3(stackRadius * bandMult, fullScale.y * 0.018f, stackRadius * bandMult), brassMat, trim);
+            SpawnRivets(bandCenter, stackRadius * bandMult * 0.5f, rivetSize, steelMatStack, trim, 10, 500 + i * 10);
         }
+
+        // 2026-08 (creator direction: "add smoke emitter coming from it"):
+        // a continuous ambient plume at the stack's own opening -- reuses
+        // SmokePlume directly (it is a plain public MonoBehaviour with its
+        // own Update-driven spawn loop; DamageFx.AttachSmoke wraps it with
+        // wall-based, damage-triggered positioning this doesn't want) so the
+        // Factory reads as a running industrial chimney from the moment
+        // construction completes, independent of the building's HP/damage
+        // state entirely.
+        var smokeGo = new GameObject("ChimneySmoke");
+        smokeGo.transform.SetParent(trim, false);
+        smokeGo.transform.position = stackTop;
+        var smokeAngle = ((root.GetInstanceID() & 0xFFFF) % 360) * Mathf.Deg2Rad;
+        smokeGo.AddComponent<SmokePlume>().Init(1.4f, smokeAngle);
 
         var stoneMat = DoctorStone();
         var pilasterH = bodyH * 0.92f;

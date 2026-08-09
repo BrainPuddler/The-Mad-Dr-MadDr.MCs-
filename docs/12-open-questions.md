@@ -13257,3 +13257,67 @@ zero errors trace to any of them, same filter-by-source-file check
 established earlier in this log); several derived-geometry values were
 checked numerically across all four building tiers rather than only the
 tier used while designing them.
+
+## Follow-up -- Mad Doctor Factory smoke stack: extend brass bands, rivets, taller/narrower stack, ambient smoke
+
+Creator direction, verbatim: "the metal edging on the building need to
+extend further out of the building add rivets. The Factory smoke stack
+needs to be longer and narrow. Add smoke emitter coming from it."
+
+Read as the Mad Doctor Factory's chimney assembly specifically (`docs`
+already frame this faction around gothic-industrial "steam pipes... glass
+tubes, glowing vats, gothic windows, chimneys" imagery, and "smoke stack"
+is period/faction-specific vocabulary the Human Alliance and Alien Hive
+factory specs never use -- their factories were never given a literal
+chimney). Scoped to `BuildDoctorFactory` in `BaseDresser.cs` only; the
+Human Factory's own cooling-vent/band assembly (same shape, different
+theme) was left untouched.
+
+Three changes, same method:
+
+- **Narrower/taller stack:** `stackRadius` cut from `fullScale.x * 0.09`
+  to `* 0.065` (about 28% narrower); the stack's own height, previously
+  flush with the building's roofline (`fullScale.y`, i.e. the SAME height
+  every other faction's building body reads at), raised to
+  `fullScale.y * 1.4` -- now visibly taller than the building it rises
+  from rather than ending level with the roof.
+- **Bands extend further out + rivets:** the three brass ring bands'
+  diameter multiplier raised from 2.3x to 2.8x the stack's OWN (now
+  smaller) radius -- a bigger absolute overhang past the stack's surface
+  than before, not an unchanged ring simply riding a thinner stack down
+  with it. Each band gets its own scattered rivet ring via the existing
+  `SpawnRivets` helper (same small-sphere "studded" precedent the jar
+  lid/base rings and the factory's own control wheel already use),
+  placed at that band's own outer radius.
+- **Ambient smoke emitter:** `SmokePlume` (the plain public MonoBehaviour
+  `DamageFx.AttachSmoke` already wraps for damage-triggered wall smoke)
+  is instantiated directly at the stack's own top opening, parented under
+  the faction's existing non-tinted `FactoryTrim` holder. Deliberately
+  NOT routed through `AttachSmoke` -- that helper's positioning (hashed
+  wall angle, height-fraction-of-building offset, radially-outward-from-
+  footprint drift) is built for a damage cue starting low on a wall, not
+  a permanent industrial chimney plume starting at a specific known
+  point in space. This plume starts running the moment construction
+  completes and is independent of the building's HP/damage state
+  entirely -- the Factory now always looks like a running boiler, the
+  same way the existing damage smoke/fire only appears once the building
+  takes its first hit.
+
+**Verified:** re-derived the Cylinder "scale.y*2 = world height,
+position.y = half that above origin" convention already established
+elsewhere in this same method (the tank cylinder, the original chimney
+itself) before changing the stack's own height math, rather than
+guessing at the scale-vs-height relationship. Confirmed via the scratch
+flightcheck harness that zero of its 27 current build errors trace to
+`BaseDresser.cs` -- every one is pre-existing harness drift in files
+this change never touched (`RuntimeCityBuilder.cs`, `MonsterAgent.cs`,
+`SimBridge.cs`, `FactionPickerHud.cs`, and one unrelated pre-existing
+line in `DamageFx.cs`) caused by the scratch `UnityStub.cs`/
+`FlightCheck.csproj` having drifted stale against the current repo
+(missing stub members like `Transform.lossyScale`/`Physics.Linecast`,
+missing Compile entries for files like `ArmyGenerator.cs` that landed on
+`main` after the harness was last reconstructed) -- reconstructing the
+harness itself was out of scope for this change. Both reused calls
+(`SpawnRivets`, `AddComponent<SmokePlume>().Init(...)`) match an
+existing call already proven correct elsewhere in the same file
+byte-for-byte in argument shape.
