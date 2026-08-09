@@ -246,13 +246,32 @@ public class WaypointCommander : MonoBehaviour
     /// mirror on whoever held this slot before (only if THIS slot is
     /// still what their own field says -- a monster moved to a second
     /// battalion since shouldn't have ITS membership yanked out from
-    /// under it by the FIRST battalion's own rebind).</summary>
+    /// under it by the FIRST battalion's own rebind).
+    ///
+    /// 2026-08 follow-up (creator direction: "battalion groups remain the
+    /// same, if a unit is already part of one group it is excluded from
+    /// being part of another"): membership is exclusive -- before adding
+    /// an incoming member here, pull it out of whatever OTHER slot's
+    /// list currently holds it (its own `BattalionSlot` mirror says
+    /// which). This is genuinely a different case from the same-slot
+    /// clear above: that one handles "slot N is being rebound to a new
+    /// roster," this one handles "a member of slot N is being pulled
+    /// INTO slot M" -- both must run for a rebind that also poaches
+    /// members from other battalions to end with every unit in exactly
+    /// one list.</summary>
     private void CreateBattalion(List<MonsterAgent> members, int slot)
     {
         var old = _battalions[slot];
         if (old != null)
             foreach (var m in old.Members)
                 if (m != null && m.BattalionSlot == slot) m.SetBattalionSlot(null);
+
+        foreach (var m in members)
+        {
+            if (m == null || !m.BattalionSlot.HasValue || m.BattalionSlot.Value == slot) continue;
+            var prior = _battalions[m.BattalionSlot.Value];
+            if (prior != null) prior.Members.Remove(m);
+        }
 
         var battalion = new Battalion { Name = "Battalion " + _nextBattalionNumber };
         battalion.Members.AddRange(members);

@@ -900,6 +900,16 @@ function render() {
 // and no vessel slot still gathers 0 of everything). Same threshold the
 // Unity side's `MonsterAgent.IsHarvester` uses, so a genome reads as a
 // harvester (or doesn't) consistently in both places.
+//
+// 2026-08 follow-up (creator direction: "create a category in the lab
+// stable and in game called scavengers, that is always searching for and
+// harvesting body parts and salvage and then transporting them to
+// factories, then returning to where they were and continue searching"):
+// that loop is exactly what a harvest-capable monster's Unity-side AI
+// already does on its own (hunt a citizen for body parts, fall back to a
+// wrecked building's debris for salvage, deliver to the Factory, resume
+// searching from where it left off) -- "Scavenger" is the category name
+// shown to players for it; this same check is still what gates it.
 function isHarvesterGenome(g) {
   const p = harvestProfile(g);
   return p.gather.blood > 0.001 || p.gather.bone > 0.001 || p.gather.brain > 0.001;
@@ -913,7 +923,7 @@ function renderRoster() {
     const v = viability(c.genome);
     const badge = c.alive ? `<span class="badge ${v.state}">${v.state}</span>` : `<span class="badge dead">DEAD</span>`;
     const star = isSaved(c.id) ? "⭐ " : "";
-    const harvesterMark = isHarvesterGenome(c.genome) ? `<span class="badge harvester" title="Collector unit -- real onboard harvest capacity">🪣</span>` : "";
+    const harvesterMark = isHarvesterGenome(c.genome) ? `<span class="badge harvester" title="Scavenger -- always searching for and harvesting body parts and salvage, then delivering to the factory and returning to search again">🪣</span>` : "";
     return `<div class="card ${c.id === local.selectedId ? "selected" : ""} ${c.alive ? "" : "dead"}" data-id="${c.id}">
       <div class="name">${star}${c.alive ? "" : "💀 "}${esc(c.name)}${harvesterMark}${badge}</div>
       <div class="meta">${esc(c.genome.body.plan)} · ${esc(c.genome.brain.tier)} brain · ${esc(c.genome.heart.tier)} heart</div>
@@ -1338,7 +1348,7 @@ function renderStable() {
   grid.innerHTML = saved.map(c => {
     const fac = factionOfCreature(c);
     if (!thumbCache[c.id]) { try { thumbCache[c.id] = renderThumbnail(c.genome, fac); } catch { thumbCache[c.id] = ""; } }
-    const harvesterMark = isHarvesterGenome(c.genome) ? `<span class="sc-harvester" title="Collector unit -- real onboard harvest capacity">🪣</span>` : "";
+    const harvesterMark = isHarvesterGenome(c.genome) ? `<span class="sc-harvester" title="Scavenger -- always searching for and harvesting body parts and salvage, then delivering to the factory and returning to search again">🪣</span>` : "";
     const picked = battalionSelection.has(c.id) ? " battalion-selected" : "";
     return `<div class="stable-card ${c.id === local.selectedId ? "selected" : ""}${picked}" data-id="${c.id}">
       <div class="sc-thumb">${thumbCache[c.id] ? `<img src="${thumbCache[c.id]}" alt="">` : ""}<span class="sc-fac">${FACTION_GLYPH[fac]}</span>${harvesterMark}</div>
@@ -1428,6 +1438,7 @@ function showStableDetail(id) {
       <div class="sd-fac">${FACTION_GLYPH[fac]} ${FACTION_LABEL[fac]}</div>
       <div class="kv">
         <div class="k">form</div><div>${esc(g.body.plan)}</div>
+        ${isHarvesterGenome(g) ? `<div class="k">role</div><div>🪣 Scavenger</div>` : ""}
         <div class="k">brain</div><div>${esc(g.brain.tier)}</div>
         <div class="k">heart</div><div>${esc(g.heart.tier)} \u2014 cap <span class="num">${heartCapacity(g.heart).toFixed(1)}</span></div>
         <div class="k">viability</div><div class="${vClass}">${c.alive ? v.state.toUpperCase() : "DEAD"}</div>

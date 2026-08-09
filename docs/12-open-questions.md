@@ -13726,3 +13726,66 @@ committed `.meta` needed" category `RegionPickerHud`/`BattalionHud`/every
 other Hud-family script in this project already established -- confirmed
 by re-checking that category's own reasoning rather than assuming it
 still applied.
+
+## Follow-up -- battalion membership exclusivity
+
+Creator direction, verbatim: "battalion groups remain the same, if a
+unit is already part of one group it is excluded from being part of
+another."
+
+Investigated whether this was already true. It wasn't:
+`MonsterAgent.BattalionSlot`'s own doc comment admitted a monster "can
+still be a live member of an OLDER battalion's own list at the same
+time" -- `WaypointCommander.CreateBattalion` only cleared the mirror for
+whoever previously held the SAME slot being rebound (same-slot
+rebinding), never checked whether an incoming member already belonged to
+some OTHER slot's list. A unit Ctrl+3'd then Ctrl+5'd would show up in
+both battalion 3's and battalion 5's member counts/`BattalionMembers()`
+lists until slot 3 was itself rebound or the unit died.
+
+**Fix:** `CreateBattalion` (`WaypointCommander.cs`) now pulls each
+incoming member out of whatever other slot's list its own
+`BattalionSlot` mirror says it currently belongs to, before adding it to
+the new one -- both existing call sites (`AssignBattalion`'s Ctrl+digit
+bind and `FormBattalionFromProduction`'s auto-form-on-produce) go
+through this one function, so both get the fix for free. Membership is
+now exclusive: a monster is in exactly one battalion's list at a time.
+
+## Follow-up -- "Scavengers" category (Lab stable + in-game)
+
+Creator direction, verbatim: "create a category in the lab stable and
+in game called scavengers. That is always searching for and harvesting,
+body parts and salvage and then transporting them to factories, then
+returning to where they were and continue searching."
+
+Investigated whether this loop already existed before building anything
+new. It does, in full, already shipped and working: any harvest-capable
+monster's Unity-side `MonsterAgent.AcquireTarget` idle-time fallback
+already (1) hunts the nearest citizen to eat for body parts (blood/bone/
+brain), (2) falls back to a destroyed building's own leftover debris pile
+for salvage when no citizen is in range, (3) walks a full or emptied-out
+tank to the Factory to deliver, and (4) resumes searching from
+`_lastForagePos` -- literally "where it was collecting" -- once
+delivered, on an unbounded loop. This is the same loop docs/20's
+Collection Station doc and the corpse/debris salvage mechanics in
+`match-core` (`SalvageCorpse`/`ScavengeDebris`) already describe; nothing
+about the requested BEHAVIOR was missing.
+
+What was missing was the category itself: there was no formal "role"/
+"category" concept anywhere in the schema (`GenomeDto` has no such
+field) or the UI -- only a derived boolean, `MonsterAgent.IsHarvester` /
+`site/main.js`'s `isHarvesterGenome`, surfaced as an unlabeled bucket
+badge. Introducing a whole new stored-trait category would be a genome
+schema change (docs 06/07/08 must move together per this doc's own
+normative-schema rule) for a distinction the genome doesn't actually
+need to carry, since the harvest-capability check already determines it
+losslessly.
+
+**Fix:** "Scavenger" is now the player-facing name for that existing
+capability, not a new mechanic: `MonsterAgent.IsScavenger` (an alias for
+`IsHarvester`) and the in-game floating badge (`HarvesterMarkerHud`, now
+lettered "S") on the Unity side; `isHarvesterGenome` badges/tooltips
+reworded to "Scavenger" and a `role: 🪣 Scavenger` row added to the
+Stable's detail panel on the Lab side. No new genome field, no new AI --
+the loop already did exactly what was asked, it just didn't have a name
+players could see.

@@ -253,11 +253,16 @@ public class MonsterAgent : MonoBehaviour
     /// list membership (same relationship <see cref="Selected"/> already
     /// has to that class's `_selected` list), kept in sync by <see
     /// cref="SetBattalionSlot"/>, never written directly by this class.
-    /// Only ever reflects the MOST RECENT battalion this monster was
-    /// assigned to -- a monster can still be a live member of an OLDER
-    /// battalion's own list at the same time (this field doesn't enforce
-    /// exclusive membership, it's a convenience lookup, not a second
-    /// source of truth).</summary>
+    /// Reflects the MOST RECENT battalion this monster was assigned to --
+    /// 2026-08 follow-up (creator direction: "battalion groups remain the
+    /// same, if a unit is already part of one group it is excluded from
+    /// being part of another"): `WaypointCommander.CreateBattalion` now
+    /// enforces that as exclusive membership, pulling this monster out of
+    /// whatever OLDER battalion's list held it before adding it to a new
+    /// one, so this mirror and "the one list this monster is actually in"
+    /// stay in agreement. Still a convenience lookup, not a second source
+    /// of truth -- the list is authoritative, this just tells you which
+    /// one to look in.</summary>
     public int? BattalionSlot { get; private set; }
 
     public void SetBattalionSlot(int? slot)
@@ -308,6 +313,21 @@ public class MonsterAgent : MonoBehaviour
                 && (_harvest.GatherBlood > 0.001 || _harvest.GatherBone > 0.001 || _harvest.GatherBrain > 0.001);
         }
     }
+
+    /// <summary>Player-facing category name for <see cref="IsHarvester"/>
+    /// -- 2026-08 (creator direction: "create a category in the lab
+    /// stable and in game called scavengers, that is always searching for
+    /// and harvesting body parts and salvage and then transporting them
+    /// to factories, then returning to where they were and continue
+    /// searching"). That loop is exactly what a harvest-capable monster's
+    /// own idle-time fallback in <see cref="AcquireTarget"/> already
+    /// does: hunt a citizen for body parts (blood/bone/brain), fall back
+    /// to a destroyed building's leftover debris for salvage, deliver the
+    /// tank to the Factory, then resume searching from
+    /// <see cref="_lastForagePos"/> right where it left off. "Scavenger"
+    /// is the name the Stable and in-game HUD show for it; `IsHarvester`
+    /// stays the internal capability check both sides derive it from.</summary>
+    public bool IsScavenger { get { return IsHarvester; } }
 
     /// <summary>Winged plan -- the commander routes a roof-click to a
     /// perch order for these, an attack order for everyone else.</summary>
