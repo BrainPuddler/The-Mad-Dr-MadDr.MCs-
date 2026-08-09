@@ -486,22 +486,49 @@ public class BaseDresser : MonoBehaviour
             new Vector3(bodyW, bodyH, bodyD), Placeholder(), root.transform);
 
         // 2026-08 (creator direction: "the Factory smoke stack needs to be
-        // longer and narrower"): radius cut from 0.09 to 0.065 of fullScale.x
-        // (narrower), height raised from a flat fullScale.y (flush with the
-        // building's own roofline) to 1.4x that (visibly taller than the
-        // building it rises from) -- same "diameter"/"height*0.5 = center
-        // offset" Cylinder convention every other primitive in this method
-        // already uses.
-        var stackRadius = fullScale.x * 0.065f;
+        // longer and narrower"): height raised from a flat fullScale.y
+        // (flush with the building's own roofline) to 1.4x that (visibly
+        // taller than the building it rises from) -- same "diameter"/
+        // "height*0.5 = center offset" Cylinder convention every other
+        // primitive in this method already uses.
+        //
+        // 2026-08 follow-up (creator direction: "chimney is a thick walled
+        // brick tube not a rod"): radius brought back up from 0.065 to 0.08
+        // of fullScale.x -- a genuine "rod" reading needed correcting more
+        // than pure narrowing was asking for -- and TWO problems fixed
+        // together, not just the shape: (1) the stack used to be spawned
+        // straight onto `root.transform` with the shared `Placeholder()`
+        // material, meaning `TintShape` silently overwrote it to the flat
+        // owner-tint color every other body panel uses -- it was never
+        // actually brick-colored at all, just the same block color as the
+        // building it rises from. Moved into the non-tinted `trim` holder
+        // (created earlier in this method now, specifically so the stack
+        // can join it) with the real `DoctorDarkBrick()` material. (2) a
+        // second, smaller, recessed dark cylinder (`DoctorFlueVoidMat()`)
+        // sits inset just below the rim, standing in for the hollow flue
+        // interior -- from the RTS camera's own down-angle, the outer
+        // brick cylinder now reads as a THICK WALL around a dark bore,
+        // not a solid rod, without needing an actual hollow mesh.
+        var stackRadius = fullScale.x * 0.08f;
         var stackHeight = fullScale.y * 1.4f;
         var stackXZ = new Vector3(fullScale.x * 0.32f, 0f, fullScale.z * 0.32f);
         var stackTop = origin + stackXZ + Vector3.up * stackHeight;
-        builder.SpawnPrim(PrimitiveType.Cylinder, origin + stackXZ + Vector3.up * (stackHeight * 0.5f),
-            new Vector3(stackRadius * 2f, stackHeight * 0.5f, stackRadius * 2f), Placeholder(), root.transform);
 
         var trim = new GameObject("FactoryTrim").transform;
         trim.SetParent(root.transform, false);
         var brassMat = Brass();
+        var brickMat = DoctorDarkBrick();
+        var flueVoidMat = DoctorFlueVoidMat();
+
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + stackXZ + Vector3.up * (stackHeight * 0.5f),
+            new Vector3(stackRadius * 2f, stackHeight * 0.5f, stackRadius * 2f), brickMat, trim);
+
+        var boreRadius = stackRadius * 0.6f;
+        var boreDepth = stackHeight * 0.35f;
+        var boreTopY = stackTop.y - fullScale.y * 0.02f;
+        builder.SpawnPrim(PrimitiveType.Cylinder,
+            new Vector3(stackTop.x, boreTopY - boreDepth * 0.5f, stackTop.z),
+            new Vector3(boreRadius * 2f, boreDepth * 0.5f, boreRadius * 2f), flueVoidMat, trim);
 
         // 2026-08 (creator direction: "the metal edging on the building need
         // to extend further out of the building add rivets"): band diameter
@@ -1698,6 +1725,13 @@ public class BaseDresser : MonoBehaviour
     /// which building it's on; only the tone needs to shift toward
     /// "old, mysterious, gothic" instead of a lived-in row house.</summary>
     private static Material DoctorDarkBrick() => MTextured("faction-doctor-brick", 0.3f, 0.24f, 0.22f, PbrTextureAtlas.Brick, 0.12f);
+
+    /// <summary>2026-08 (creator direction: "chimney is a thick walled
+    /// brick tube not a rod"): flat near-black, untextured, matte --
+    /// stands in for the smoke stack's hollow flue interior. No texture
+    /// or metallic response on purpose; the point is to read as empty
+    /// dark space recessed below the brick rim, not as a lit surface.</summary>
+    private static Material DoctorFlueVoidMat() => MTextured("faction-doctor-flue-void", 0.05f, 0.05f, 0.05f, null, 0.05f, 0f);
 
     /// <summary>Mad Doctor faction: pale weathered stone for buttresses/
     /// window surrounds -- reuses PbrTextureAtlas.Limestone (same

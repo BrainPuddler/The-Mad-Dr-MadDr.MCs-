@@ -13399,3 +13399,46 @@ two entries (`Transform.lossyScale`, `Physics.Raycast`/`Linecast`
 missing from the scratch `UnityStub.cs`) at their same original line
 numbers -- confirmed by line number that neither is one of the lines
 this change touched.
+
+## Follow-up -- chimney is a tube, not a rod
+
+Creator direction, verbatim: "chimney is a thick walled brick tube not a
+rod."
+
+Investigated why it read as a plain rod rather than guessing at a purely
+cosmetic fix, and found a real bug, not just a missing detail: the stack
+cylinder was spawned straight onto `root.transform` using the shared
+`Placeholder()` material -- exactly like the building's own body cube --
+so `TintShape` silently overwrote it to the flat owner-tint color every
+frame, the same way it does the whole building's base silhouette. The
+stack was never actually brick-colored at all; it was rendering as the
+same flat tint block as the rest of the building, which reads as a
+featureless colored rod regardless of its proportions.
+
+Fixed with two changes:
+
+- **Material**: stack moved into the non-tinted `FactoryTrim` holder
+  (created earlier in the method now, specifically so the stack can join
+  it before it's spawned) using the real `DoctorDarkBrick()` material --
+  the same brick texture the city's own civilian buildings use, tinted
+  darker/cooler for the gothic-industrial faction read, per that
+  material's own doc comment.
+- **Shape**: radius brought back up from 0.065 to 0.08 of `fullScale.x`
+  (the prior "longer and narrower" pass alone pushed it too far toward
+  reading as a rod), and a second, smaller cylinder in a new near-black
+  matte material (`DoctorFlueVoidMat()`) sits recessed just below the
+  rim -- 60% of the outer radius, extending down 35% of the stack's own
+  height. From the RTS camera's own down-angle this reads as a genuine
+  hollow bore inside a thick brick wall, without needing an actual
+  hollow/tube mesh (this project's primitive-kit convention has no
+  imported-mesh pipeline to author one).
+
+**Verified:** the wider outer radius could plausibly have pushed the
+stack into the corner pilasters raised two entries above (both sit on
+the same diagonal corner of the building) -- checked with a real 2D
+nearest-point-on-cube-to-circle-center calculation (not the flawed 1D
+axis-only check tried first, which falsely flagged a collision) across
+all four building tiers; clearance ranges from 0.21 (Small) to 0.34
+(Landmark) units, comfortably clear at every tier, not just the one used
+while designing the fix. Flightcheck shows zero errors tracing to
+`BaseDresser.cs`.
