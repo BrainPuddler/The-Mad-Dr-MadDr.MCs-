@@ -103,6 +103,137 @@ public static class BuildingDresser
         }
     }
 
+    // ---- docs/30: facade grammar (WFC) integration -----------------------
+
+    /// <summary>Master switch for the docs/30 facade grammar. ON: Medium
+    /// and Large tiers get street/alley/party-wall-aware facades solved by
+    /// <see cref="FacadeGrammar"/> and built through <see cref="FacadeKit"/>'s
+    /// PropLibrary mesh-swap points. OFF: the pre-docs/30 window-strip
+    /// dressing, byte-for-byte.
+    ///
+    /// Deliberately defaults ON -- the creator's ask was to slot this into
+    /// the game, not to ship it dormant behind a flag nobody flips (a
+    /// failure mode this project has hit before: every pre-match picker
+    /// ever built sat switched off in the only real scene). It stays a
+    /// single bool so a bad visual verdict is one edit to revert, and the
+    /// legacy path below is untouched and still reachable.</summary>
+    public static bool UseFacadeGrammar = true;
+
+    /// <summary>Small tier keeps its whole-building archetypes (house,
+    /// gas station, diner) and Landmark keeps its civic set pieces --
+    /// those are already period-specific silhouettes, and a facade grid
+    /// would fight them rather than improve them. The grammar targets
+    /// exactly the tiers that are currently an extruded block with one
+    /// continuous window strip, which is where the "procedurally
+    /// assembled" read actually comes from.</summary>
+    private static bool GrammarAppliesTo(BuildingTier tier)
+    {
+        return tier == BuildingTier.Medium || tier == BuildingTier.Large;
+    }
+
+    // City-wide occupancy index, rebuilt once per CityModel (reference-
+    // compared, so a new city rebuilds it and a re-dress of the same city
+    // reuses it). Face classification needs "is the neighbouring hex a
+    // road / another building?", and asking that per building against the
+    // full building list would be O(n^2) over ~19k BigCity buildings.
+    private static CityModel _indexedCity;
+    private static HashSet<HexCoord> _roadIndex;
+    private static HashSet<HexCoord> _buildingIndex;
+
+    private static void EnsureCityIndex(CityModel city)
+    {
+        if (city == null || ReferenceEquals(_indexedCity, city)) return;
+        _indexedCity = city;
+        _roadIndex = new HashSet<HexCoord>(city.Roads);
+        _buildingIndex = new HashSet<HexCoord>();
+        for (var i = 0; i < city.Buildings.Count; i++)
+        {
+            var fp = city.Buildings[i].Footprint;
+            for (var j = 0; j < fp.Count; j++) _buildingIndex.Add(fp[j]);
+        }
+    }
+
+    private static Material DarkRecess() { return M(0.09f, 0.09f, 0.11f); }
+    private static Material IronDark() { return M(0.15f, 0.15f, 0.17f); }
+
+    /// <summary>Solve and build every face of one footprint hex.
+    ///
+    /// Cost discipline, stated rather than discovered later: only STREET
+    /// faces get the full grammar. Alley faces get their crown only (a
+    /// cornice genuinely does run around a corner, so this is period-
+    /// correct rather than a pure saving) and party walls get nothing at
+    /// all. That keeps a grammar-dressed hex in the same order of
+    /// magnitude as the window-strip dressing it replaces instead of
+    /// multiplying it by four faces.</summary>
+    private static void DressFacadeGrammar(RuntimeCityBuilder b, Building building, HexCoord hex,
+        Transform t, float height, int h, bool industrial, bool suburb, Material wall)
+    {
+        EnsureCityIndex(b.City);
+        if (_roadIndex == null || _buildingIndex == null) return;
+
+        var footprint = new HashSet<HexCoord>(building.Footprint);
+        var roles = FacadeGrammar.ClassifyFaces(hex, footprint, _roadIndex, _buildingIndex);
+        var style = FacadeGrammar.StyleFor(building.Tier, industrial, suburb);
+
+        var floors = Mathf.Clamp(Mathf.RoundToInt(height / 4.2f) - 1, 1, 8);
+
+        // One fire escape per BUILDING, not per face -- a constraint that
+        // spans faces and so can't live inside a single-face solve. The
+        // hash decides which street face is eligible, deterministically.
+        var escapeFace = h % 4;
+
+        var mats = new FacadeMaterials
+        {
+            Wall = wall,
+            Stone = Concrete(),
+            Trim = (h / 5) % 2 == 0 ? Cream() : Mustard(),
+            Glass = WindowBand(),
+            GlassLit = WindowGlow(),
+            DarkRecess = DarkRecess(),
+            Iron = IronDark(),
+            Rust = RustRed(),
+            Sign = SignWhite(),
+            GlowColor = WindowGlowColor,
+            // Same "roughly 2 in 5 are lit" read the strip dressing had,
+            // decided per building rather than per strip.
+            WindowsLit = (h / 11) % 5 < 2,
+            // Sized so a grammar-dressed building registers no MORE
+            // emissive/glow entries than the single per-floor strip pair
+            // it replaces -- this change cannot worsen the existing
+            // lighting load, which docs/30 flagged as already strained.
+            GlowBudget = 2,
+        };
+
+        for (var f = 0; f < 4; f++)
+        {
+            var role = roles[f];
+            if (role == FaceRole.PartyWall) continue;
+
+            var face = (FacadeFace)f;
+
+            if (role == FaceRole.Alley)
+            {
+                // crown only -- cornices wrap corners; the rest of an
+                // alley wall is the massing cube's own brick.
+                var alley = FacadeGrammar.Solve(FaceRole.Alley, 0, style,
+                    new Rng(unchecked((uint)(h + f * 7919))), allowFireEscape: false);
+                FacadeKit.BuildFace(b, t, t.position, face, alley, height, mats);
+                continue;
+            }
+
+            var solution = FacadeGrammar.Solve(role, floors, style,
+                new Rng(unchecked((uint)(h + f * 7919))),
+                allowFireEscape: f == escapeFace);
+
+            // A contradiction falls back to legacy dressing for this face
+            // rather than a half-built one -- the current dresser IS the
+            // emergency layout, already shipped and known-good.
+            if (solution.IsFallback) continue;
+
+            FacadeKit.BuildFace(b, t, t.position, face, solution, height, mats);
+        }
+    }
+
     /// <summary>Dress one building. Adds one holder GameObject per
     /// footprint hex into `cubes` (the damage pipeline's list). The
     /// FIRST hex is the "primary": it carries the rooftop kit and
@@ -140,11 +271,11 @@ public static class BuildingDresser
                     DressLandmark(builder, building.Archetype, holder.transform, height, h, primary);
                     break;
                 case BuildingTier.Large:
-                    DressOffice(builder, hex, holder.transform, height, h, primary);
+                    DressOffice(builder, building, hex, holder.transform, height, h, primary, industrial, suburb);
                     break;
                 case BuildingTier.Medium:
                     if (industrial) DressIndustrial(builder, holder.transform, height, h, primary);
-                    else DressApartment(builder, holder.transform, height, h, primary, suburb);
+                    else DressApartment(builder, building, hex, holder.transform, height, h, primary, suburb);
                     break;
                 default:
                     if (industrial) DressIndustrial(builder, holder.transform, height, h, primary);
@@ -297,7 +428,8 @@ public static class BuildingDresser
 
     // ---- medium tier: brick walk-up apartments ---------------------------------
 
-    private static void DressApartment(RuntimeCityBuilder b, Transform t, float height, int h, bool primary, bool suburb = false)
+    private static void DressApartment(RuntimeCityBuilder b, Building building, HexCoord hex, Transform t,
+        float height, int h, bool primary, bool suburb = false)
     {
         var basePos = t.position;
         // suburb: warm-leaning (50% cream / 25% brick / 25% seafoam);
@@ -306,32 +438,41 @@ public static class BuildingDresser
             ? ((h / 7) % 4 < 2 ? Cream() : (h / 7) % 4 == 2 ? Brick() : Seafoam())
             : ((h / 7) % 4 < 2 ? Seafoam() : (h / 7) % 4 == 2 ? Cream() : Brick());
 
-        // window bands: dark strips proud of two opposite faces per floor.
-        // docs/28: roughly 2 in 5 floor/face strips are "lit" at night --
-        // a per-instance EmissiveAnimator Flicker registration, not a
-        // synchronized whole-building glow, so a building face reads as
-        // "some windows lit, some dark, occasionally changing" instead of
-        // one uniform glow block.
-        var floors = Mathf.Max(2, Mathf.RoundToInt(height / 4f));
-        for (var f = 0; f < floors; f++)
+        if (UseFacadeGrammar && GrammarAppliesTo(building.Tier))
         {
-            var y = (f + 0.55f) * (height / floors);
-            SpawnWindowStrip(b, t, basePos + new Vector3(0f, y, Half * 1.01f), new Vector3(15f, 1.5f, 0.35f), h, f * 2);
-            SpawnWindowStrip(b, t, basePos + new Vector3(0f, y, -Half * 1.01f), new Vector3(15f, 1.5f, 0.35f), h, f * 2 + 1);
+            // docs/30: the grammar owns the walls now -- punched window
+            // bays that know which face is a street, a real ground-floor
+            // band, party walls left blank, a cornice that overhangs.
+            // Everything below the grammar call is roof/structure work it
+            // deliberately does NOT own.
+            DressFacadeGrammar(b, building, hex, t, height, h, industrial: false, suburb: suburb, wall: wall);
         }
+        else
+        {
+            // legacy: continuous window strips on two opposite faces
+            var floors = Mathf.Max(2, Mathf.RoundToInt(height / 4f));
+            for (var f = 0; f < floors; f++)
+            {
+                var y = (f + 0.55f) * (height / floors);
+                SpawnWindowStrip(b, t, basePos + new Vector3(0f, y, Half * 1.01f), new Vector3(15f, 1.5f, 0.35f), h, f * 2);
+                SpawnWindowStrip(b, t, basePos + new Vector3(0f, y, -Half * 1.01f), new Vector3(15f, 1.5f, 0.35f), h, f * 2 + 1);
+            }
+            // fire escape: zig-zag ladder strip down one face
+            b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(Half * 1.04f, height * 0.5f, 0f),
+                new Vector3(0.25f, height * 0.86f, 3.2f), M(0.15f, 0.15f, 0.17f), t);
+        }
+
         // repaint accent: thin corner pilasters in the era wall color
         b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(Half * 0.98f, height / 2f, Half * 0.98f),
             new Vector3(1.2f, height, 1.2f), wall, t);
         b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(-Half * 0.98f, height / 2f, -Half * 0.98f),
             new Vector3(1.2f, height, 1.2f), wall, t);
-        // cornice + tar roof
-        b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 0.3f),
-            new Vector3(19.4f, 0.6f, 19.4f), Concrete(), t);
+        // tar roof (the cornice is the grammar's crown module when it's on)
+        if (!UseFacadeGrammar || !GrammarAppliesTo(building.Tier))
+            b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 0.3f),
+                new Vector3(19.4f, 0.6f, 19.4f), Concrete(), t);
         b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 0.65f),
             new Vector3(17.6f, 0.2f, 17.6f), RoofTar(), t);
-        // fire escape: zig-zag ladder strip down one face
-        b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(Half * 1.04f, height * 0.5f, 0f),
-            new Vector3(0.25f, height * 0.86f, 3.2f), M(0.15f, 0.15f, 0.17f), t);
 
         if (primary) Rooftop(b, t, basePos, height, h);
     }
@@ -344,7 +485,8 @@ public static class BuildingDresser
     // the setback itself is drawn on every hex, not just the primary one.
     private const float SetbackTopOffset = 6.5f + 1.5f;   // = 8f
 
-    private static void DressOffice(RuntimeCityBuilder b, HexCoord hex, Transform t, float height, int h, bool primary)
+    private static void DressOffice(RuntimeCityBuilder b, Building building, HexCoord hex, Transform t,
+        float height, int h, bool primary, bool industrial = false, bool suburb = false)
     {
         var basePos = t.position;
         var trim = (h / 5) % 2 == 0 ? Cream() : Mustard();
@@ -357,19 +499,38 @@ public static class BuildingDresser
         b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 6.5f),
             new Vector3(8f, 3f, 8f), Concrete(), t);
         b.RegisterRoofLandingHeight(hex, height + SetbackTopOffset);
-        // vertical pilaster strips -- the deco silhouette from a distance
-        for (var i = -1; i <= 1; i++)
+
+        if (UseFacadeGrammar && GrammarAppliesTo(building.Tier))
         {
-            b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(i * 5.5f, height / 2f, Half * 1.01f),
-                new Vector3(1.1f, height, 0.35f), trim, t);
-            b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(i * 5.5f, height / 2f, -Half * 1.01f),
-                new Vector3(1.1f, height, 0.35f), trim, t);
+            // Pilasters stay -- they're the deco vertical rhythm and they
+            // frame the grammar's bays rather than competing with them --
+            // but the two continuous full-height window slabs are gone,
+            // replaced by per-floor punched bays that respect face role.
+            for (var i = -1; i <= 1; i++)
+            {
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(i * 5.5f, height / 2f, Half * 1.01f),
+                    new Vector3(1.1f, height, 0.35f), trim, t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(i * 5.5f, height / 2f, -Half * 1.01f),
+                    new Vector3(1.1f, height, 0.35f), trim, t);
+            }
+            DressFacadeGrammar(b, building, hex, t, height, h, industrial, suburb, wall: Concrete());
         }
-        // window bands between pilasters (darker, recessed feel)
-        b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, height / 2f, Half * 0.995f),
-            new Vector3(16.8f, height * 0.9f, 0.15f), WindowBand(), t);
-        b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, height / 2f, -Half * 0.995f),
-            new Vector3(16.8f, height * 0.9f, 0.15f), WindowBand(), t);
+        else
+        {
+            // vertical pilaster strips -- the deco silhouette from a distance
+            for (var i = -1; i <= 1; i++)
+            {
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(i * 5.5f, height / 2f, Half * 1.01f),
+                    new Vector3(1.1f, height, 0.35f), trim, t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(i * 5.5f, height / 2f, -Half * 1.01f),
+                    new Vector3(1.1f, height, 0.35f), trim, t);
+            }
+            // window bands between pilasters (darker, recessed feel)
+            b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, height / 2f, Half * 0.995f),
+                new Vector3(16.8f, height * 0.9f, 0.15f), WindowBand(), t);
+            b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, height / 2f, -Half * 0.995f),
+                new Vector3(16.8f, height * 0.9f, 0.15f), WindowBand(), t);
+        }
 
         if (primary)
         {

@@ -40,6 +40,27 @@ public static class PropLibrary
         // gentler taper for the Human Alliance's cooling towers.
         Register("alien-crystal-spike", () => ProceduralMeshKit.Frustum(1f, 0.15f, 6));
         Register("human-cooling-tower", () => ProceduralMeshKit.Frustum(1f, 0.7f, 12));
+
+        // 2026-08 docs/30 (facade grammar): the module mesh-swap points.
+        // Deliberately left UNREGISTERED -- FacadeKit spawns each of these
+        // through PropLibrary.Spawn with a primitive fallback type, and an
+        // unregistered key takes exactly that fallback path (see Spawn's
+        // own contract below). That is the whole design: every facade
+        // module already routes through the asset seam, so authoring a
+        // real mesh later is a one-line Register(...) here per key, with
+        // zero changes at any FacadeKit call site and zero changes to the
+        // solver in citygen-core.
+        //
+        // The keys FacadeKit asks for, for whoever authors them:
+        //   facade-shopfront, facade-entrance-recessed, facade-entrance-stoop,
+        //   facade-loading-dock, facade-window-bay, facade-oriel-bay,
+        //   facade-fire-escape, facade-cornice, facade-parapet
+        //
+        // Registering a placeholder ProceduralMeshKit shape for each would
+        // be worse than the primitive fallback, not better: a hand-authored
+        // stand-in that only approximates a cornice reads as a wrong mesh,
+        // whereas the primitive reads as an honest block. "Flag, don't
+        // fake" -- this project's own standing rule.
     }
 
     public static void Register(string key, MeshBuilder builder) { Registry[key] = builder; }

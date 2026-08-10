@@ -1,0 +1,403 @@
+using MadDr.CityGen;
+using UnityEngine;
+
+/// <summary>
+/// docs/30: turns one solved <see cref="FacadeModule"/> into geometry on a
+/// building face. This is the <em>mesh-swap layer</em> the WFC plan is
+/// built around -- the half that knows about Unity, paired with
+/// <see cref="FacadeGrammar"/>, which knows only about architecture and is
+/// `dotnet test`-able without an engine.
+///
+/// **Every module spawns through <see cref="PropLibrary"/>.** That is the
+/// entire point of this file: docs/23 §10.4 already established
+/// "mesh-by-key with a primitive fallback so the game never breaks without
+/// assets," and every module here goes through that seam. Today each key
+/// falls back to a primitive because no authored mesh exists in this
+/// project (no DCC pipeline, no Editor in this environment). The moment a
+/// real mesh IS authored, registering it under the matching key upgrades
+/// every building in the city with zero changes here and zero changes to
+/// the solver -- which is what "compatible with a mesh pipeline" has to
+/// mean to be worth anything.
+///
+/// **Nothing here ever gets a collider.** <see cref="RuntimeCityBuilder.SpawnPrim"/>
+/// strips them, and <see cref="PropLibrary.Spawn"/> never adds one. This
+/// is load-bearing, not incidental: every `Physics.Raycast` in this project
+/// is unmasked, so a stray facade collider would immediately start
+/// intercepting cursor picks, monster line-of-sight tests, and
+/// `FireCluster`'s surface-pinning ray -- the last of which explicitly
+/// discards any hit that isn't its own parent's collider, and would
+/// silently fall back to crude fixed-radius flame placement.
+/// </summary>
+public static class FacadeKit
+{
+    /// <summary>Massing cubes are 18 m across, so a face plane sits at
+    /// ±9 m. Mirrors <see cref="BuildingDresser.Half"/> rather than
+    /// re-deriving it.</summary>
+    private const float Half = BuildingDresser.Half;
+
+    /// <summary>How far proud of the wall plane facade geometry sits.
+    /// Small but non-zero: a flush-mounted trim piece is geometrically
+    /// invisible as trim regardless of its size -- a rule this project
+    /// learned the hard way and wrote down (docs/12, "'edge trim' only
+    /// reads as trim if it actually protrudes").</summary>
+    private const float Proud = 0.22f;
+
+    // ---- PropLibrary keys: the mesh-swap points ------------------------
+    //
+    // Registered lazily below with primitive-shaped procedural fallbacks.
+    // An authored .mesh dropped in under any of these keys replaces that
+    // module everywhere, instantly, with no other code change.
+    public const string KeyShopfront = "facade-shopfront";
+    public const string KeyRecessedEntrance = "facade-entrance-recessed";
+    public const string KeyStoopEntrance = "facade-entrance-stoop";
+    public const string KeyLoadingDock = "facade-loading-dock";
+    public const string KeyWindowBay = "facade-window-bay";
+    public const string KeyOrielBay = "facade-oriel-bay";
+    public const string KeyFireEscape = "facade-fire-escape";
+    public const string KeyCornice = "facade-cornice";
+    public const string KeyParapet = "facade-parapet";
+
+    /// <summary>World-space outward normal for a cardinal face.</summary>
+    public static Vector3 Normal(FacadeFace face)
+    {
+        switch (face)
+        {
+            case FacadeFace.PlusX: return Vector3.right;
+            case FacadeFace.MinusX: return Vector3.left;
+            case FacadeFace.PlusZ: return Vector3.forward;
+            default: return Vector3.back;
+        }
+    }
+
+    /// <summary>In-plane horizontal axis for a cardinal face -- the
+    /// direction a shopfront's width or a cornice's run extends along.</summary>
+    public static Vector3 Tangent(FacadeFace face)
+    {
+        switch (face)
+        {
+            case FacadeFace.PlusX:
+            case FacadeFace.MinusX: return Vector3.forward;
+            default: return Vector3.right;
+        }
+    }
+
+    /// <summary>Build one solved face. `baseWorld` is the hex's ground-level
+    /// world centre (the dressing holder's own position), `height` the
+    /// massing cube's full height.
+    ///
+    /// Returns the number of GameObjects spawned, so the caller can hold
+    /// the whole system to a stated per-building budget rather than
+    /// discovering the cost in a profiler later.</summary>
+    public static int BuildFace(
+        RuntimeCityBuilder b, Transform parent, Vector3 baseWorld,
+        FacadeFace face, FacadeSolution solution, float height,
+        FacadeMaterials mats)
+    {
+        if (solution == null || solution.Role == FaceRole.PartyWall) return 0;
+
+        var n = Normal(face);
+        var tan = Tangent(face);
+        var cells = solution.Cells;
+        var upperCount = Mathf.Max(0, cells.Count - 2);
+
+        // Ground band gets a real, generous share of the elevation -- a
+        // period commercial street is legible precisely because the ground
+        // floor is taller and different from what sits on it.
+        var groundH = Mathf.Min(height * 0.34f, 5.2f);
+        var upperSpan = Mathf.Max(0.01f, height - groundH);
+        var floorH = upperCount > 0 ? upperSpan / upperCount : upperSpan;
+
+        var spawned = 0;
+
+        spawned += BuildGround(b, parent, baseWorld, n, tan, cells[0], groundH, mats);
+
+        for (var f = 0; f < upperCount; f++)
+        {
+            var y = groundH + (f + 0.5f) * floorH;
+            spawned += BuildUpper(b, parent, baseWorld, n, tan, cells[f + 1], y, floorH, mats,
+                isTopFloor: f == upperCount - 1);
+        }
+
+        spawned += BuildCrown(b, parent, baseWorld, n, tan, cells[cells.Count - 1], height, mats);
+
+        return spawned;
+    }
+
+    // ---- ground band ---------------------------------------------------
+
+    private static int BuildGround(RuntimeCityBuilder b, Transform t, Vector3 basePos,
+        Vector3 n, Vector3 tan, FacadeModule m, float groundH, FacadeMaterials mats)
+    {
+        var mid = basePos + n * (Half + Proud * 0.5f) + Vector3.up * (groundH * 0.5f);
+
+        switch (m)
+        {
+            case FacadeModule.Shopfront:
+            {
+                // Big plate-glass display window with a bulkhead below and
+                // a signboard above -- the single most period-legible thing
+                // on a commercial street, and the element the current
+                // dresser has no concept of at all.
+                PropLibrary.Spawn(b, KeyShopfront, PrimitiveType.Cube,
+                    mid + Vector3.up * groundH * 0.06f,
+                    Along(tan, n, 13.5f, groundH * 0.62f, Proud), mats.Glass, t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + n * (Half + Proud * 0.6f) + Vector3.up * (groundH * 0.11f),
+                    Along(tan, n, 13.8f, groundH * 0.22f, Proud * 1.2f), mats.Trim, t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + n * (Half + Proud * 0.8f) + Vector3.up * (groundH * 0.9f),
+                    Along(tan, n, 14.2f, groundH * 0.16f, Proud * 1.6f), mats.Sign, t);
+                return 3;
+            }
+            case FacadeModule.RecessedEntrance:
+            {
+                b.SpawnPrim(PrimitiveType.Cube, mid,
+                    Along(tan, n, 3.6f, groundH * 0.82f, Proud * 0.7f), mats.DarkRecess, t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + n * (Half + Proud) + Vector3.up * (groundH * 0.92f),
+                    Along(tan, n, 4.6f, 0.34f, Proud * 2.2f), mats.Trim, t);   // lintel
+                return 2;
+            }
+            case FacadeModule.StoopEntrance:
+            {
+                b.SpawnPrim(PrimitiveType.Cube, mid + Vector3.up * groundH * 0.12f,
+                    Along(tan, n, 3.2f, groundH * 0.7f, Proud * 0.7f), mats.DarkRecess, t);
+                // the stoop itself: two steps out onto the pavement
+                for (var s = 0; s < 2; s++)
+                    b.SpawnPrim(PrimitiveType.Cube,
+                        basePos + n * (Half + 0.5f + s * 0.6f) + Vector3.up * (0.5f - s * 0.22f),
+                        Along(tan, n, 3.4f, 0.45f, 1.2f), mats.Stone, t);
+                return 3;
+            }
+            case FacadeModule.LoadingDock:
+            {
+                b.SpawnPrim(PrimitiveType.Cube, mid,
+                    Along(tan, n, 6.5f, groundH * 0.72f, Proud * 0.7f), mats.DarkRecess, t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + n * (Half + 1.4f) + Vector3.up * 0.55f,
+                    Along(tan, n, 7.2f, 1.1f, 2.8f), mats.Stone, t);   // dock apron
+                PropLibrary.Spawn(b, KeyLoadingDock, PrimitiveType.Cube,
+                    basePos + n * (Half + 1.1f) + Vector3.up * (groundH * 1.02f),
+                    Along(tan, n, 7.6f, 0.34f, 3.2f), mats.Rust, t);   // canopy
+                return 3;
+            }
+            default: // BlankPlinth
+            {
+                b.SpawnPrim(PrimitiveType.Cube, basePos + n * (Half + Proud * 0.4f) + Vector3.up * (groundH * 0.5f),
+                    Along(tan, n, 17.4f, groundH, Proud * 0.8f), mats.Stone, t);
+                return 1;
+            }
+        }
+    }
+
+    // ---- upper band ----------------------------------------------------
+
+    private static int BuildUpper(RuntimeCityBuilder b, Transform t, Vector3 basePos,
+        Vector3 n, Vector3 tan, FacadeModule m, float y, float floorH, FacadeMaterials mats,
+        bool isTopFloor)
+    {
+        var at = basePos + n * (Half + Proud * 0.5f) + Vector3.up * y;
+
+        switch (m)
+        {
+            case FacadeModule.WindowBay:
+            {
+                // Punched windows in a row, not one continuous strip. The
+                // continuous strip is what makes the current buildings read
+                // as extruded blocks; individual openings with brick
+                // between them is what makes them read as built.
+                // Three bays, not four: a deliberate object-budget call.
+                // docs/21's stated "<= ~15 primitives/building" target is
+                // already silently exceeded today, and no measurement of
+                // the real cost exists anywhere in this project -- so this
+                // adds detail where it reads and stops before multiplying
+                // an unmeasured load.
+                const int bays = 3;
+                var spawned = 0;
+                for (var i = 0; i < bays; i++)
+                {
+                    var u = Mathf.Lerp(-6.0f, 6.0f, i / (float)(bays - 1));
+                    var pos = at + tan * u;
+                    var go = PropLibrary.Spawn(b, KeyWindowBay, PrimitiveType.Cube, pos,
+                        Along(tan, n, 2.3f, floorH * 0.52f, Proud), mats.Glass, t);
+                    RegisterWindowGlow(go, mats, pos);
+                    spawned++;
+                    // sill: the small horizontal that catches light and
+                    // reads at distance far better than the window itself
+                    b.SpawnPrim(PrimitiveType.Cube, pos + Vector3.down * (floorH * 0.3f) + n * (Proud * 0.6f),
+                        Along(tan, n, 2.7f, 0.16f, Proud * 1.8f), mats.Stone, t);
+                    spawned++;
+                }
+                return spawned;
+            }
+            case FacadeModule.OrielBay:
+            {
+                // A projecting bay window -- pure silhouette value, which
+                // is what actually survives to RTS camera distance.
+                var go = PropLibrary.Spawn(b, KeyOrielBay, PrimitiveType.Cube,
+                    at + n * 0.75f, Along(tan, n, 4.2f, floorH * 0.66f, 1.7f), mats.Glass, t);
+                RegisterWindowGlow(go, mats, at + n * 0.75f);
+                b.SpawnPrim(PrimitiveType.Cube, at + n * 0.75f + Vector3.down * (floorH * 0.38f),
+                    Along(tan, n, 4.6f, 0.28f, 2.0f), mats.Trim, t);
+                return 2;
+            }
+            case FacadeModule.FireEscapeBay:
+            {
+                // A landing plus its rail, one per floor. Continuity is
+                // enforced by the solver, not here -- see
+                // FacadeGrammar.Propagate.
+                PropLibrary.Spawn(b, KeyFireEscape, PrimitiveType.Cube,
+                    at + n * 1.15f + tan * 3.2f,
+                    Along(tan, n, 4.4f, 0.16f, 2.2f), mats.Iron, t);       // landing
+                b.SpawnPrim(PrimitiveType.Cube, at + n * 2.2f + tan * 3.2f + Vector3.up * 0.55f,
+                    Along(tan, n, 4.4f, 1.1f, 0.12f), mats.Iron, t);       // rail
+                // the diagonal run down to the floor below
+                var stair = b.SpawnPrim(PrimitiveType.Cube,
+                    at + n * 1.6f + tan * 0.6f + Vector3.down * (floorH * 0.3f),
+                    Along(tan, n, 2.6f, 0.12f, 1.1f), mats.Iron, t);
+                stair.transform.rotation = Quaternion.LookRotation(n, Vector3.up) * Quaternion.Euler(0f, 0f, 32f);
+                return 3;
+            }
+            default: // BlindBay -- brick, with just enough relief to catch light
+            {
+                b.SpawnPrim(PrimitiveType.Cube, at,
+                    Along(tan, n, 16.6f, floorH * 0.9f, Proud * 0.5f), mats.Wall, t);
+                if (isTopFloor)
+                    b.SpawnPrim(PrimitiveType.Cube, at + Vector3.up * (floorH * 0.42f),
+                        Along(tan, n, 16.9f, 0.2f, Proud * 1.4f), mats.Trim, t);
+                return isTopFloor ? 2 : 1;
+            }
+        }
+    }
+
+    // ---- crown ---------------------------------------------------------
+
+    private static int BuildCrown(RuntimeCityBuilder b, Transform t, Vector3 basePos,
+        Vector3 n, Vector3 tan, FacadeModule m, float height, FacadeMaterials mats)
+    {
+        var at = basePos + n * (Half + Proud) + Vector3.up * height;
+
+        switch (m)
+        {
+            case FacadeModule.Cornice:
+            {
+                // Two-step overhanging cornice. The overhang is the whole
+                // point: it throws a hard shadow line across the top of
+                // the facade, which is the single strongest period read
+                // available at RTS distance.
+                PropLibrary.Spawn(b, KeyCornice, PrimitiveType.Cube, at + Vector3.down * 0.45f,
+                    Along(tan, n, 18.6f, 0.5f, 1.5f), mats.Trim, t);
+                b.SpawnPrim(PrimitiveType.Cube, at + Vector3.down * 0.95f,
+                    Along(tan, n, 18.0f, 0.34f, 0.9f), mats.Stone, t);
+                return 2;
+            }
+            case FacadeModule.SetbackCrown:
+            {
+                b.SpawnPrim(PrimitiveType.Cube, at + Vector3.down * 0.4f,
+                    Along(tan, n, 18.2f, 0.5f, 1.1f), mats.Trim, t);
+                b.SpawnPrim(PrimitiveType.Cube, at + Vector3.up * 1.1f - n * 1.2f,
+                    Along(tan, n, 14.5f, 2.2f, 0.6f), mats.Stone, t);
+                return 2;
+            }
+            default: // Parapet -- a plain raised lip, the utilitarian crown
+            {
+                PropLibrary.Spawn(b, KeyParapet, PrimitiveType.Cube, at + Vector3.up * 0.55f,
+                    Along(tan, n, 18.2f, 1.1f, 0.55f), mats.Wall, t);
+                return 1;
+            }
+        }
+    }
+
+    // ---- shared helpers -------------------------------------------------
+
+    /// <summary>Build a scale vector for a slab lying in a face plane:
+    /// `along` across the face, `up` vertically, `depth` outward. Saves
+    /// every call site from re-deriving which world axis is which for
+    /// each of the four faces -- exactly the kind of hand-copied offset
+    /// math this project's own style notes warn drifts wrong.</summary>
+    private static Vector3 Along(Vector3 tan, Vector3 n, float along, float up, float depth)
+    {
+        var s = new Vector3(
+            Mathf.Abs(tan.x) * along + Mathf.Abs(n.x) * depth,
+            up,
+            Mathf.Abs(tan.z) * along + Mathf.Abs(n.z) * depth);
+        // guard against a zero component if a caller passes an odd axis
+        if (s.x < 0.01f) s.x = depth;
+        if (s.z < 0.01f) s.z = depth;
+        return s;
+    }
+
+    /// <summary>Hook a window into the city's existing two-tier lighting
+    /// model, but only when the caller's budget allows it.
+    ///
+    /// docs/28's model is "unlimited free emissive, one shared budgeted
+    /// pool of real lights." That holds only while the number of
+    /// registered glow points stays sane -- and the existing per-floor
+    /// strip registration already produces tens of thousands of entries at
+    /// BigCity scale, each iterated every frame by EmissiveAnimator. This
+    /// grammar spawns MORE windows per face than the old single strip did,
+    /// so registering every one would make a known-strained system
+    /// materially worse. Instead the emissive material still renders on
+    /// every lit window (free), and only a bounded sample per building
+    /// registers for animation and the real-light budget.</summary>
+    private static void RegisterWindowGlow(GameObject go, FacadeMaterials mats, Vector3 pos)
+    {
+        if (go == null || !mats.WindowsLit) return;
+        if (!mats.TryTakeGlowBudget()) return;
+
+        var renderer = go.GetComponent<Renderer>();
+        if (renderer == null) return;
+
+        renderer.sharedMaterial = mats.GlassLit;
+        EmissiveAnimator.Register(renderer, mats.GlowColor * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
+            LightBehaviorKind.Window, mats.NextGlowSeed());
+        GlowPointRegistry.Register(go.transform, mats.GlowColor);
+    }
+}
+
+/// <summary>The material set and per-building budget one facade solve
+/// draws from. Passed in rather than looked up per module so every
+/// material stays a shared cached instance (SRP-batcher friendly, the
+/// project's established convention) and so the glow budget is genuinely
+/// per-building rather than a hidden global.</summary>
+public sealed class FacadeMaterials
+{
+    public Material Wall;
+    public Material Stone;
+    public Material Trim;
+    public Material Glass;
+    public Material GlassLit;
+    public Material DarkRecess;
+    public Material Iron;
+    public Material Rust;
+    public Material Sign;
+    public Color GlowColor;
+
+    /// <summary>False during the day-facing build, or for a building whose
+    /// hash says it's dark tonight.</summary>
+    public bool WindowsLit;
+
+    /// <summary>Hard ceiling on how many windows of THIS building may
+    /// register for emissive animation + the real-light budget. A v0.1
+    /// placeholder like every other tuning number in this project, chosen
+    /// so a grammar-dressed building registers no more than the single
+    /// per-floor strip the old dresser registered -- i.e. this change
+    /// cannot make the existing lighting load worse.</summary>
+    public int GlowBudget;
+
+    private int _glowUsed;
+    private int _seedCursor;
+
+    public bool TryTakeGlowBudget()
+    {
+        if (_glowUsed >= GlowBudget) return false;
+        _glowUsed++;
+        return true;
+    }
+
+    public float NextGlowSeed()
+    {
+        _seedCursor++;
+        unchecked
+        {
+            var h = (_seedCursor * 2654435761u) ^ 0x9E3779B9u;
+            return (h % 10007u) / 10007f;
+        }
+    }
+}

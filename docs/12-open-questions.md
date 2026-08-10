@@ -13789,3 +13789,123 @@ reworded to "Scavenger" and a `role: 🪣 Scavenger` row added to the
 Stable's detail panel on the Lab side. No new genome field, no new AI --
 the loop already did exactly what was asked, it just didn't have a name
 players could see.
+
+## 2026-08: facade grammar (WFC) -- rebuilding the dresser onto a mesh pipeline
+
+Creator direction, verbatim: "Rebuild the building dresser to be
+compatible with mesh pipeline and WFC, fulfilling the goal of empire of
+sin, AAA quality. Make it a method that rendered building compatible with
+the current architecture and slots them in." Approved off the docs/30
+plan (the artifact deliverable), which recommended **Modify Architecture**
+rather than a direct WFC replacement.
+
+**What shipped.** A constrained wave-function-collapse solver over
+building faces, plus the Unity module kit that builds its output, wired
+into `BuildingDresser` for the two tiers where the visual gap actually
+lives.
+
+- `packages/citygen-core/src/FacadeGrammar.cs` -- the solver. Engine-
+  agnostic on purpose: it is the only part of this work that can be
+  verified at all in an environment with no Unity Editor, so it carries
+  the whole verification burden and is covered by 20 new tests.
+- `packages/citygen-core/Tests~/FacadeGrammarTests.cs` -- 20 tests.
+- `unity-client/Assets/Scripts/FacadeKit.cs` -- module -> geometry, every
+  module routed through `PropLibrary` (the mesh-swap seam).
+- `unity-client/Assets/Scripts/BuildingDresser.cs` -- grammar path for
+  Medium/Large, legacy path preserved intact behind `UseFacadeGrammar`.
+- `unity-client/Assets/Scripts/PropLibrary.cs` -- the nine facade keys
+  documented for whoever authors real meshes.
+
+**The one architectural idea.** Before this, no building knew which of
+its faces was a street, an alley, or a party wall -- every hex was
+dressed identically on all four sides, which is why a row of buildings
+read as detached objects on a grid instead of a street wall. All three
+directors in the docs/30 art review independently named this as their
+top item, for three different reasons. `FacadeGrammar.ClassifyFaces`
+computes the role from real footprint/road adjacency, and it is the
+constraint everything else hangs off.
+
+**Why it is genuinely WFC and not a dressed-up weighted pick:** every
+cell carries a domain bitmask, constraints PROPAGATE between vertically
+adjacent cells until the wave is stable, collapse targets the
+lowest-entropy undecided cell, and a real contradiction (empty domain) is
+detected and reported rather than papered over. The load-bearing
+adjacency rule is architectural, not decorative -- a fire escape is a
+CONTINUOUS vertical run, so if any upper cell collapses to
+`FireEscapeBay` every other upper cell on that face must too. There is a
+test for exactly that (`Fire_escapes_are_vertically_continuous`).
+
+**Why 1-D per face rather than a big 2-D solve.** What reads at RTS
+camera height is the vertical grammar (ground floor differs from upper
+floors, cornice at the top, fire escape continuous). A Medium face is
+three floors plus ground plus crown: a five-cell solve. That fits inside
+the existing 5000 ms loading-screen budget with no Jobs, no Burst, and no
+native containers -- none of which this project uses anywhere today.
+
+**Every gameplay contract preserved, deliberately.** docs/30 enumerated
+five load-bearing contracts hanging off the massing cube, none of them
+test-guarded. All five are untouched: the cube itself, its single
+collider, the `cubes` list two-block ordering, the flat roof plane and
+its `hit.normal.y > 0.5f` perch-vs-attack discriminator, and `Building`
+reference identity. Facade modules are colliderless children of the
+existing dressing holder -- the same category as every prop the dresser
+already spawns. **`FacadeKit`'s header states the colliderless rule as
+load-bearing rather than incidental**, because every `Physics.Raycast` in
+this project is unmasked: a stray facade collider would start
+intercepting cursor picks and monster line-of-sight, and would break
+`FireCluster`'s parent-collider check into its crude fixed-radius
+fallback.
+
+**Cost discipline, stated rather than discovered in a profiler later.**
+docs/30's headline finding was that no performance measurement exists
+anywhere in this project and docs/21's "<= ~15 primitives/building"
+target is already silently exceeded. So: only STREET faces get the full
+grammar; alley faces get their crown only (a cornice genuinely does wrap
+a corner, so this is period-correct rather than a pure saving); party
+walls get nothing. Window bays are 3 per floor, not 4 -- an explicit
+budget call, commented as such. And `FacadeMaterials.GlowBudget` caps a
+grammar-dressed building at 2 emissive/glow registrations, sized so it
+registers **no more** than the single per-floor strip pair it replaces --
+this change cannot worsen the lighting load docs/30 flagged as already
+strained at BigCity scale.
+
+**Scope, honestly.** Small tier keeps its whole-building archetypes
+(house, gas station, diner) and Landmark keeps its civic set pieces --
+those are already period-specific silhouettes and a facade grid would
+fight them. The grammar targets exactly the tiers that were an extruded
+block with one continuous window strip.
+
+**Mesh-pipeline compatibility is the real deliverable, not a side
+effect.** Every module spawns through `PropLibrary.Spawn(key,
+fallbackType, ...)`. The nine keys are deliberately left UNREGISTERED, so
+each takes the primitive-fallback path today. Registering an authored
+mesh under a key later upgrades every building in the city with zero
+changes at any `FacadeKit` call site and zero changes to the solver.
+Registering hand-made `ProceduralMeshKit` stand-ins now would be worse
+than the fallback, not better -- an approximate cornice reads as a wrong
+mesh where a primitive reads as an honest block ("flag, don't fake").
+
+**Period.** Proceeding on 1950s per docs/23 §10 with Empire of Sin as a
+CRAFT benchmark only (silhouette discipline, material richness, graphic
+readability, environmental storytelling) -- see docs/30 §20 for the full
+reasoning and the one nuance found (docs/23 §10 already carries a
+1930s-40s illustration as a *daytime mood board*, not a period target).
+
+**Verified for real:** `dotnet test` on citygen-core green at 217/217 --
+the 20 new grammar tests plus every pre-existing test unchanged,
+including `Cities_are_byte_identical_per_seed_and_preset` and
+`Big_city_generates_quickly_enough_to_live_in_a_loading_screen`.
+Flightcheck compiles `FacadeKit.cs`, `BuildingDresser.cs` and
+`PropLibrary.cs` clean against the real rebuilt `MadDr.CityGen.dll`; the
+only remaining harness errors are the same pre-existing drift in
+`DamageFx`/`MonsterAgent`/`RuntimeCityBuilder` this log has flagged all
+session (a missing `DeployingArmyHud` compile entry and a missing
+`GetComponentInChildren` stub), none from these files. Added
+`Vector3.back` to the scratch `UnityStub.cs`, which was missing it.
+
+**NOT verified, and this is the important caveat:** nothing visual. No
+Unity Editor exists in this environment, so whether the grammar actually
+reads as an improvement -- whether the ground band, the punched bays and
+the overhanging cornice land at RTS camera distance -- is unconfirmed and
+needs a real Play session. `BuildingDresser.UseFacadeGrammar = false`
+reverts to the legacy dressing in one edit if the verdict is negative.
