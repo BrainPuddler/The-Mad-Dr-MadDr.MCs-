@@ -51,9 +51,19 @@ public static class BuildingDresser
 
     /// <summary>docs/23 Phase 10.3: same idea as M(), but also applies a
     /// PbrTextureAtlas placeholder texture -- "dressers keep their
-    /// geometry logic, gain material richness." A fixed tiling scale
-    /// (not scaled to each face's own world size -- a documented v0.1
-    /// simplification, see docs/23-balance/graphics-3-notes.md).</summary>
+    /// geometry logic, gain material richness."
+    ///
+    /// 2026-08 (docs/30 Tier 1): the (3,3) scale set here is now only the
+    /// FALLBACK, applied if a caller somehow bypasses `RuntimeCityBuilder.
+    /// SpawnPrim`. Every real call site goes through `SpawnPrim`, which
+    /// now overrides `_BaseMap_ST` per instance via a `MaterialPropertyBlock`
+    /// sized from that instance's own world scale -- the fix for the
+    /// exact "SAME 0..1 UV rect stretches across a 1m curb prop or a 30m
+    /// building wall equally" gap this comment used to flag as an open
+    /// v0.1 simplification. See `SpawnPrim.ApplyWorldScaledTiling`'s own
+    /// doc comment for the reasoning; this material's own SHARED tiling
+    /// stays a harmless, never-actually-visible default now that every
+    /// consumer overrides it per instance.</summary>
     private static Material MTextured(string key, float r, float g, float b, Texture2D tex)
     {
         Material mat;
@@ -252,7 +262,8 @@ public static class BuildingDresser
     /// and for Large/Landmark (they cluster near downtown by construction
     /// anyway, per the massing-tint precedent this mirrors).</summary>
     public static void Dress(RuntimeCityBuilder builder, Building building, float height,
-        List<GameObject> cubes, Transform parent, bool industrial = false, bool suburb = false)
+        List<GameObject> cubes, Transform parent, bool industrial = false, bool suburb = false,
+        CityRegion region = CityRegion.Generic)
     {
         var footprint = building.Footprint;
         for (var i = 0; i < footprint.Count; i++)
@@ -268,14 +279,14 @@ public static class BuildingDresser
             switch (building.Tier)
             {
                 case BuildingTier.Landmark:
-                    DressLandmark(builder, building.Archetype, holder.transform, height, h, primary);
+                    DressLandmark(builder, building.Archetype, holder.transform, height, h, primary, region);
                     break;
                 case BuildingTier.Large:
-                    DressOffice(builder, building, hex, holder.transform, height, h, primary, industrial, suburb);
+                    DressOffice(builder, building, hex, holder.transform, height, h, primary, industrial, suburb, region);
                     break;
                 case BuildingTier.Medium:
                     if (industrial) DressIndustrial(builder, holder.transform, height, h, primary);
-                    else DressApartment(builder, building, hex, holder.transform, height, h, primary, suburb);
+                    else DressApartment(builder, building, hex, holder.transform, height, h, primary, suburb, region);
                     break;
                 default:
                     if (industrial) DressIndustrial(builder, holder.transform, height, h, primary);
@@ -285,11 +296,83 @@ public static class BuildingDresser
         }
     }
 
+    /// <summary>2026-08 (docs/30 Tier 1, "route Region into the dressers"):
+    /// `CityModel.Region` was already threaded to `LumenCycleController`
+    /// (the lighting GRADE) but never reached the buildings themselves --
+    /// New York, Paris and Montreal rendered with identical architecture
+    /// despite `CityPreset`'s own doc comment promising a
+    /// "BuildingDresser/RoadDresser palette + prop switches." This is that
+    /// switch, applied to the wall-material weighted pick specifically
+    /// (the highest-visibility, most-repeated color choice a Medium
+    /// building makes).
+    ///
+    /// `CityRegion.Generic` -- every pre-docs/30 preset (Village/SmallTown/
+    /// BigCity) -- reproduces the ORIGINAL `(h/7)%4` expression verbatim,
+    /// not an approximation of it, so nothing about an existing city's
+    /// appearance changes. NY/Paris/Montreal reweight the SAME three-
+    /// material palette rather than inventing new colors, mirroring
+    /// `LumenCycleController.ApplyRegionTint`'s own NY=cooler/steel,
+    /// Paris=warmer/cream, Montreal=cooler/flatter read one layer
+    /// deeper -- the same semantic mapping the lighting grade already
+    /// established, not a separately invented one.</summary>
+    private static Material RegionWall(int h, bool suburb, CityRegion region)
+    {
+        if (region == CityRegion.Generic)
+        {
+            return suburb
+                ? ((h / 7) % 4 < 2 ? Cream() : (h / 7) % 4 == 2 ? Brick() : Seafoam())
+                : ((h / 7) % 4 < 2 ? Seafoam() : (h / 7) % 4 == 2 ? Cream() : Brick());
+        }
+
+        var pct = (h / 7) % 100;
+        switch (region)
+        {
+            case CityRegion.NewYork:
+                return pct < 55 ? Seafoam() : pct < 85 ? Brick() : Cream();
+            case CityRegion.Paris:
+                return pct < 60 ? Cream() : pct < 85 ? Brick() : Seafoam();
+            case CityRegion.Montreal:
+                return pct < 45 ? Seafoam() : pct < 85 ? Cream() : Brick();
+            default:
+                return suburb ? Cream() : Seafoam();
+        }
+    }
+
+    /// <summary>Same region-aware reweighting as <see cref="RegionWall"/>,
+    /// applied to the office/civic trim pick (Cream vs. Mustard) --
+    /// Generic keeps the exact original `(h/5)%2` expression.</summary>
+    private static Material RegionTrim(int h, CityRegion region)
+    {
+        if (region == CityRegion.Generic) return (h / 5) % 2 == 0 ? Cream() : Mustard();
+
+        var pct = (h / 5) % 100;
+        switch (region)
+        {
+            case CityRegion.NewYork: return pct < 70 ? Mustard() : Cream();     // grittier, less gold trim
+            case CityRegion.Paris: return pct < 70 ? Cream() : Mustard();       // pale stone trim dominant
+            case CityRegion.Montreal: return pct < 50 ? Cream() : Mustard();
+            default: return Cream();
+        }
+    }
+
     // massing cubes are hexSize*0.9 = 18m across; faces sit at +-9m.
     // Public: RoadDresser's street-furniture placement needs this to keep
     // poles/lights clear of a building occupying the hex across the curb
     // (see RoadDresser.ClearLateralOffset).
     public const float Half = 9f;
+
+    // 2026-08 (docs/30 Tier 1c, "roof-form variety"): apartment-tier roof
+    // massing sits ON TOP of the flat tar cap (which still always spawns --
+    // it's the base every variant shares), so its own lift starts from the
+    // cap's top surface (0.65 cap center + 0.1 half-thickness), not from
+    // `height` directly.
+    private const float ApartmentRoofCapTop = 0.75f;
+    // Same rotated-diamond trick as DressSmall's GableApexOffset, sized
+    // shallower (8 vs. that tier's 11) -- an apartment block reads as a
+    // modest peaked roof, not a house-sized A-frame stacked on a mid-rise.
+    private const float ApartmentHipSize = 8f;
+    private const float ApartmentHipApexOffset = ApartmentRoofCapTop + ApartmentHipSize * 0.5f * 1.41421356f;
+    private const float ApartmentParapetHeight = 1.4f;
 
     // ---- small tier: suburbia / roadside America ------------------------------
 
@@ -429,14 +512,10 @@ public static class BuildingDresser
     // ---- medium tier: brick walk-up apartments ---------------------------------
 
     private static void DressApartment(RuntimeCityBuilder b, Building building, HexCoord hex, Transform t,
-        float height, int h, bool primary, bool suburb = false)
+        float height, int h, bool primary, bool suburb = false, CityRegion region = CityRegion.Generic)
     {
         var basePos = t.position;
-        // suburb: warm-leaning (50% cream / 25% brick / 25% seafoam);
-        // downtown: cool-leaning (50% seafoam / 25% cream / 25% brick)
-        var wall = suburb
-            ? ((h / 7) % 4 < 2 ? Cream() : (h / 7) % 4 == 2 ? Brick() : Seafoam())
-            : ((h / 7) % 4 < 2 ? Seafoam() : (h / 7) % 4 == 2 ? Cream() : Brick());
+        var wall = RegionWall(h, suburb, region);
 
         if (UseFacadeGrammar && GrammarAppliesTo(building.Tier))
         {
@@ -474,6 +553,45 @@ public static class BuildingDresser
         b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 0.65f),
             new Vector3(17.6f, 0.2f, 17.6f), RoofTar(), t);
 
+        // docs/30 Tier 1c: flat stays the plurality (the shipped, known-
+        // good silhouette), the other three add real roof-form variety on
+        // top of it. Own hash slot (h/11) so this pick doesn't correlate
+        // with the wall/trim picks drawn from the same `h`.
+        switch ((h / 11) % 6)
+        {
+            case 3:   // hip roof: shallow pitched ridge (solid -- registers a real landable apex)
+            {
+                var ridgeMat = (h / 13) % 2 == 0 ? RustRed() : M(0.35f, 0.42f, 0.5f);
+                var ridge = b.SpawnPrim(PrimitiveType.Cube,
+                    basePos + Vector3.up * (height + ApartmentRoofCapTop),
+                    new Vector3(ApartmentHipSize, ApartmentHipSize, 18.6f), ridgeMat, t);
+                ridge.transform.rotation = Quaternion.Euler(0f, 0f, 45f);
+                b.RegisterRoofLandingHeight(hex, height + ApartmentHipApexOffset);
+                break;
+            }
+            case 4:   // stepped parapet: a raised rim around the roof edge -- boxier
+                      // deco-apartment silhouette. Hollow (the flat cap is still the
+                      // landable surface underneath it), so no height registration.
+            {
+                var rimY = height + ApartmentRoofCapTop + ApartmentParapetHeight * 0.5f;
+                var edge = 19.4f * 0.5f - 0.3f;
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, rimY, edge), new Vector3(19.4f, ApartmentParapetHeight, 0.6f), wall, t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, rimY, -edge), new Vector3(19.4f, ApartmentParapetHeight, 0.6f), wall, t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(edge, rimY, 0f), new Vector3(0.6f, ApartmentParapetHeight, 19.4f), wall, t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(-edge, rimY, 0f), new Vector3(0.6f, ApartmentParapetHeight, 19.4f), wall, t);
+                break;
+            }
+            case 5:   // penthouse: a small off-center rooftop volume -- decorative
+                      // massing (same class as the water tower/vents below), not a
+                      // registered landable surface -- the flat cap around it still is.
+            {
+                var boxAt = basePos + new Vector3(3.5f, height + ApartmentRoofCapTop + 1.6f, -2f);
+                b.SpawnPrim(PrimitiveType.Cube, boxAt, new Vector3(6f, 3.2f, 5f), wall, t);
+                b.SpawnPrim(PrimitiveType.Cube, boxAt + new Vector3(0f, 1.75f, 0f), new Vector3(6.4f, 0.3f, 5.4f), Concrete(), t);
+                break;
+            }
+        }
+
         if (primary) Rooftop(b, t, basePos, height, h);
     }
 
@@ -486,10 +604,10 @@ public static class BuildingDresser
     private const float SetbackTopOffset = 6.5f + 1.5f;   // = 8f
 
     private static void DressOffice(RuntimeCityBuilder b, Building building, HexCoord hex, Transform t,
-        float height, int h, bool primary, bool industrial = false, bool suburb = false)
+        float height, int h, bool primary, bool industrial = false, bool suburb = false, CityRegion region = CityRegion.Generic)
     {
         var basePos = t.position;
-        var trim = (h / 5) % 2 == 0 ? Cream() : Mustard();
+        var trim = RegionTrim(h, region);
 
         // deco setbacks: two shrinking tiers on the roof -- real, solid,
         // walkable massing on every high-rise, not decoration; register
@@ -590,7 +708,7 @@ public static class BuildingDresser
     // ---- landmark tier: archetype-aware civic set pieces ------------------------
 
     private static void DressLandmark(RuntimeCityBuilder b, string archetype, Transform t,
-        float height, int h, bool primary)
+        float height, int h, bool primary, CityRegion region = CityRegion.Generic)
     {
         var basePos = t.position;
         // gold cornice band keeps the tier's RTS color read
@@ -717,6 +835,101 @@ public static class BuildingDresser
                 b.SpawnPrim(PrimitiveType.Cube, trellisAt + Vector3.up * 1.4f,
                     new Vector3(3.2f, 2.6f, 0.15f), GardenGreen(), t);
                 break;
+
+            // docs/30 Tier 1d: the five region-specific landmark archetypes
+            // CityPreset.NewYork()/Paris()/Montreal() have named since
+            // docs/23 Phase 8, previously falling through to the generic
+            // movie-palace default below -- each region now gets its own
+            // silhouette instead of looking architecturally identical.
+            case "liberty_statuette_plaza":
+                // NY: a civic statue-on-plinth fronting a small plaza --
+                // echoes the raised-torch silhouette without literally
+                // reproducing a specific copyrighted statue design
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 3f, Half * 1.3f),
+                    new Vector3(6f, 6f, 6f), Concrete(), t);   // plinth
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 6.4f, Half * 1.3f),
+                    new Vector3(7f, 0.8f, 7f), Cream(), t);    // plinth cap
+                var statueAt = basePos + new Vector3(0f, 6.8f, Half * 1.3f);
+                b.SpawnPrim(PrimitiveType.Cylinder, statueAt + Vector3.up * 4f,
+                    new Vector3(1.6f, 4f, 1.6f), Seafoam(), t);   // robed body
+                b.SpawnPrim(PrimitiveType.Sphere, statueAt + Vector3.up * 8.4f,
+                    new Vector3(1.1f, 1.1f, 1.1f), Seafoam(), t);   // head
+                b.SpawnPrim(PrimitiveType.Cube, statueAt + new Vector3(1.3f, 8.5f, 0f),
+                    new Vector3(0.5f, 3.6f, 0.5f), Seafoam(), t);   // raised torch arm
+                var torchAt = statueAt + new Vector3(1.3f, 10.5f, 0f);
+                b.SpawnPrim(PrimitiveType.Cylinder, torchAt, new Vector3(0.55f, 0.5f, 0.55f), Chrome(), t);
+                var flame = b.SpawnPrim(PrimitiveType.Sphere, torchAt + Vector3.up * 0.8f,
+                    new Vector3(0.6f, 0.8f, 0.6f), NeonRed(), t);
+                EmissiveAnimator.Register(flame.GetComponent<Renderer>(), new Color(0.95f, 0.4f, 0.2f) * 1.6f, LightBehaviorKind.Buzz, 0.35f);
+                break;
+            case "grand_terminal":
+                // NY: a monumental passenger-hall facade -- tall arched
+                // colonnade + an oversized ceremonial clock. Grander and
+                // front-facing, unlike rail_depot's plain platform shed.
+                for (var i = -2; i <= 2; i++)
+                    b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(i * 3.2f, 7f, Half * 1.12f),
+                        new Vector3(0.9f, 7f, 0.9f), Cream(), t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 14.6f, Half * 1.12f),
+                    new Vector3(19f, 1.2f, 3f), Cream(), t);   // entablature over the colonnade
+                var clockFace = b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(0f, 10.5f, Half * 1.32f),
+                    new Vector3(2.6f, 0.25f, 2.6f), SignWhite(), t);
+                clockFace.transform.rotation = Quaternion.Euler(0f, 0f, 90f);
+                var clockRim = b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(0f, 10.5f, Half * 1.42f),
+                    new Vector3(2.1f, 0.1f, 2.1f), IronDark(), t);
+                clockRim.transform.rotation = Quaternion.Euler(0f, 0f, 90f);
+                b.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (height + 3.5f),
+                    new Vector3(0.4f, 3.5f, 0.4f), Chrome(), t);   // flagmast
+                break;
+            case "iron_tower":
+                // Paris: a tapering lattice tower echoing the silhouette of
+                // a wrought-iron viewing tower, not a literal replica
+                b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 3f),
+                    new Vector3(11f, 6f, 11f), IronDark(), t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 9f),
+                    new Vector3(7f, 6f, 7f), IronDark(), t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + Vector3.up * (height + 14.5f),
+                    new Vector3(4f, 5f, 4f), IronDark(), t);
+                b.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (height + 19f),
+                    new Vector3(0.6f, 4f, 0.6f), IronDark(), t);
+                var beacon = b.SpawnPrim(PrimitiveType.Sphere, basePos + Vector3.up * (height + 21.2f),
+                    new Vector3(0.8f, 0.8f, 0.8f), NeonRed(), t);
+                EmissiveAnimator.Register(beacon.GetComponent<Renderer>(), new Color(0.95f, 0.25f, 0.3f) * 1.6f, LightBehaviorKind.Buzz, 0.9f);
+                break;
+            case "marche_tower":
+                // Montreal: a market-hall clock tower with a silvered dome,
+                // echoing Montreal's 19th-century market halls
+                b.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (height + 3f),
+                    new Vector3(3.4f, 3f, 3.4f), Cream(), t);   // drum
+                var domeAt = basePos + Vector3.up * (height + 6.6f);
+                b.SpawnPrim(PrimitiveType.Sphere, domeAt, new Vector3(3.6f, 2.6f, 3.6f), Chrome(), t);
+                b.SpawnPrim(PrimitiveType.Cylinder, domeAt + Vector3.up * 2.4f,
+                    new Vector3(0.35f, 2.4f, 0.35f), Chrome(), t);
+                b.SpawnPrim(PrimitiveType.Sphere, domeAt + Vector3.up * 4.9f,
+                    new Vector3(0.5f, 0.5f, 0.5f), Mustard(), t);   // gilded finial ball
+                var marketClockFace = b.SpawnPrim(PrimitiveType.Cylinder,
+                    basePos + new Vector3(0f, height + 3f, Half * 1.05f), new Vector3(1.4f, 0.15f, 1.4f), SignWhite(), t);
+                marketClockFace.transform.rotation = Quaternion.Euler(0f, 0f, 90f);
+                break;
+            case "forum_arena":
+                // Montreal: a barrel-roofed arena, echoing the rounded shed
+                // roof of a classic ice-hockey forum
+                var barrel = b.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (height + 1f),
+                    new Vector3(10f, 10.5f, 10f), Corrugated(), t);
+                barrel.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 4f, Half * 1.2f),
+                    new Vector3(13f, 8f, 3f), Concrete(), t);   // entrance block
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, 8.6f, Half * 1.25f),
+                    new Vector3(12f, 1.4f, 3.4f), SignWhite(), t);   // marquee
+                for (var i = -1; i <= 1; i++)
+                {
+                    var mastAt = basePos + new Vector3(i * 4.5f, 0f, Half * 1.35f);
+                    b.SpawnPrim(PrimitiveType.Cylinder, mastAt + Vector3.up * 5f,
+                        new Vector3(0.2f, 5f, 0.2f), Chrome(), t);
+                    b.SpawnPrim(PrimitiveType.Cube, mastAt + new Vector3(0.9f, 8.5f, 0f),
+                        new Vector3(1.8f, 1.2f, 0.1f), AdRed(), t);   // pennant flag
+                }
+                break;
+
             default:
                 // any future/unlisted archetype -> THE MOVIE PALACE: a
                 // marquee slab out front and a big neon rooftop sign --

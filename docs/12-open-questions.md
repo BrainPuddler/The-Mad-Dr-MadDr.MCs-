@@ -14007,3 +14007,120 @@ point of shipping the instrumentation rather than guessing at more
 fixes. The plan's own gate stands: a real Profiler capture on a BigCity
 build is the next step before deciding what Tier 1 (or a real
 building/road batching redesign) should even prioritize.
+
+## 2026-08: Tier 1 of the graphics-upgrade plan -- per-object UV tiling, region-aware dressing, roof-form variety, region landmarks
+
+Asked to "proceed to next phase" after Tier 0 (performance floor), this
+is the plan's Tier 1: visual wins that need neither WFC nor a live
+Editor to implement. Four independent pieces, one commit.
+
+**1a: per-object UV tiling.** Every dresser primitive shared one fixed
+`(3,3)` texture-tiling scale regardless of its actual size (`MTextured`'s
+own doc comment already flagged this as a known flaw) -- a 40 m landmark
+face and a 1.2 m corner pilaster tiled identically, so the brick/stone
+textures either smeared or repeated wrong depending which end of that
+range an object happened to sit at. `RuntimeCityBuilder.SpawnPrim` --
+the single shared workhorse every dresser in the project routes through
+(`RoadDresser`, `BuildingDresser`, `BridgeDresser`, `TramDresser`,
+`BaseDresser`, `PropLibrary`'s fallback path, `FacadeKit`) -- now calls
+`ApplyWorldScaledTiling` right after assigning the material: tile count
+derives from `max(scale.x, scale.y, scale.z) / TileWorldMeters` (6 m,
+clamped to a 0.35 floor so thin trim doesn't tile to near-zero), applied
+via a reused, cleared-per-call `MaterialPropertyBlock` on `_BaseMap_ST`
+-- never a per-instance Material, which would defeat the SRP-batcher
+work Tier 0 just did. A no-op for any flat `M()` color (no `_BaseMap` to
+tile), so this only touches the textured materials `MTextured` already
+produces. One shared hook point instead of touching every dresser's own
+call sites, because `SpawnPrim` was already the common seam.
+
+**1b: `CityModel.Region` reaches the dressers.** `CityPreset.NewYork()/
+Paris()/Montreal()` have set a real `Region` since docs/23 Phase 8, and
+it already reached `LumenCycleController` (the lighting grade) and a
+tram-gating check -- but never `BuildingDresser`, so all three regions
+built architecturally identical buildings under three different color
+grades. `Dress()` gained a trailing `CityRegion region =
+CityRegion.Generic` parameter (`RuntimeCityBuilder.BeginMatch`'s one
+call site now passes `_city.Region`), threaded down to two new helpers,
+`RegionWall`/`RegionTrim`, that replace the apartment wall pick and
+office trim pick's old inline `(h/7)%4`/`(h/5)%2` expressions.
+`CityRegion.Generic` -- every pre-docs/30 preset (Village/SmallTown/
+BigCity) -- reproduces the ORIGINAL expression verbatim, so nothing
+about an existing city's look changes; NY/Paris/Montreal reweight the
+SAME three-material palette via direct percentage thresholds (NOT a
+hash/seed shift, which was considered and rejected: shifting which hash
+bucket a building falls into only permutes WHICH buildings get which
+color, not the aggregate proportions actually being asked for) --
+mirroring `LumenCycleController.ApplyRegionTint`'s own NY=cooler/steel,
+Paris=warmer/cream, Montreal=cooler/flatter read one layer deeper, not a
+separately invented mapping. `DressLandmark`/`DressOffice`/
+`DressApartment` all gained the same trailing parameter for call-site
+parity, even though `DressLandmark` didn't need it for 1b -- it does for
+1d, below, so the signature only needed touching once.
+
+**1c: apartment-tier roof-form variety.** Medium tier had zero roof
+variety -- every apartment building got the identical flat tar cap.
+Added a hash-keyed pick (own slot, `h/11`, decorrelated from the wall/
+trim picks drawn from the same `h`) layered on top of the flat cap that
+still always spawns: flat stays the plurality (3/6, the shipped
+known-good silhouette), plus three real alternatives --
+a **hip roof** (the same rotated-diamond trick `DressSmall`'s gable
+uses, shallower so a mid-rise doesn't get a house-sized A-frame; solid,
+so it registers a real `RegisterRoofLandingHeight` apex a flyer can
+land on, same derivation discipline as `GableApexOffset`), a **stepped
+parapet** (a raised rim around the roof edge in the building's own wall
+color -- hollow, so the flat cap underneath stays the registered
+landable surface, NOT the parapet top: registering the rim height would
+have put flyers floating over empty air, the exact class of bug
+`RegisterRoofLandingHeight`'s own doc comment warns the small
+decorative rooftop kit away from), and a **penthouse** (a small
+off-center rooftop volume, decorative massing like the water tower/vents
+below it, same reason left unregistered).
+
+**1d: the five region-specific landmark archetypes.** `CityPreset`
+has named `liberty_statuette_plaza`/`grand_terminal` (NY),
+`iron_tower` (Paris), and `marche_tower`/`forum_arena` (Montreal) since
+docs/23 Phase 8, but `DressLandmark`'s archetype switch never had cases
+for them -- all five fell through to the generic movie-palace default,
+so a Paris landmark and a Springfield-style small-town landmark looked
+identical. Added a distinct set piece per archetype, same primitive-kit
+discipline as the existing church/cathedral/town_hall/rail_depot cases:
+a statue-on-plinth with a raised torch arm for the plaza (silhouette
+only -- deliberately not a literal reproduction of a specific
+copyrighted statue), a monumental colonnaded terminal facade with a
+ceremonial clock for the NY terminal, a tapering iron-lattice tower for
+Paris, a silvered-dome market clock tower for Montreal, and a
+barrel-roofed arena with entrance marquee and pennant masts for the
+Forum. `DressLandmark` dispatches on the archetype string directly (the
+name alone identifies which of the five to build); the `region`
+parameter threaded through in 1b isn't needed by the switch itself, but
+existing now for symmetry with the other two dress methods.
+
+**Verification.** `dotnet test Tests~/CityGenCore.Tests.csproj` --
+217/217, unchanged from before this pass (Tier 1 is entirely Unity-side;
+no citygen-core files touched). Flightcheck compiled clean after closing
+two harness gaps surfaced while verifying 1a specifically (not
+pre-existing drift from an earlier session): `Material.GetTexture` and
+`MaterialPropertyBlock.SetVector` were both missing from `UnityStub.cs`
+-- real Unity APIs `ApplyWorldScaledTiling` calls, stubbed for real
+(a tracked-texture dictionary, not an always-null fake) rather than left
+broken, since a no-op stub would make the tiling gate vacuously
+untestable the same way this file's other real-arithmetic comments
+already warn against. Also closed, while getting the harness to a clean
+baseline: `Vector3.Distance`, `Transform.lossyScale`, and
+`Physics.Linecast`/a 4-arg `Physics.Raycast` overload -- all real,
+pre-existing gaps in `MonsterAgent.cs`/`DamageFx.cs` unrelated to this
+session's own edits, closed so a clean compile actually isolates
+Tier 1's own changes instead of drowning them in unrelated noise.
+`DeployingArmyHud.cs` itself stays OUT of the flightcheck compile list
+-- it needs its own separate `RosterFetcher.OnFetchProgress`/
+`GUIStyle`/`GUI.Label` stub work, out of scope here; `ProjStub.cs`
+gained a minimal `DeployingArmyHud` peer stub (`Init(RosterFetcher)`,
+no-op) purely so `RuntimeCityBuilder.cs`, its one real caller, has
+something to `AddComponent`/`GetComponent` against.
+
+**NOT verified, same caveat as every entry in this file touching
+`unity-client`:** no Unity Editor exists in this environment. Nothing
+here has been seen rendered -- the UV tiling math, the region palette
+reweighting, the roof silhouettes, and the five landmark set pieces are
+all correct by construction and by compile, not by a screenshot. That
+verification is the creator's, on their own machine.

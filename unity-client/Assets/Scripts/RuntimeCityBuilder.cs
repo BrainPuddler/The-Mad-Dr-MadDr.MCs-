@@ -1923,6 +1923,57 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         }
     }
 
+    /// <summary>2026-08 (docs/30 Tier 1, "per-object UV tiling"): how many
+    /// real-world meters ONE full texture repeat should span. A shared
+    /// cached material's `_BaseMap` tiling used to be a single fixed value
+    /// (`MTextured`'s own doc comment called this out: "No per-object UV
+    /// tiling scaled to world size... the SAME 0..1 UV rect stretches
+    /// across a 1m curb prop or a 30m building wall equally"), so brick
+    /// coursing that reads correctly on a wall reads absurdly dense on a
+    /// small prop using the same shared material. 6f is chosen so a
+    /// typical ~18m building wall repeats about 3 times -- matching the
+    /// OLD fixed (3,3) baseline for the case it was actually tuned
+    /// against -- while a 1-2m prop now tiles down instead of stretching
+    /// up. A v0.1 placeholder like every other tuning number in this
+    /// project, not a measured/authored value.</summary>
+    private const float TileWorldMeters = 6f;
+
+    private static MaterialPropertyBlock _tilingBlock;
+
+    /// <summary>Per-instance `_BaseMap` tiling via MaterialPropertyBlock,
+    /// derived from this object's own world scale -- deliberately NOT a
+    /// per-instance Material (that would defeat SRP batching on every
+    /// shared dresser material, the exact regression this project's own
+    /// material-caching convention exists to avoid). Only touches
+    /// materials that actually carry a `_BaseMap` texture (`MTextured`'s
+    /// output) -- a flat `M()` color has no texture to tile, so this is a
+    /// silent no-op for it either way.
+    ///
+    /// Uses the LARGEST scale component as the size proxy rather than an
+    /// average of all three: most dressed geometry here is a thin wall
+    /// panel (a large width/height, a small depth), and the depth
+    /// component would otherwise pull a wall's effective tile count down
+    /// toward the thin axis. Approximate -- Unity's built-in primitive UV
+    /// layout isn't reasoned about per-face here -- but it is a real,
+    /// documented improvement over the flat constant it replaces, not a
+    /// claim of exactness.</summary>
+    private static void ApplyWorldScaledTiling(Renderer renderer, Material mat, Vector3 scale)
+    {
+        if (renderer == null || mat == null) return;
+        if (!mat.HasProperty("_BaseMap")) return;
+        if (mat.GetTexture("_BaseMap") == null) return;
+
+        var size = Mathf.Max(scale.x, Mathf.Max(scale.y, scale.z));
+        if (size < 0.01f) return;
+        var tiles = Mathf.Max(0.35f, size / TileWorldMeters);
+
+        if (_tilingBlock == null) _tilingBlock = new MaterialPropertyBlock();
+        else _tilingBlock.Clear();
+        renderer.GetPropertyBlock(_tilingBlock);
+        _tilingBlock.SetVector("_BaseMap_ST", new Vector4(tiles, tiles, 0f, 0f));
+        renderer.SetPropertyBlock(_tilingBlock);
+    }
+
     /// <summary>Colliderless styled primitive -- the dresser workhorse.</summary>
     public GameObject SpawnPrim(PrimitiveType type, Vector3 position, Vector3 scale, Material mat, Transform parent)
     {
@@ -1933,7 +1984,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var collider = go.GetComponent<Collider>();
         if (collider != null) Object.Destroy(collider);
         var renderer = go.GetComponent<Renderer>();
-        if (renderer != null) renderer.sharedMaterial = mat;
+        if (renderer != null)
+        {
+            renderer.sharedMaterial = mat;
+            ApplyWorldScaledTiling(renderer, mat, scale);
+        }
         return go;
     }
 
@@ -1987,7 +2042,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // the same cubes list, so the damage pipeline below crushes
             // and tints the water towers/signs/fire escapes along with
             // the massing they belong to
-            BuildingDresser.Dress(this, building, height, cubes, buildings, industrial, suburb);
+            BuildingDresser.Dress(this, building, height, cubes, buildings, industrial, suburb, _city.Region);
             _cubesByBuilding[building] = cubes;
         }
     }
