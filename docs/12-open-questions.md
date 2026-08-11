@@ -15028,3 +15028,40 @@ clear at typical RTS camera height, or whether the underbelly ring's own
 position (`underRingYFrac = 0.3`) sits at a visually pleasing spot on
 the tapered cone rather than just "safely far from the windows," is
 unconfirmed until a real Editor run.
+
+## 2026-08 follow-up: Big Brain pedestal -- fixed door/windows placed directly behind columns (all factions)
+
+Creator report: "big brain all factions has window or door behind
+column." `BuildPedestal` (faction-agnostic, shared by every faction's
+Big Brain, called from `BuildBigBrainShape`) places 8 engaged columns
+evenly around the body at `i / columnCount * 360` degrees -- i.e.
+starting AT 0 degrees (0, 45, 90, 135, 180, 225, 270, 315). The door
+sits at the front (0 degrees, `Vector3.forward`) and the three windows
+sit at 90/180/270 degrees. Every single opening therefore landed at the
+EXACT same angle as a column -- not a near-miss, an exact coincidence,
+since both the column loop and the door/window placement independently
+picked round-number cardinal/ordinal angles starting from 0. Every
+faction's Big Brain had a pilaster standing directly in front of its
+door and all three windows.
+
+**Fix:** offset the column loop by half the angular spacing --
+`(i + 0.5f) / columnCount * 360` instead of `i / columnCount * 360` --
+so the 8 columns land at 22.5/67.5/112.5/.../337.5 degrees instead.
+None of those coincide with 0/90/180/270, so every door/window now sits
+in the clear bay between two columns. One-line change, door/window
+angles themselves untouched (the columns moved, not the openings) --
+same "identify which side of the coincidence is wrong and move only
+that side" instinct as every other placement fix in this log.
+
+This also incidentally fixes the new lighthouse-base door
+(`BuildBigBrainLighthouseBase`, added this session) at the same front
+angle -- it was never occluded by anything of its OWN (that method has
+no columns), but sat directly below the pedestal's own now-fixed door,
+so the fix reads correctly stacked top to bottom.
+
+**Verified:** flightcheck stub-compile clean against `BaseDresser.cs`.
+NOT verified visually -- no Unity Editor in this environment, same
+standing caveat as every entry in this section. The fix is confirmed by
+direct angle arithmetic (both loops' angle formulas checked against each
+other), not by rendering, but this one is exact-value trigonometry, not
+an estimate -- 0 degrees literally equals 0 degrees.

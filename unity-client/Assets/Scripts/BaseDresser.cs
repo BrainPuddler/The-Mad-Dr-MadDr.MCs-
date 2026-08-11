@@ -1860,12 +1860,22 @@ public class BaseDresser : MonoBehaviour
         // architecture, not a plinth" cue. Placed right at the body's
         // own outer surface so they read as attached pilasters, not
         // free-standing posts.
+        // 2026-08 fix (creator report: "big brain all factions has
+        // window or door behind column"): the door is placed at the
+        // front (0 degrees) and the three windows at 90/180/270 degrees
+        // below -- with 8 columns spaced every 45 degrees starting at 0,
+        // a column sat at EVERY ONE of those exact angles, directly in
+        // front of every opening. Offset by half the column spacing
+        // (22.5 degrees) so the 8 columns fall at 22.5/67.5/.../337.5
+        // instead -- none of those coincide with 0/90/180/270, so every
+        // door/window now sits in a clear bay between two columns
+        // instead of behind one.
         const int columnCount = 8;
         var columnDiameter = radius * 0.22f;
         var columnPlacementRadius = bodyD * 0.52f;
         for (var i = 0; i < columnCount; i++)
         {
-            var angle = i / (float)columnCount * 360f * Mathf.Deg2Rad;
+            var angle = (i + 0.5f) / columnCount * 360f * Mathf.Deg2Rad;
             var pos = origin + new Vector3(Mathf.Sin(angle) * columnPlacementRadius, bodyCenterY,
                 Mathf.Cos(angle) * columnPlacementRadius);
             builder.SpawnPrim(PrimitiveType.Cylinder, pos,
