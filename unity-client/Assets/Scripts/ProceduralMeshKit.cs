@@ -214,6 +214,54 @@ public static class ProceduralMeshKit
         return mesh;
     }
 
+    /// <summary>2026-08 (creator direction: "Add a real triangle
+    /// primitive to roof generator NOT a Cube on it's side"): a real
+    /// triangular prism -- a symmetric ridge/gable roof, replacing the
+    /// old trick of rotating a `PrimitiveType.Cube` 45 degrees about Z
+    /// and sinking half of it into the block so only the top "V" of the
+    /// resulting diamond showed. That trick worked (a diamond's upper
+    /// half IS visually a ridge), but it was never a real triangle mesh
+    /// -- always six square cube faces underneath, four of them just
+    /// hidden below the roof plane. This is the honest shape: two
+    /// triangular gable-end caps and two rectangular sloped faces,
+    /// nothing hidden.
+    ///
+    /// Centered at local origin, extends -0.5..0.5 on every axis -- same
+    /// calling convention as every other shape here (<see cref="Wedge"/>,
+    /// <see cref="Frustum"/>). The ridge runs along local Z (the "length"
+    /// axis, matching how a building's own depth becomes the roof's
+    /// ridge-run direction at every call site); the triangular
+    /// cross-section is in the XY plane: base corners at Y=-0.5 (the
+    /// eaves, sitting flush on the roof plane a caller positions this
+    /// at), apex at Y=+0.5 (the ridge line).</summary>
+    public static Mesh GableRoof()
+    {
+        var v = new List<Vector3>
+        {
+            new Vector3(-0.5f, -0.5f, -0.5f),  // 0 back-left eave
+            new Vector3(0.5f, -0.5f, -0.5f),   // 1 back-right eave
+            new Vector3(0f, 0.5f, -0.5f),      // 2 back ridge
+            new Vector3(-0.5f, -0.5f, 0.5f),   // 3 front-left eave
+            new Vector3(0.5f, -0.5f, 0.5f),    // 4 front-right eave
+            new Vector3(0f, 0.5f, 0.5f),       // 5 front ridge
+        };
+        var tris = new List<int>();
+        Quad(tris, 0, 1, 4, 3);   // bottom (eaves plane -- usually unseen, sat flush on the roof cap)
+        Quad(tris, 0, 3, 5, 2);   // left slope
+        Quad(tris, 1, 2, 5, 4);   // right slope
+        Tri(tris, 0, 2, 1);       // back gable-end cap
+        Tri(tris, 3, 4, 5);       // front gable-end cap
+
+        FaceOutward(v, tris);
+
+        var mesh = new Mesh();
+        mesh.vertices = v.ToArray();
+        mesh.triangles = tris.ToArray();
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
     /// <summary>A lean-to awning wedge -- centered at local origin,
     /// extends -0.5..0.5 on every axis. Flat bottom and back, sloping
     /// from the back-top edge down to the front-bottom edge (local +Z is

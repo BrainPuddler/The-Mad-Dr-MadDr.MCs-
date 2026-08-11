@@ -31,6 +31,21 @@ public static class BuildingDresser
     // existing bit-packing scheme.
     private static readonly Dictionary<string, Material> TexturedCache = new Dictionary<string, Material>();
 
+    // 2026-08 (creator direction: "Add a real triangle primitive to roof
+    // generator NOT a Cube on it's side"): one shared mesh instance for
+    // every pitched-roof spawn (house gable, apartment hip) -- unlike
+    // ProceduralMeshKit.FlameShard/CloudShard, this shape has no per-call
+    // jitter, so there's nothing instance-specific to regenerate; every
+    // caller just varies position/scale/material on the transform, same
+    // as CreatePrimitive's own shared-mesh-per-type behavior.
+    private static Mesh _gableRoofMesh;
+
+    private static Mesh GableRoofMesh()
+    {
+        if (_gableRoofMesh == null) _gableRoofMesh = ProceduralMeshKit.GableRoof();
+        return _gableRoofMesh;
+    }
+
     private static Material M(float r, float g, float b, float emissive = 0f)
     {
         var key = ((int)(r * 255) << 20) | ((int)(g * 255) << 10) | (int)(b * 255) | ((int)(emissive * 3) << 30);
@@ -367,22 +382,35 @@ public static class BuildingDresser
     // cap's top surface (0.65 cap center + 0.1 half-thickness), not from
     // `height` directly.
     private const float ApartmentRoofCapTop = 0.75f;
-    // Same rotated-diamond trick as DressSmall's GableApexOffset, sized
-    // shallower (8 vs. that tier's 11) -- an apartment block reads as a
-    // modest peaked roof, not a house-sized A-frame stacked on a mid-rise.
-    private const float ApartmentHipSize = 8f;
-    private const float ApartmentHipApexOffset = ApartmentRoofCapTop + ApartmentHipSize * 0.5f * 1.41421356f;
+    // 2026-08 (creator direction: "Add a real triangle primitive to roof
+    // generator NOT a Cube on it's side"): same ProceduralMeshKit.
+    // GableRoof real triangular prism as DressSmall's gable, sized
+    // shallower -- an apartment block reads as a modest peaked roof, not
+    // a house-sized A-frame stacked on a mid-rise. See GableApexOffset's
+    // own doc comment for why the apex offset is now just the height,
+    // no sqrt(2) math needed.
+    private const float ApartmentHipWidth = 8f;
+    private const float ApartmentHipHeight = 4f;
+    private const float ApartmentHipLength = 18.6f;
+    private const float ApartmentHipApexOffset = ApartmentRoofCapTop + ApartmentHipHeight;
     private const float ApartmentParapetHeight = 1.4f;
 
     // ---- small tier: suburbia / roadside America ------------------------------
 
-    // 2026-07 bug fix: the pitched-roof pick's actual landable apex height
-    // above `height` -- half-extents (5.5, 5.5) of the gable's 11x11
-    // cross-section, rotated 45 degrees about Z, plus the 0.6 base lift
-    // the gable prim itself is spawned at (see case 0 below). Derived from
-    // the SAME numbers the mesh uses, not a separate guess, so a flyer
-    // lands exactly where the roof ridge visually is.
-    private const float GableApexOffset = 0.6f + 5.5f * 1.41421356f;   // 0.6 + 5.5*sqrt(2) ~= 8.38
+    // 2026-08 (creator direction: "Add a real triangle primitive to roof
+    // generator NOT a Cube on it's side"): a real ProceduralMeshKit.
+    // GableRoof triangular prism, replacing the old rotated-cube-diamond
+    // trick. The mesh's local Y spans -0.5..0.5 (eaves to ridge), so at
+    // scale.y = GableRoofHeight, positioning the prim's CENTER at
+    // `height + GableRoofHeight * 0.5f` sits its base (the eaves) flush
+    // on the roof plane and its apex (the ridge) exactly GableRoofHeight
+    // above `height` -- no sqrt(2) needed anymore, the apex offset IS the
+    // scale, because this is now an honest triangle instead of half a
+    // rotated square.
+    private const float GableRoofWidth = 15.5f;
+    private const float GableRoofHeight = 7.8f;
+    private const float GableRoofLength = 17.5f;
+    private const float GableApexOffset = GableRoofHeight;
 
     private static void DressSmall(RuntimeCityBuilder b, HexCoord hex, Transform t, float height, int h, bool primary, bool suburb = false)
     {
@@ -399,12 +427,13 @@ public static class BuildingDresser
                 var roofMat = suburb
                     ? ((h / 3) % 3 != 0 ? RustRed() : M(0.35f, 0.42f, 0.5f))   // warm roof more often
                     : ((h / 3) % 3 == 0 ? RustRed() : M(0.35f, 0.42f, 0.5f));  // cool slate more often
-                // a 45-degree diamond prism sunk into the block: only the
-                // top V shows, reading as a pitched gable roof
-                var gable = b.SpawnPrim(PrimitiveType.Cube,
-                    basePos + Vector3.up * (height + 0.6f), new Vector3(11f, 11f, 17.5f), roofMat, t);
-                gable.transform.rotation = Quaternion.Euler(0f, 0f, 45f);
-                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(4f, height + 4.6f, 3f),
+                // a real triangular-prism gable roof (ProceduralMeshKit.
+                // GableRoof) instead of a rotated cube -- see
+                // GableApexOffset's own doc comment for the placement math
+                b.SpawnMesh(GableRoofMesh(),
+                    basePos + Vector3.up * (height + GableRoofHeight * 0.5f),
+                    new Vector3(GableRoofWidth, GableRoofHeight, GableRoofLength), roofMat, t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(4f, height + 4.3f, 3f),
                     new Vector3(1.4f, 2.6f, 1.4f), Brick(), t);   // chimney, poking through the roof plane
                 // 2026-07 bug fix: this IS solid, walkable roof massing
                 // (not rooftop-kit clutter) -- a flyer should be able to
@@ -562,10 +591,9 @@ public static class BuildingDresser
             case 3:   // hip roof: shallow pitched ridge (solid -- registers a real landable apex)
             {
                 var ridgeMat = (h / 13) % 2 == 0 ? RustRed() : M(0.35f, 0.42f, 0.5f);
-                var ridge = b.SpawnPrim(PrimitiveType.Cube,
-                    basePos + Vector3.up * (height + ApartmentRoofCapTop),
-                    new Vector3(ApartmentHipSize, ApartmentHipSize, 18.6f), ridgeMat, t);
-                ridge.transform.rotation = Quaternion.Euler(0f, 0f, 45f);
+                b.SpawnMesh(GableRoofMesh(),
+                    basePos + Vector3.up * (height + ApartmentRoofCapTop + ApartmentHipHeight * 0.5f),
+                    new Vector3(ApartmentHipWidth, ApartmentHipHeight, ApartmentHipLength), ridgeMat, t);
                 b.RegisterRoofLandingHeight(hex, height + ApartmentHipApexOffset);
                 break;
             }
@@ -763,9 +791,16 @@ public static class BuildingDresser
                 for (var i = -2; i <= 2; i++)
                     b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(i * 3.4f, 5f, Half * 1.15f),
                         new Vector3(0.9f, 5f, 0.9f), Cream(), t);
-                var pediment = b.SpawnPrim(PrimitiveType.Cube,
-                    basePos + new Vector3(0f, 11.5f, Half * 1.15f), new Vector3(11f, 11f, 2.4f), Cream(), t);
-                pediment.transform.rotation = Quaternion.Euler(0f, 0f, 45f);
+                // 2026-08 (creator direction: "Add a real triangle
+                // primitive to roof generator NOT a Cube on it's side"):
+                // the classical pediment is the same triangular-prism
+                // shape as a roof (ProceduralMeshKit.GableRoof), just
+                // thin and facing forward instead of long and ridge-run
+                // -- the mesh's ridge axis (local Z) becomes the
+                // pediment's shallow front-to-back depth here, no
+                // rotated-cube diamond trick needed.
+                b.SpawnMesh(GableRoofMesh(),
+                    basePos + new Vector3(0f, 14.25f, Half * 1.15f), new Vector3(11f, 5.5f, 2.4f), Cream(), t);
                 b.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (height + 3.5f),
                     new Vector3(0.25f, 3.5f, 0.25f), Chrome(), t);
                 break;

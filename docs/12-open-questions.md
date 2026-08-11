@@ -14519,3 +14519,44 @@ needs its own docs 06/07/08-coordinated pass per CLAUDE.md), and all
 Unity UI/AI wiring for wings specifically. Phase 1 here is a real,
 independently-valuable fix on its own -- worth shipping alone -- not a
 partial slice of the wing feature that depends on the rest landing too.
+
+## 2026-08: real triangular-prism roof mesh, replacing the rotated-cube-diamond trick
+
+Creator direction: "Add a real triangle primitive to roof generator NOT
+a Cube on it's side." `BuildingDresser`'s pitched-roof shapes (docs/30
+Tier 1c) were never real triangles -- a `PrimitiveType.Cube` rotated 45
+degrees about its own Z axis, sunk half-height into the block so only
+the upper "V" of the resulting diamond cross-section showed above the
+roof plane. Visually convincing (a diamond's top half IS a ridge), but
+still six square cube faces underneath, four of them permanently hidden
+below the roof line -- exactly the "cube on its side" the creator named.
+
+**`ProceduralMeshKit.GableRoof()`**: a real triangular prism -- two
+sloped rectangular faces and two triangular gable-end caps, nothing
+hidden -- same hand-authored-mesh-plus-`FaceOutward` convention this
+file already established for `Wedge`/`Frustum`/`FlameShard`/`CloudShard`
+(docs/23 Phase 10.4). Centered at local origin, -0.5..0.5 on every axis,
+ridge along local Z -- same calling convention as every other shape
+here. `RuntimeCityBuilder.SpawnMesh` is the new sibling to `SpawnPrim`
+for spawning it (position/scale/material/parent, no collider, same
+world-scaled-UV-tiling pass `SpawnPrim` already applies).
+
+**Three call sites fixed**, all in `BuildingDresser.cs`: `DressSmall`'s
+suburban-house gable roof, `DressOffice`'s apartment-tier hip-roof
+variant (docs/30 Tier 1c's own "roof-form variety" pick), and the
+`town_hall` landmark's classical pediment (the SAME rotated-cube trick,
+just thin/forward-facing instead of long/ridge-running -- `GableRoof`
+covers both by varying scale, no second mesh needed). `GableApexOffset`/
+`ApartmentHipApexOffset` (the flyer-landing-height math `RegisterRoofLandingHeight`
+feeds) simplified along with it: the old formula needed `sqrt(2)` because
+it was deriving a diamond's rotated apex height from a square's
+half-extent; the new one doesn't, because the apex height genuinely IS
+the mesh's own Y-scale now -- an honest triangle, not trigonometry
+undoing a rotation trick.
+
+**Verified:** flightcheck stub-compile clean against the real
+`ProceduralMeshKit`/`BuildingDresser`/`RuntimeCityBuilder.cs` changes
+together. NOT verified visually -- no Unity Editor in this environment,
+same standing caveat as every entry in this section; the actual on-screen
+silhouette (does the new prism's proportions read as well as the old
+diamond's did) is unconfirmed until the creator's own Editor run.

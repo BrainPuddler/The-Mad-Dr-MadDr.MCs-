@@ -2017,6 +2017,26 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return go;
     }
 
+    /// <summary>Colliderless styled hand-authored mesh -- <see
+    /// cref="SpawnPrim"/>'s sibling for shapes `CreatePrimitive` doesn't
+    /// offer (see <see cref="ProceduralMeshKit"/>'s own header), e.g.
+    /// <see cref="ProceduralMeshKit.GableRoof"/> for a real triangular
+    /// roof instead of a rotated cube. Same calling convention as
+    /// `SpawnPrim` -- position/scale/material/parent, no collider.</summary>
+    public GameObject SpawnMesh(Mesh mesh, Vector3 position, Vector3 scale, Material mat, Transform parent)
+    {
+        var go = new GameObject("Mesh");
+        go.transform.SetParent(parent, false);
+        go.transform.position = position;
+        go.transform.localScale = scale;
+        var filter = go.AddComponent<MeshFilter>();
+        filter.sharedMesh = mesh;
+        var renderer = go.AddComponent<MeshRenderer>();
+        renderer.sharedMaterial = mat;
+        ApplyWorldScaledTiling(renderer, mat, scale);
+        return go;
+    }
+
     private static int Mod(int x, int m)
     {
         return ((x % m) + m) % m;
