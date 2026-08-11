@@ -14831,3 +14831,75 @@ in this section; whether the tower/battlement proportions read as
 mounting looks right rather than clipping the arrow-slit windows it was
 positioned to clear (±0.42/±0.35 of body width vs. the windows' own
 ±0.28/±0.2 spread), is unconfirmed until a real Editor run.
+
+## 2026-08: faction gauntlet Phase 4 -- Alien flying-saucer building massing overhaul (docs/31)
+
+Creator direction: the faction gauntlet addendum's mandatory Alien
+massing change -- "the current Alien Factory/Control Centre massing (a
+box body + an offset cylinder/sphere element) is the wrong starting
+point. A saucer IS the body, not something placed on top of one," with
+a stated "final test": would the building still read as Alien in pure
+black silhouette. docs/31 §6 flagged this as the largest remaining
+phase, comparable in size to the entire 2026-08 per-faction pass.
+
+**New hand-authored mesh: `ProceduralMeshKit.Saucer(domeRadiusFrac,
+rimHalfThickness, elevation, segments)`.** A real revolved lathe profile
+-- tapered underside cone up to a flat rim band, then a tapered dome cap
+above -- built the same way `Frustum` lathes its own two-ring profile,
+just with more profile rings (bottom tip / rim-bottom ring / rim-top
+ring / dome-shoulder ring / apex), reusing the file's existing
+`FaceOutward` convex-heuristic winding fix-up rather than hand-deriving
+windings. Same "-0.5..0.5, size via `scale` alone" calling convention
+every other shape in that file already follows. Cached once as
+`BaseDresser.AlienSaucerMesh()` (fixed params: domeRadiusFrac=0.5,
+rimHalfThickness=0.07, elevation=0.12, 16 segments) and reused at
+different `scale` per call site -- one mesh, many instance sizes, same
+idiom `alien-crystal-spike` already established via `PropLibrary`.
+
+**`BuildAlienFactory`:** the old owner-tinted CUBE body is now this
+saucer mesh directly -- still a `Placeholder()`-material DIRECT child of
+`root` (so `TintShape`'s own single-level `GetChild` sweep keeps
+re-tinting it unchanged; only the mesh changed, not the split that makes
+tinting work, same discipline the Mad Doctor castle-transform phase
+established for ITS body). Flattened relative to the old box (`bodyH`
+cut from 0.65 to 0.42 of `fullScale.y`) while `bodyW`/`bodyD` stay
+EXACTLY what they were -- "the existing footprint must not grow...
+likely meaning a WIDE, SHORT saucer" (docs/31 §6's own load-bearing
+constraint), satisfied by construction rather than by approximation.
+Brass-riveted portholes (Phase 1) are repositioned from a flat-cube-face
+X-offset onto the saucer's own round rim band (an angle-around-Y
+placement, `rimYFrac = 0.5 + 0.12` matching `AlienSaucerMesh`'s own
+baked elevation param) so they sit flush on the curved hull instead of
+floating past it or sinking into it.
+
+**`BuildAlienControlCentre`:** now TWO saucer modules -- a main saucer
+(same flattening approach as the Factory, `bodyH` cut from 0.8 to 0.5)
+and a smaller secondary module riding above it -- bridged by a real
+passage-tube connector: a new `alien-passage-tube` prop (`ProceduralMesh
+Kit.Frustum(1, 0.85, 12)`, a gentle taper rather than a straight
+cylinder, registered in `PropLibrary` alongside the existing
+`alien-crystal-spike`/`human-cooling-tower`/`castle-tower-cap` entries)
+with two flat docking-collar rings at each end. The hive-mind crystal,
+orbiting energy rings, curved support struts, and the full B-movie
+antenna rig (Phase 2's own `rigBase`/drum/dish/horn/telescope/cable/
+meter/lamp apparatus) are all re-anchored to the SECONDARY module
+(`secondaryCenter`/`secondaryH`/`secondaryDiam`) rather than the old
+turret-cube's own roofline -- every position formula that used to key
+off `turretCenter`/`turretH`/`bodyH` for that detail now keys off the
+secondary module's own center/height/diameter instead, so nothing floats
+disconnected from the massing it used to sit on. Portholes get the same
+round-rim repositioning as the Factory's.
+
+**Verified:** flightcheck stub-compile clean against `BaseDresser.cs`/
+`PropLibrary.cs`/`ProceduralMeshKit.cs` together, including a forced
+non-incremental rebuild to confirm zero unused-variable warnings beyond
+the harness's own 4 baseline `RosterFetcher` event warnings. No
+citygen-core/match-core changes this pass. NOT verified visually -- no
+Unity Editor in this environment, same standing caveat as every entry in
+this section; in particular the `Saucer` mesh's own winding (whether
+`FaceOutward`'s convex-centroid heuristic produces correct outward
+normals for this specific 5-ring profile, not just the simpler 2-ring
+`Frustum`/1-apex `FlameShard` shapes it was already proven against) is
+unconfirmed until a real Editor render, and is the single highest-risk
+unverified claim in this pass -- flagged explicitly rather than assumed
+fine by analogy.

@@ -183,7 +183,7 @@ exactly this purpose on Factory/Control Centre trim) rather than a new
 convention. Do not randomize the primary silhouette per-instance — that's
 where faction identity lives; randomize secondary/tertiary only.
 
-## 6. Alien buildings: saucer massing (not yet implemented, see §7 Phase 4)
+## 6. Alien buildings: saucer massing (Shipped, §7 Phase 4)
 
 The brief's own strongest claim, restated precisely because it's a real
 architectural-massing change, not decoration: **the current Alien Factory/
@@ -191,30 +191,44 @@ Control Centre massing (a box body + an offset cylinder/sphere element,
 same shared shape every other faction's body uses) is the wrong starting
 point.** A saucer IS the body, not something placed on top of one.
 
-Target massing: a primary saucer module (broad circular/elliptical
-footprint, flattened body, domed/raised center, tapered underside) as a
-reusable parametrized generator (diameter, thickness, dome radius, rim
-thickness, elevation) analogous to `ProceduralMeshKit.Frustum`/`GableRoof`
-— hand-authored mesh, not a `CreatePrimitive` composite, since no built-in
-primitive produces a true saucer cross-section. Larger Alien buildings
-(Control Centre) connect 2+ saucer modules via a passage-tube connector
-(a `Frustum`-style tapered cylinder with visible docking-collar rings).
+**Shipped.** `ProceduralMeshKit.Saucer(domeRadiusFrac, rimHalfThickness,
+elevation, segments)` — a real revolved lathe mesh (tapered underside
+cone → flat rim band → tapered dome cap), hand-authored (not a
+`CreatePrimitive` composite, since no built-in primitive produces a true
+saucer cross-section), same "-0.5..0.5, size via `scale` alone" calling
+convention `Frustum`/`GableRoof`/`Wedge` already established. Cached once
+as `BaseDresser.AlienSaucerMesh()` and reused at different `scale` per
+call site — same "one mesh, many instance scales" idiom
+`alien-crystal-spike` already established via `PropLibrary`.
 
-**Load-bearing constraint from the brief itself, worth restating:**
-existing footprint must not grow. A saucer's own bounding box needs to fit
-inside the SAME `fullScale` every other Factory/Control Centre already
-targets — likely meaning a WIDE, SHORT saucer (matching a saucer's own
-canonical proportions anyway) rather than a tall structure, which
-conveniently costs nothing against the brief's own "flattened central
-body" description.
+`BuildAlienFactory`'s own body is now this saucer mesh directly (still a
+`Placeholder()`-material DIRECT child of `root`, so `TintShape` keeps
+re-tinting it unchanged — the mesh changed, not the split that makes
+tinting work). `BuildAlienControlCentre` connects TWO saucer modules — a
+main saucer (the same approach as the Factory) and a smaller secondary
+module riding above it — via a passage-tube connector
+(`alien-passage-tube`, a `ProceduralMeshKit.Frustum`-backed slight taper)
+with two flat docking-collar rings at each end. The hive-mind crystal,
+orbiting rings, curved struts, and the B-movie antenna rig (§5, Phase 2)
+are all re-anchored to the SECONDARY module (replacing the old turret-
+cube anchor) rather than the main saucer body. Brass-riveted portholes
+(§2) are repositioned onto the main saucer's own round rim band (an
+angle-around-Y placement, not the old flat-cube-face X-offset) so they
+sit flush on the curved hull instead of floating past it.
+
+**Load-bearing constraint from the brief itself, satisfied by
+construction:** existing footprint must not grow. Both saucer bodies keep
+their predecessor cube's exact `bodyW`/`bodyD` (unchanged from before this
+phase); only `bodyH` shrinks (Factory: 0.65→0.42 of `fullScale.y`;
+Control Centre: 0.8→0.5) — a WIDE, SHORT saucer, matching a saucer's own
+canonical proportions anyway, which conveniently costs nothing against
+the brief's own "flattened central body" description.
 
 ## 7. Implementation status and phasing
 
-Broken into six phases; **Phases 1-3 are implemented as of this doc's
-latest revision.** Each remaining phase is real, separately-scoped work
-(the saucer-massing phase is comparable in size to the entire 2026-08
-per-faction Factory/Control Centre pass that already shipped), not a
-placeholder stub.
+Broken into six phases; **Phases 1-4 are implemented as of this doc's
+latest revision.** Each remaining phase is real, separately-scoped work,
+not a placeholder stub.
 
 1. **Windows** (§2) — Alien portholes, Doctor arrow slits. **Shipped.**
 2. **Antennas** (§5) — full per-faction modular antenna systems. **Shipped**
@@ -262,7 +276,11 @@ placeholder stub.
    decision from the prior 2026-08 pass ("no bespoke fourth
    architectural style was asked for"), unchanged by this doc.
 4. **Alien saucer massing** (§6) — full body-massing replacement plus the
-   saucer-module/passage-tube generator. Not started.
+   saucer-module/passage-tube generator. **Shipped**, both
+   `BuildAlienFactory` (single saucer body) and `BuildAlienControlCentre`
+   (main saucer + secondary module + passage tube) — see §6's own full
+   writeup for what changed and how the existing crystal/ring/strut/
+   antenna/porthole detail was re-anchored onto the new massing.
 5. **Big Brain lighthouse base.** Mount the EXISTING, UNCHANGED Big Brain
    jar (`BuildBigBrainShape`) on a new squat circular stone/metal base
    with a small door — a new `BuildLighthouseBase`-style holder call

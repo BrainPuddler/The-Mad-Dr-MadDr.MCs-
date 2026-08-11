@@ -293,4 +293,70 @@ public static class ProceduralMeshKit
         mesh.RecalculateBounds();
         return mesh;
     }
+
+    /// <summary>2026-08 (faction gauntlet addendum, docs/31 §6: "the
+    /// current Alien Factory/Control Centre massing... is the wrong
+    /// starting point. A saucer IS the body, not something placed on top
+    /// of one"): a real revolved flying-saucer profile -- a tapered
+    /// underside cone up to a flat rim band, then a tapered dome cap
+    /// above, lathed around Y the same way <see cref="Frustum"/> lathes
+    /// its own two-ring profile, just with more profile rings. Centered
+    /// at local origin, extends -0.5..0.5 on every axis -- same calling
+    /// convention as every other shape here, so a caller sizes/positions
+    /// it exactly like `Frustum`/`GableRoof`/`Wedge` via `scale` alone.
+    ///
+    /// `domeRadiusFrac` (0..1): how wide the dome's shoulder ring is
+    /// relative to the full rim radius -- smaller reads pointier/more
+    /// UFO-like, larger reads flatter/more lens-shaped.
+    /// `rimHalfThickness` (fraction of total height): half the flat
+    /// rim band's own vertical thickness -- the disc "edge" a saucer
+    /// silhouette reads by.
+    /// `elevation` (fraction of total height, roughly -0.3..0.3): where
+    /// the rim band sits along the vertical axis -- 0 is dead center
+    /// (equal dome/belly), positive lifts the rim toward the dome
+    /// (a deeper tapered underside, the classic "flying saucer" read).</summary>
+    public static Mesh Saucer(float domeRadiusFrac, float rimHalfThickness, float elevation, int segments)
+    {
+        var verts = new List<Vector3>();
+        var tris = new List<int>();
+
+        var bottomTip = verts.Count; verts.Add(new Vector3(0f, -0.5f, 0f));
+        var apex = verts.Count; verts.Add(new Vector3(0f, 0.5f, 0f));
+
+        var rimBottomY = elevation - rimHalfThickness;
+        var rimTopY = elevation + rimHalfThickness;
+        var domeShoulderY = Mathf.Lerp(rimTopY, 0.5f, 0.4f);
+        var domeShoulderR = 0.5f * domeRadiusFrac;
+
+        var rimBottomRing = new int[segments];
+        var rimTopRing = new int[segments];
+        var domeShoulderRing = new int[segments];
+        for (var i = 0; i < segments; i++)
+        {
+            var a = i / (float)segments * 2f * Mathf.PI;
+            var x = Mathf.Sin(a);
+            var z = Mathf.Cos(a);
+            rimBottomRing[i] = verts.Count; verts.Add(new Vector3(x * 0.5f, rimBottomY, z * 0.5f));
+            rimTopRing[i] = verts.Count; verts.Add(new Vector3(x * 0.5f, rimTopY, z * 0.5f));
+            domeShoulderRing[i] = verts.Count; verts.Add(new Vector3(x * domeShoulderR, domeShoulderY, z * domeShoulderR));
+        }
+
+        for (var i = 0; i < segments; i++)
+        {
+            var next = (i + 1) % segments;
+            Tri(tris, bottomTip, rimBottomRing[next], rimBottomRing[i]);                          // tapered underside
+            Quad(tris, rimBottomRing[i], rimTopRing[i], rimTopRing[next], rimBottomRing[next]);   // flat rim band edge
+            Quad(tris, rimTopRing[i], domeShoulderRing[i], domeShoulderRing[next], rimTopRing[next]); // rim-to-dome taper
+            Tri(tris, apex, domeShoulderRing[i], domeShoulderRing[next]);                          // dome cap
+        }
+
+        FaceOutward(verts, tris);
+
+        var mesh = new Mesh();
+        mesh.vertices = verts.ToArray();
+        mesh.triangles = tris.ToArray();
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
 }

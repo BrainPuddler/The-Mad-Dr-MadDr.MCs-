@@ -76,6 +76,18 @@ public class BaseDresser : MonoBehaviour
     // private copy of -- this file didn't need one until now.
     private static readonly Dictionary<string, Material> TexturedCache = new Dictionary<string, Material>();
 
+    // 2026-08 (faction gauntlet addendum, docs/31 §6, Alien saucer
+    // massing): same "build once, cache, share across every instance"
+    // idiom `BuildingDresser._gableRoofMesh` already established for its
+    // own hand-authored mesh -- one shared `Mesh` asset, sized per call
+    // site via `scale` alone (never a per-instance mesh rebuild).
+    private static Mesh _alienSaucerMesh;
+    private static Mesh AlienSaucerMesh()
+    {
+        if (_alienSaucerMesh == null) _alienSaucerMesh = ProceduralMeshKit.Saucer(0.5f, 0.07f, 0.12f, 16);
+        return _alienSaucerMesh;
+    }
+
     // UnderConstruction: one scaffold GameObject per building, a single
     // scaling cube (see the class header for why shape stays generic here).
     private readonly Dictionary<uint, GameObject> _scaffolds = new Dictionary<uint, GameObject>();
@@ -930,27 +942,43 @@ public class BaseDresser : MonoBehaviour
     }
 
     /// <summary>Alien faction Factory -- "a living energy organism":
-    /// translucent membrane hull DETAIL (the owner-tinted body cube
-    /// underneath stays the same shape/silhouette; the organic read
-    /// comes from bulging energy sacs, ribs, and a crystal growth
-    /// replacing the chimney slot), gentle hovering (Bob.cs) and slow
-    /// rotation (SlowSpin.cs).
+    /// bulging energy sacs, ribs, and a crystal growth replacing the
+    /// chimney slot, gentle hovering (Bob.cs) and slow rotation
+    /// (SlowSpin.cs).
     ///
     /// 2026-08 (docs/31, creator-confirmed reversal): the prior "no
     /// visible bolts/rivets anywhere... avoid visible bolts and human
     /// engineering" restraint is SUPERSEDED -- brass-riveted portholes
-    /// (SpawnAlienPorthole) now sit on the front face alongside the
-    /// organic detail above, a deliberate "captured/bolted spacecraft"
-    /// read layered on top of the living-organism hull, not a
-    /// contradiction left unresolved. See SpawnAlienPorthole's own doc
-    /// comment and docs/31 SS2 for the full design-conflict writeup.</summary>
+    /// (SpawnAlienPorthole) now sit on the hull alongside the organic
+    /// detail above, a deliberate "captured/bolted spacecraft" read
+    /// layered on top of the living-organism hull, not a contradiction
+    /// left unresolved. See SpawnAlienPorthole's own doc comment and
+    /// docs/31 SS2 for the full design-conflict writeup.
+    ///
+    /// 2026-08 (faction gauntlet addendum, docs/31 §6, "the current
+    /// Alien Factory/Control Centre massing... is the wrong starting
+    /// point. A saucer IS the body, not something placed on top of
+    /// one"): the body is now a real revolved saucer mesh
+    /// (`AlienSaucerMesh`/`ProceduralMeshKit.Saucer`) instead of the
+    /// owner-tinted CUBE every other faction still uses -- STILL a
+    /// direct, `Placeholder()`-material child of `root` (so `TintShape`'s
+    /// own single-level `GetChild` sweep keeps re-tinting it unchanged,
+    /// same split every other phase in this doc relies on), just a
+    /// different mesh instead of `PrimitiveType.Cube`. Flattened
+    /// (`bodyH` cut roughly in half vs. the old box) rather than tall --
+    /// "the existing footprint must not grow... likely meaning a WIDE,
+    /// SHORT saucer" (docs/31 §6's own load-bearing constraint);
+    /// `bodyW`/`bodyD` stay exactly what they were, so the ground
+    /// footprint is unchanged. The final-test check from the brief itself
+    /// (would this read as Alien in pure black silhouette) is why the
+    /// body shape had to change, not just its surface detail.</summary>
     private void BuildAlienFactory(GameObject root, Vector3 fullScale)
     {
         var origin = root.transform.position;
-        var bodyH = fullScale.y * 0.65f;
+        var bodyH = fullScale.y * 0.42f;
         var bodyW = fullScale.x * 0.9f;
         var bodyD = fullScale.z * 0.9f;
-        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.5f),
+        builder.SpawnMesh(AlienSaucerMesh(), origin + Vector3.up * (bodyH * 0.5f),
             new Vector3(bodyW, bodyH, bodyD), Placeholder(), root.transform);
 
         var trim = new GameObject("FactoryTrim").transform;
@@ -987,14 +1015,21 @@ public class BaseDresser : MonoBehaviour
         // energy sac -- see SpawnAlienPorthole's own doc comment for why
         // this supersedes the "no visible bolts" direction that shaped
         // the rest of this method.
+        // 2026-08 (saucer massing): repositioned onto the saucer's own
+        // round rim band (angle around the Y axis, not an X-offset on a
+        // flat cube face that no longer exists) -- rimYFrac mirrors
+        // AlienSaucerMesh's own baked elevation param (0.5 body-center +
+        // 0.12 elevation) so the portholes sit exactly on the rim's flat
+        // edge, not floating past the curved hull or sunk inside it.
         var portholeRadius = fullScale.x * 0.09f;
-        float[] portholeXFrac = { -0.24f, 0.24f };
-        for (var pi = 0; pi < portholeXFrac.Length; pi++)
+        const float rimYFrac = 0.5f + 0.12f;
+        float[] portholeAngleDeg = { -20f, 20f };
+        for (var pi = 0; pi < portholeAngleDeg.Length; pi++)
         {
-            var xf = portholeXFrac[pi];
-            SpawnAlienPorthole(trim,
-                origin + new Vector3(xf * bodyW, bodyH * 0.65f, bodyD * 0.5f * 0.99f),
-                Vector3.forward, portholeRadius, pi, 521);
+            var rad = portholeAngleDeg[pi] * Mathf.Deg2Rad;
+            var dir = new Vector3(Mathf.Sin(rad), 0f, Mathf.Cos(rad));
+            var pos = origin + new Vector3(dir.x * bodyW * 0.5f, bodyH * rimYFrac, dir.z * bodyD * 0.5f);
+            SpawnAlienPorthole(trim, pos, dir, portholeRadius, pi, 521);
         }
 
         // organic ribs -- thin vertical crystal struts around the body
@@ -1024,62 +1059,97 @@ public class BaseDresser : MonoBehaviour
     }
 
     /// <summary>Alien faction Control Centre -- "the hive mind": a
-    /// massive floating central crystal (replacing the turret slot,
-    /// same offset/height envelope) with orbiting energy rings, curved
-    /// support struts, and a pulsing psychic core.
+    /// massive floating central crystal with orbiting energy rings,
+    /// curved support struts, and a pulsing psychic core.
     /// 2026-08 (docs/31): now ALSO gets brass-riveted portholes on the
     /// body's own front face -- see SpawnAlienPorthole's own doc comment
     /// for why "no rivets/bolts anywhere" (this method's own prior
     /// restraint, matching the Factory's) was explicitly superseded.
-    /// 2026-08 (faction gauntlet, docs/31 §5): the roofline's own
-    /// five-fold symmetric crystalline-antenna ring is replaced by a
-    /// real B-movie mechanical-apparatus rig (rotating drum + tilted
-    /// dish + horn antenna + telescoping mast + loop antenna + sagging
-    /// cable + meter/lamp), mounted at ONE asymmetric point rather than
-    /// repeated radially -- see that block's own doc comment.</summary>
+    /// 2026-08 (faction gauntlet, docs/31 §5): a real B-movie mechanical-
+    /// apparatus rig (rotating drum + tilted dish + horn antenna +
+    /// telescoping mast + loop antenna + sagging cable + meter/lamp),
+    /// mounted at ONE asymmetric point rather than repeated radially --
+    /// see that block's own doc comment.
+    ///
+    /// 2026-08 (faction gauntlet addendum, docs/31 §6, "Larger Alien
+    /// buildings (Control Centre) connect 2+ saucer modules via a
+    /// passage-tube connector"): the old box-body-plus-cube-turret
+    /// massing is replaced by TWO real saucer modules (`AlienSaucerMesh`)
+    /// -- a main saucer (same flattened-body approach as
+    /// `BuildAlienFactory`) and a smaller secondary module riding above
+    /// it, bridged by a tapered passage tube with docking-collar rings
+    /// (`alien-passage-tube`) -- rather than the old single box + an
+    /// offset cylinder/sphere the docs/31 brief called out by name as
+    /// "the wrong starting point." The hive-mind crystal/rings/struts/
+    /// antenna rig below are all now anchored to the SECONDARY module
+    /// (replacing the old turret-cube anchor) rather than the main
+    /// saucer body.</summary>
     private void BuildAlienControlCentre(GameObject root, Vector3 fullScale)
     {
         var origin = root.transform.position;
-        var bodyH = fullScale.y * 0.8f;
+        var bodyH = fullScale.y * 0.5f;
         var bodyW = fullScale.x * 0.75f;
         var bodyD = fullScale.z * 0.75f;
-        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.5f),
+        builder.SpawnMesh(AlienSaucerMesh(), origin + Vector3.up * (bodyH * 0.5f),
             new Vector3(bodyW, bodyH, bodyD), Placeholder(), root.transform);
+
+        // secondary saucer module -- the "2+ saucer modules" the brief
+        // asks for -- offset the SAME direction the old turret cube used
+        // (fullScale.x * 0.18 along +X), riding above the main saucer's
+        // own dome apex on a passage tube rather than sitting flush on
+        // top of it.
+        var secondaryOffsetXZ = Vector3.right * (fullScale.x * 0.18f);
+        var secondaryDiam = fullScale.x * 0.34f;
+        var secondaryH = fullScale.y * 0.22f;
+        var tubeH = fullScale.y * 0.12f;
+        var tubeBottomY = bodyH;
+        var secondaryBaseY = tubeBottomY + tubeH;
+        var secondaryCenter = origin + secondaryOffsetXZ + Vector3.up * (secondaryBaseY + secondaryH * 0.5f);
+        builder.SpawnMesh(AlienSaucerMesh(), secondaryCenter,
+            new Vector3(secondaryDiam, secondaryH, secondaryDiam), Placeholder(), root.transform);
 
         var trim = new GameObject("HqTrim").transform;
         trim.SetParent(root.transform, false);
         var crystalMat = AlienCrystalMat();
 
-        var turretH = fullScale.y * 0.35f;
-        var crystalCenter = origin + Vector3.right * (fullScale.x * 0.18f) + Vector3.up * (bodyH + turretH * 0.5f);
-        var crystalH = turretH * 1.05f;
+        // passage-tube connector -- a Frustum-style tapered cylinder
+        // (`alien-passage-tube`) plus two flat docking-collar rings at
+        // each end, bridging the main saucer's dome apex to the
+        // secondary module's own underside.
+        var tubeBottom = origin + secondaryOffsetXZ + Vector3.up * tubeBottomY;
+        var tubeTop = origin + secondaryOffsetXZ + Vector3.up * secondaryBaseY;
+        var tubeR = fullScale.x * 0.08f;
+        PropLibrary.Spawn(builder, "alien-passage-tube", PrimitiveType.Cylinder, (tubeBottom + tubeTop) * 0.5f,
+            new Vector3(tubeR * 2f, (tubeTop.y - tubeBottom.y) * 0.5f, tubeR * 2f), crystalMat, trim);
+        builder.SpawnPrim(PrimitiveType.Cylinder, tubeBottom,
+            new Vector3(tubeR * 2.4f, fullScale.y * 0.012f, tubeR * 2.4f), crystalMat, trim);
+        builder.SpawnPrim(PrimitiveType.Cylinder, tubeTop,
+            new Vector3(tubeR * 2.4f, fullScale.y * 0.012f, tubeR * 2.4f), crystalMat, trim);
+
+        // hive-mind crystal, floating above the secondary module -- same
+        // "replaces the turret slot, same offset/height envelope" idea
+        // as before, just re-anchored to `secondaryCenter` instead of a
+        // turret cube's own top.
+        var crystalCenter = secondaryCenter + Vector3.up * (secondaryH * 0.5f + fullScale.y * 0.18f);
+        var crystalH = fullScale.y * 0.37f;
         var crystalGo = PropLibrary.Spawn(builder, "alien-crystal-spike", PrimitiveType.Cylinder, crystalCenter,
             new Vector3(fullScale.x * 0.26f, crystalH, fullScale.x * 0.26f), crystalMat, trim);
         crystalGo.AddComponent<Bob>().amplitude = fullScale.x * 0.05f;
         crystalGo.AddComponent<SlowSpin>().degreesPerSecond = 6f;
 
-        // Curved supports, approximated as vertical struts from the roof
-        // up to a point PARTWAY up the crystal (0.25 of its own height
-        // above center-minus-half, not the crystal's exact bottom tip).
-        // Checked numerically before picking that fraction: the crystal
-        // is only slightly taller than the turret slot it replaces
-        // (crystalH = turretH * 1.05) at the SAME vertical center the
-        // turret used, so its own bottom tip sits barely BELOW the
-        // roofline (bodyH) -- attaching a strut there would compute a
-        // negative height (Unity Cylinder with a negative Y-scale
-        // renders inverted/degenerate, not just "wrong looking," a real
-        // bug, not a style nitpick). Attaching 0.25 of crystalH above
-        // the true bottom instead makes the strut length exactly
-        // `turretH * (0.5 - crystalH/turretH * 0.25)`, which stays
-        // positive for any crystalH up to 2x turretH -- comfortably
-        // covers the actual 1.05x used here with real margin, not by
-        // coincidence.
+        // Curved supports, approximated as vertical struts from the
+        // secondary module's own roofline up to a point PARTWAY up the
+        // crystal (0.25 of its own height above center-minus-half, not
+        // the crystal's exact bottom tip) -- same "stays positive for
+        // any crystalH up to 2x the strut envelope" reasoning the prior
+        // turret-anchored version used, now measured against
+        // `secondaryH` instead of `turretH`.
         var strutAttachY = crystalCenter.y - crystalH * 0.25f;
         float[] strutXFrac = { -0.12f, 0.12f };
         foreach (var xf in strutXFrac)
         {
             var top = new Vector3(crystalCenter.x, strutAttachY, crystalCenter.z);
-            var basePos = origin + new Vector3(fullScale.x * 0.18f + xf * fullScale.x, bodyH, 0f);
+            var basePos = secondaryCenter + Vector3.up * (secondaryH * 0.5f) + Vector3.right * (xf * fullScale.x);
             builder.SpawnPrim(PrimitiveType.Cylinder, (top + basePos) * 0.5f,
                 new Vector3(fullScale.x * 0.018f, (top.y - basePos.y) * 0.5f, fullScale.x * 0.018f), crystalMat, trim);
         }
@@ -1099,14 +1169,14 @@ public class BaseDresser : MonoBehaviour
         // 2026-08 (faction gauntlet, docs/31 §5, "1950s-70s B-movie
         // mechanical apparatus... exposed pivots/gears/bearings...
         // asymmetrical, uneven silhouette -- the opposite of Human's
-        // strict symmetry"): replaces the old five-fold RADIALLY
-        // SYMMETRIC crystalline-antenna ring with a real bolted-on
-        // communications rig, mounted at ONE point on the roofline
+        // strict symmetry"): a real bolted-on communications rig,
+        // mounted at ONE point on the secondary module's own roofline
         // rather than repeated -- symmetry itself is the thing this
-        // brief calls out as wrong for this faction.
+        // brief calls out as wrong for this faction. Re-anchored to
+        // `secondaryCenter` (was the old turret-cube roofline).
         var gunmetalMat = AlienGunmetal();
         var brassMat = Brass();
-        var rigBase = origin + new Vector3(-Mathf.Min(bodyW, bodyD) * 0.32f, bodyH, Mathf.Min(bodyW, bodyD) * 0.1f);
+        var rigBase = secondaryCenter + Vector3.up * (secondaryH * 0.5f) + new Vector3(-secondaryDiam * 0.32f, 0f, secondaryDiam * 0.1f);
 
         // primary: a heavy rotating drum base, brass-riveted -- matches
         // the "captured/bolted spacecraft" read SpawnAlienPorthole
@@ -1137,8 +1207,11 @@ public class BaseDresser : MonoBehaviour
 
         // secondary: a telescoping rod mast, three shrinking segments,
         // offset from the dish rig entirely -- keeps the whole apparatus
-        // reading as uneven/asymmetrical rather than one tidy cluster
-        var telescopeBase = origin + new Vector3(Mathf.Min(bodyW, bodyD) * 0.28f, bodyH, -Mathf.Min(bodyW, bodyD) * 0.15f);
+        // reading as uneven/asymmetrical rather than one tidy cluster.
+        // Anchored to the secondary module's own roofline (was the old
+        // main-body roofline, `bodyH`, before the saucer-massing pass
+        // moved this whole rig up onto the secondary module).
+        var telescopeBase = secondaryCenter + Vector3.up * (secondaryH * 0.5f) + new Vector3(secondaryDiam * 0.28f, 0f, -secondaryDiam * 0.15f);
         const int telescopeTiers = 3;
         var segH = fullScale.y * 0.055f;
         var segTopY = telescopeBase.y;
@@ -1186,16 +1259,20 @@ public class BaseDresser : MonoBehaviour
         var coreGo = builder.SpawnPrim(PrimitiveType.Sphere, crystalCenter, Vector3.one * (fullScale.x * 0.1f), AlienGlowMat(), trim);
         SpawnPulseLight(trim, crystalCenter, coreGo, new Color(0.62f, 0.3f, 1f), new Color(0.62f, 0.3f, 1f) * 1.5f, fullScale.x * 1.2f, 4.2f);
 
-        // 2026-08 (docs/31): brass-riveted portholes on the body's own
-        // front face, below the crystal/ring/antenna roofline detail.
+        // 2026-08 (docs/31): brass-riveted portholes on the main saucer's
+        // own hull, below the crystal/ring/antenna roofline detail.
+        // 2026-08 (saucer massing): repositioned onto the main saucer's
+        // round rim band, same fix/reasoning as `BuildAlienFactory`'s
+        // own matching portholes -- see that block's own doc comment.
         var portholeRadius = fullScale.x * 0.08f;
-        float[] portholeXFrac = { -0.2f, 0.2f };
-        for (var pi = 0; pi < portholeXFrac.Length; pi++)
+        const float rimYFrac = 0.5f + 0.12f;
+        float[] portholeAngleDeg = { -18f, 18f };
+        for (var pi = 0; pi < portholeAngleDeg.Length; pi++)
         {
-            var xf = portholeXFrac[pi];
-            SpawnAlienPorthole(trim,
-                origin + new Vector3(xf * bodyW, bodyH * 0.5f, bodyD * 0.5f * 0.99f),
-                Vector3.forward, portholeRadius, pi, 522);
+            var rad = portholeAngleDeg[pi] * Mathf.Deg2Rad;
+            var dir = new Vector3(Mathf.Sin(rad), 0f, Mathf.Cos(rad));
+            var pos = origin + new Vector3(dir.x * bodyW * 0.5f, bodyH * rimYFrac, dir.z * bodyD * 0.5f);
+            SpawnAlienPorthole(trim, pos, dir, portholeRadius, pi, 522);
         }
     }
 

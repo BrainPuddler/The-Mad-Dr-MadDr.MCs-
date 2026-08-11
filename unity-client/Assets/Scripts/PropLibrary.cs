@@ -67,6 +67,14 @@ public static class PropLibrary
         // makes it read as a buttress instead of an awning, not a
         // different mesh, so no new generator is needed.
         Register("castle-buttress", ProceduralMeshKit.Wedge);
+        // 2026-08 (faction gauntlet addendum, docs/31 §6, "Larger Alien
+        // buildings... connect 2+ saucer modules via a passage-tube
+        // connector -- a Frustum-style tapered cylinder with visible
+        // docking-collar rings"): a gentle taper (0.85 top:bottom, not a
+        // straight cylinder) so the tube itself reads as organic/grown
+        // rather than a machined pipe, matching the rest of this
+        // faction's crystal-taper vocabulary.
+        Register("alien-passage-tube", () => ProceduralMeshKit.Frustum(1f, 0.85f, 12));
 
         // 2026-08 docs/30 (facade grammar): the module mesh-swap points.
         // Deliberately left UNREGISTERED -- FacadeKit spawns each of these
