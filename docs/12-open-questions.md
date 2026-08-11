@@ -13909,3 +13909,101 @@ reads as an improvement -- whether the ground band, the punched bays and
 the overhanging cornice land at RTS camera distance -- is unconfirmed and
 needs a real Play session. `BuildingDresser.UseFacadeGrammar = false`
 reverts to the legacy dressing in one edit if the verdict is negative.
+
+## 2026-08: Tier 0 of the graphics-upgrade plan -- performance floor
+
+The prior facade-grammar session's own planning artifact ("WFC Building
+System -- Technical & Art-Direction Plan," a plan-mode deliverable, not a
+committed doc) ranked Tier 0 -- instrument and floor the performance --
+ahead of every visual tier, on the grounds that its own headline finding
+("no performance measurement exists anywhere in this project") should
+gate what comes next. The facade grammar (Tier 2) shipped first anyway in
+that session. Asked which piece to do next, the creator picked Tier 0.
+
+**What shipped -- two real fixes, not just instrumentation:**
+
+- **Damage-transition material churn.** `RuntimeCityBuilder.
+  ApplyBuildingDamage`'s Intact->Damaged branch used to `new Material(...)`
+  once per renderer, per building, on the exact frame combat is heaviest
+  (~56 heap-allocated, never-`Destroy()`'d Material instances for a Large
+  office) -- the plan's own profiling-agent finding. Replaced with a
+  reused `MaterialPropertyBlock` override (`_BaseColor`/`_Color`, covering
+  both URP and Built-in). Same "this building only, never the shared
+  cached material" isolation the original code's own comment insisted on,
+  zero allocation instead of one Material per renderer.
+- **`PropLibrary` double-sided material cloning.** `Spawn` cloned a new
+  Material per prop instance just to flip `_Cull` off (a real fix for a
+  real winding-direction bug, per that code's own comment) -- meaning
+  every facade module spawn defeated SRP batching by construction. Now
+  caches one double-sided variant PER SOURCE MATERIAL
+  (`PropLibrary.DoubleSidedCache`), so every prop sharing
+  `BuildingDresser`'s ~21 cached materials shares one clone instead of
+  minting its own.
+
+**Distance-gated the one unbounded per-frame cost found.**
+`EmissiveAnimator.Tick()`'s own doc comment assumed "a few hundred"
+registrations at "trivially cheap" cost; the plan's finding was that
+window registrations alone land in the tens of thousands at BigCity
+scale, all walked unconditionally every frame with no distance check
+(unlike `GlowPointRegistry`/`DynamicLightBudget`, which already budgets
+to a nearest-N pick). Added `CityLightingProfile.EmissiveTickRangeMeters`
+(default 250 m, live-tunable) -- entries farther than that from
+`Camera.main` are skipped for the frame, keeping their last-applied
+`MaterialPropertyBlock` override rather than paying trig + `SetPropertyBlock`
+for something off in the DistantSkyline zone nobody's looking at.
+
+**Batching/LOD floor -- narrower than the plan assumed, and that's a
+real finding of its own.** The plan's Tier 0 asked for "static batching
+or mesh combining for dressing props" in general. Reading the actual
+destruction and street-furniture code surfaced two independent reasons
+that can't be done blindly:
+
+- **Building dressing** can't be static-batched: `ApplyBuildingDamage`'s
+  Destroyed-transition squish (`cube.transform.localScale`/`position`
+  rewritten, then every child renderer's material swapped to `rubbleMat`)
+  mutates the exact geometry static batching bakes into a combined buffer
+  at combine time. Any building that can take combat damage -- which is
+  effectively all of them -- is disqualified.
+- **Road furniture** can't either: every knockable piece (parked cars,
+  hydrants, poles -- anything `RoadDresser` wraps in a `KnockHolder`) gets
+  a `KnockableProp` that physically tips it at runtime on request from
+  `RuntimeCityBuilder`, the same "geometry must never move after combine"
+  conflict.
+
+What's left over, and what actually got batched: the raw road SURFACE
+geometry -- pads, connector strips, sidewalks, curbs, center dashes,
+crosswalk stripes -- which `RoadDresser.cs` never destroys, moves, or
+reparents after `Build` returns (colliderless by that file's own header
+comment; no `Object.Destroy` call anywhere in it). `RuntimeCityBuilder.
+CombineStaticRoadSurfaces` walks `RoadDresser.Build`'s returned "Roads"
+host, marks every renderer without a `KnockableProp` ancestor
+`isStatic = true`, and calls `StaticBatchingUtility.Combine` on that set
+-- detected by absence of a `KnockableProp` ancestor rather than by
+threading a separate flag through `RoadDresser`'s many draw-call sites,
+since every furniture piece already funnels through `KnockHolder`.
+Building-dressing and road-furniture batching stay open problems for
+whoever picks up Tier 3+ -- solving them for real needs either a
+de-batch-on-damage/de-batch-on-knock mechanism or scoping batching to
+buildings/props already classified `DistantSkyline` (docs/18 SS5's
+`EngagementZone`, still unwired into Unity), neither of which is a
+Tier-0-sized change.
+
+**Instrumentation, for the creator's own Editor.** `ProfilerMarker`-style
+`Profiler.BeginSample`/`EndSample` blocks now wrap each `BeginMatch`
+build phase (`BuildGround`/`BuildTableEdge`/`BuildTerrainAndRoads`/
+`BuildBuildings`/`BuildBridges`/`BuildLandmarkAuras`) so the Profiler
+timeline reads as labeled phases instead of undifferentiated call-stack
+noise. `LogCityBuildCensus` logs a one-time
+GameObject/renderer/collider count plus total build time after the city
+finishes -- docs/30's (the plan artifact's) ~19k buildings / ~530k
+GameObjects / ~490k renderers / ~39k colliders were estimates from a
+re-implemented placement pass, not measurements, because nothing existed
+to measure with.
+
+**NOT verified, same caveat as every prior entry this session:** no
+Unity Editor exists in this environment. Nothing here has a real
+before/after frame-time number attached to it -- that was the whole
+point of shipping the instrumentation rather than guessing at more
+fixes. The plan's own gate stands: a real Profiler capture on a BigCity
+build is the next step before deciding what Tier 1 (or a real
+building/road batching redesign) should even prioritize.

@@ -158,6 +158,11 @@ public class CityLightingProfile : ScriptableObject
     [Range(0.5f, 30f)]
     public float BuzzDropoutIntervalSeconds = 6f;
 
+    [Header("Distance culling (Tier 0 perf floor, docs/12 2026-08)")]
+    [Tooltip("EmissiveAnimator.Tick() skips any Flicker/Buzz/Chase/Window entry farther than this from the main camera, instead of walking every registration in the city every frame regardless of visibility. A BigCity build can register tens of thousands of window entries (docs/30's finding), against a system whose own doc comment assumed 'a few hundred.' A skipped entry simply keeps whatever emission multiplier it last had until it's back in range -- no pop, since it re-syncs within one frame of re-entering.")]
+    [Range(20f, 500f)]
+    public float EmissiveTickRangeMeters = 250f;
+
     [Header("Chase (marquee 'clique' sequencer lights)")]
     [Tooltip("Seconds each step of the chase sequence holds before advancing to the next bulb.")]
     [Range(0.02f, 1f)]

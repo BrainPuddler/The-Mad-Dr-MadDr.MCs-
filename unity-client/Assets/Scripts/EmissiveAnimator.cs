@@ -149,16 +149,32 @@ public static class EmissiveAnimator
     }
 
     /// <summary>Call once per frame from a single driver (see
-    /// EmissiveAnimatorDriver) -- NOT per registered instance.</summary>
+    /// EmissiveAnimatorDriver) -- NOT per registered instance.
+    ///
+    /// 2026-08 perf (Tier 0 of the graphics-upgrade plan, docs/12): this
+    /// class's own doc comment above assumed "a few hundred" registrations
+    /// at "trivially cheap" cost -- BigCity-scale window counts land in the
+    /// tens of thousands (docs/30's finding), all walked unconditionally
+    /// every frame regardless of whether the camera is anywhere near them.
+    /// Entries farther than <see cref="CityLightingProfile.
+    /// EmissiveTickRangeMeters"/> from the main camera are skipped entirely
+    /// -- they keep whatever MaterialPropertyBlock override they last had
+    /// (visually inert either way at that distance) instead of paying the
+    /// trig + SetPropertyBlock cost for something nobody can see.</summary>
     public static void Tick()
     {
         if (Animated.Count == 0) return;
         var profile = CityLightingProfile.Active;
         var t = Time.time;
+        var cam = Camera.main;
+        var hasCam = cam != null;
+        var camPos = hasCam ? cam.transform.position : default(Vector3);
+        var maxRangeSqr = profile.EmissiveTickRangeMeters * profile.EmissiveTickRangeMeters;
         for (var i = Animated.Count - 1; i >= 0; i--)
         {
             var e = Animated[i];
             if (e.Renderer == null) { Animated.RemoveAt(i); continue; }   // destroyed prop drops out
+            if (hasCam && (e.Renderer.transform.position - camPos).sqrMagnitude > maxRangeSqr) continue;
             var mult = 1f;
             switch (e.Kind)
             {

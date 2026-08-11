@@ -128,7 +128,7 @@ public static class RoadDresser
 
     public const int RailyardRadius = 4;
 
-    public static void Build(RuntimeCityBuilder builder, CityModel city, Transform parent, HexCoord? railyardCenter = null)
+    public static Transform Build(RuntimeCityBuilder builder, CityModel city, Transform parent, HexCoord? railyardCenter = null)
     {
         var host = new GameObject("Roads").transform;
         host.SetParent(parent, false);
@@ -197,6 +197,8 @@ public static class RoadDresser
             if (railyardCenter.HasValue && connectors.Count == 2 && hex.DistanceTo(railyardCenter.Value) <= RailyardRadius)
                 DressRailSiding(builder, center, connectors[0].dir, host);
         }
+
+        return host;
     }
 
     /// <summary>Odd-r offset (col, row) of a hex -- the world-cardinal

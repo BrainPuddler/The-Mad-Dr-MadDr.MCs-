@@ -20,6 +20,14 @@ public static class PropLibrary
 
     private static readonly Dictionary<string, MeshBuilder> Registry = new Dictionary<string, MeshBuilder>();
     private static readonly Dictionary<string, Mesh> Cache = new Dictionary<string, Mesh>();
+    // 2026-08 perf (Tier 0 of the graphics-upgrade plan, docs/12): one
+    // double-sided clone PER SOURCE MATERIAL, not per Spawn call. Every
+    // facade module spawned with the same source `mat` (BuildingDresser's
+    // ~21 cached materials) now shares one Material instance, so Unity's
+    // SRP batcher can still batch them -- the old per-call clone minted a
+    // brand-new instance every single Spawn, defeating batching by
+    // construction on the newest prop path.
+    private static readonly Dictionary<Material, Material> DoubleSidedCache = new Dictionary<Material, Material>();
 
     static PropLibrary()
     {
@@ -105,9 +113,17 @@ public static class PropLibrary
         // cost) so these specific meshes render regardless of which way
         // the winding actually landed. Only reached for a REGISTERED
         // mesh -- the primitive fallback path below never hits this.
-        var instanceMat = new Material(mat);
-        instanceMat.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
-        go.AddComponent<MeshRenderer>().material = instanceMat;
+        go.AddComponent<MeshRenderer>().sharedMaterial = GetDoubleSidedVariant(mat);
         return go;
+    }
+
+    private static Material GetDoubleSidedVariant(Material mat)
+    {
+        Material variant;
+        if (DoubleSidedCache.TryGetValue(mat, out variant) && variant != null) return variant;
+        variant = new Material(mat);
+        variant.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+        DoubleSidedCache[mat] = variant;
+        return variant;
     }
 }

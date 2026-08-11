@@ -452,12 +452,41 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         DamageFxProfile.Active = damageFxProfile != null ? damageFxProfile : DamageFxProfile.Default;
         MonsterCombatProfile.Active = monsterCombatProfile != null ? monsterCombatProfile : MonsterCombatProfile.Default;
 
+        // 2026-08 perf (Tier 0 of the graphics-upgrade plan, docs/12):
+        // "no performance measurement exists anywhere in this project" was
+        // that plan's own headline finding -- no profiler capture, no
+        // frame time, no object count, in any doc or comment. This is the
+        // scaffolding to fix that, not the measurement itself: there's no
+        // Unity Editor in the environment these changes were written in,
+        // so the actual before/after numbers still have to come from the
+        // creator's own Profiler window. ProfilerMarkers around each build
+        // phase below label the Profiler timeline instead of leaving it as
+        // undifferentiated call-stack noise; the Debug.Log after
+        // BuildLandmarkAuras prints a one-time object/renderer/collider
+        // census plus total build time, both cheap enough to leave on
+        // permanently (a handful of GetComponentsInChildren calls once per
+        // match, not a per-frame cost).
+        var buildStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        UnityEngine.Profiling.Profiler.BeginSample("RuntimeCityBuilder.BuildGround");
         BuildGround();
+        UnityEngine.Profiling.Profiler.EndSample();
+        UnityEngine.Profiling.Profiler.BeginSample("RuntimeCityBuilder.BuildTableEdge");
         BuildTableEdge();
+        UnityEngine.Profiling.Profiler.EndSample();
+        UnityEngine.Profiling.Profiler.BeginSample("RuntimeCityBuilder.BuildTerrainAndRoads");
         BuildTerrainAndRoads();
+        UnityEngine.Profiling.Profiler.EndSample();
+        UnityEngine.Profiling.Profiler.BeginSample("RuntimeCityBuilder.BuildBuildings");
         BuildBuildings();
+        UnityEngine.Profiling.Profiler.EndSample();
+        UnityEngine.Profiling.Profiler.BeginSample("RuntimeCityBuilder.BuildBridges");
         BuildBridges();
+        UnityEngine.Profiling.Profiler.EndSample();
+        UnityEngine.Profiling.Profiler.BeginSample("RuntimeCityBuilder.BuildLandmarkAuras");
         BuildLandmarkAuras();
+        UnityEngine.Profiling.Profiler.EndSample();
+        buildStopwatch.Stop();
+        LogCityBuildCensus(buildStopwatch.ElapsedMilliseconds);
 
         // seed the camera-ground focus BEFORE any traffic spawns -- the
         // real camera doesn't exist/get snapped to the city center until
@@ -1498,7 +1527,46 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // roads: the connected 1950s street network (RoadDresser draws
         // pads + connector strips + sidewalks + furniture + railyard
         // siding near a rail_depot landmark, if this preset has one)
-        RoadDresser.Build(this, _city, terrain, _railyardCenter);
+        var roadsHost = RoadDresser.Build(this, _city, terrain, _railyardCenter);
+        CombineStaticRoadSurfaces(roadsHost);
+    }
+
+    /// <summary>Tier 0 of the graphics-upgrade plan (docs/12, 2026-08):
+    /// the project's own diagnosis found zero static batching, mesh
+    /// combining, or LOD anywhere in the city-building path, at BigCity
+    /// scale (~490k renderers). Building dressing can't safely take this
+    /// treatment -- ApplyBuildingDamage's Damaged/Destroyed transitions
+    /// rewrite every dressing renderer's transform and material in place,
+    /// which static batching (geometry baked into a combined buffer at
+    /// combine time) cannot tolerate. Road FURNITURE can't either --
+    /// RoadDresser wraps every knockable prop (parked cars, hydrants,
+    /// poles) in a "Knockable" holder with a <see cref="KnockableProp"/>
+    /// that physically tips it at runtime, same problem.
+    ///
+    /// What's left over -- and what this combines -- is the raw road
+    /// SURFACE: pads, connector strips, sidewalks, curbs, center dashes,
+    /// crosswalk stripes. None of it is ever destroyed, moved, or
+    /// reparented after RoadDresser.Build returns (confirmed: no
+    /// Object.Destroy call anywhere in RoadDresser.cs, and it's
+    /// deliberately colliderless per that file's own header comment), so
+    /// it's genuinely permanent for the life of the city. Detected by
+    /// absence of a KnockableProp ancestor rather than by threading a
+    /// separate "is furniture" flag through RoadDresser's many draw
+    /// call sites -- every furniture piece already funnels through
+    /// KnockHolder, so this is a correct filter without touching that
+    /// file at all.</summary>
+    private void CombineStaticRoadSurfaces(Transform roadsHost)
+    {
+        if (roadsHost == null) return;
+        var surfaceObjects = new List<GameObject>();
+        foreach (var renderer in roadsHost.GetComponentsInChildren<Renderer>(true))
+        {
+            if (renderer.GetComponentInParent<KnockableProp>() != null) continue;
+            renderer.gameObject.isStatic = true;
+            surfaceObjects.Add(renderer.gameObject);
+        }
+        if (surfaceObjects.Count > 0)
+            StaticBatchingUtility.Combine(surfaceObjects.ToArray(), roadsHost.gameObject);
     }
 
     /// <summary>Model-railroad vegetation, deterministically scattered:
@@ -1972,6 +2040,26 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         }
     }
 
+    /// <summary>Tier 0 of the graphics-upgrade plan (docs/12, 2026-08):
+    /// one-time census after the city finishes building, so a real
+    /// BigCity run finally has SOME written-down number to compare a
+    /// future optimization pass against -- docs/30's ~19k buildings /
+    /// ~530k GameObjects / ~490k renderers / ~39k colliders were
+    /// estimates from a re-implemented placement pass, not a measurement,
+    /// because nothing existed to measure with. `GetComponentsInChildren`
+    /// over the whole scene is a one-shot cost paid once per match, not a
+    /// per-frame one, so this is safe to leave on permanently rather than
+    /// gating it behind a debug flag.</summary>
+    private void LogCityBuildCensus(long buildMilliseconds)
+    {
+        var gameObjectCount = FindObjectsByType<Transform>(FindObjectsSortMode.None).Length;
+        var rendererCount = FindObjectsByType<Renderer>(FindObjectsSortMode.None).Length;
+        var colliderCount = FindObjectsByType<Collider>(FindObjectsSortMode.None).Length;
+        Debug.Log(string.Format(
+            "City build census -- preset={0} seed={1}: {2}ms, {3} GameObjects, {4} renderers, {5} colliders.",
+            preset, seed, buildMilliseconds, gameObjectCount, rendererCount, colliderCount));
+    }
+
     private void BuildBridges()
     {
         // trestle piers, guardrails, through-truss arches (docs/21 batch 2,
@@ -2160,9 +2248,20 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             if (next.Stage == DamageStage.Damaged && current.Stage == DamageStage.Intact)
             {
                 // Intact -> Damaged visual: darken (docs/18's cracked state),
-                // dressing included -- per-renderer material INSTANCES here,
-                // never a tint on the shared cached dresser materials (that
-                // would darken every building in the city at once)
+                // dressing included -- PER-RENDERER OVERRIDE here, never a
+                // tint on the shared cached dresser materials (that would
+                // darken every building in the city at once).
+                //
+                // 2026-08 perf (Tier 0 of the graphics-upgrade plan,
+                // docs/12): this used to be `new Material(...)` per
+                // renderer -- ~56 heap-allocated, never-Destroy()'d Material
+                // instances for a single Large office, on the frame combat
+                // is heaviest. A MaterialPropertyBlock override gets the
+                // same "this renderer only" isolation without allocating or
+                // leaking a Material, and without touching the shared
+                // sharedMaterial other buildings still reference. Reused
+                // across the whole loop -- GetPropertyBlock/SetPropertyBlock
+                // copy in and out, so one block instance is enough.
                 //
                 // 2026-08 (creator report: "goes solid at about 50%
                 // destruction"): GetComponentsInChildren is a RECURSIVE
@@ -2180,16 +2279,24 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 // any renderer whose ancestor is a live FX root -- this
                 // loop was written before fire/smoke existed under this
                 // same hierarchy and was never audited against it.
+                var damagedBlock = new MaterialPropertyBlock();
                 foreach (var cube in cubes)
                 {
                     foreach (var renderer in cube.GetComponentsInChildren<Renderer>())
                     {
                         if (renderer.GetComponentInParent<SmokePlume>() != null) continue;
                         if (renderer.GetComponentInParent<FireCluster>() != null) continue;
-                        var mat = new Material(ShaderUtil.FindRenderableShader());
                         var c = renderer.sharedMaterial != null ? renderer.sharedMaterial.color : Color.gray;
-                        mat.color = new Color(c.r * 0.6f, c.g * 0.6f, c.b * 0.6f);
-                        renderer.sharedMaterial = mat;
+                        var darkened = new Color(c.r * 0.6f, c.g * 0.6f, c.b * 0.6f);
+                        renderer.GetPropertyBlock(damagedBlock);
+                        // both names set: URP/Lit's [MainColor] is
+                        // `_BaseColor`, Built-in/Standard's is `_Color` --
+                        // ShaderUtil documents this project can end up on
+                        // either, and an override for a property the active
+                        // shader doesn't have is simply unused, not an error.
+                        damagedBlock.SetColor("_BaseColor", darkened);
+                        damagedBlock.SetColor("_Color", darkened);
+                        renderer.SetPropertyBlock(damagedBlock);
                     }
                 }
             }
