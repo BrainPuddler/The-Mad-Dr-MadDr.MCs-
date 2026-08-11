@@ -620,16 +620,26 @@ public static class BuildingDresser
 
         if (UseFacadeGrammar && GrammarAppliesTo(building.Tier))
         {
-            // Pilasters stay -- they're the deco vertical rhythm and they
-            // frame the grammar's bays rather than competing with them --
-            // but the two continuous full-height window slabs are gone,
-            // replaced by per-floor punched bays that respect face role.
+            // Pilasters stay -- they're the deco vertical rhythm framing
+            // the grammar's bays -- but they used to run the full height
+            // from y=0, which put a solid pier straight through the
+            // grammar's own ground-floor modules (a 13.5m-wide shopfront
+            // window, or the 17.4m blank plinth, both centered on x=0 --
+            // exactly where the middle pilaster sits). Starting the
+            // pilaster at the SAME ground-band height FacadeKit.BuildFace
+            // uses internally (mirrored here, not re-derived) keeps them
+            // out of the ground floor entirely -- upper-floor bay
+            // placement (see FacadeKit.BuildUpper) is what keeps them
+            // clear of the punched windows above that line.
+            var pilasterGroundH = Mathf.Min(height * 0.34f, 5.2f);
+            var pilasterH = height - pilasterGroundH;
+            var pilasterY = pilasterGroundH + pilasterH * 0.5f;
             for (var i = -1; i <= 1; i++)
             {
-                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(i * 5.5f, height / 2f, Half * 1.01f),
-                    new Vector3(1.1f, height, 0.35f), trim, t);
-                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(i * 5.5f, height / 2f, -Half * 1.01f),
-                    new Vector3(1.1f, height, 0.35f), trim, t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(i * 5.5f, pilasterY, Half * 1.01f),
+                    new Vector3(1.1f, pilasterH, 0.35f), trim, t);
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(i * 5.5f, pilasterY, -Half * 1.01f),
+                    new Vector3(1.1f, pilasterH, 0.35f), trim, t);
             }
             DressFacadeGrammar(b, building, hex, t, height, h, industrial, suburb, wall: Concrete());
         }

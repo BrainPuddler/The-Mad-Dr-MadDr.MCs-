@@ -14124,3 +14124,56 @@ here has been seen rendered -- the UV tiling math, the region palette
 reweighting, the roof silhouettes, and the five landmark set pieces are
 all correct by construction and by compile, not by a screenshot. That
 verification is the creator's, on their own machine.
+
+## 2026-08 follow-up: the facade grammar's own deco pilasters were slicing through its windows -- found and fixed
+
+Asked to find and fix a window/facade intersection in the facade
+grammar. Worked it out from the actual numbers rather than a screenshot
+(none available here): `DressOffice`'s deco pilasters (three full-height
+strips per Z-face, at local x = -5.5/0/5.5, spawned independently of
+`FacadeKit`) and `FacadeKit.BuildUpper`'s `WindowBay` module (three
+evenly-spaced bays at u = -6/0/6) sit on the exact same face. The center
+pilaster (x=0) and the center window bay (u=0) were placed at IDENTICAL
+horizontal positions -- a full-height, 1.1m-wide solid pier punched
+straight through the middle window of every floor, on both the +Z and
+-Z faces, of every Large-tier office building the grammar dresses. The
+same center pilaster also ran from y=0, crossing the grammar's ground
+band -- so it sliced through the shopfront's 13.5m glass pane, the
+17.4m blank plinth, and every other ground-floor module too, all of
+which are centered on x=0 by construction. `OrielBay` (the single wide
+bay window a floor can get instead of a row of small ones) had the
+identical bug in its worse form: it's ALWAYS centered at u=0, so it hit
+the center pilaster on literally every floor it was chosen for, not
+just some.
+
+**Fix, two parts:**
+
+- `DressOffice`'s pilasters now start at the grammar's own ground-band
+  height (`Mathf.Min(height * 0.34f, 5.2f)`, the exact expression
+  `FacadeKit.BuildFace` uses internally, mirrored rather than
+  re-derived) instead of y=0 -- they no longer cross the ground floor
+  at all, so the shopfront/plinth/entrance modules there are clear.
+- `FacadeKit`'s `WindowBay` moved from three bays evenly spaced at
+  u = -6/0/6 to two bays at u = ±2.75 (`WindowBayU`), sitting in the
+  middle of the ~4.4m gaps flanking the center pilaster with roughly
+  1.05m of clearance to the nearest pier edge on both sides. `OrielBay`
+  moved from a fixed u=0 to u=2.75 (`OrielU`), reusing one of those same
+  clear positions instead of the pilaster's own center line. Buildings
+  with no pilasters on a given face (every tier except Large, and
+  Large's own X-faces, which never got pilasters) just get two windows
+  instead of three -- a smaller cosmetic tradeoff than a floor of
+  windows with a pier through the glass.
+
+The clearance numbers are derived, not guessed: window half-width 1.15m
++ pilaster half-width 0.55m = 1.7m of combined half-widths needed to
+clear; u=2.75 sits 4.95m from the far pilaster (comfortable) and 2.2m
+from the near one measured pilaster-edge-to-window-edge -- both
+comments on `WindowBayU`/`OrielU` themselves carry the actual numbers
+for whoever touches this next.
+
+**Verification.** Flightcheck compiled clean. `dotnet test
+Tests~/CityGenCore.Tests.csproj` -- 217/217, unchanged (this fix is
+entirely Unity-side geometry; `FacadeGrammar.cs`, the citygen-core
+solver, was never touched -- only `FacadeKit.cs`'s and
+`DressOffice`'s placement of what the solver decided). NOT verified
+visually, same caveat as every other entry in this section.

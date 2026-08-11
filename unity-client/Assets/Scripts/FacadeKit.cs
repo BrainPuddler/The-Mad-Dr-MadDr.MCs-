@@ -42,6 +42,26 @@ public static class FacadeKit
     /// reads as trim if it actually protrudes").</summary>
     private const float Proud = 0.22f;
 
+    // 2026-08 (docs/30 follow-up): the Large tier's own deco pilasters
+    // (DressOffice, full-height strips at u = -5.5/0/5.5, each 1.1m wide)
+    // sit on the same faces this grammar dresses. A window bay centered on
+    // one of those u-values -- as the old evenly-spaced -6/0/6 layout put
+    // one dead-center at u=0 -- read as a pilaster punched straight through
+    // a pane of glass. These two positions sit in the middle of the two
+    // ~4.4m gaps either side of the center pilaster (window half-width
+    // 1.15 + pilaster half-width 0.55 = 1.7m needed; each position clears
+    // its nearest pilaster edge by ~1.05m), so a Large-tier building's
+    // windows read as glass BETWEEN the piers. Buildings with no pilasters
+    // on this face (every other tier) just get two windows instead of an
+    // evenly-spaced three -- a smaller cosmetic tradeoff than a floor of
+    // buildings whose windows are sliced by solid stone.
+    private static readonly float[] WindowBayU = { -2.75f, 2.75f };
+    // OrielBay is a single wide (4.2m) window per floor -- reuses one of
+    // WindowBay's clear gap positions rather than its own dead-center u=0,
+    // which used to sit inside the center pilaster exactly like WindowBay's
+    // middle bay did.
+    private const float OrielU = 2.75f;
+
     // ---- PropLibrary keys: the mesh-swap points ------------------------
     //
     // Registered lazily below with primitive-shaped procedural fallbacks.
@@ -202,17 +222,20 @@ public static class FacadeKit
                 // continuous strip is what makes the current buildings read
                 // as extruded blocks; individual openings with brick
                 // between them is what makes them read as built.
-                // Three bays, not four: a deliberate object-budget call.
-                // docs/21's stated "<= ~15 primitives/building" target is
-                // already silently exceeded today, and no measurement of
-                // the real cost exists anywhere in this project -- so this
-                // adds detail where it reads and stops before multiplying
-                // an unmeasured load.
-                const int bays = 3;
+                // Two bays, not three: the Large tier's own deco pilasters
+                // (DressOffice, full-height strips at u = -5.5/0/5.5) sit on
+                // this exact face, and three bays spaced -6/0/6 used to
+                // land almost exactly on top of them -- worst at u=0, a
+                // pilaster punched dead-center through a window on every
+                // floor. WindowBayU sits in the two ~4.4m-wide gaps either
+                // side of the center pilaster (comfortable clearance either
+                // side of both flanking piers -- see the constant's own
+                // comment for the numbers), so the bays read as glass
+                // BETWEEN the piers instead of glass WITH a pier through it.
                 var spawned = 0;
-                for (var i = 0; i < bays; i++)
+                for (var i = 0; i < WindowBayU.Length; i++)
                 {
-                    var u = Mathf.Lerp(-6.0f, 6.0f, i / (float)(bays - 1));
+                    var u = WindowBayU[i];
                     var pos = at + tan * u;
                     var go = PropLibrary.Spawn(b, KeyWindowBay, PrimitiveType.Cube, pos,
                         Along(tan, n, 2.3f, floorH * 0.52f, Proud), mats.Glass, t);
@@ -230,10 +253,16 @@ public static class FacadeKit
             {
                 // A projecting bay window -- pure silhouette value, which
                 // is what actually survives to RTS camera distance.
+                // Same pilaster-clearance reasoning as WindowBay: this used
+                // to sit dead-center at u=0, exactly where the center
+                // pilaster runs, so a projecting bay window would have been
+                // clipping straight through a solid pier. OrielU reuses one
+                // of WindowBay's two clear gap positions.
+                var oat = at + tan * OrielU;
                 var go = PropLibrary.Spawn(b, KeyOrielBay, PrimitiveType.Cube,
-                    at + n * 0.75f, Along(tan, n, 4.2f, floorH * 0.66f, 1.7f), mats.Glass, t);
-                RegisterWindowGlow(go, mats, at + n * 0.75f);
-                b.SpawnPrim(PrimitiveType.Cube, at + n * 0.75f + Vector3.down * (floorH * 0.38f),
+                    oat + n * 0.75f, Along(tan, n, 4.2f, floorH * 0.66f, 1.7f), mats.Glass, t);
+                RegisterWindowGlow(go, mats, oat + n * 0.75f);
+                b.SpawnPrim(PrimitiveType.Cube, oat + n * 0.75f + Vector3.down * (floorH * 0.38f),
                     Along(tan, n, 4.6f, 0.28f, 2.0f), mats.Trim, t);
                 return 2;
             }
