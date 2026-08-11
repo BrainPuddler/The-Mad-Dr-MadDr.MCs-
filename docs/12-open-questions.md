@@ -14177,3 +14177,60 @@ entirely Unity-side geometry; `FacadeGrammar.cs`, the citygen-core
 solver, was never touched -- only `FacadeKit.cs`'s and
 `DressOffice`'s placement of what the solver decided). NOT verified
 visually, same caveat as every other entry in this section.
+
+## 2026-08 follow-up: Tier 3 of the graphics-upgrade plan investigated, deliberately NOT implemented
+
+Tier 0's own entry left "Tier 3+" as the open item: batch building
+dressing and road furniture, which Tier 0 couldn't touch because both
+mutate geometry at runtime (`ApplyBuildingDamage`'s Destroyed-transition
+squish, `KnockableProp`'s tip-over) in ways `StaticBatchingUtility.
+Combine` can't tolerate after the fact.
+
+**Investigated: is `EngagementZone.cs` (docs/18 SS5, fully built and
+tested in citygen-core but "still unwired into Unity" per Tier 0's own
+note) enough to scope a safe v0.1 slice -- batch only buildings
+currently far from any fighting, using static engagement centers
+(landmark/HQ positions) as a stand-in for live combat tracking?**
+Findings:
+
+- `EngagementZone.cs`'s own doc comment ("the match sim, which doesn't
+  exist yet in this repo") is now stale -- match-core's combat system
+  (docs/23 Phase 4) exists -- but there's still no ready-made "where is
+  combat happening" query anywhere: `SimBridge.cs` exposes no
+  `UnitAt`/`UnitCount`, and nothing pre-aggregates active attackers'
+  positions. A v0.1 slice using static engagement centers instead
+  (landmark/HQ hexes, decided once at `BeginMatch`) avoids needing that
+  new query, at the cost of never re-classifying a building that
+  becomes contested mid-match.
+- That "never re-classifies" gap is not cosmetic: a building batched as
+  `DistantSkyline` at `BeginMatch` that later takes real damage (fighting
+  drifts there, or a player's own aggression reaches it) needs its
+  geometry un-batched before `ApplyBuildingDamage`'s squish can apply --
+  `StaticBatchingUtility.Combine` bakes geometry into a shared buffer
+  that per-object transform/material writes can't touch afterward. A
+  real fix needs a de-batch-on-first-damage step (destroy and respawn
+  that one building's dressing un-batched, then apply the damage) or the
+  bug is just "a distant building takes damage but visually doesn't
+  update" -- silent, hard to notice in testing, and exactly the kind of
+  thing that should never ship undocumented.
+- The de-batch-on-damage step itself would need to live inside
+  `ApplyBuildingDamage` (`RuntimeCityBuilder.cs`), the same method
+  CLAUDE.md flags as touching the `cubes` list's ordering invariant --
+  and that invariant is enforced only by convention/comments in this
+  method today, not by a test or a doc-level contract. Adding a new
+  first-damage branch here is exactly the kind of change that invariant
+  warns against making casually.
+
+**Decision: do not implement Tier 3 this pass.** Tier 0's own headline
+finding was "no performance measurement exists anywhere in this
+project" -- nothing has since measured that building-dressing/
+road-furniture batching is actually a bottleneck at any real city
+scale. Spending a de-batch-on-damage mechanism's real correctness risk
+(touching the load-bearing damage pipeline) against an unmeasured
+problem is the wrong trade. The instrumentation Tier 0 already shipped
+(`LogCityBuildCensus`, per-phase `Profiler` markers) is what should
+answer "is this worth the risk" first, on the creator's own machine.
+Tier 3 stays open, now with this investigation attached instead of
+just a one-line "needs a de-batch mechanism" note -- whoever picks it
+up next has the concrete landmines listed above instead of starting
+from zero.
