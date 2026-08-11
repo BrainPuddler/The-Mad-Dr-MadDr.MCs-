@@ -14331,3 +14331,79 @@ up on paper" -- a real BigCity match, in the creator's own Editor, is
 still the only way to confirm both that DistantSkyline buildings
 actually draw fewer batches AND that hitting one mid-match still
 squishes/rubbles correctly post-de-batch.
+
+## 2026-08: SCV-style Worker tech-wing/add-on buildings -- scoped, not implemented
+
+Creator direction: "human workers controlled big brain that build
+structures. Like SCVs in StarCraft, to add tech wings on the base for
+upgrades of units." Read-only investigation before touching any code,
+per this request's own "likely a large new feature needing scoping/
+prioritization discussion, not an immediate implementation" framing.
+
+**Confirmed: no add-on/tech-wing mechanic exists anywhere in this
+codebase.** Searched code and docs for "tech wing," "add-on"/"addon,"
+"attachment," "Reactor," "Tech Lab" -- zero hits. `BuildingDef.cs`'s
+`BuildingKind` enum is flat (Hq, BloodStorage, FuelPump, FuelStorage,
+PartsStorage, HarvestPost, Factory, Defense, BigBrain), no parent/child
+or "attaches-to" relationship, and `CanTrainUnit` gates production only
+on ownership/Complete-state/faction -- no per-instance "which units can
+THIS building produce" concept, and no notion that a building's
+production menu could ever change post-construction. `BuildingKind.
+BigBrain` (the 2026-07 epic) is the closest existing thing -- a control
+unit raising `SupplyCapBonus` -- but it's a population-cap building, not
+a production/tech unlock; it doesn't modify any other building's
+output.
+
+**A load-bearing gap this request would expose, independent of add-ons:
+Worker gating is Unity-side cosmetic today, not real.** `Worker.cs` is a
+bare possessed-Citizen `MonoBehaviour` -- no move orders, no build
+animation, no repair action, not even a match-core `SimUnit`; its only
+functional role is existing as a headcount. `BuildGhostCursor.cs` has a
+hardcoded `RequiresWorker(kind) => kind == BuildingKind.Factory`, checked
+ONLY through the ghost-cursor UI's own red/green preview -- match-core's
+`CanPlaceBuilding`/`ApplyBuildStructure` have zero concept of a Worker,
+so a `QueueBuildCommand` sent directly (bypassing the cursor) succeeds
+with zero Workers on the field, for ANY building, add-ons included. "SCVs
+build things" isn't actually true anywhere in match-core yet -- an
+add-on feature would either inherit that gap silently or need to fix it
+first. Repair (docs/20 SS6, Vat-based, a full formula already designed)
+is in the same boat: designed, never implemented, likely the same
+worker-occupies-a-build-slot machinery an add-on needs.
+
+**What a real implementation would touch:** match-core -- new
+`BuildingKind` values (or a separate `AddOnKind`) in `BuildingDef.cs`; a
+parent-building reference on `SimBuilding`; adjacency validation (hex
+adjacency primitives already exist -- `HexCoord.Neighbors()` in
+citygen-core -- currently unused by building placement at all);
+production-gating changes to `CanTrainUnit`/the unit roster so
+availability depends on an attached add-on, not just faction+Complete.
+`SimBridge.cs` -- new command wrapper(s) alongside `QueueBuildCommand`/
+`TrainUnit`. Unity -- `BuildMenuHud.cs` (parent-building selection UI),
+`BuildGhostCursor.cs` (adjacency-aware preview, and making Worker
+enforcement real rather than Factory-only/Unity-only), `BaseDresser.cs`
+(attachment geometry), `ArmyGenerator.cs`/`ProductionAdvisor.cs` (AI has
+to learn to build add-ons too, or skirmish AI silently never uses them).
+
+**Size: medium-large, not started.** The data-model slice (new
+BuildingKind + parent link + adjacency check) is small given existing
+patterns to copy from. The real cost is making Worker gating actually
+enforced in match-core (a prerequisite this request exposes but doesn't
+itself require) and wiring conditional production-by-attached-building,
+which nothing in the roster system does today for any building.
+
+**Open design questions needing creator input before implementation
+starts** (deliberately not decided here -- this is a scoping pass, not
+a design doc): does an add-on cost resources+worker-time like a normal
+building, or is it free once some base tech threshold is met? Hex
+adjacency to the parent, or same-hex "mounted on"? Which buildings can
+receive wings -- Factory only (StarCraft's own Barracks/Factory/
+Starport-only precedent), and does that roster differ per faction
+(Army/Hive/Doctor are structurally different)? Does a wing unlock new
+`RosterUnitKind` entries, or baseline stat upgrades to existing units --
+explicitly distinct from the ALREADY-SHIPPED per-unit RPG XP/level
+system (docs/23 Phase 4), which is combat-progression, not base tech,
+and would be a real design collision if the creator meant "upgrades"
+to mean the same thing. Can one base hold multiple wing types at once,
+and is there a one-wing-per-building cap (StarCraft-style)? No code
+changed this pass -- staying a scoped-but-open item until those
+questions get answered.
