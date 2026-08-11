@@ -2017,13 +2017,42 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return go;
     }
 
+    private static MaterialPropertyBlock _matteBlock;
+
+    /// <summary>2026-08 (creator direction: "the triangle roofs should be
+    /// matt not shiny"): per-instance zero-smoothness override via
+    /// MaterialPropertyBlock -- same "never fork a per-instance Material"
+    /// discipline <see cref="ApplyWorldScaledTiling"/> already
+    /// established, so a shared cached roof-color Material (<see
+    /// cref="BuildingDresser"/>'s own `M()` cache, keyed purely by color
+    /// -- other props reusing that exact color stay untouched) doesn't
+    /// have to fork into a matte-specific variant just for the new
+    /// <see cref="ProceduralMeshKit.GableRoof"/> shape. Sets both
+    /// `_Smoothness` (URP Lit) and `_Glossiness` (Built-in Standard) --
+    /// same "set both, the shader that doesn't have one simply ignores
+    /// it" precedent Tier 0's own damage-darken override already uses
+    /// for `_BaseColor`/`_Color`.</summary>
+    private static void ApplyMatteFinish(Renderer renderer)
+    {
+        if (renderer == null) return;
+        if (_matteBlock == null) _matteBlock = new MaterialPropertyBlock();
+        else _matteBlock.Clear();
+        renderer.GetPropertyBlock(_matteBlock);
+        _matteBlock.SetFloat("_Smoothness", 0f);
+        _matteBlock.SetFloat("_Glossiness", 0f);
+        renderer.SetPropertyBlock(_matteBlock);
+    }
+
     /// <summary>Colliderless styled hand-authored mesh -- <see
     /// cref="SpawnPrim"/>'s sibling for shapes `CreatePrimitive` doesn't
     /// offer (see <see cref="ProceduralMeshKit"/>'s own header), e.g.
     /// <see cref="ProceduralMeshKit.GableRoof"/> for a real triangular
     /// roof instead of a rotated cube. Same calling convention as
-    /// `SpawnPrim` -- position/scale/material/parent, no collider.</summary>
-    public GameObject SpawnMesh(Mesh mesh, Vector3 position, Vector3 scale, Material mat, Transform parent)
+    /// `SpawnPrim` -- position/scale/material/parent, no collider.
+    /// `matte` (default false, so this stays a no-op for any future
+    /// caller that doesn't ask for it) applies <see
+    /// cref="ApplyMatteFinish"/>.</summary>
+    public GameObject SpawnMesh(Mesh mesh, Vector3 position, Vector3 scale, Material mat, Transform parent, bool matte = false)
     {
         var go = new GameObject("Mesh");
         go.transform.SetParent(parent, false);
@@ -2034,6 +2063,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var renderer = go.AddComponent<MeshRenderer>();
         renderer.sharedMaterial = mat;
         ApplyWorldScaledTiling(renderer, mat, scale);
+        if (matte) ApplyMatteFinish(renderer);
         return go;
     }
 

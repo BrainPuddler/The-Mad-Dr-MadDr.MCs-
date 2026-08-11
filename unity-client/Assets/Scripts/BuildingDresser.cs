@@ -432,7 +432,7 @@ public static class BuildingDresser
                 // GableApexOffset's own doc comment for the placement math
                 b.SpawnMesh(GableRoofMesh(),
                     basePos + Vector3.up * (height + GableRoofHeight * 0.5f),
-                    new Vector3(GableRoofWidth, GableRoofHeight, GableRoofLength), roofMat, t);
+                    new Vector3(GableRoofWidth, GableRoofHeight, GableRoofLength), roofMat, t, matte: true);
                 b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(4f, height + 4.3f, 3f),
                     new Vector3(1.4f, 2.6f, 1.4f), Brick(), t);   // chimney, poking through the roof plane
                 // 2026-07 bug fix: this IS solid, walkable roof massing
@@ -593,7 +593,7 @@ public static class BuildingDresser
                 var ridgeMat = (h / 13) % 2 == 0 ? RustRed() : M(0.35f, 0.42f, 0.5f);
                 b.SpawnMesh(GableRoofMesh(),
                     basePos + Vector3.up * (height + ApartmentRoofCapTop + ApartmentHipHeight * 0.5f),
-                    new Vector3(ApartmentHipWidth, ApartmentHipHeight, ApartmentHipLength), ridgeMat, t);
+                    new Vector3(ApartmentHipWidth, ApartmentHipHeight, ApartmentHipLength), ridgeMat, t, matte: true);
                 b.RegisterRoofLandingHeight(hex, height + ApartmentHipApexOffset);
                 break;
             }
