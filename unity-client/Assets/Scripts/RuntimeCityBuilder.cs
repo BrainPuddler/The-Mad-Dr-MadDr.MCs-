@@ -177,6 +177,23 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
     private readonly Dictionary<Collider, Building> _buildingByCollider = new Dictionary<Collider, Building>();
     private readonly Dictionary<Building, List<GameObject>> _cubesByBuilding = new Dictionary<Building, List<GameObject>>();
+    // docs/12 Tier 3 of the graphics-upgrade plan: landmark sites + every
+    // player's starting HQ/Factory hex, gathered once in BeginMatch
+    // (BEFORE BuildBuildings runs) and used as EngagementZoneManager's
+    // "where is the fighting" input -- docs/18 SS5's own live-engagement
+    // tracking doesn't exist yet (no SimBridge query for "where are units
+    // fighting right now"), so these static, decided-once-at-match-start
+    // points are a v0.1 stand-in. A building far from EVERY one of these
+    // never re-classifies mid-match even if combat drifts there -- see
+    // DeBatchBuildingDressingIfNeeded's own doc comment for how that gap
+    // is contained rather than ignored.
+    private readonly List<HexCoord> _engagementCenters = new List<HexCoord>();
+    // Buildings whose DRESSING (not massing cubes -- see BuildBuildings)
+    // is currently StaticBatchingUtility.Combine'd because ClassifyBuilding
+    // read them as DistantSkyline at build time. Consulted (and cleared)
+    // by DeBatchBuildingDressingIfNeeded the moment such a building takes
+    // its first damage.
+    private readonly HashSet<Building> _batchedDistantDressing = new HashSet<Building>();
     // 2026-08 (creator direction: "as the lot is cleaned of parts the lot
     // debris is decreased"): the individual rubble chunk GameObjects
     // spawned for a building's own collapse (flattened out of
@@ -356,8 +373,16 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         _city = CityGenerator.Generate(unchecked((uint)seed), ResolvePreset());
         _battlefield = BattlefieldState.FreshFrom(_city);
         _terrain = new TerrainField(_city, _origin, unchecked((uint)seed));
+        // docs/12 Tier 3: every landmark site seeds _engagementCenters
+        // (below) alongside each player's starting HQ/Factory hex, added
+        // as SpawnStartingBases picks them further down this method --
+        // no `break` anymore since a rail_depot landmark is no longer
+        // the only one worth visiting.
         foreach (var lm in _city.Landmarks)
-            if (lm.Archetype == "rail_depot") { _railyardCenter = lm.Site; break; }
+        {
+            if (lm.Archetype == "rail_depot" && !_railyardCenter.HasValue) _railyardCenter = lm.Site;
+            _engagementCenters.Add(lm.Site);
+        }
 
         // 2026-07 amendment (docs/12 "give the player one fully functional
         // factory on startup" + the faction picker): a real MatchState now
@@ -1997,18 +2022,30 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return ((x % m) + m) % m;
     }
 
-    private void BuildBuildings()
+    /// <summary>Same suburb/industrial classification every dressing call
+    /// needs -- factored out (2026-08, docs/12 Tier 3) so
+    /// DeBatchBuildingDressingIfNeeded's later re-Dress call reproduces
+    /// byte-identical dressing to what BuildBuildings originally chose,
+    /// instead of drifting from a second hand-copied formula.</summary>
+    private void ComputeDistrictFlags(Building building, out bool suburb, out bool industrial)
     {
-        var buildings = new GameObject("Buildings").transform;
-        buildings.SetParent(transform, false);
-        _buildingsHost = buildings;
-
         // downtown vs suburb massing tint (docs/21 batch 2, item 10): a
         // building's hex distance from CenterHex stands in for road-graph
         // radius (the generator seeds density outward from the same
         // center) -- close in reads cooler/institutional, the outskirts
         // read warmer/residential
         var districtRadius = Mathf.Max(1, (_city.WidthHexes + _city.HeightHexes) / 4);
+        suburb = building.Footprint[0].DistanceTo(_city.CenterHex) > districtRadius * 0.55f;
+        industrial = _railyardCenter.HasValue
+            && building.Footprint[0].DistanceTo(_railyardCenter.Value) <= RoadDresser.RailyardRadius;
+    }
+
+    private void BuildBuildings()
+    {
+        var buildings = new GameObject("Buildings").transform;
+        buildings.SetParent(transform, false);
+        _buildingsHost = buildings;
+
         var smallDowntown = NewMaterial(new Color(0.72f, 0.72f, 0.74f));
         var smallSuburb = NewMaterial(new Color(0.83f, 0.78f, 0.64f));
         var mediumDowntown = NewMaterial(new Color(0.5f, 0.52f, 0.62f));
@@ -2016,12 +2053,22 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var large = NewMaterial(new Color(0.35f, 0.35f, 0.7f));
         var landmark = NewMaterial(new Color(0.9f, 0.75f, 0.2f));
 
+        // docs/12 Tier 3 of the graphics-upgrade plan: dressing (not
+        // massing -- see the loop below) belonging to a building
+        // classified DistantSkyline gets StaticBatchingUtility.Combine'd
+        // in ONE pass after every building is built, same "batch
+        // everything under this host in a single Combine call" shape
+        // CombineStaticRoadSurfaces already uses for road surfaces.
+        // EngagementZoneConfig.Default is citygen-core's own docs/18 SS5
+        // v0.1 numbers (175m/1000m) -- no separate Unity-side knob yet.
+        var zoneConfig = EngagementZoneConfig.Default;
+        var pendingDistantDressing = new List<GameObject>();
+
         foreach (var building in _city.Buildings)
         {
             var height = HeightForTier(building.Tier);
-            var suburb = building.Footprint[0].DistanceTo(_city.CenterHex) > districtRadius * 0.55f;
-            var industrial = _railyardCenter.HasValue
-                && building.Footprint[0].DistanceTo(_railyardCenter.Value) <= RoadDresser.RailyardRadius;
+            bool suburb, industrial;
+            ComputeDistrictFlags(building, out suburb, out industrial);
             Material mat;
             switch (building.Tier)
             {
@@ -2031,6 +2078,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 default: mat = suburb ? smallSuburb : smallDowntown; break;
             }
             var cubes = new List<GameObject>();
+            var footprintCount = building.Footprint.Count;
             foreach (var hex in building.Footprint)
             {
                 var cube = SpawnCube(hex, height / 2f, height, mat, buildings, true);
@@ -2044,7 +2092,95 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // the massing they belong to
             BuildingDresser.Dress(this, building, height, cubes, buildings, industrial, suburb, _city.Region);
             _cubesByBuilding[building] = cubes;
+
+            // docs/12 Tier 3: a building whose CLOSEST footprint hex to
+            // every engagement center (landmarks + starting HQs/Factories)
+            // is beyond EngagementZoneConfig's LocalCity radius is
+            // DistantSkyline -- its dressing (the many small window/
+            // cornice/water-tower props Tier 0 found blocking batching)
+            // is queued for one shared Combine call below. Massing cubes
+            // are deliberately excluded: they're the ones ApplyBuildingDamage
+            // Object.Destroy()s outright on collapse rather than mutating
+            // in place, so batching them buys nothing and would only add
+            // more surface area to the de-batch path for no benefit.
+            var zone = EngagementZoneManager.ClassifyBuilding(building, _engagementCenters, zoneConfig);
+            if (zone == EngagementZone.DistantSkyline)
+            {
+                _batchedDistantDressing.Add(building);
+                for (var i = footprintCount; i < cubes.Count; i++)
+                    pendingDistantDressing.Add(cubes[i]);
+            }
         }
+
+        CombineDistantSkylineDressing(pendingDistantDressing, buildings);
+    }
+
+    /// <summary>The docs/12 Tier 3 counterpart to CombineStaticRoadSurfaces
+    /// -- same "mark isStatic, one shared Combine call" shape, applied to
+    /// DistantSkyline building-dressing holders instead of road-surface
+    /// renderers. Building dressing has no KnockableProp equivalent (only
+    /// RoadDresser's street furniture tips over), so no exclusion filter
+    /// is needed here.</summary>
+    private void CombineDistantSkylineDressing(List<GameObject> dressingHolders, Transform buildingsHost)
+    {
+        if (dressingHolders.Count == 0) return;
+        var dressingObjects = new List<GameObject>();
+        foreach (var holder in dressingHolders)
+        {
+            foreach (var renderer in holder.GetComponentsInChildren<Renderer>(true))
+            {
+                renderer.gameObject.isStatic = true;
+                dressingObjects.Add(renderer.gameObject);
+            }
+        }
+        if (dressingObjects.Count > 0)
+            StaticBatchingUtility.Combine(dressingObjects.ToArray(), buildingsHost.gameObject);
+    }
+
+    /// <summary>docs/12 Tier 3: undoes CombineDistantSkylineDressing for
+    /// ONE building the instant it takes its first damage. Static batching
+    /// bakes each renderer's vertices into a shared world-space buffer at
+    /// Combine time -- Unity's own docs are explicit that transform moves/
+    /// scales afterward are silently ignored by the renderer, which is
+    /// exactly what ApplyBuildingDamage's Destroyed-stage squish does to a
+    /// dressing holder (`cube.transform.localScale`/`position` rewritten
+    /// in place). The Damaged-stage darken pass is NOT the problem --
+    /// that's a per-renderer MaterialPropertyBlock override, which static
+    /// batching tolerates fine (same trick Tier 0's own damage-material
+    /// fix already relies on) -- but de-batching unconditionally on first
+    /// damage rather than trying to special-case "only Destroyed needs
+    /// this" keeps the two damage-stage code paths below unaware this
+    /// mechanism exists at all, rather than threading a batched/unbatched
+    /// distinction through both of them.
+    ///
+    /// There's no Unity API to reverse StaticBatchingUtility.Combine on a
+    /// live renderer, so this destroys the (now possibly stale, batched)
+    /// dressing holders for this building and re-runs BuildingDresser.Dress
+    /// for it alone -- ComputeDistrictFlags reproduces the exact suburb/
+    /// industrial inputs BuildBuildings used, so the respawned dressing is
+    /// visually identical to what was just destroyed, just unbatched.
+    /// EmissiveAnimator/GlowPointRegistry both already null-check their
+    /// entries every tick (a knocked-over/destroyed prop "simply drops
+    /// out", their own comments say) -- the stale entries this destroy
+    /// leaves behind self-prune on the next tick, no explicit unregister
+    /// needed here.</summary>
+    private void DeBatchBuildingDressingIfNeeded(Building building)
+    {
+        if (!_batchedDistantDressing.Remove(building)) return;
+        List<GameObject> cubes;
+        if (!_cubesByBuilding.TryGetValue(building, out cubes)) return;
+
+        var footprintCount = building.Footprint.Count;
+        for (var i = cubes.Count - 1; i >= footprintCount; i--)
+        {
+            Object.Destroy(cubes[i]);
+            cubes.RemoveAt(i);
+        }
+
+        bool suburb, industrial;
+        ComputeDistrictFlags(building, out suburb, out industrial);
+        var height = HeightForTier(building.Tier);
+        BuildingDresser.Dress(this, building, height, cubes, _buildingsHost, industrial, suburb, _city.Region);
     }
 
     /// <summary>Play-mode read for the landmark mechanics' radii --
@@ -2176,6 +2312,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         foreach (var state in _battlefield.Buildings)
             if (ReferenceEquals(state.Building, building)) { current = state; break; }
         if (current == null || current.Stage == DamageStage.Destroyed) return;
+
+        // docs/12 Tier 3: un-batch BEFORE any stage transition below runs
+        // -- see DeBatchBuildingDressingIfNeeded's own doc comment for why
+        // this has to happen on first damage rather than only right before
+        // the Destroyed-stage squish that actually needs it.
+        DeBatchBuildingDressingIfNeeded(building);
 
         // 2026-08 (creator direction: "as the lot is cleaned of parts the
         // lot debris is decreased... available to build on it"): stamp
@@ -2869,9 +3011,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var p0Hq = FindOpenHexWide(center, blocked, claimed, 24);
         claimed.Add(p0Hq);
         _simBridge.SpawnHqForPlayer(0, p0Hq);
+        _engagementCenters.Add(p0Hq); // docs/12 Tier 3
         var p0Factory = FindOpenHexWide(p0Hq, blocked, claimed, 24);
         claimed.Add(p0Factory);
         _simBridge.SpawnFactoryForPlayer(0, p0Factory);
+        _engagementCenters.Add(p0Factory); // docs/12 Tier 3
 
         var opponentSeeds = AiOpponentSeedRing(center, opponents.Count, AiOpponentSeedRingRadius);
         for (var i = 0; i < opponents.Count; i++)
@@ -2880,9 +3024,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             var hq = FindOpenHexWide(opponentSeeds[i], blocked, claimed, 24);
             claimed.Add(hq);
             _simBridge.SpawnHqForPlayer(playerIndex, hq);
+            _engagementCenters.Add(hq); // docs/12 Tier 3
             var factory = FindOpenHexWide(hq, blocked, claimed, 24);
             claimed.Add(factory);
             _simBridge.SpawnFactoryForPlayer(playerIndex, factory);
+            _engagementCenters.Add(factory); // docs/12 Tier 3
 
             var faction = opponents[i].Faction;
             if (faction == FactionId.HumanArmy || faction == FactionId.AlienHive)

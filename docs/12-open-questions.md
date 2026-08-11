@@ -14234,3 +14234,100 @@ Tier 3 stays open, now with this investigation attached instead of
 just a one-line "needs a de-batch mechanism" note -- whoever picks it
 up next has the concrete landmines listed above instead of starting
 from zero.
+
+## 2026-08 follow-up: Tier 3 implemented (creator direction: "continue to tiers 3 graphics upgrade")
+
+The above entry's own gate (a real Profiler capture motivating the
+risk) was never cleared -- no Unity Editor exists in this environment,
+so that number still doesn't exist. Asked explicitly to proceed anyway,
+this ships the narrower slice that entry scoped: building-dressing
+batching using static engagement centers, with the de-batch-on-damage
+mechanism that slice's own gap analysis said it would need. Road
+furniture (KnockableProp) stays out of scope -- untouched, same
+reasoning as Tier 0's own finding.
+
+**Engagement centers (`RuntimeCityBuilder._engagementCenters`).** Every
+landmark site (`_city.Landmarks`, all of them now, not just the
+rail_depot the old loop `break`'d after) plus every player's starting
+HQ and Factory hex (`SpawnStartingBases`, both the human's and every AI
+opponent's) -- all decided once, before `BuildBuildings` runs, and
+never touched again. This is deliberately NOT "where fighting is
+happening right now" (docs/18 SS5's own eventual design, gated on a
+SimBridge query this codebase still doesn't have -- `EngagementZone.cs`'s
+own doc comment says as much) -- it's the "static engagement centers
+... as a stand-in for live combat tracking" scope the investigation
+above proposed, and its accuracy gap is exactly what was flagged:
+static, base-relative distance, not live combat distance.
+
+**Batching (`BuildBuildings` + new `CombineDistantSkylineDressing`).**
+Reuses citygen-core's already-built, already-tested
+`EngagementZoneManager.ClassifyBuilding` (`EngagementZoneConfig.Default`
+-- docs/18 SS5's own 175m/1000m v0.1 numbers, no separate Unity knob
+yet) to classify each building by its closest footprint hex to the
+nearest engagement center. Buildings reading `DistantSkyline` get their
+DRESSING holders (not massing cubes -- see below) queued into one
+shared `StaticBatchingUtility.Combine` call after the whole city
+finishes building, same "mark isStatic, one Combine call" shape
+`CombineStaticRoadSurfaces` already established for road surfaces.
+Massing cubes are deliberately excluded from batching: `ApplyBuildingDamage`
+already `Object.Destroy()`s them outright on collapse rather than
+mutating them in place, so batching bought nothing there and would only
+add surface area to the de-batch path below for zero benefit.
+
+**De-batch-on-first-damage (`DeBatchBuildingDressingIfNeeded`).** The
+actual conflict, precisely scoped: Unity's own docs say a statically-
+batched renderer's transform moves/scales are silently ignored after
+`Combine` bakes its vertices into a shared world-space buffer.
+`ApplyBuildingDamage`'s Damaged-stage darken pass is NOT that problem
+-- it's a `MaterialPropertyBlock` override (Tier 0's own fix), which
+static batching tolerates fine. The Destroyed-stage squish IS that
+problem (`cube.transform.localScale`/`position` rewritten in place on a
+dressing holder). Rather than threading a batched/unbatched distinction
+through both of those existing code paths, `ApplyBuildingDamage` now
+calls `DeBatchBuildingDressingIfNeeded` unconditionally on first damage
+(right after the existing `Destroyed`-stage early-return, before
+anything else runs) -- it destroys that ONE building's (possibly
+batched) dressing holders and re-runs `BuildingDresser.Dress` for it
+alone, unbatched. Both damage-stage branches stay unaware this
+mechanism exists at all. `ComputeDistrictFlags` -- the suburb/industrial
+inputs `BuildingDresser.Dress` needs -- was factored out of
+`BuildBuildings` specifically so this re-Dress call reproduces
+byte-identical dressing rather than drifting from a second hand-copied
+formula.
+
+**Registries needed no new plumbing.** `EmissiveAnimator.Tick()` and
+`GlowPointRegistry` both already null-check their entries every tick
+("a knocked-over/destroyed prop simply drops out", `GlowPointRegistry`'s
+own comment says) -- checked before relying on it, not assumed. The
+stale entries a de-batch's `Object.Destroy()` leaves behind self-prune
+on the next tick; `NeonRegistry` is keyed by shared cached Material, not
+by per-instance Renderer/GameObject, so it's entirely unaffected.
+
+**The known gap, unchanged from the investigation above and not
+fixed by this pass:** a `DistantSkyline` classification is decided ONCE
+at `BeginMatch` from static engagement centers, never re-evaluated as
+the match progresses. A building far from every HQ/landmark that later
+takes damage still correctly de-batches and updates (that's what this
+pass built) -- what's NOT covered is the inverse: nothing currently
+walks the whole city re-classifying zones as combat actually moves, so
+a building that goes from `Engagement` to genuinely `DistantSkyline`
+mid-match (e.g. the fighting front pushes away from it) stays unbatched
+for the rest of the match, forfeiting the perf win it would otherwise
+get. Flagged, not fixed -- the real fix needs the same live "where is
+combat happening" SimBridge query docs/18 SS5 was always going to need
+and this codebase still doesn't have.
+
+**Verification.** `dotnet test` for both `CityGenCore.Tests.csproj`
+(217/217) and `MatchCore.Tests.csproj` (311/311) -- unchanged, since
+neither citygen-core nor match-core source was touched (`EngagementZone.cs`
+already existed, built and tested, before this pass). Whole Unity
+gameplay layer compiles clean against the rebuilt DLLs via the
+flightcheck stub-compile harness. NOT verified visually or for actual
+frame-time impact -- no Unity Editor exists in this environment, same
+caveat as every entry in this section, and the SAME caveat that made
+the prior entry defer this work in the first place. The batching
+mechanism itself is untested beyond "compiles and the invariants line
+up on paper" -- a real BigCity match, in the creator's own Editor, is
+still the only way to confirm both that DistantSkyline buildings
+actually draw fewer batches AND that hitting one mid-match still
+squishes/rubbles correctly post-de-batch.
