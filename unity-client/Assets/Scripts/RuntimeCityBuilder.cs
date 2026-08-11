@@ -562,6 +562,13 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (hud == null) hud = gameObject.AddComponent<HudStatus>();
         hud.Init(this, commander);
 
+        // 2026-08 (creator direction: "add a toggle window lights on
+        // off"): no Init() needed -- reads EmissiveAnimator's own static
+        // toggle directly, same "no data source" simplicity HudStatus's
+        // instructions text has.
+        if (gameObject.GetComponent<WindowLightsHud>() == null)
+            gameObject.AddComponent<WindowLightsHud>();
+
         var bars = gameObject.GetComponent<HealthBars>();
         if (bars == null) bars = gameObject.AddComponent<HealthBars>();
         bars.Init(this);

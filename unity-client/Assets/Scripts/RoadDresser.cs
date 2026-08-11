@@ -102,6 +102,53 @@ public static class RoadDresser
     // tunable default (0.45) instead of another blind guess.
     private static readonly Color LampColor = new Color(1f, 0.85f, 0.55f);   // warm sodium bulb
     private static Material Bulb() { return M(1f, 0.9f, 0.6f, CityLightingProfile.Active.BulbEmissiveBase); }
+
+    /// <summary>2026-08 (creator direction: "Streetlight should cast
+    /// moody volumetric light rays"). This project is confirmed URP, not
+    /// HDRP (see the maddr-lighting-system skill) -- true 3D-occluded
+    /// light shafts need real volumetric fog, which was evaluated and
+    /// declined here before on performance grounds (docs/28 §3). This is
+    /// the free, already-established URP-native approximation instead:
+    /// a real translucent cone MESH hanging from the bulb down toward
+    /// the road (not a shader trick), reading as a soft light shaft from
+    /// the RTS camera's own down-angle. ONE shared cached material
+    /// (never a per-instance fork -- this project's own standing
+    /// discipline) registered with NeonRegistry so it dims/brightens on
+    /// the same day/night curve every other emissive prop already
+    /// follows, for free.
+    ///
+    /// Very low base alpha (0.05) -- a light shaft reads as a hazy,
+    /// barely-there volume, not a solid orange traffic cone; the
+    /// emissive glow (not the alpha) is what actually sells "light,"
+    /// same "the glow, not the geometry, carries the read" principle
+    /// DamageFx's own fire/smoke shards already lean on.</summary>
+    private static Material _lightBeamMat;
+    private static Material LightBeamMat()
+    {
+        if (_lightBeamMat != null) return _lightBeamMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(LampColor.r, LampColor.g, LampColor.b, 0.05f);
+        LabMeshBuilder.MakeTransparent(mat);
+        mat.EnableKeyword("_EMISSION");
+        var baseEmission = LampColor * (CityLightingProfile.Active.BulbEmissiveBase * 0.3f);
+        mat.SetColor("_EmissionColor", baseEmission);
+        NeonRegistry.Register(mat, baseEmission);
+        _lightBeamMat = mat;
+        return _lightBeamMat;
+    }
+
+    /// <summary>Cone from `bulbPos` down to the road, narrow at the bulb
+    /// and flaring wide at the ground -- the classic light-shaft/"pool
+    /// of light" silhouette. `beamHeight` is the vertical span (usually
+    /// the bulb's own height above the road); the cone is centered on
+    /// that span, not resting flush on either end, so it visually
+    /// bridges bulb-to-ground without needing exact contact geometry.</summary>
+    private static void SpawnLightBeam(RuntimeCityBuilder b, Vector3 bulbPos, float beamHeight, Transform parent)
+    {
+        var beamCenter = bulbPos - Vector3.up * (beamHeight * 0.5f);
+        PropLibrary.Spawn(b, "streetlight-beam", PrimitiveType.Cylinder, beamCenter,
+            new Vector3(beamHeight * 0.6f, beamHeight, beamHeight * 0.6f), LightBeamMat(), parent);
+    }
     private static Material HydrantRed() { return M(0.75f, 0.15f, 0.12f); }
     private static Material CanGray() { return M(0.4f, 0.42f, 0.44f); }
     private static Material ChromeTrim() { return MTextured("chrome", 0.8f, 0.82f, 0.85f, PbrTextureAtlas.Chrome); }
@@ -465,7 +512,8 @@ public static class RoadDresser
                 // then spreads a bright sphere into something much bigger
                 // than its own geometry -- a small emitter is the correct
                 // starting point for a "pool of light" read.
-                var bulb = b.SpawnPrim(PrimitiveType.Sphere, propSpot + Vector3.up * 4.55f - side * (sideSign * 2.2f),
+                var bulbPos = propSpot + Vector3.up * 4.55f - side * (sideSign * 2.2f);
+                var bulb = b.SpawnPrim(PrimitiveType.Sphere, bulbPos,
                     new Vector3(0.26f, 0.2f, 0.26f), Bulb(), holder);
                 // 2026-07 creator direction: "make the overhanging street
                 // lights spotlights, pointing down at the road" -- this is
@@ -476,6 +524,12 @@ public static class RoadDresser
                 // aims any promoted Spot light straight down and applies
                 // its own shared cone angle.
                 GlowPointRegistry.Register(bulb.transform, LampColor, LightType.Spot);
+                // 4.55 is the bulb's own height ABOVE propSpot (matching
+                // its spawn offset above) -- NOT bulbPos.y itself, which
+                // would double-count propSpot's own ground/terrain
+                // elevation and stretch the beam through the terrain on
+                // any street that isn't at world Y=0.
+                SpawnLightBeam(b, bulbPos, 4.55f, holder);
                 MakeKnockable(b, holder.gameObject, 1.6f);
                 break;
             }
@@ -652,8 +706,10 @@ public static class RoadDresser
             var a = (i + 0.5f) / 5f * 2f * Mathf.PI;
             var p = c + new Vector3(Mathf.Sin(a), 0f, Mathf.Cos(a)) * (RndAsphalt + 1.2f);
             b.SpawnPrim(PrimitiveType.Cylinder, p + Vector3.up * 2.4f, new Vector3(0.16f, 2.4f, 0.16f), PoleMetal(), host);
-            var roundaboutBulb = b.SpawnPrim(PrimitiveType.Sphere, p + Vector3.up * 4.7f, new Vector3(0.24f, 0.2f, 0.24f), Bulb(), host);
+            var roundaboutBulbPos = p + Vector3.up * 4.7f;
+            var roundaboutBulb = b.SpawnPrim(PrimitiveType.Sphere, roundaboutBulbPos, new Vector3(0.24f, 0.2f, 0.24f), Bulb(), host);
             GlowPointRegistry.Register(roundaboutBulb.transform, LampColor);
+            SpawnLightBeam(b, roundaboutBulbPos, 4.7f, host);
         }
 
         // per-entry treatment: flared apron, give-way triangles, set-back

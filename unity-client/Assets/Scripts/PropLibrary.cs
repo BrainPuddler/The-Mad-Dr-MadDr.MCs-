@@ -75,6 +75,13 @@ public static class PropLibrary
         // rather than a machined pipe, matching the rest of this
         // faction's crystal-taper vocabulary.
         Register("alien-passage-tube", () => ProceduralMeshKit.Frustum(1f, 0.85f, 12));
+        // 2026-08 (creator direction: "Streetlight should cast moody
+        // volumetric light rays"): a wide-based, narrow-topped cone --
+        // the light-shaft silhouette hanging from a streetlamp bulb down
+        // to its own pool of light on the road. Low segment count (8) --
+        // this is a translucent haze shape seen from a distance, not a
+        // hard-edged prop that needs a smooth profile.
+        Register("streetlight-beam", () => ProceduralMeshKit.Frustum(1f, 0.15f, 8));
 
         // 2026-08 docs/30 (facade grammar): the module mesh-swap points.
         // Deliberately left UNREGISTERED -- FacadeKit spawns each of these

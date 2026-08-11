@@ -2558,7 +2558,25 @@ public class BaseDresser : MonoBehaviour
     /// be clean and functional" / "communicate precision" is read as a
     /// genuine faction-differentiating choice: Doctor pulses slow and
     /// eerie, Alien pulses organic, Human stays constant. A steady light
-    /// literally reads as more "precise" than a wavering one.</summary>
+    /// literally reads as more "precise" than a wavering one.
+    ///
+    /// 2026-08 fix (creator direction: "Windows should light up
+    /// especially Player buildings"): this material used to set its
+    /// `_EmissionColor` once and never touch it again -- lit at NOON same
+    /// as midnight, the one player-faction window material that never
+    /// responded to the day/night cycle at all (Doctor's arrow slits and
+    /// Alien's portholes both already ran through EmissiveAnimator's own
+    /// per-window Window schedule). Registering with NeonRegistry (the
+    /// same mechanism every OTHER emissive material in this codebase's
+    /// `M()`/`MTextured()` helpers already goes through automatically)
+    /// gets it dimming/brightening on the shared day/night curve for
+    /// free -- deliberately NOT EmissiveAnimator's per-instance
+    /// randomized "someone's home" schedule, since Human's own windows
+    /// here are single continuous glowing bands/panels (not a grid of
+    /// individual room windows), and a uniform on/off flip actually
+    /// reads as MORE "precise/mechanical" than per-window variance would
+    /// -- consistent with, not a departure from, the "steady" design
+    /// language above.</summary>
     private static Material _humanBlueLightMat;
     private static Material HumanBlueLightMat()
     {
@@ -2567,7 +2585,9 @@ public class BaseDresser : MonoBehaviour
         var glow = new Color(0.3f, 0.6f, 1f);
         mat.color = glow;
         mat.EnableKeyword("_EMISSION");
-        mat.SetColor("_EmissionColor", glow * 1.2f);
+        var baseEmission = glow * 1.2f;
+        mat.SetColor("_EmissionColor", baseEmission);
+        NeonRegistry.Register(mat, baseEmission);
         _humanBlueLightMat = mat;
         return _humanBlueLightMat;
     }

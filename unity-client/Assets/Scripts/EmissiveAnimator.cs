@@ -99,6 +99,18 @@ public static class EmissiveAnimator
 
     private static readonly List<Entry> Animated = new List<Entry>();
 
+    /// <summary>2026-08 (creator direction: "add a toggle window lights
+    /// on off"). Default true (the naturalistic schedule is the
+    /// standing behavior). When false, every `Window`-kind registration
+    /// reverts to the SAME plain, uniform day/night-driven brightness
+    /// every other `Steady` emissive prop in the city already uses
+    /// (see <see cref="OccupancyGate"/>) -- not total darkness, which
+    /// would read as broken city lighting rather than an intentional
+    /// preference toggle; this only turns off the PER-WINDOW randomized
+    /// "someone's home"/"someone went to bed" variation, not the city's
+    /// own night lighting as a whole.</summary>
+    public static bool WindowScheduleEnabled = true;
+
     /// <summary>Register a renderer's emissive material for animation.
     /// `baseEmission` is the color at full brightness BEFORE the day/night
     /// boost (DayNightState.NeonBoost is applied on top every tick, same
@@ -233,7 +245,7 @@ public static class EmissiveAnimator
     /// off half entirely -- "not all lights go off."</summary>
     private static float OccupancyGate(Entry e, float cycleProgress)
     {
-        if (e.AlwaysOn) return 1f;
+        if (!WindowScheduleEnabled || e.AlwaysOn) return 1f;
         var onGate = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(
             e.OnCycleFrac - OccupancyTransitionFrac, e.OnCycleFrac + OccupancyTransitionFrac, cycleProgress));
         var offGate = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(

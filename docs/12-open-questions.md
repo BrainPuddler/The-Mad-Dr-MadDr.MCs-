@@ -15065,3 +15065,84 @@ standing caveat as every entry in this section. The fix is confirmed by
 direct angle arithmetic (both loops' angle formulas checked against each
 other), not by rendering, but this one is exact-value trigonometry, not
 an estimate -- 0 degrees literally equals 0 degrees.
+
+## 2026-08: streetlight light-shaft beams, window-lights toggle, Human window day/night fix
+
+Creator direction (multi-part): "add a toggle window lights on off for
+a naturalistic windows light up at night based on a human schedule and
+movement within a building... Windows should light up especially Player
+buildings. Streetlight should cast moody volumetric light rays." Asked
+the creator to choose between the free URP-safe approximation and
+integrating real volumetric fog (docs/28 §3, previously declined for
+performance) via AskUserQuestion; unanswered, so proceeded with the
+recommended free option rather than blocking or guessing the heavier one.
+
+**Streetlight light-shaft beams.** This project is confirmed URP, not
+HDRP (maddr-lighting-system skill) -- true 3D-occluded volumetric light
+shafts need real volumetric fog, evaluated and declined here before on
+performance grounds. Implemented the free, already-established URP-
+native approximation instead: a real translucent cone MESH (new
+`ProceduralMeshKit.Frustum`-backed `streetlight-beam` prop, wide at the
+ground/narrow at the bulb) hanging from each streetlamp bulb down to its
+own pool of light on the road -- not a shader trick, real geometry, so
+it reads as a soft shaft from the RTS camera's own down-angle. ONE
+shared cached material (`RoadDresser.LightBeamMat`, very low alpha 0.05
+-- the glow, not the geometry, is what sells "light," same principle
+DamageFx's fire/smoke shards already lean on) registered with
+`NeonRegistry` so it dims/brightens on the same day/night curve every
+other emissive prop already follows, for free. Wired onto both
+streetlight fixtures that actually cast a defined beam of light: the
+overhanging arm streetlight (RoadDresser case 0) and the roundabout's
+5 edge streetlamps. Deliberately NOT added to the ornate multi-globe
+lamppost (a daytime mood-board decorative fixture, not a "streetlight"
+in the literal sense) or telephone poles, keeping the added-geometry
+count proportionate.
+
+**Window-lights on/off toggle.** `EmissiveAnimator.WindowScheduleEnabled`
+(new public static bool, default true) gates `OccupancyGate` -- when
+false, every `Window`-kind registration reverts to the same plain,
+uniform day/night-driven brightness every `Steady` emissive prop in the
+city already uses (not total darkness, which would read as broken
+rather than an intentional preference). New `WindowLightsHud.cs`: a
+single always-on IMGUI button flipping the flag, positioned below
+`HudStatus.ContentBottom` (published for exactly this "don't hardcode an
+offset that might overlap" reason) rather than claiming a new screen
+corner -- all four are already spoken for. Wired into
+`RuntimeCityBuilder.BeginMatch` alongside `HudStatus` itself, un-gated
+by match state (the window schedule runs on any city).
+
+**Human player-building windows now respond to day/night.** Audited
+every player-faction window/glow material in `BaseDresser.cs`: Doctor's
+arrow slits and Alien's portholes already ran through
+`EmissiveAnimator`'s own per-window "Window" schedule (confirmed by
+grep, not assumed). `HumanBlueLightMat` did not -- it set
+`_EmissionColor` once at mint time and never touched it again, lit at
+noon the same as midnight, the one player-faction window material that
+never responded to the day/night cycle at all. Fixed by registering it
+with `NeonRegistry` (the same mechanism every other emissive material in
+this codebase's `M()`/`MTextured()` helpers already goes through
+automatically) rather than wiring it into EmissiveAnimator's per-
+instance randomized schedule -- Human's own window elements here are
+single continuous glowing bands/panels (a maintenance-bay window, an
+observation-deck band), not a grid of individual room windows the way
+Doctor's arrow slits or Alien's portholes are, so a uniform day/night
+flip preserves (rather than contradicts) the faction's own established
+"steady, precise, not pulsing" design language from docs/31.
+
+Audited the five generic-kind player buildings (Tank/Pump/Warehouse/
+Watchtower/Bunker, `BuildTankShape` etc.) for any window element:
+confirmed none of them have glazed windows at all -- Warehouse's loading-
+dock door and Bunker's viewing-slit are both opaque `DarkRecess` voids,
+architecturally correct for a storage vessel/utility structure, not a
+lighting gap to fix. Left untouched rather than inventing new window
+geometry these industrial/defense structures don't call for.
+
+**Verified:** flightcheck stub-compile clean against `RoadDresser.cs`/
+`PropLibrary.cs`/`EmissiveAnimator.cs`/`WindowLightsHud.cs`/
+`RuntimeCityBuilder.cs`/`BaseDresser.cs` together. No citygen-core/
+match-core changes this pass. NOT verified visually -- no Unity Editor
+in this environment, same standing caveat as every entry in this
+section; the light-beam cone's own visual weight (alpha 0.05, radius/
+height ratios) is a first guess with no render feedback, and whether it
+reads as "moody" rather than either invisible or a solid orange wedge is
+unconfirmed until a real Editor run.
