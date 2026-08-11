@@ -713,14 +713,20 @@ public class BaseDresser : MonoBehaviour
                 new Vector3(pilasterW, pilasterH, pilasterW), stoneMat, trim);
         }
 
+        // 2026-08 (docs/31, "Mad Doctor windows should resemble CASTLE
+        // ARROW SLITS"): replaces the old flat-cube window void every
+        // faction used to share with a real narrow-slit-plus-heavy-stone-
+        // frame shape (SpawnArrowSlit) -- irregularly jittered placement,
+        // not an evenly-spaced strip, per the brief's own "irregularly
+        // distributed."
         var windowH = bodyH * 0.5f;
-        var windowW = fullScale.x * 0.08f;
         float[] windowXFrac = { -0.28f, 0f, 0.28f };
         for (var wi = 0; wi < windowXFrac.Length; wi++)
         {
-            var xf = windowXFrac[wi];
-            SpawnPedestalWindow(trim, origin + new Vector3(xf * bodyW, bodyH * 0.5f, bodyD * 0.5f * 0.99f),
-                new Vector3(windowW, windowH, fullScale.x * 0.02f), wi, 511);
+            var xf = windowXFrac[wi] + (PbrTextureAtlas.Jitter(wi, 511, 122) - 0.5f) * 0.06f;
+            var slitH = windowH * (0.9f + PbrTextureAtlas.Jitter(wi, 511, 123) * 0.25f);
+            SpawnArrowSlit(trim, origin + new Vector3(xf * bodyW, bodyH * 0.5f, bodyD * 0.5f * 0.99f),
+                slitH, wi, 511);
         }
 
         var tankRadius = fullScale.x * 0.11f;
@@ -832,14 +838,16 @@ public class BaseDresser : MonoBehaviour
                 new Vector3(pilasterW, pilasterH, pilasterW), stoneMat, trim);
         }
 
+        // 2026-08 (docs/31): arrow slits, same shape family as
+        // BuildDoctorFactory's own -- see SpawnArrowSlit's own doc comment.
         var windowH = bodyH * 0.35f;
-        var windowW = fullScale.x * 0.07f;
         float[] windowXFrac = { -0.2f, 0.2f };
         for (var wi = 0; wi < windowXFrac.Length; wi++)
         {
-            var xf = windowXFrac[wi];
-            SpawnPedestalWindow(trim, origin + new Vector3(xf * bodyW, bodyH * 0.55f, bodyD * 0.5f * 0.99f),
-                new Vector3(windowW, windowH, fullScale.x * 0.02f), wi, 512);
+            var xf = windowXFrac[wi] + (PbrTextureAtlas.Jitter(wi, 512, 122) - 0.5f) * 0.05f;
+            var slitH = windowH * (0.9f + PbrTextureAtlas.Jitter(wi, 512, 123) * 0.25f);
+            SpawnArrowSlit(trim, origin + new Vector3(xf * bodyW, bodyH * 0.55f, bodyD * 0.5f * 0.99f),
+                slitH, wi, 512);
         }
 
         var coreCenter = origin + Vector3.up * (bodyH * 0.22f) + Vector3.forward * (bodyD * 0.5f * 0.98f);
@@ -851,10 +859,17 @@ public class BaseDresser : MonoBehaviour
     /// translucent membrane hull DETAIL (the owner-tinted body cube
     /// underneath stays the same shape/silhouette; the organic read
     /// comes from bulging energy sacs, ribs, and a crystal growth
-    /// replacing the chimney slot), no visible bolts/rivets anywhere
-    /// (per the brief: "avoid visible bolts and human engineering"),
-    /// gentle hovering (Bob.cs) and slow rotation (SlowSpin.cs) instead
-    /// of anything mechanical-looking.</summary>
+    /// replacing the chimney slot), gentle hovering (Bob.cs) and slow
+    /// rotation (SlowSpin.cs).
+    ///
+    /// 2026-08 (docs/31, creator-confirmed reversal): the prior "no
+    /// visible bolts/rivets anywhere... avoid visible bolts and human
+    /// engineering" restraint is SUPERSEDED -- brass-riveted portholes
+    /// (SpawnAlienPorthole) now sit on the front face alongside the
+    /// organic detail above, a deliberate "captured/bolted spacecraft"
+    /// read layered on top of the living-organism hull, not a
+    /// contradiction left unresolved. See SpawnAlienPorthole's own doc
+    /// comment and docs/31 SS2 for the full design-conflict writeup.</summary>
     private void BuildAlienFactory(GameObject root, Vector3 fullScale)
     {
         var origin = root.transform.position;
@@ -894,6 +909,20 @@ public class BaseDresser : MonoBehaviour
                 SpawnPulseLight(trim, sacPositions[i], sacGo, new Color(0.6f, 0.3f, 1f), new Color(0.6f, 0.3f, 1f) * 1.3f, fullScale.x * 0.7f, 3.1f);
         }
 
+        // 2026-08 (docs/31): brass-riveted portholes flanking the front
+        // energy sac -- see SpawnAlienPorthole's own doc comment for why
+        // this supersedes the "no visible bolts" direction that shaped
+        // the rest of this method.
+        var portholeRadius = fullScale.x * 0.09f;
+        float[] portholeXFrac = { -0.24f, 0.24f };
+        for (var pi = 0; pi < portholeXFrac.Length; pi++)
+        {
+            var xf = portholeXFrac[pi];
+            SpawnAlienPorthole(trim,
+                origin + new Vector3(xf * bodyW, bodyH * 0.65f, bodyD * 0.5f * 0.99f),
+                Vector3.forward, portholeRadius, pi, 521);
+        }
+
         // organic ribs -- thin vertical crystal struts around the body
         var ribCount = 6;
         var ribR = Mathf.Max(bodyW, bodyD) * 0.52f;
@@ -924,7 +953,10 @@ public class BaseDresser : MonoBehaviour
     /// massive floating central crystal (replacing the turret slot,
     /// same offset/height envelope) with orbiting energy rings, curved
     /// support struts, crystalline antennae, and a pulsing psychic core.
-    /// No rivets/bolts anywhere, matching the Factory's own restraint.</summary>
+    /// 2026-08 (docs/31): now ALSO gets brass-riveted portholes on the
+    /// body's own front face -- see SpawnAlienPorthole's own doc comment
+    /// for why "no rivets/bolts anywhere" (this method's own prior
+    /// restraint, matching the Factory's) was explicitly superseded.</summary>
     private void BuildAlienControlCentre(GameObject root, Vector3 fullScale)
     {
         var origin = root.transform.position;
@@ -1000,6 +1032,18 @@ public class BaseDresser : MonoBehaviour
         // pulsing psychic core at the crystal's own heart
         var coreGo = builder.SpawnPrim(PrimitiveType.Sphere, crystalCenter, Vector3.one * (fullScale.x * 0.1f), AlienGlowMat(), trim);
         SpawnPulseLight(trim, crystalCenter, coreGo, new Color(0.62f, 0.3f, 1f), new Color(0.62f, 0.3f, 1f) * 1.5f, fullScale.x * 1.2f, 4.2f);
+
+        // 2026-08 (docs/31): brass-riveted portholes on the body's own
+        // front face, below the crystal/ring/antenna roofline detail.
+        var portholeRadius = fullScale.x * 0.08f;
+        float[] portholeXFrac = { -0.2f, 0.2f };
+        for (var pi = 0; pi < portholeXFrac.Length; pi++)
+        {
+            var xf = portholeXFrac[pi];
+            SpawnAlienPorthole(trim,
+                origin + new Vector3(xf * bodyW, bodyH * 0.5f, bodyD * 0.5f * 0.99f),
+                Vector3.forward, portholeRadius, pi, 522);
+        }
     }
 
     /// <summary>Human Alliance faction Factory -- "advanced automated
@@ -1895,6 +1939,100 @@ public class BaseDresser : MonoBehaviour
         EmissiveAnimator.Register(go.GetComponent<Renderer>(),
             new Color(1f, 0.85f, 0.55f) * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
             LightBehaviorKind.Window, PbrTextureAtlas.Jitter(index, seedSalt, 111));
+    }
+
+    /// <summary>2026-08 (docs/31, creator direction: "Mad Doctor windows
+    /// should resemble CASTLE ARROW SLITS... narrow vertical openings,
+    /// deep recesses and heavy masonry framing"): replaces the flat
+    /// rectangular window cube every faction used to share with a real
+    /// narrow-slit-in-a-stone-block shape -- a wide/tall `DoctorStone`
+    /// frame flush with the wall face, and a much narrower dark-or-lit
+    /// void set back into it (recessed along -Z, the SAME wall-outward
+    /// axis every current Doctor window call site already assumes -- see
+    /// SpawnPedestalWindow's own callers). `pos` is the slit's own outer
+    /// (frame-front) position; `slitHeight` drives every other proportion
+    /// off it so a single number controls the whole shape. Reuses <see
+    /// cref="PedestalWindowMat"/>/<see cref="PedestalWindowGlowMat"/> and
+    /// the same ~2-in-5-lit `EmissiveAnimator` Window registration
+    /// <see cref="SpawnPedestalWindow"/> already established -- only the
+    /// GEOMETRY is new, not a second lighting mechanism.</summary>
+    private void SpawnArrowSlit(Transform parent, Vector3 pos, float slitHeight, int index, int seedSalt)
+    {
+        var slitWidth = slitHeight * 0.14f;
+        var frameWidth = slitWidth * 3.4f;
+        var frameHeight = slitHeight * 1.15f;
+        var frameDepth = slitHeight * 0.22f;
+        builder.SpawnPrim(PrimitiveType.Cube, pos, new Vector3(frameWidth, frameHeight, frameDepth), DoctorStone(), parent);
+
+        var lit = PbrTextureAtlas.Jitter(index, seedSalt, 120) < 0.4f;
+        var slitPos = pos - Vector3.forward * (frameDepth * 0.32f);
+        var slitScale = new Vector3(slitWidth, slitHeight, frameDepth * 0.5f);
+        if (!lit)
+        {
+            builder.SpawnPrim(PrimitiveType.Cube, slitPos, slitScale, PedestalWindowMat(), parent);
+            return;
+        }
+        var slitGo = builder.SpawnPrim(PrimitiveType.Cube, slitPos, slitScale, PedestalWindowGlowMat(), parent);
+        EmissiveAnimator.Register(slitGo.GetComponent<Renderer>(),
+            new Color(1f, 0.85f, 0.55f) * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
+            LightBehaviorKind.Window, PbrTextureAtlas.Jitter(index, seedSalt, 121));
+    }
+
+    /// <summary>2026-08 (docs/31, creator direction: "Alien windows must
+    /// be ROUND, surrounded by a substantial BRASS ring, secured with
+    /// visible rivets... Alien windows should look like they were bolted
+    /// into a machine"). This EXPLICITLY SUPERSEDES `BuildAlienFactory`'s
+    /// own prior 2026-08 direction ("avoid visible bolts and human
+    /// engineering," a living-energy-organism aesthetic with zero
+    /// mechanical detailing) -- a real, creator-confirmed reversal for
+    /// this one faction, not an oversight; see docs/31 SS2 for the full
+    /// writeup. A brass ring flush with the hull, a recessed thick-glass
+    /// disc (reusing the existing `PedestalWindowMat`/
+    /// `PedestalWindowGlowMat`/Window-schedule pairing, same mechanism
+    /// every other faction's windows now use), and a rivet ring in the
+    /// window's own FACE plane (XY, since the window mounts on a vertical
+    /// hull face) -- deliberately NOT `SpawnRivets`, whose own ring is in
+    /// the XZ plane (a horizontal-cap convention that fits a tank lid or
+    /// wheel housing, not a wall-mounted porthole).</summary>
+    private void SpawnAlienPorthole(Transform parent, Vector3 pos, Vector3 outwardDir, float radius, int index, int seedSalt)
+    {
+        // the ring's own flat-cap normal has to align with THIS window's
+        // outward direction (not always +Z -- Alien hulls mount portholes
+        // on multiple faces, unlike the Doctor's own front-only windows),
+        // so its rotation is derived from outwardDir instead of a fixed
+        // Euler literal.
+        var faceRot = Quaternion.LookRotation(outwardDir, Vector3.up);
+        var ringGo = builder.SpawnPrim(PrimitiveType.Cylinder, pos,
+            new Vector3(radius * 2f, radius * 0.18f, radius * 2f), Brass(), parent);
+        ringGo.transform.rotation = faceRot * Quaternion.Euler(90f, 0f, 0f);
+
+        var glassPos = pos - outwardDir * (radius * 0.15f);
+        var lit = PbrTextureAtlas.Jitter(index, seedSalt, 130) < 0.4f;
+        var glassMat = lit ? PedestalWindowGlowMat() : PedestalWindowMat();
+        var glassGo = builder.SpawnPrim(PrimitiveType.Cylinder, glassPos,
+            new Vector3(radius * 1.5f, radius * 0.12f, radius * 1.5f), glassMat, parent);
+        glassGo.transform.rotation = faceRot * Quaternion.Euler(90f, 0f, 0f);
+        if (lit)
+        {
+            EmissiveAnimator.Register(glassGo.GetComponent<Renderer>(),
+                new Color(1f, 0.85f, 0.55f) * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
+                LightBehaviorKind.Window, PbrTextureAtlas.Jitter(index, seedSalt, 131));
+        }
+
+        // rivet ring in the window's own face plane -- the two axes
+        // perpendicular to outwardDir, derived from faceRot rather than
+        // assumed to be world X/Y (which only held when outwardDir was Z).
+        const int rivetCount = 10;
+        var rivetR = radius * 1.02f;
+        var rivetSize = radius * 0.1f;
+        var faceRight = faceRot * Vector3.right;
+        var faceUp = faceRot * Vector3.up;
+        for (var i = 0; i < rivetCount; i++)
+        {
+            var a = i / (float)rivetCount * 2f * Mathf.PI + PbrTextureAtlas.Jitter(i, seedSalt, 132) * 0.15f;
+            var rp = pos + (faceRight * Mathf.Sin(a) + faceUp * Mathf.Cos(a)) * rivetR;
+            builder.SpawnPrim(PrimitiveType.Sphere, rp, Vector3.one * rivetSize, Steel(), parent);
+        }
     }
 
     /// <summary>The cornerstone plaque's own light stone/bronze tone,
