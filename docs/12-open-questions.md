@@ -15146,3 +15146,78 @@ section; the light-beam cone's own visual weight (alpha 0.05, radius/
 height ratios) is a first guess with no render feedback, and whether it
 reads as "moody" rather than either invisible or a solid orange wedge is
 unconfirmed until a real Editor run.
+
+## 2026-08: city building texture/color unification -- massing cube itself was the last untextured surface
+
+Creator direction: "apply all texture and displacement map details to
+city building. unify the building's colours and textures to be
+consistent with actual building."
+
+**The real finding.** Investigated before writing anything: most of
+BuildingDresser.cs's own wall/trim/roof materials already went through
+`MTextured` (Brick, Concrete/Limestone, Chrome, WindowBand, the three
+RoofShingle variants) from earlier passes. But the actual MASSING CUBE
+every building shows to the world -- the big box BuildingDresser only
+adds detail ON TOP of, spawned by `RuntimeCityBuilder.BuildBuildings`
+via `SpawnCube` -- was six completely flat, untextured colors
+(`smallDowntown`/`smallSuburb`/`mediumDowntown`/`mediumSuburb`/`large`/
+`landmark`, `NewMaterial(Color)`, no texture at all). The docs/30
+facade-grammar system only re-skins Medium/Large's STREET-facing faces
+with real texture; every Small-tier building (the overwhelming majority
+of the city -- houses, gas stations, diners) and every alley/party-wall
+face of Medium/Large showed this flat color directly, unconditionally.
+This -- not a missing texture on some minor trim piece -- was the actual
+"building" the report meant.
+
+**Fix.** New `RuntimeCityBuilder.NewTexturedMaterial(color, tex)` (same
+shape as `BuildingDresser`/`RoadDresser`'s own `MTextured` helpers, which
+this file never had) replaces all six `NewMaterial` calls, reusing
+`PbrTextureAtlas.Limestone` -- the same neutral "worn surface" texture
+`Concrete()`/`DressedStone()`/the faction-stone materials already tint
+for their own purposes, not an eighth invented texture -- with the
+EXACT same tuned colors as before (only the surface gains detail, the
+palette itself is unchanged, so this can't regress the district-tint/
+region-tint reads already built on top of these six colors elsewhere).
+`SpawnCube` now also calls `ApplyWorldScaledTiling` (the existing Tier 1a
+per-object UV-scaling technique, docs/12) so a small house and a
+Landmark tower sharing the same Material don't share the same stretched
+texture scale -- a no-op for any material with no texture (confirmed by
+reading that method's own early-out), so this is purely additive.
+
+Also textured the last remaining flat WALL/trim colors in
+`BuildingDresser.cs` itself: `Cream()`/`Seafoam()`/`Mustard()` (house/
+apartment wall and trim colors) and `RustRed()` (water-tower tanks, dome
+roofs, canopy trim -- confirmed by grep to be a structural surface, not
+signage) all now tint `PbrTextureAtlas.Limestone`; `Corrugated()`
+(industrial roof/tank/drum shapes) now tints `PbrTextureAtlas.
+PaintedMetal`, the same texture `RoadDresser.PoleMetal()` already uses.
+Left `NeonRed()`/`NeonTeal()`/`SignWhite()`/`GardenGreen()`/`AdRed()`/
+`AdBlue()`/`DarkRecess()`/`IronDark()` flat on purpose -- confirmed by
+grep that every one of these is signage/neon glass/shrubbery/void, not
+a masonry surface, so texturing them would read as wrong rather than
+consistent.
+
+**"Unify colors" -- investigated, no change needed.** Checked whether
+wall and roof color picks are coordinated per building (the
+mismatched-parts failure mode this request's second half sounds like).
+`DressSmall`'s own suburban-house roof pick already biases warm-roof-
+more-often in `suburb` districts and cool-roof-more-often downtown --
+matching the SAME warm-suburb/cool-downtown split the massing wall color
+already follows, not independently random. This is a real, existing,
+DOCUMENTED design decision (this file's own header: "shifts Small/
+Medium's palette warmer toward the outskirts and cooler downtown,
+WITHOUT going monotone -- still hash-varied, just reweighted"), not a
+bug -- forcing 100% wall/roof color matching would contradict that
+explicit "not monotone" intent rather than fix a gap. No change made
+here; the texture work above is the substantive fix for this report.
+
+**Verified:** flightcheck stub-compile clean against `RuntimeCityBuilder.
+cs`/`BuildingDresser.cs` together, including a forced non-incremental
+rebuild to confirm zero unused-variable/other warnings beyond the
+harness's own 4 baseline `RosterFetcher` event warnings. No citygen-
+core/match-core changes this pass. NOT verified visually -- no Unity
+Editor in this environment, same standing caveat as every entry in this
+section; whether Limestone's mottling reads convincingly as painted
+clapboard/stucco at typical RTS camera height (versus reading as "stone
+texture on a wooden house," which would be a genuine mismatch) is
+unconfirmed until a real Editor render.

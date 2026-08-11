@@ -2103,12 +2103,29 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         buildings.SetParent(transform, false);
         _buildingsHost = buildings;
 
-        var smallDowntown = NewMaterial(new Color(0.72f, 0.72f, 0.74f));
-        var smallSuburb = NewMaterial(new Color(0.83f, 0.78f, 0.64f));
-        var mediumDowntown = NewMaterial(new Color(0.5f, 0.52f, 0.62f));
-        var mediumSuburb = NewMaterial(new Color(0.72f, 0.6f, 0.48f));
-        var large = NewMaterial(new Color(0.35f, 0.35f, 0.7f));
-        var landmark = NewMaterial(new Color(0.9f, 0.75f, 0.2f));
+        // 2026-08 (creator direction: "apply all texture and
+        // displacement map details to city building"): these six flat
+        // colors are the actual WALL every building shows to the world
+        // -- BuildingDresser only adds detail ON TOP of this massing
+        // cube (trim, windows, roof), and the facade-grammar system
+        // (docs/30) only re-skins Medium/Large's STREET-facing faces,
+        // leaving every Small-tier building (the overwhelming majority
+        // of the city -- houses, gas stations, diners) and every alley/
+        // party-wall face of Medium/Large completely untextured. Reusing
+        // `PbrTextureAtlas.Limestone` -- the same neutral, general-
+        // purpose "worn surface" texture `Concrete()`/`DressedStone()`/
+        // the faction-stone materials already tint for their own
+        // purposes -- rather than inventing a seventh texture, and
+        // keeping the EXACT same tuned colors as before (only the
+        // surface gains detail, the palette itself doesn't change) so
+        // this can't regress the district-tint/region-tint reads
+        // already built on top of these six colors elsewhere.
+        var smallDowntown = NewTexturedMaterial(new Color(0.72f, 0.72f, 0.74f), PbrTextureAtlas.Limestone);
+        var smallSuburb = NewTexturedMaterial(new Color(0.83f, 0.78f, 0.64f), PbrTextureAtlas.Limestone);
+        var mediumDowntown = NewTexturedMaterial(new Color(0.5f, 0.52f, 0.62f), PbrTextureAtlas.Limestone);
+        var mediumSuburb = NewTexturedMaterial(new Color(0.72f, 0.6f, 0.48f), PbrTextureAtlas.Limestone);
+        var large = NewTexturedMaterial(new Color(0.35f, 0.35f, 0.7f), PbrTextureAtlas.Limestone);
+        var landmark = NewTexturedMaterial(new Color(0.9f, 0.75f, 0.2f), PbrTextureAtlas.Limestone);
 
         // docs/12 Tier 3 of the graphics-upgrade plan: dressing (not
         // massing -- see the loop below) belonging to a building
@@ -2324,7 +2341,16 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var world = WorldOf(hex);
         cube.transform.position = new Vector3(world.x, y, world.z);
         cube.transform.localScale = new Vector3(hexSize * 0.9f, height, hexSize * 0.9f);
-        cube.GetComponent<Renderer>().sharedMaterial = mat;
+        var cubeRenderer = cube.GetComponent<Renderer>();
+        cubeRenderer.sharedMaterial = mat;
+        // 2026-08 ("apply all texture and displacement map details"):
+        // per-instance tiling via MaterialPropertyBlock, same Tier 1a
+        // technique (docs/12) every other textured prop in this file
+        // already uses -- a no-op for the six massing materials' old
+        // untextured incarnation (ApplyWorldScaledTiling bails out on
+        // any material with no `_BaseMap` texture assigned), so this is
+        // purely additive now that NewTexturedMaterial gives them one.
+        ApplyWorldScaledTiling(cubeRenderer, mat, cube.transform.localScale);
         if (!keepCollider)
         {
             var collider = cube.GetComponent<Collider>();
@@ -2337,6 +2363,27 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     {
         var mat = new Material(ShaderUtil.FindRenderableShader());
         mat.color = color;
+        return mat;
+    }
+
+    /// <summary>Same shape as `BuildingDresser`/`RoadDresser`'s own
+    /// `MTextured` helpers (this file didn't have one until now) --
+    /// tints a shared atlas texture rather than inventing a flat color.
+    /// A default fallback tiling is set here; `ApplyWorldScaledTiling`
+    /// (called from <see cref="SpawnCube"/>) overrides it per-instance
+    /// via MaterialPropertyBlock once the actual building height/hex
+    /// size is known, so a small house and a Landmark tower sharing this
+    /// SAME Material don't share the same stretched-or-tiny texture
+    /// scale.</summary>
+    private static Material NewTexturedMaterial(Color color, Texture2D tex)
+    {
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = color;
+        if (mat.HasProperty("_BaseMap") && tex != null)
+        {
+            mat.SetTexture("_BaseMap", tex);
+            mat.SetTextureScale("_BaseMap", new Vector2(3f, 3f));
+        }
         return mat;
     }
 

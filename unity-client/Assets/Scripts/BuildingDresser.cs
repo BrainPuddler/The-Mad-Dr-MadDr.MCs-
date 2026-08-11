@@ -95,9 +95,19 @@ public static class BuildingDresser
     }
 
     private static Material Brick() { return MTextured("brick", 0.55f, 0.27f, 0.2f, PbrTextureAtlas.Brick); }
-    private static Material Cream() { return M(0.87f, 0.82f, 0.68f); }
-    private static Material Seafoam() { return M(0.62f, 0.78f, 0.68f); }
-    private static Material Mustard() { return M(0.82f, 0.66f, 0.25f); }
+    // 2026-08 (creator direction: "apply all texture and displacement
+    // map details to city building"): these three were the last flat,
+    // untextured WALL colors in this file -- every other wall/trim
+    // material already went through MTextured, these three alone still
+    // rendered as pure flat color. PbrTextureAtlas.Limestone (same
+    // "one texture, several tinted material variants" precedent
+    // Concrete()/the faction-stone materials already use) reads fine as
+    // painted clapboard/stucco surface variation too, not just cut
+    // stone -- the mottling is generic enough weathering to serve
+    // either read.
+    private static Material Cream() { return MTextured("cream-clapboard", 0.87f, 0.82f, 0.68f, PbrTextureAtlas.Limestone); }
+    private static Material Seafoam() { return MTextured("seafoam-clapboard", 0.62f, 0.78f, 0.68f, PbrTextureAtlas.Limestone); }
+    private static Material Mustard() { return MTextured("mustard-clapboard", 0.82f, 0.66f, 0.25f, PbrTextureAtlas.Limestone); }
     private static Material Concrete() { return MTextured("limestone", 0.62f, 0.6f, 0.55f, PbrTextureAtlas.Limestone); }
     private static Material Chrome() { return MTextured("chrome", 0.78f, 0.8f, 0.82f, PbrTextureAtlas.Chrome); }
     private static Material WindowBand() { return MTextured("glass", 0.16f, 0.2f, 0.28f, PbrTextureAtlas.Glass); }
@@ -123,7 +133,11 @@ public static class BuildingDresser
     private static Material RoofTar() { return MTextured("roof-shingle-tar", 0.24f, 0.23f, 0.21f, PbrTextureAtlas.RoofShingle); }
     private static Material RoofShingleWarm() { return MTextured("roof-shingle-warm", 0.5f, 0.24f, 0.16f, PbrTextureAtlas.RoofShingle); }
     private static Material RoofShingleCool() { return MTextured("roof-shingle-cool", 0.35f, 0.42f, 0.5f, PbrTextureAtlas.RoofShingle); }
-    private static Material RustRed() { return M(0.5f, 0.24f, 0.16f); }
+    // Genuinely a structural surface color (water-tower tanks, dome
+    // roofs, canopy trim -- see call sites), not a sign/neon color, so
+    // it gets the same texture treatment as Cream/Seafoam/Mustard above
+    // rather than staying flat.
+    private static Material RustRed() { return MTextured("rust-red-surface", 0.5f, 0.24f, 0.16f, PbrTextureAtlas.Limestone); }
     private static Material NeonRed() { return M(0.95f, 0.25f, 0.3f, 1.6f); }
     private static Material NeonTeal() { return M(0.3f, 0.9f, 0.85f, 1.6f); }
     private static Material SignWhite() { return M(0.92f, 0.9f, 0.82f, 0.6f); }
@@ -487,7 +501,12 @@ public static class BuildingDresser
 
     // ---- railyard/industrial re-skin (docs/21 batch 2, item 6) -----------------
 
-    private static Material Corrugated() { return M(0.46f, 0.44f, 0.42f); }
+    // Corrugated metal siding/roofing -- a real structural surface (the
+    // industrial re-skin's own roof/tank/drum shapes below), so it gets
+    // PbrTextureAtlas.PaintedMetal (the same texture RoadDresser's own
+    // PoleMetal() already tints for painted street furniture) rather
+    // than staying flat.
+    private static Material Corrugated() { return MTextured("corrugated-metal", 0.46f, 0.44f, 0.42f, PbrTextureAtlas.PaintedMetal); }
 
     private static void DressIndustrial(RuntimeCityBuilder b, Transform t, float height, int h, bool primary)
     {
