@@ -285,6 +285,45 @@ export function weightOf(family) {
         throw new Error(`unknown part family: ${family}`);
     return f.weight ?? 1;
 }
+// 2026-08 (creator direction: "add the probability for flying units to
+// have guns projectile particle weapons"). rifle_arm is the one hand
+// family Weapon.WeaponFor (roster-client) maps to WeaponKind.Bullet --
+// "gun" in the creator's own words has no other match in this catalog
+// (laser_array/photon_blaster/plasma_lance are beam/bolt energy weapons,
+// spore_launcher is organic, chain_blade is melee).
+const GUN_FAMILY = "rifle_arm";
+/** Body plans a shoulder-mounted gun reads naturally on: an airborne
+ * frame making a strafing run. Its own small set rather than a new
+ * BodyPlan field -- only these two get the boost, not every plan that
+ * happens to fly (a floater drone-pod, for instance, reads better with
+ * its existing weapon vocabulary than with an arm it has no shoulder
+ * for). */
+const GUN_LIKELY_PLANS = new Set(["winged", "avian"]);
+/** Same relative-weight system weightOf() already exposes for the
+ * static, plan-blind case (e.g. tank_backpack/steel_tank's Human Army
+ * bias above), but conditioned on the creature's OWN body plan instead
+ * of applying everywhere. A v0.1 placeholder multiplier like every
+ * other tuning number in this project: 6x turns rifle_arm from a flat
+ * 1-in-N draw (tied with every other unweighted hand family in its
+ * origin pool) into a clearly-more-likely-but-not-guaranteed draw for a
+ * winged/avian creature, without making a gun the ONLY hand such a
+ * creature can roll -- still hash/rng-varied, just reweighted, the same
+ * "not monotone" principle the rest of this project's weighted picks
+ * follow.
+ *
+ * NOTE: rifle_arm's origin is "tech", and random generation defaults to
+ * organic-only (docs/17, `familiesInClass`'s own doc comment) -- this
+ * boost only has any effect when the caller already opts a hand's
+ * origins into `["organic", "tech"]` or similar (e.g. the Human Army
+ * spawn pool, which docs/17 already establishes issues tech equipment).
+ * A purely organic Lab breeding session is unaffected, by design: tech
+ * still only enters a genome by explicit issue, never by accident. */
+export function handFamilyWeightForPlan(family, plan) {
+    const base = weightOf(family);
+    if (family === GUN_FAMILY && GUN_LIKELY_PLANS.has(plan))
+        return base * 6;
+    return base;
+}
 export function isVestigial(family) {
     return FAMILIES[family]?.vestigial === true;
 }

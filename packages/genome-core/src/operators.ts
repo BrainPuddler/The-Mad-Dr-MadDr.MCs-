@@ -32,6 +32,7 @@ import {
 import {
   BODY_PLANS,
   familiesInClass,
+  handFamilyWeightForPlan,
   homologOf,
   originOf,
   weightOf,
@@ -75,9 +76,20 @@ export function randomAllele(
   slot: SlotName,
   rng: Rng,
   origins: readonly Origin[] = ["organic"],
+  // 2026-08 (creator direction: "add the probability for flying units to
+  // have guns projectile particle weapons"): the creature's OWN body
+  // plan, passed through only for the "hand" slot so a winged/avian
+  // creature's rifle_arm draw is boosted (handFamilyWeightForPlan's own
+  // doc comment has the full reasoning + the tech-origin-gate caveat).
+  // Every other slot ignores this -- plan-conditioned weighting is a
+  // one-family special case, not a new general mechanism.
+  plan?: string,
 ): PartAllele {
   const families = familiesInClass(slot, origins);
-  const family = rng.weightedChoice(families, families.map(weightOf));
+  const weightFn = slot === "hand" && plan
+    ? (f: string) => handFamilyWeightForPlan(f, plan)
+    : weightOf;
+  const family = rng.weightedChoice(families, families.map(weightFn));
   return { family, params: sixOf(() => rng.next()) };
 }
 
@@ -130,12 +142,18 @@ export function randomGenome(
     origins?: readonly Origin[];
   } = {},
 ): Genome {
+  // Body plan is drawn FIRST (moved ahead of the slot loop below, 2026-08)
+  // so the "hand" slot's draw can see it -- a winged/avian plan biases
+  // toward rifle_arm (handFamilyWeightForPlan). This changes the rng draw
+  // ORDER from before this feature existed: a deliberate, versioned break
+  // of the golden determinism stream (docs/12), not an accident.
+  const body = randomBody(rng, opts.plan);
   const slots = {} as Record<SlotName, PartAllele>;
-  for (const s of SLOT_NAMES) slots[s] = randomAllele(s, rng, opts.origins);
+  for (const s of SLOT_NAMES) slots[s] = randomAllele(s, rng, opts.origins, body.plan);
   const g: Genome = {
     genomeVersion: GENOME_VERSION,
     parentIds: [],
-    body: randomBody(rng, opts.plan),
+    body,
     brain: randomBrain(rng, opts.tier),
     heart: randomHeart(rng, opts.heartTier),
     slots,

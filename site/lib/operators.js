@@ -7,7 +7,7 @@
  * that pass validation (closure is enforced by tests).
  */
 import { BRAIN_TIERS, GENOME_VERSION, HEART_TIERS, SLOT_NAMES, clamp01, heartVigor, } from "./genome.js";
-import { BODY_PLANS, familiesInClass, homologOf, originOf, weightOf, } from "./catalog.js";
+import { BODY_PLANS, familiesInClass, handFamilyWeightForPlan, homologOf, originOf, weightOf, } from "./catalog.js";
 import { viability } from "./energy.js";
 const DEFAULTS = {
     rate: 0.45,
@@ -19,9 +19,20 @@ const DEFAULTS = {
 };
 const FEED_BOOST = 3;
 // ---- random generation -------------------------------------------------------
-export function randomAllele(slot, rng, origins = ["organic"]) {
+export function randomAllele(slot, rng, origins = ["organic"], 
+// 2026-08 (creator direction: "add the probability for flying units to
+// have guns projectile particle weapons"): the creature's OWN body
+// plan, passed through only for the "hand" slot so a winged/avian
+// creature's rifle_arm draw is boosted (handFamilyWeightForPlan's own
+// doc comment has the full reasoning + the tech-origin-gate caveat).
+// Every other slot ignores this -- plan-conditioned weighting is a
+// one-family special case, not a new general mechanism.
+plan) {
     const families = familiesInClass(slot, origins);
-    const family = rng.weightedChoice(families, families.map(weightOf));
+    const weightFn = slot === "hand" && plan
+        ? (f) => handFamilyWeightForPlan(f, plan)
+        : weightOf;
+    const family = rng.weightedChoice(families, families.map(weightFn));
     return { family, params: sixOf(() => rng.next()) };
 }
 export function randomBody(rng, plan) {
@@ -64,13 +75,19 @@ function fitHeart(g, headroom = 1.15) {
     return out;
 }
 export function randomGenome(rng, opts = {}) {
+    // Body plan is drawn FIRST (moved ahead of the slot loop below, 2026-08)
+    // so the "hand" slot's draw can see it -- a winged/avian plan biases
+    // toward rifle_arm (handFamilyWeightForPlan). This changes the rng draw
+    // ORDER from before this feature existed: a deliberate, versioned break
+    // of the golden determinism stream (docs/12), not an accident.
+    const body = randomBody(rng, opts.plan);
     const slots = {};
     for (const s of SLOT_NAMES)
-        slots[s] = randomAllele(s, rng, opts.origins);
+        slots[s] = randomAllele(s, rng, opts.origins, body.plan);
     const g = {
         genomeVersion: GENOME_VERSION,
         parentIds: [],
-        body: randomBody(rng, opts.plan),
+        body,
         brain: randomBrain(rng, opts.tier),
         heart: randomHeart(rng, opts.heartTier),
         slots,

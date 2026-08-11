@@ -15255,3 +15255,71 @@ established.
 citygen-core changes (`FacadeGrammar.cs` itself, the solver, is
 untouched -- this was purely a Unity-side mesh-density change). NOT
 verified visually -- no Unity Editor in this environment.
+
+## 2026-08: probability for flying units to get gun/projectile weapons
+
+Creator direction: "add the probability for flying units to have guns
+projectile particle weapons." Asked which system ("flying units" reads
+as either bred Lab creatures or the RTS army roster) and which weapon
+kind to target; creator chose both systems, and `WeaponKind.Bullet`
+(the existing "fast small projectile" kind, already what
+`rifle_arm` maps to in `Weapon.WeaponFor`) over inventing a new kind.
+
+**genome-core (bred Lab creatures) -- implemented.** `rifle_arm` is the
+ONE hand family that maps to `WeaponKind.Bullet` -- "gun" has no other
+match in the catalog (laser_array/photon_blaster/plasma_lance are beam/
+bolt energy weapons; spore_launcher is organic; chain_blade is melee).
+New `catalog.ts: handFamilyWeightForPlan(family, plan)` multiplies
+`rifle_arm`'s weight 6x specifically for `winged`/`avian` body plans,
+falling back to the existing plan-blind `weightOf` for everything else
+-- same shape as the existing tank_backpack/steel_tank Human-Army-spawn-
+pool precedent (weightOf's own doc comment), just conditioned on plan
+instead of always-on.
+
+Wiring required moving `randomBody` ahead of the per-slot loop in
+`operators.ts: randomGenome` (previously body was picked AFTER every
+slot, including hand) so the resolved plan is available when the hand
+slot's `randomAllele` call needs it -- `randomAllele` gained an optional
+4th `plan` param, used only for the `slot === "hand"` case. **This
+reorders the canonical rng draw sequence**, a deliberate, versioned
+break of `tests/golden.txt` per this project's own determinism contract
+(CLAUDE.md: "if the golden test breaks, that's a versioned breaking
+change... only deliberately") -- ran `npm run test:update-golden`
+after confirming the ONLY failure was the golden snapshot itself (all
+55 other tests green both before and after).
+
+rifle_arm's origin is "tech", and random generation defaults to
+organic-only (docs/17) -- this boost has no effect unless the caller
+already opts a hand's origins into `["organic","tech"]`. Confirmed by
+reading `mutator-service/src/service.ts:190-203` (`spawn(...)`) that
+callers can already pass `opts.origins` through to `randomGenome`, so
+this is real end-to-end wiring, not a dead code path. Manual sanity
+check (400 seeds each): a winged/tech-eligible creature rolls rifle_arm
+~52% of the time vs. a tetrapod's baseline ~13% under the same tech-
+eligible origins -- a clear, meaningful bias, not a guarantee (still
+leaves room for claw_hand/pincer/tentacle/etc., matching this project's
+"not monotone" weighted-pick convention elsewhere).
+
+**match-core (RTS army roster) -- investigated, no applicable
+mechanism found.** `UnitRosterDef.All` (`FactionRoster.cs`) is fixed
+STATIC data, not procedurally assembled per-instance -- each roster
+unit (Rifleman, Tank, ZeppelinGunship, Drone, Spitter, FloaterQueen) has
+ONE hand-tuned `CombatStats` block, always the same, with no weapon-kind
+enum or randomization anywhere in that file or in `ArmyGenerator.cs`
+(confirmed by grep: zero hits for "Weapon"/"Flying" in either file).
+`ZeppelinGunship`, the one flying Human Army unit, is already
+unconditionally gun-armed by its own fixed archetype/name -- there is no
+per-instance roll to bias, because roster units aren't instantiated with
+random attributes at all (`UnitRosterDef`'s own doc comment: match-core
+has zero reference to genome-core, "these numbers are... not a claim
+that these numbers are balanced or canon," a separate not-yet-built
+integration job). Rather than manufacture an artificial "probability"
+where the underlying system has nothing to randomize, left this side
+untouched and reporting the finding instead of a code change.
+
+**Verified:** genome-core `npm test` 56/56 green (55 unchanged + golden
+re-pinned), `npm run build` clean; `site/lib/` vendored copy rebuilt +
+recopied per this file's own build instructions; mutator-service
+rebuilt against the new genome-core and its own `npm test` (32/32)
+green. No citygen-core/match-core changes this pass (investigated, no
+applicable code to change).
