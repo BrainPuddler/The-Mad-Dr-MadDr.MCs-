@@ -25,6 +25,7 @@ public static class PbrTextureAtlas
 
     private static Texture2D _brick;
     private static Texture2D _limestone;
+    private static Texture2D _roofShingle;
     private static Texture2D _asphaltWet;
     private static Texture2D _chrome;
     private static Texture2D _paintedMetal;
@@ -33,6 +34,17 @@ public static class PbrTextureAtlas
 
     public static Texture2D Brick { get { return _brick != null ? _brick : (_brick = BuildBrick()); } }
     public static Texture2D Limestone { get { return _limestone != null ? _limestone : (_limestone = BuildLimestone()); } }
+
+    /// <summary>2026-08 ("AAA upgrades" pass, creator direction: "Create
+    /// texture maps. Brick and lime stone, roof shingles that match the
+    /// b-movie style we have established"): asphalt roofing shingles --
+    /// staggered overlapping courses (same brick-coursing IDEA as <see
+    /// cref="BuildBrick"/>, but shingles overlap DOWNWARD instead of
+    /// mortar-separating, and each course's own row reads as a stack of
+    /// slightly-uneven tabs rather than uniform bricks) plus weathered
+    /// tone variation per shingle, same jitter technique as every other
+    /// texture here.</summary>
+    public static Texture2D RoofShingle { get { return _roofShingle != null ? _roofShingle : (_roofShingle = BuildRoofShingle()); } }
     public static Texture2D AsphaltWet { get { return _asphaltWet != null ? _asphaltWet : (_asphaltWet = BuildAsphaltWet()); } }
     public static Texture2D Chrome { get { return _chrome != null ? _chrome : (_chrome = BuildChrome()); } }
     public static Texture2D PaintedMetal { get { return _paintedMetal != null ? _paintedMetal : (_paintedMetal = BuildPaintedMetal()); } }
@@ -180,6 +192,57 @@ public static class PbrTextureAtlas
             var fine = Jitter(x, y, 3);
             var v = 0.9f + (coarse * 0.7f + fine * 0.3f - 0.5f) * 0.18f;
             pixels[y * Size + x] = baseCol * v;
+        }
+        tex.SetPixels32(pixels);
+        tex.Apply(true);
+        return tex;
+    }
+
+    /// <summary>Neutral mid-gray base -- deliberately NOT baked warm or
+    /// cool (unlike <see cref="BuildBrick"/>'s own reddish base tone) so
+    /// the same texture serves both `BuildingDresser`'s warm (rust-red)
+    /// and cool (slate-blue) roof-color picks via the calling Material's
+    /// own tint, same "one neutral texture, many material-color variants"
+    /// precedent <see cref="BuildLimestone"/> already establishes (reused
+    /// tinted for concrete, faction stone, the Big Brain pedestal plaque).
+    /// Salt 40 -- picked past every salt already in use elsewhere in this
+    /// file (1-6, 11-14, 20-34).</summary>
+    private static Texture2D BuildRoofShingle()
+    {
+        var tex = NewTexture();
+        var pixels = new Color32[Size * Size];
+        const int courseHeight = 6;   // a shingle course's own row height
+        const int shadowPx = 1;       // the overlap-shadow line at each course's bottom edge
+        var baseCol = new Color(0.5f, 0.5f, 0.5f);
+        for (var y = 0; y < Size; y++)
+        {
+            var course = y / courseHeight;
+            var inCourse = y % courseHeight;
+            // staggered tab joints: odd courses offset half a tab -- the
+            // same "a real roofer staggers seams so they never stack"
+            // idea BuildBrick already uses for its own vertical joints
+            var offset = (course % 2 == 0) ? 0 : Size / 10;
+            // shadow at the BOTTOM of each course -- shingles overlap
+            // downward, so the course below reads a shadow line under
+            // the one lapping over it, not a mortar gap
+            var isShadow = inCourse >= courseHeight - shadowPx;
+            for (var x = 0; x < Size; x++)
+            {
+                var shifted = (x + offset) % Size;
+                var tabX = shifted % (Size / 5);   // ~5 tabs per course width
+                var isTabGap = tabX < 1;           // thin vertical seam between adjacent tabs
+                Color c;
+                if (isShadow || isTabGap)
+                {
+                    c = baseCol * 0.55f;
+                }
+                else
+                {
+                    var jitter = 0.82f + Jitter(x, y, 40) * 0.35f;   // per-shingle weathering
+                    c = baseCol * jitter;
+                }
+                pixels[y * Size + x] = c;
+            }
         }
         tex.SetPixels32(pixels);
         tex.Apply(true);

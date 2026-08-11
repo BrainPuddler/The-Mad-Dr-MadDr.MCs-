@@ -14560,3 +14560,108 @@ together. NOT verified visually -- no Unity Editor in this environment,
 same standing caveat as every entry in this section; the actual on-screen
 silhouette (does the new prism's proportions read as well as the old
 diamond's did) is unconfirmed until the creator's own Editor run.
+
+## 2026-08: "AAA upgrades" pass -- roof-shingle texture, real detail on plain player buildings, naturalistic window schedule wired onto them
+
+Creator direction, verbatim: "Create texture maps. Brick and lime stone,
+roof shingles that match the b-movie style we have established. Also
+add AAA building detail to player upgrades buildings. Do not touch Big
+Brain and add a random window light mapper, where a naturalistic
+windows light up at night based on a human schedule to make the city
+alive.. Use a luminous object not a shadow casting light, Keep it all
+performant by only visible area of windows are mapped."
+
+Investigated before writing anything, since two of the four asks turned
+out to already exist: `PbrTextureAtlas.Brick`/`Limestone` were already
+built (docs/23 Phase 10.3) and already wired into `BuildingDresser`'s
+walls via `MTextured`; and the "naturalistic window schedule" mechanism
+itself -- `EmissiveAnimator.LightBehaviorKind.Window`, a per-window
+randomized "someone gets home"/"someone goes to bed" schedule, real
+emissive-only via `MaterialPropertyBlock` (never a shadow-casting
+`Light`), distance-culled in `EmissiveAnimator.Tick` -- already existed
+verbatim, from an EARLIER 2026-07 creator direction quoted almost
+word-for-word by this new request. What was actually missing, and what
+this pass shipped:
+
+**Phase A -- the one genuinely missing texture.** `PbrTextureAtlas.
+RoofShingle`: a neutral mid-gray staggered-course shingle texture (same
+jitter/weathering technique as every other atlas entry), tinted per use
+via the calling Material rather than baked warm/cool, so it serves both
+the warm (rust) and cool (slate) roof-color picks. Wired into
+`BuildingDresser.RoofTar` (the flat cap every tier still spawns) and the
+new `ProceduralMeshKit.GableRoof` triangular-prism roofs (the prior
+entry's own "real triangle, not a rotated cube" fix) via two new tinted
+variants, `RoofShingleWarm`/`RoofShingleCool`.
+
+**Phase B -- real detail on the "two-primitive, flat owner-tint"
+player buildings, explicitly excluding Big Brain.** `BaseDresser`'s own
+class header already documents its two-tier reality: Factory/Control
+Centre got a full 2026-08 per-faction treatment (real PBR materials,
+rivets, pipework, windows) and Big Brain got its own "Major Improvement"
+pass, but BloodStorage/FuelStorage (`BuildTankShape`), FuelPump
+(`BuildPumpShape`), PartsStorage (`BuildWarehouseShape`), HarvestPost
+(`BuildWatchtowerShape`), and Defense (`BuildBunkerShape`) were still
+exactly two flat-`Placeholder()` primitives each, EVERY child renderer
+silently overwritten to a solid owner-tint color by `TintShape`'s own
+single-level `GetChild` sweep. Added real detail to all five, following
+the EXACT same "body stays a direct child of `root` using `Placeholder()`
+so `TintShape` keeps working unchanged; new detail geometry goes on a
+grandchild `Trim` holder with real materials" split the per-faction
+Factory/ControlCentre pass already established (its own header comment
+states this explicitly) -- riveted tank ladders/gauges, a shingled pump-
+house roof, a warehouse loading-dock recess, a watchtower railing +
+canopy, a bunker footing band + viewing slit. The Mixed-faction generic
+Hq/Factory fallbacks were deliberately left untouched -- their own doc
+comments already record a prior creator direction ("no bespoke fourth
+architectural style was asked for... kept verbatim"), which this
+request didn't override.
+
+**Phase C -- wiring the existing Window mechanism onto BaseDresser's
+own (previously always-dark) windows.** `BaseDresser` had ZERO
+`EmissiveAnimator.Register` calls anywhere before this pass -- its own
+`PedestalWindowMat` is a permanently dark, non-emissive "window void"
+(never enables `_EMISSION` at all), used uniformly for every window
+`BuildDoctorFactory`/`BuildDoctorControlCentre` spawn. A
+`MaterialPropertyBlock` override on a material whose shader never
+enabled the emission keyword renders nothing, so the fix needed a real
+LIT sibling material (`PedestalWindowGlowMat`, mirroring `BuildingDresser.
+WindowGlow`'s own emission setup) alongside the existing dark one, plus
+a shared `SpawnPedestalWindow` helper that picks each window dark/lit
+deterministically (~2-in-5 lit, `PbrTextureAtlas.Jitter`, same ratio
+`BuildingDresser.SpawnWindowStrip` already uses) and registers the lit
+ones with `EmissiveAnimator.Register(..., LightBehaviorKind.Window,
+seed)`. Wired at both Doctor-faction window sites (`BuildDoctorFactory`'s
+"gothic window voids," `BuildDoctorControlCentre`'s facade windows).
+`BuildHumanControlCentre`'s own maintenance-bay window was deliberately
+LEFT ALONE -- its own doc comment already records a prior, explicit
+"steady, not pulsing" design choice, and this request gave no reason to
+override it. Alien Factory/Control Centre and Human Factory don't spawn
+any window geometry at all currently (confirmed by grep, not assumed) --
+wiring the schedule onto them would mean inventing new window geometry
+from scratch, real but separate scope from "wire the existing mechanism
+onto existing windows," not attempted this pass. Big Brain's own
+`BuildPedestal` (which also calls `PedestalWindowMat`) was confirmed to
+have exactly one call site, entirely its own, and was not touched, per
+the creator's own explicit "do not touch Big Brain."
+
+Every listed request constraint was already satisfied by the mechanism
+being reused rather than needing new engineering: "luminous object not
+a shadow-casting light" (`MaterialPropertyBlock`-only, no `Light`
+component, confirmed by reading `EmissiveAnimator.Register`/`Apply`
+directly) and "only visible area... mapped" (`EmissiveAnimator.Tick`'s
+existing `CityLightingProfile.EmissiveTickRangeMeters` distance cull
+from `Camera.main`, applied uniformly to every registered light
+including these new ones -- not a true camera-frustum test, a distance
+radius, same approximation the rest of the lighting system already
+uses and never claimed otherwise).
+
+**Verified:** flightcheck stub-compile clean against
+`PbrTextureAtlas.cs`/`BuildingDresser.cs`/`BaseDresser.cs` together. No
+citygen-core/match-core changes this pass. NOT verified visually or for
+actual frame-time impact -- no Unity Editor in this environment, same
+standing caveat as every entry in this section. In particular: whether
+the new lit-window ratio/placement reads well on the small Doctor
+Factory/Control Centre facades (only 2-3 windows per building, so a
+"2-in-5 lit" ratio is a much coarser sample than the procedural city's
+own many-windowed apartment blocks) is unconfirmed until a real Editor
+run.

@@ -111,7 +111,18 @@ public static class BuildingDresser
     // minting a separate Material per window.
     private static readonly Color WindowGlowColor = new Color(1f, 0.85f, 0.55f);
     private static Material WindowGlow() { return M(1f, 0.85f, 0.55f, CityLightingProfile.Active.BulbEmissiveBase * 0.9f); }
-    private static Material RoofTar() { return M(0.24f, 0.23f, 0.21f); }
+
+    // 2026-08 ("AAA upgrades" pass, creator direction: "Create texture
+    // maps. Brick and lime stone, roof shingles that match the b-movie
+    // style"): PbrTextureAtlas.RoofShingle's neutral gray base tinted
+    // per use, same "one texture, several material-color variants"
+    // precedent Concrete()/faction-stone materials already use for
+    // Limestone. RoofTar (the flat cap every tier still spawns) and the
+    // gable/hip pitched-roof shapes (ProceduralMeshKit.GableRoof) all
+    // read as real shingle coursing now instead of a flat color.
+    private static Material RoofTar() { return MTextured("roof-shingle-tar", 0.24f, 0.23f, 0.21f, PbrTextureAtlas.RoofShingle); }
+    private static Material RoofShingleWarm() { return MTextured("roof-shingle-warm", 0.5f, 0.24f, 0.16f, PbrTextureAtlas.RoofShingle); }
+    private static Material RoofShingleCool() { return MTextured("roof-shingle-cool", 0.35f, 0.42f, 0.5f, PbrTextureAtlas.RoofShingle); }
     private static Material RustRed() { return M(0.5f, 0.24f, 0.16f); }
     private static Material NeonRed() { return M(0.95f, 0.25f, 0.3f, 1.6f); }
     private static Material NeonTeal() { return M(0.3f, 0.9f, 0.85f, 1.6f); }
@@ -425,8 +436,8 @@ public static class BuildingDresser
             case 0:   // suburban house: pitched gable roof + chimney
             {
                 var roofMat = suburb
-                    ? ((h / 3) % 3 != 0 ? RustRed() : M(0.35f, 0.42f, 0.5f))   // warm roof more often
-                    : ((h / 3) % 3 == 0 ? RustRed() : M(0.35f, 0.42f, 0.5f));  // cool slate more often
+                    ? ((h / 3) % 3 != 0 ? RoofShingleWarm() : RoofShingleCool())   // warm roof more often
+                    : ((h / 3) % 3 == 0 ? RoofShingleWarm() : RoofShingleCool());  // cool slate more often
                 // a real triangular-prism gable roof (ProceduralMeshKit.
                 // GableRoof) instead of a rotated cube -- see
                 // GableApexOffset's own doc comment for the placement math
@@ -590,7 +601,7 @@ public static class BuildingDresser
         {
             case 3:   // hip roof: shallow pitched ridge (solid -- registers a real landable apex)
             {
-                var ridgeMat = (h / 13) % 2 == 0 ? RustRed() : M(0.35f, 0.42f, 0.5f);
+                var ridgeMat = (h / 13) % 2 == 0 ? RoofShingleWarm() : RoofShingleCool();
                 b.SpawnMesh(GableRoofMesh(),
                     basePos + Vector3.up * (height + ApartmentRoofCapTop + ApartmentHipHeight * 0.5f),
                     new Vector3(ApartmentHipWidth, ApartmentHipHeight, ApartmentHipLength), ridgeMat, t, matte: true);

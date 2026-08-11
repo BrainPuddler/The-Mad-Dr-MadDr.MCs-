@@ -343,12 +343,38 @@ public class BaseDresser : MonoBehaviour
     /// for that.</summary>
     private void BuildTankShape(GameObject root, Vector3 fullScale)
     {
+        var origin = root.transform.position;
         var radius = Mathf.Min(fullScale.x, fullScale.z) * 0.28f;
         var bodyHeight = fullScale.y * 0.85f;
-        builder.SpawnPrim(PrimitiveType.Cylinder, root.transform.position + Vector3.up * (bodyHeight * 0.5f),
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (bodyHeight * 0.5f),
             new Vector3(radius * 2f, bodyHeight * 0.5f, radius * 2f), Placeholder(), root.transform);
-        builder.SpawnPrim(PrimitiveType.Sphere, root.transform.position + Vector3.up * bodyHeight,
+        builder.SpawnPrim(PrimitiveType.Sphere, origin + Vector3.up * bodyHeight,
             new Vector3(radius * 1.7f, radius * 1.7f, radius * 1.7f), Placeholder(), root.transform);
+
+        // 2026-08 ("AAA upgrades" pass): real riveted-vessel detail on a
+        // shared, non-faction-specific trim holder -- same grandchild-of-
+        // root split the per-faction Factory/ControlCentre pass already
+        // established (see that block's own header comment), so TintShape's
+        // owner-color sweep still only ever touches the plain body/dome
+        // above, unchanged.
+        var trim = new GameObject("TankTrim").transform;
+        trim.SetParent(root.transform, false);
+        var steel = Steel();
+        SpawnRivets(origin + Vector3.up * (bodyHeight * 0.08f), radius * 1.02f, radius * 0.05f, steel, trim, 10, 501);
+        SpawnRivets(origin + Vector3.up * (bodyHeight * 0.55f), radius * 1.02f, radius * 0.05f, steel, trim, 10, 502);
+        // a real access ladder up the tank's own side, reading as
+        // "someone services this vessel," not just a smooth cylinder
+        var ladderX = radius * 0.98f;
+        builder.SpawnPrim(PrimitiveType.Cube, origin + new Vector3(ladderX, bodyHeight * 0.5f, 0f),
+            new Vector3(radius * 0.05f, bodyHeight * 0.9f, radius * 0.22f), steel, trim);
+        // a small brass pressure gauge on the opposite face -- rotated 90
+        // degrees about Z so the cylinder's own flat cap (its default
+        // +-Y faces) points outward along X instead of straight up,
+        // reading as a dial mounted flush against the curved tank wall
+        var gaugeGo = builder.SpawnPrim(PrimitiveType.Cylinder,
+            origin + new Vector3(-ladderX * 0.9f, bodyHeight * 0.65f, radius * 0.3f),
+            new Vector3(radius * 0.18f, radius * 0.03f, radius * 0.18f), Brass(), trim);
+        gaugeGo.transform.rotation = Quaternion.Euler(0f, 0f, 90f);
     }
 
     /// <summary>FuelPump -- a small pump house plus an upright nozzle
@@ -356,40 +382,96 @@ public class BaseDresser : MonoBehaviour
     /// vessel-shaped read.</summary>
     private void BuildPumpShape(GameObject root, Vector3 fullScale)
     {
+        var origin = root.transform.position;
         var houseH = fullScale.y * 0.5f;
-        builder.SpawnPrim(PrimitiveType.Cube, root.transform.position + Vector3.up * (houseH * 0.5f),
-            new Vector3(fullScale.x * 0.55f, houseH, fullScale.z * 0.55f), Placeholder(), root.transform);
+        var houseW = fullScale.x * 0.55f;
+        var houseD = fullScale.z * 0.55f;
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (houseH * 0.5f),
+            new Vector3(houseW, houseH, houseD), Placeholder(), root.transform);
         var poleRadius = fullScale.x * 0.06f;
         var poleHeight = fullScale.y * 0.9f;
         builder.SpawnPrim(PrimitiveType.Cylinder,
-            root.transform.position + Vector3.right * (fullScale.x * 0.3f) + Vector3.up * (poleHeight * 0.5f),
+            origin + Vector3.right * (fullScale.x * 0.3f) + Vector3.up * (poleHeight * 0.5f),
             new Vector3(poleRadius * 2f, poleHeight * 0.5f, poleRadius * 2f), Placeholder(), root.transform);
+
+        // 2026-08 ("AAA upgrades" pass): shingle roof cap + a real gauge
+        // dial on a non-tinted trim holder, same grandchild-of-root split
+        // the per-faction Factory/ControlCentre pass established.
+        var trim = new GameObject("PumpTrim").transform;
+        trim.SetParent(root.transform, false);
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (houseH + 0.15f),
+            new Vector3(houseW * 1.08f, 0.3f, houseD * 1.08f), RoofShingleMat(), trim);
+        SpawnRivets(origin + Vector3.up * (poleHeight * 0.06f) + Vector3.right * (fullScale.x * 0.3f),
+            poleRadius * 1.4f, poleRadius * 0.4f, Steel(), trim, 6, 503);
+        var gaugeGo = builder.SpawnPrim(PrimitiveType.Cylinder,
+            origin + new Vector3(0f, houseH * 0.6f, houseD * 0.51f),
+            new Vector3(houseW * 0.14f, 0.02f, houseW * 0.14f), Brass(), trim);
+        gaugeGo.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
     }
 
     /// <summary>PartsStorage -- a wide low warehouse body plus a smaller
     /// raised roof vent off-center, the "long low industrial shed" read.</summary>
     private void BuildWarehouseShape(GameObject root, Vector3 fullScale)
     {
+        var origin = root.transform.position;
         var bodyH = fullScale.y * 0.7f;
-        builder.SpawnPrim(PrimitiveType.Cube, root.transform.position + Vector3.up * (bodyH * 0.5f),
-            new Vector3(fullScale.x * 0.9f, bodyH, fullScale.z * 0.9f), Placeholder(), root.transform);
+        var bodyW = fullScale.x * 0.9f;
+        var bodyD = fullScale.z * 0.9f;
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.5f),
+            new Vector3(bodyW, bodyH, bodyD), Placeholder(), root.transform);
         var ventH = fullScale.y * 0.35f;
         builder.SpawnPrim(PrimitiveType.Cube,
-            root.transform.position + Vector3.right * (fullScale.x * 0.2f) + Vector3.up * (bodyH + ventH * 0.5f),
+            origin + Vector3.right * (fullScale.x * 0.2f) + Vector3.up * (bodyH + ventH * 0.5f),
             new Vector3(fullScale.x * 0.25f, ventH, fullScale.z * 0.25f), Placeholder(), root.transform);
+
+        // 2026-08 ("AAA upgrades" pass): a shingled shed roof cap, a dark
+        // loading-dock door recess, and rivets banding the roof vent --
+        // all on a non-tinted trim holder, same split as every other kind
+        // this pass touched.
+        var trim = new GameObject("WarehouseTrim").transform;
+        trim.SetParent(root.transform, false);
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH + 0.15f),
+            new Vector3(bodyW * 1.05f, 0.3f, bodyD * 1.05f), RoofShingleMat(), trim);
+        builder.SpawnPrim(PrimitiveType.Cube,
+            origin + Vector3.forward * (bodyD * 0.5f * 0.99f) + Vector3.up * (bodyH * 0.35f),
+            new Vector3(bodyW * 0.3f, bodyH * 0.6f, fullScale.x * 0.02f), DarkRecess(), trim);
+        SpawnRivets(origin + Vector3.right * (fullScale.x * 0.2f) + Vector3.up * (bodyH + 0.02f),
+            fullScale.x * 0.14f, fullScale.x * 0.015f, Steel(), trim, 6, 504);
     }
 
     /// <summary>HarvestPost -- a thin tall pole with a platform near the
     /// top, a lookout-tower read matching its "collection point" fiction.</summary>
     private void BuildWatchtowerShape(GameObject root, Vector3 fullScale)
     {
+        var origin = root.transform.position;
         var poleRadius = fullScale.x * 0.12f;
         var poleHeight = fullScale.y * 0.95f;
-        builder.SpawnPrim(PrimitiveType.Cylinder, root.transform.position + Vector3.up * (poleHeight * 0.5f),
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (poleHeight * 0.5f),
             new Vector3(poleRadius * 2f, poleHeight * 0.5f, poleRadius * 2f), Placeholder(), root.transform);
         var platH = fullScale.y * 0.12f;
-        builder.SpawnPrim(PrimitiveType.Cube, root.transform.position + Vector3.up * (poleHeight * 0.85f),
-            new Vector3(fullScale.x * 0.8f, platH, fullScale.z * 0.8f), Placeholder(), root.transform);
+        var platY = poleHeight * 0.85f;
+        var platW = fullScale.x * 0.8f;
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * platY,
+            new Vector3(platW, platH, fullScale.z * 0.8f), Placeholder(), root.transform);
+
+        // 2026-08 ("AAA upgrades" pass): a real railing ring around the
+        // lookout platform, a small shingled collection-station canopy
+        // over it, and rivets banding the pole's own base -- non-tinted
+        // trim, same split as every other kind this pass touched.
+        var trim = new GameObject("WatchtowerTrim").transform;
+        trim.SetParent(root.transform, false);
+        var railY = platY + platH * 0.5f + fullScale.y * 0.05f;
+        var railRadius = platW * 0.5f * 0.92f;
+        const int railPosts = 8;
+        for (var i = 0; i < railPosts; i++)
+        {
+            var a = i / (float)railPosts * 2f * Mathf.PI;
+            var p = origin + new Vector3(Mathf.Sin(a) * railRadius, railY, Mathf.Cos(a) * railRadius);
+            builder.SpawnPrim(PrimitiveType.Cylinder, p, new Vector3(poleRadius * 0.15f, fullScale.y * 0.05f, poleRadius * 0.15f), Steel(), trim);
+        }
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (platY + fullScale.y * 0.16f),
+            new Vector3(platW * 0.5f, 0.2f, fullScale.z * 0.5f), RoofShingleMat(), trim);
+        SpawnRivets(origin + Vector3.up * (poleHeight * 0.04f), poleRadius * 1.1f, poleRadius * 0.15f, Steel(), trim, 8, 505);
     }
 
     /// <summary>Factory -- a large body plus a tall thin smokestack
@@ -431,12 +513,29 @@ public class BaseDresser : MonoBehaviour
     /// on top, a pillbox read.</summary>
     private void BuildBunkerShape(GameObject root, Vector3 fullScale)
     {
+        var origin = root.transform.position;
         var bodyH = fullScale.y * 0.5f;
-        builder.SpawnPrim(PrimitiveType.Cube, root.transform.position + Vector3.up * (bodyH * 0.5f),
-            new Vector3(fullScale.x * 0.95f, bodyH, fullScale.z * 0.95f), Placeholder(), root.transform);
+        var bodyW = fullScale.x * 0.95f;
+        var bodyD = fullScale.z * 0.95f;
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.5f),
+            new Vector3(bodyW, bodyH, bodyD), Placeholder(), root.transform);
         var domeRadius = fullScale.x * 0.3f;
-        builder.SpawnPrim(PrimitiveType.Sphere, root.transform.position + Vector3.up * (bodyH + domeRadius * 0.6f),
+        var domeY = bodyH + domeRadius * 0.6f;
+        builder.SpawnPrim(PrimitiveType.Sphere, origin + Vector3.up * domeY,
             new Vector3(domeRadius * 2f, domeRadius * 1.3f, domeRadius * 2f), Placeholder(), root.transform);
+
+        // 2026-08 ("AAA upgrades" pass): a limestone footing band, a dark
+        // viewing-slit recess on the dome, and rivets ringing its base --
+        // non-tinted trim, same split as every other kind this pass
+        // touched.
+        var trim = new GameObject("BunkerTrim").transform;
+        trim.SetParent(root.transform, false);
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.06f),
+            new Vector3(bodyW * 1.03f, bodyH * 0.12f, bodyD * 1.03f), DoctorStone(), trim);
+        builder.SpawnPrim(PrimitiveType.Cube,
+            origin + Vector3.forward * (domeRadius * 0.95f) + Vector3.up * domeY,
+            new Vector3(domeRadius * 0.5f, domeRadius * 0.18f, domeRadius * 0.3f), DarkRecess(), trim);
+        SpawnRivets(origin + Vector3.up * bodyH, domeRadius * 1.05f, domeRadius * 0.08f, Steel(), trim, 10, 506);
     }
 
     /// <summary>Hq -- a tall keep plus a smaller turret perched off-center
@@ -614,15 +713,14 @@ public class BaseDresser : MonoBehaviour
                 new Vector3(pilasterW, pilasterH, pilasterW), stoneMat, trim);
         }
 
-        var windowMat = PedestalWindowMat();
         var windowH = bodyH * 0.5f;
         var windowW = fullScale.x * 0.08f;
         float[] windowXFrac = { -0.28f, 0f, 0.28f };
-        foreach (var xf in windowXFrac)
+        for (var wi = 0; wi < windowXFrac.Length; wi++)
         {
-            builder.SpawnPrim(PrimitiveType.Cube,
-                origin + new Vector3(xf * bodyW, bodyH * 0.5f, bodyD * 0.5f * 0.99f),
-                new Vector3(windowW, windowH, fullScale.x * 0.02f), windowMat, trim);
+            var xf = windowXFrac[wi];
+            SpawnPedestalWindow(trim, origin + new Vector3(xf * bodyW, bodyH * 0.5f, bodyD * 0.5f * 0.99f),
+                new Vector3(windowW, windowH, fullScale.x * 0.02f), wi, 511);
         }
 
         var tankRadius = fullScale.x * 0.11f;
@@ -734,15 +832,14 @@ public class BaseDresser : MonoBehaviour
                 new Vector3(pilasterW, pilasterH, pilasterW), stoneMat, trim);
         }
 
-        var windowMat = PedestalWindowMat();
         var windowH = bodyH * 0.35f;
         var windowW = fullScale.x * 0.07f;
         float[] windowXFrac = { -0.2f, 0.2f };
-        foreach (var xf in windowXFrac)
+        for (var wi = 0; wi < windowXFrac.Length; wi++)
         {
-            builder.SpawnPrim(PrimitiveType.Cube,
-                origin + new Vector3(xf * bodyW, bodyH * 0.55f, bodyD * 0.5f * 0.99f),
-                new Vector3(windowW, windowH, fullScale.x * 0.02f), windowMat, trim);
+            var xf = windowXFrac[wi];
+            SpawnPedestalWindow(trim, origin + new Vector3(xf * bodyW, bodyH * 0.55f, bodyD * 0.5f * 0.99f),
+                new Vector3(windowW, windowH, fullScale.x * 0.02f), wi, 512);
         }
 
         var coreCenter = origin + Vector3.up * (bodyH * 0.22f) + Vector3.forward * (bodyD * 0.5f * 0.98f);
@@ -1702,6 +1799,27 @@ public class BaseDresser : MonoBehaviour
         return MTextured("big-brain-steel-rivet", 0.55f, 0.56f, 0.58f, null, 0.55f, 0.85f);
     }
 
+    /// <summary>2026-08 ("AAA upgrades" pass): a neutral dark asphalt-
+    /// shingle roof cap, shared across every plain-tier player building's
+    /// own trim -- same PbrTextureAtlas.RoofShingle texture <see
+    /// cref="BuildingDresser.RoofTar"/> now uses for the procedural
+    /// city's own flat-cap roofs (see that method's own doc comment),
+    /// tinted matte-dark here rather than re-deriving a second texture.</summary>
+    private static Material RoofShingleMat()
+    {
+        return MTextured("roof-shingle", 0.3f, 0.28f, 0.26f, PbrTextureAtlas.RoofShingle, 0f);
+    }
+
+    /// <summary>2026-08 ("AAA upgrades" pass): a flat dark recess/void --
+    /// same untextured-flat-color-via-MTextured idiom <see cref="Steel"/>
+    /// already uses (`tex: null`), same color BuildingDresser.DarkRecess
+    /// already establishes for a door/window void, reused here rather
+    /// than re-deriving a second dark tone.</summary>
+    private static Material DarkRecess()
+    {
+        return MTextured("dark-recess", 0.09f, 0.09f, 0.11f, null);
+    }
+
     /// <summary>2026-08 (ornate pedestal: "Make the base more ornate yet
     /// should feel like a building"). Dark, faintly glassy voids for the
     /// door/window recesses -- these read as openings into an interior,
@@ -1717,6 +1835,66 @@ public class BaseDresser : MonoBehaviour
         if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.45f);
         _pedestalWindowMat = mat;
         return _pedestalWindowMat;
+    }
+
+    /// <summary>2026-08 ("AAA upgrades" pass, creator direction: "a random
+    /// window light mapper, where naturalistic windows light up at
+    /// night... use a luminous object not a shadow casting light"): the
+    /// LIT sibling of <see cref="PedestalWindowMat"/>'s dark window void
+    /// -- that material never enables `_EMISSION` at all (a genuinely
+    /// unlit recess, per its own doc comment), so it can't be made to
+    /// glow via a MaterialPropertyBlock override; a shader with the
+    /// emission keyword off simply ignores `_EmissionColor` regardless of
+    /// what a property block sets it to. This is a SEPARATE material,
+    /// same split BuildingDresser.WindowBand/WindowGlow already uses for
+    /// the procedural city's own dark-vs-lit window strips -- only
+    /// windows picked "lit" (see the per-window loops below) get this
+    /// one; the rest stay on the existing dark void.</summary>
+    private static Material _pedestalWindowGlowMat;
+    private static Material PedestalWindowGlowMat()
+    {
+        if (_pedestalWindowGlowMat != null) return _pedestalWindowGlowMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        var c = new Color(1f, 0.85f, 0.55f);
+        mat.color = c;
+        if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.45f);
+        mat.EnableKeyword("_EMISSION");
+        var baseEmission = c * CityLightingProfile.Active.BulbEmissiveBase * 0.9f;
+        mat.SetColor("_EmissionColor", baseEmission);
+        NeonRegistry.Register(mat, baseEmission);
+        _pedestalWindowGlowMat = mat;
+        return _pedestalWindowGlowMat;
+    }
+
+    /// <summary>2026-08 ("AAA upgrades" pass, creator direction: "a random
+    /// window light mapper, where naturalistic windows light up at night
+    /// based on a human schedule to make the city alive"): spawns one
+    /// Doctor-faction Factory/Control Centre window, deterministically
+    /// dark or lit (~2-in-5 lit, same ratio BuildingDresser.
+    /// SpawnWindowStrip already uses for the procedural city's own
+    /// windows -- <see cref="PbrTextureAtlas.Jitter"/> is the SAME
+    /// deterministic hash that file's own rivet-jitter calls already use,
+    /// not a fresh RNG). A lit window gets <see cref="PedestalWindowGlowMat"/>
+    /// plus an <see cref="EmissiveAnimator"/> Window registration -- real
+    /// per-instance occupancy scheduling via MaterialPropertyBlock, no
+    /// shadow-casting Light, and it self-culls by distance in
+    /// EmissiveAnimator.Tick's own CityLightingProfile.EmissiveTickRangeMeters
+    /// check, same as every other registered light in the city. `index`
+    /// distinguishes windows within one call (0, 1, 2...); `seedSalt`
+    /// distinguishes one CALL SITE from another (Factory vs Control
+    /// Centre) so the two don't draw from the identical jitter stream.</summary>
+    private void SpawnPedestalWindow(Transform parent, Vector3 pos, Vector3 scale, int index, int seedSalt)
+    {
+        var lit = PbrTextureAtlas.Jitter(index, seedSalt, 110) < 0.4f;
+        if (!lit)
+        {
+            builder.SpawnPrim(PrimitiveType.Cube, pos, scale, PedestalWindowMat(), parent);
+            return;
+        }
+        var go = builder.SpawnPrim(PrimitiveType.Cube, pos, scale, PedestalWindowGlowMat(), parent);
+        EmissiveAnimator.Register(go.GetComponent<Renderer>(),
+            new Color(1f, 0.85f, 0.55f) * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
+            LightBehaviorKind.Window, PbrTextureAtlas.Jitter(index, seedSalt, 111));
     }
 
     /// <summary>The cornerstone plaque's own light stone/bronze tone,
