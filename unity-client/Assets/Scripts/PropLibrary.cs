@@ -48,6 +48,12 @@ public static class PropLibrary
         // gentler taper for the Human Alliance's cooling towers.
         Register("alien-crystal-spike", () => ProceduralMeshKit.Frustum(1f, 0.15f, 6));
         Register("human-cooling-tower", () => ProceduralMeshKit.Frustum(1f, 0.7f, 12));
+        // 2026-08 (faction gauntlet, docs/31 §5, "1950s-70s B-movie
+        // mechanical apparatus... horn antennas"): a wide-mouth funnel,
+        // the inverse taper of alien-crystal-spike (wide end forward,
+        // narrow throat at the mount) -- same Frustum generator, a
+        // different pair of radii is the whole difference.
+        Register("alien-horn-antenna", () => ProceduralMeshKit.Frustum(1f, 0.35f, 10));
 
         // 2026-08 docs/30 (facade grammar): the module mesh-swap points.
         // Deliberately left UNREGISTERED -- FacadeKit spawns each of these

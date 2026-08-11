@@ -14665,3 +14665,102 @@ Factory/Control Centre facades (only 2-3 windows per building, so a
 "2-in-5 lit" ratio is a much coarser sample than the procedural city's
 own many-windowed apartment blocks) is unconfirmed until a real Editor
 run.
+
+## 2026-08: faction gauntlet Phases 1-2 -- per-faction windows and antennas (docs/31)
+
+Creator direction: a full "CLAUDE CODE -- EXECUTABLE ART/DESIGN GAUNTLET"
+covering strict per-faction architectural/window/antenna/lighting design
+languages, plus an addendum mandating Alien buildings' massing become
+flying-saucer/connected-saucer architecture. Captured in full as
+[docs/31](31-faction-building-architecture.md), the new authoritative
+reference for `BaseDresser.cs`'s per-faction Factory/Control Centre
+visuals. This entry logs Phases 1-2; Phases 3-6 (Mad Doctor gothic
+castle transform, Alien saucer massing, Big Brain lighthouse base,
+cross-phase emphasis lighting) remain not started, tracked in docs/31 §7.
+
+**Phase 1 -- windows (commit `0e793e2`, this entry is the docs/12 log a
+prior pass in this session omitted).** Alien gets brass-riveted
+portholes (`SpawnAlienPorthole`, round glass + rivet ring, oriented via
+`Quaternion.LookRotation` on an `outwardDir` parameter so it's correct
+on any face, not hardcoded to +Z); Mad Doctor gets castle arrow slits
+(`SpawnArrowSlit`, `DoctorStone` frame + a narrow recessed void, jittered
+irregular offsets); Human keeps its existing "steady, not pulsing"
+maintenance-bay/observation-deck windows (own doc comment already
+recorded that choice, no reason to override it here).
+
+**Phase 2 -- antennas (this entry), replacing three roofline mounts on
+each faction's Control Centre with the docs/31 §5 brief's modular
+primary/secondary/tertiary apparatus.** Factory methods keep their
+existing roofline detail -- matching Phase 1's own scope (Control Centre
+only), not a new restriction.
+
+- **Mad Doctor** (`BuildDoctorControlCentre`): the old symmetric 4-rod
+  roofline ring is replaced by a Tesla apparatus EXTENDING the already-
+  built `TeslaArc.cs` rod/arc (`rodTip`/`arcAnchor`) rather than a second
+  disconnected mast -- a tapering copper coil (four rings shrinking up
+  the mast) with a ceramic insulator stud (new `Ceramic()` material,
+  `MTextured` idiom, untextured glazed off-white) at each ring, two
+  deliberately UNEVEN branching rods (`Quaternion.FromToRotation`, not a
+  symmetric pair), and a glowing lamp at the tip (`SpawnPulseLight`).
+- **Human** (`BuildHumanControlCentre`): the old spinning communication
+  dish (`SlowSpin` + a flat disc, its own doc comment explicitly said it
+  "reads as a radar sweep") plus roofline sensor spikes and an antenna
+  cluster are replaced by a real Art Deco setback mast -- three stacked,
+  progressively narrower drum tiers (the "setback" silhouette RKO/RCA
+  towers are named for), four vertical fin blades fanning off the mast
+  base, a stepped ledge where the mast narrows, and a slender finial
+  capped by a STEADY (not pulsing -- `HumanBlueLightMat`'s own "clean and
+  functional" design language, reused rather than inventing a new pulsing
+  beacon) blue light. `SlowSpin.cs` itself is untouched, still used
+  elsewhere (Alien crystal spike/rings, Human cooling-tower wheel).
+- **Alien** (`BuildAlienControlCentre`): the old five-fold RADIALLY
+  SYMMETRIC crystalline-antenna ring is replaced by a real bolted-on
+  B-movie mechanical apparatus, mounted at ONE asymmetric roofline point
+  rather than repeated -- symmetry itself is what the brief calls out as
+  wrong here ("asymmetrical, uneven silhouette -- the opposite of Human's
+  strict symmetry"). A heavy rotating drum base (`SlowSpin`, brass-
+  riveted via the existing `SpawnRivets` tertiary-detail helper), an
+  oversized shallow dish tilted off-vertical on a short pivot mast, a
+  horn antenna at its own uneven angle (new `ProceduralMeshKit.Frustum`-
+  based `alien-horn-antenna` prop, registered in `PropLibrary` alongside
+  the existing `alien-crystal-spike`/`human-cooling-tower` entries -- same
+  generator, different taper), a three-tier telescoping rod mast offset
+  from the dish entirely, a loop antenna standing on the telescope, a
+  sagging two-segment bundled cable between the two rigs
+  (`Quaternion.FromToRotation`, not a straight run), and an analog-meter
+  void (`DarkRecess`) + pulsing purple indicator lamp (`AlienGlowMat`,
+  this faction's own established glow color, not a new one). New
+  `AlienGunmetal()` material for the housings/dishes/rods -- reuses
+  `PbrTextureAtlas.CastIron` (the same shared texture `DoctorIron`
+  already established) tinted dark purple-gray, distinct from
+  `AlienCrystalMat`/`AlienMembraneMat`'s own organic-hull read.
+
+**Two design conflicts surfaced and resolved during implementation** (the
+creator's own gauntlet text asked for these to be reported):
+
+1. Alien's prior "no visible bolts/rivets anywhere... avoid visible
+   bolts and human engineering" restraint directly contradicts this
+   gauntlet's "full mechanical apparatus" antenna brief. Already
+   surfaced and resolved during Phase 1 (`SpawnAlienPorthole`'s own
+   conflict) via `AskUserQuestion` -- the creator's explicit answer,
+   "New gauntlet wins -- go full mechanical," is the standing resolution
+   this phase's Alien antenna rig applies without a second pause.
+2. Human's prior Control Centre doc comment described its communication
+   dish as deliberately reading "as a radar sweep," which directly
+   contradicts docs/31 §5's explicit "never modern telecom/cellular...
+   avoid modern military radar dishes" for the Art Deco tower spec. No
+   prior creator quote defends the radar-dish read the way the Alien
+   "no rivets" direction was explicitly defended, so this was judged
+   lower-stakes and resolved the same direction (new gauntlet brief
+   wins) without a second confirmation round, consistent with the
+   session's own "continue with execution" instruction.
+
+**Verified:** flightcheck stub-compile clean against `BaseDresser.cs`/
+`PropLibrary.cs` together (the scratch harness rebuilt fresh this
+session, per that harness's own standing caveat that it lives outside
+the repo and isn't persisted between sessions). No citygen-core/
+match-core changes this pass. NOT verified visually -- no Unity Editor
+in this environment, same standing caveat as every entry in this
+section; whether the Alien rig's asymmetric single-point placement and
+the Human mast's stacked-drum proportions read correctly at typical RTS
+camera height is unconfirmed until a real Editor run.

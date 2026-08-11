@@ -806,19 +806,52 @@ public class BaseDresser : MonoBehaviour
         builder.SpawnPrim(PrimitiveType.Sphere, arcAnchor, Vector3.one * (fullScale.x * 0.02f), brassMat, trim);
         SpawnArc(trim, rodTip, arcAnchor, DoctorGlowMat(), new Color(0.55f, 1f, 0.6f, 0.85f), fullScale.x * 0.015f);
 
-        // mechanical antenna rods around the turret roofline
-        var antennaCount = 4;
-        var antennaR = turretSize * 0.42f;
-        for (var i = 0; i < antennaCount; i++)
+        // 2026-08 (docs/31, "Mad Doctor antennas... central mast +
+        // oversized electromagnetic coil + branching rods + ceramic
+        // insulators... glowing indicator lamps"): replaces the old
+        // symmetric 4-rod roofline ring with a real apparatus, EXTENDING
+        // the Tesla rod/arc just above (rodTip/arcAnchor) rather than
+        // inventing a second, disconnected mast.
+        var copperMat = DoctorCopper();
+        var ceramicMat = Ceramic();
+        var mastTop = rodTip + Vector3.up * (turretH * 0.4f);
+        builder.SpawnPrim(PrimitiveType.Cylinder, (rodTip + mastTop) * 0.5f,
+            new Vector3(fullScale.x * 0.01f, (mastTop.y - rodTip.y) * 0.5f, fullScale.x * 0.01f), brassMat, trim);
+
+        // tapering copper coil climbing the mast, a ceramic insulator
+        // stud where each ring meets the mast
+        const int coilRings = 4;
+        for (var ci = 0; ci < coilRings; ci++)
         {
-            var angleDeg = i / (float)antennaCount * 360f;
-            var rad = angleDeg * Mathf.Deg2Rad;
-            var basePos = turretCenter + Vector3.up * (turretH * 0.5f) + new Vector3(Mathf.Sin(rad) * antennaR, 0f, Mathf.Cos(rad) * antennaR);
-            var tipPos = basePos + Vector3.up * (fullScale.y * 0.06f);
-            builder.SpawnPrim(PrimitiveType.Cylinder, (basePos + tipPos) * 0.5f,
-                new Vector3(fullScale.x * 0.01f, (tipPos.y - basePos.y) * 0.5f, fullScale.x * 0.01f), brassMat, trim);
-            builder.SpawnPrim(PrimitiveType.Sphere, tipPos, Vector3.one * (fullScale.x * 0.018f), brassMat, trim);
+            var t = ci / (float)(coilRings - 1);
+            var y = Mathf.Lerp(rodTip.y, mastTop.y, t);
+            var ringR = fullScale.x * Mathf.Lerp(0.05f, 0.02f, t);
+            builder.SpawnPrim(PrimitiveType.Cylinder, new Vector3(rodTip.x, y, rodTip.z),
+                new Vector3(ringR * 2f, fullScale.x * 0.006f, ringR * 2f), copperMat, trim);
+            builder.SpawnPrim(PrimitiveType.Sphere, new Vector3(rodTip.x + ringR, y, rodTip.z),
+                Vector3.one * (fullScale.x * 0.014f), ceramicMat, trim);
         }
+
+        // two branching rods at deliberately UNEVEN angles/lengths --
+        // the brief's own "irregular and asymmetrical," not a
+        // symmetric ring like the loop this replaces
+        var coilMidY = (rodTip.y + mastTop.y) * 0.5f;
+        var rodOrigin = new Vector3(rodTip.x, coilMidY, rodTip.z);
+        float[] rodAngleDeg = { 35f, 205f };
+        float[] rodLenFrac = { 0.5f, 0.3f };
+        for (var ri = 0; ri < rodAngleDeg.Length; ri++)
+        {
+            var rad = rodAngleDeg[ri] * Mathf.Deg2Rad;
+            var rodLen = turretH * rodLenFrac[ri];
+            var rodEnd = rodOrigin + new Vector3(Mathf.Sin(rad), 0.4f, Mathf.Cos(rad)) * rodLen;
+            var rodGo = builder.SpawnPrim(PrimitiveType.Cylinder, (rodOrigin + rodEnd) * 0.5f,
+                new Vector3(fullScale.x * 0.008f, (rodEnd - rodOrigin).magnitude * 0.5f, fullScale.x * 0.008f), brassMat, trim);
+            rodGo.transform.rotation = Quaternion.FromToRotation(Vector3.up, rodEnd - rodOrigin);
+        }
+
+        // glowing indicator lamp at the mast tip
+        var lampGo = builder.SpawnPrim(PrimitiveType.Sphere, mastTop, Vector3.one * (fullScale.x * 0.03f), DoctorGlowMat(), trim);
+        SpawnPulseLight(trim, mastTop, lampGo, new Color(0.55f, 1f, 0.6f), new Color(0.55f, 1f, 0.6f) * 1.3f, fullScale.x * 3f, 3.4f);
 
         // 2026-08 (creator direction: "the edge objects need to be thicker
         // and protrude more" -- confirmed as the corner pilasters, same fix
@@ -952,11 +985,17 @@ public class BaseDresser : MonoBehaviour
     /// <summary>Alien faction Control Centre -- "the hive mind": a
     /// massive floating central crystal (replacing the turret slot,
     /// same offset/height envelope) with orbiting energy rings, curved
-    /// support struts, crystalline antennae, and a pulsing psychic core.
+    /// support struts, and a pulsing psychic core.
     /// 2026-08 (docs/31): now ALSO gets brass-riveted portholes on the
     /// body's own front face -- see SpawnAlienPorthole's own doc comment
     /// for why "no rivets/bolts anywhere" (this method's own prior
-    /// restraint, matching the Factory's) was explicitly superseded.</summary>
+    /// restraint, matching the Factory's) was explicitly superseded.
+    /// 2026-08 (faction gauntlet, docs/31 §5): the roofline's own
+    /// five-fold symmetric crystalline-antenna ring is replaced by a
+    /// real B-movie mechanical-apparatus rig (rotating drum + tilted
+    /// dish + horn antenna + telescoping mast + loop antenna + sagging
+    /// cable + meter/lamp), mounted at ONE asymmetric point rather than
+    /// repeated radially -- see that block's own doc comment.</summary>
     private void BuildAlienControlCentre(GameObject root, Vector3 fullScale)
     {
         var origin = root.transform.position;
@@ -1016,18 +1055,91 @@ public class BaseDresser : MonoBehaviour
             ringGo.AddComponent<SlowSpin>().degreesPerSecond = ringSpeeds[i];
         }
 
-        // crystalline antennae around the roofline
-        var antennaCount = 5;
-        var antennaR = Mathf.Min(bodyW, bodyD) * 0.4f;
-        for (var i = 0; i < antennaCount; i++)
+        // 2026-08 (faction gauntlet, docs/31 §5, "1950s-70s B-movie
+        // mechanical apparatus... exposed pivots/gears/bearings...
+        // asymmetrical, uneven silhouette -- the opposite of Human's
+        // strict symmetry"): replaces the old five-fold RADIALLY
+        // SYMMETRIC crystalline-antenna ring with a real bolted-on
+        // communications rig, mounted at ONE point on the roofline
+        // rather than repeated -- symmetry itself is the thing this
+        // brief calls out as wrong for this faction.
+        var gunmetalMat = AlienGunmetal();
+        var brassMat = Brass();
+        var rigBase = origin + new Vector3(-Mathf.Min(bodyW, bodyD) * 0.32f, bodyH, Mathf.Min(bodyW, bodyD) * 0.1f);
+
+        // primary: a heavy rotating drum base, brass-riveted -- matches
+        // the "captured/bolted spacecraft" read SpawnAlienPorthole
+        // already established for this faction rather than a fresh idiom
+        var drumR = fullScale.x * 0.09f;
+        var drumH = fullScale.y * 0.05f;
+        var drumGo = builder.SpawnPrim(PrimitiveType.Cylinder, rigBase + Vector3.up * (drumH * 0.5f),
+            new Vector3(drumR * 2f, drumH, drumR * 2f), gunmetalMat, trim);
+        drumGo.AddComponent<SlowSpin>().degreesPerSecond = 5f;
+        SpawnRivets(rigBase + Vector3.up * drumH, drumR * 0.9f, fullScale.x * 0.006f, brassMat, trim, 8, 531);
+
+        // primary: an oversized shallow dish on a short pivot mast,
+        // tilted off-vertical -- "oversized parabolic dish"
+        var dishMastH = fullScale.y * 0.09f;
+        builder.SpawnPrim(PrimitiveType.Cylinder, rigBase + Vector3.up * (drumH + dishMastH * 0.5f),
+            new Vector3(fullScale.x * 0.015f, dishMastH * 0.5f, fullScale.x * 0.015f), gunmetalMat, trim);
+        var dishMastTop = rigBase + Vector3.up * (drumH + dishMastH);
+        var dishR = fullScale.x * 0.15f;
+        var dishGo = builder.SpawnPrim(PrimitiveType.Cylinder, dishMastTop,
+            new Vector3(dishR * 2f, fullScale.x * 0.015f, dishR * 2f), gunmetalMat, trim);
+        dishGo.transform.rotation = Quaternion.Euler(35f, 25f, 0f);
+
+        // secondary: a horn antenna at its own uneven angle off the drum
+        var hornGo = PropLibrary.Spawn(builder, "alien-horn-antenna", PrimitiveType.Cylinder,
+            rigBase + Vector3.up * (drumH + fullScale.x * 0.02f) + Vector3.right * (drumR * 1.1f),
+            new Vector3(fullScale.x * 0.045f, fullScale.x * 0.13f, fullScale.x * 0.045f), gunmetalMat, trim);
+        hornGo.transform.rotation = Quaternion.Euler(-45f, 70f, 0f);
+
+        // secondary: a telescoping rod mast, three shrinking segments,
+        // offset from the dish rig entirely -- keeps the whole apparatus
+        // reading as uneven/asymmetrical rather than one tidy cluster
+        var telescopeBase = origin + new Vector3(Mathf.Min(bodyW, bodyD) * 0.28f, bodyH, -Mathf.Min(bodyW, bodyD) * 0.15f);
+        const int telescopeTiers = 3;
+        var segH = fullScale.y * 0.055f;
+        var segTopY = telescopeBase.y;
+        for (var ti = 0; ti < telescopeTiers; ti++)
         {
-            var angleDeg = i / (float)antennaCount * 360f;
-            var rad = angleDeg * Mathf.Deg2Rad;
-            var pos = origin + new Vector3(Mathf.Sin(rad) * antennaR, bodyH, Mathf.Cos(rad) * antennaR);
-            var spikeH = fullScale.x * 0.16f;
-            PropLibrary.Spawn(builder, "alien-crystal-spike", PrimitiveType.Cylinder, pos + Vector3.up * (spikeH * 0.5f),
-                new Vector3(fullScale.x * 0.05f, spikeH, fullScale.x * 0.05f), crystalMat, trim);
+            var segR = fullScale.x * (0.02f - ti * 0.005f);
+            builder.SpawnPrim(PrimitiveType.Cylinder, new Vector3(telescopeBase.x, segTopY + segH * 0.5f, telescopeBase.z),
+                new Vector3(segR * 2f, segH * 0.5f, segR * 2f), gunmetalMat, trim);
+            segTopY += segH;
         }
+
+        // secondary: a loop antenna standing upright atop the telescope
+        var loopR = fullScale.x * 0.045f;
+        var loopGo = builder.SpawnPrim(PrimitiveType.Cylinder,
+            new Vector3(telescopeBase.x, segTopY + loopR, telescopeBase.z),
+            new Vector3(loopR * 2f, fullScale.x * 0.006f, loopR * 2f), brassMat, trim);
+        loopGo.transform.rotation = Quaternion.Euler(0f, 0f, 90f);
+
+        // tertiary: a sagging bundled cable between the two rigs -- two
+        // segments meeting at a drooped midpoint, not a straight run
+        var cableStart = rigBase + Vector3.up * (drumH * 1.6f);
+        var cableEnd = new Vector3(telescopeBase.x, telescopeBase.y + segH * 0.5f, telescopeBase.z);
+        var cableSag = (cableStart + cableEnd) * 0.5f - Vector3.up * (fullScale.y * 0.025f);
+        var cableGo1 = builder.SpawnPrim(PrimitiveType.Cylinder, (cableStart + cableSag) * 0.5f,
+            new Vector3(fullScale.x * 0.006f, (cableSag - cableStart).magnitude * 0.5f, fullScale.x * 0.006f), gunmetalMat, trim);
+        cableGo1.transform.rotation = Quaternion.FromToRotation(Vector3.up, cableSag - cableStart);
+        var cableGo2 = builder.SpawnPrim(PrimitiveType.Cylinder, (cableSag + cableEnd) * 0.5f,
+            new Vector3(fullScale.x * 0.006f, (cableEnd - cableSag).magnitude * 0.5f, fullScale.x * 0.006f), gunmetalMat, trim);
+        cableGo2.transform.rotation = Quaternion.FromToRotation(Vector3.up, cableEnd - cableSag);
+
+        // tertiary: an analog meter face on the drum housing (dark void,
+        // the same DarkRecess idiom pedestal/window voids already use)
+        // and a pulsing purple indicator lamp on the dish mast --
+        // AlienGlowMat matches this faction's own established glow
+        // language rather than inventing a new color
+        var meterGo = builder.SpawnPrim(PrimitiveType.Cylinder,
+            rigBase + Vector3.right * (drumR * 1.02f) + Vector3.up * (drumH * 0.6f),
+            new Vector3(fullScale.x * 0.028f, fullScale.x * 0.002f, fullScale.x * 0.028f), DarkRecess(), trim);
+        meterGo.transform.rotation = Quaternion.Euler(0f, 0f, 90f);
+        var lampPos = dishMastTop + Vector3.up * (fullScale.x * 0.02f);
+        var lampGo = builder.SpawnPrim(PrimitiveType.Sphere, lampPos, Vector3.one * (fullScale.x * 0.016f), AlienGlowMat(), trim);
+        SpawnPulseLight(trim, lampPos, lampGo, new Color(0.62f, 0.25f, 0.95f), new Color(0.62f, 0.25f, 0.95f) * 1.3f, fullScale.x * 2f, 2.8f);
 
         // pulsing psychic core at the crystal's own heart
         var coreGo = builder.SpawnPrim(PrimitiveType.Sphere, crystalCenter, Vector3.one * (fullScale.x * 0.1f), AlienGlowMat(), trim);
@@ -1125,12 +1237,16 @@ public class BaseDresser : MonoBehaviour
     }
 
     /// <summary>Human Alliance faction Control Centre -- "modern orbital
-    /// command headquarters": aluminum keep with a slowly rotating
-    /// communication dish on the reinforced tower (SlowSpin.cs -- a safe
-    /// vertical spin, no tilted mount, so it reads as a radar sweep
-    /// without needing any static rotation this environment has no
-    /// Editor to render-verify), sensor towers, an antenna cluster, and
-    /// a steady illuminated blue observation-deck band.</summary>
+    /// command headquarters": aluminum keep with a reinforced tower.
+    ///
+    /// 2026-08 (faction gauntlet, docs/31 §5): the tower's roofline
+    /// mount used to be a slowly rotating communication dish (SlowSpin.cs)
+    /// plus roofline sensor spikes and an antenna cluster -- the gauntlet
+    /// brief calls that out explicitly ("avoid modern military radar
+    /// dishes"), so it's replaced with a real Art Deco setback broadcast
+    /// mast (see the mast-tier/fin/finial block below); SlowSpin.cs is no
+    /// longer referenced by this method. A steady illuminated blue
+    /// observation-deck band remains.</summary>
     private void BuildHumanControlCentre(GameObject root, Vector3 fullScale)
     {
         var origin = root.transform.position;
@@ -1149,41 +1265,62 @@ public class BaseDresser : MonoBehaviour
         var trim = new GameObject("HqTrim").transform;
         trim.SetParent(root.transform, false);
         var aluminumMat = HumanAluminum();
+        var carbonMat = HumanCarbon();
 
-        // communication dish -- a shallow, wide, flat-facing-up disc
-        var dishR = turretSize * 0.6f;
-        var dishGo = builder.SpawnPrim(PrimitiveType.Cylinder, turretCenter + Vector3.up * (turretH * 0.5f + fullScale.x * 0.02f),
-            new Vector3(dishR * 2f, fullScale.x * 0.02f, dishR * 2f), aluminumMat, trim);
-        dishGo.AddComponent<SlowSpin>().degreesPerSecond = 18f;
-        builder.SpawnPrim(PrimitiveType.Cylinder, turretCenter + Vector3.up * (turretH * 0.5f + fullScale.x * 0.05f),
-            new Vector3(fullScale.x * 0.02f, fullScale.x * 0.03f, fullScale.x * 0.02f), aluminumMat, dishGo.transform);
+        // 2026-08 (faction gauntlet, "Human = RKO-style Art Deco broadcast
+        // tower... avoid modern military radar dishes"): replaces the old
+        // spinning radar dish + roofline sensor spikes + antenna cluster
+        // with a real Art Deco setback mast, growing straight up out of
+        // the turret roof rather than a second disconnected structure --
+        // primary tapering shaft, secondary fin fascia + setback ledge,
+        // tertiary finial + beacon.
 
-        // sensor towers around the roofline
-        var sensorCount = 3;
-        var sensorR = turretSize * 0.5f;
-        for (var i = 0; i < sensorCount; i++)
+        // primary: three stacked, progressively narrower drums -- the
+        // "setback" silhouette RKO/RCA-style towers are named for
+        var mastBaseR = turretSize * 0.22f;
+        const int mastTiers = 3;
+        var tierH = fullScale.y * 0.07f;
+        for (var ti = 0; ti < mastTiers; ti++)
         {
-            var angleDeg = i / (float)sensorCount * 360f + 60f;
+            var tierR = mastBaseR * (1f - ti * 0.28f);
+            var tierCenter = turretCenter + Vector3.up * (turretH * 0.5f + tierH * (ti + 0.5f));
+            builder.SpawnPrim(PrimitiveType.Cylinder, tierCenter,
+                new Vector3(tierR * 2f, tierH, tierR * 2f), aluminumMat, trim);
+        }
+        var mastTop = turretCenter + Vector3.up * (turretH * 0.5f + tierH * mastTiers);
+
+        // secondary: four vertical fin blades fanning out from the mast
+        // base -- the fluted-pylon fascia an Art Deco broadcast tower
+        // wears at street level, here at roofline since this IS the tower
+        var finCount = 4;
+        var finH = tierH * mastTiers * 0.9f;
+        var finBase = turretCenter + Vector3.up * (turretH * 0.5f);
+        for (var fi = 0; fi < finCount; fi++)
+        {
+            var angleDeg = fi / (float)finCount * 360f + 45f;
             var rad = angleDeg * Mathf.Deg2Rad;
-            var basePos = turretCenter + Vector3.up * (turretH * 0.5f) + new Vector3(Mathf.Sin(rad) * sensorR, 0f, Mathf.Cos(rad) * sensorR);
-            var h = fullScale.y * 0.05f;
-            builder.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (h * 0.5f),
-                new Vector3(fullScale.x * 0.012f, h * 0.5f, fullScale.x * 0.012f), aluminumMat, trim);
-            builder.SpawnPrim(PrimitiveType.Sphere, basePos + Vector3.up * h, Vector3.one * (fullScale.x * 0.018f), aluminumMat, trim);
+            var dir = new Vector3(Mathf.Sin(rad), 0f, Mathf.Cos(rad));
+            var finPos = finBase + dir * (mastBaseR * 1.15f) + Vector3.up * (finH * 0.5f);
+            var finGo = builder.SpawnPrim(PrimitiveType.Cube, finPos,
+                new Vector3(fullScale.x * 0.012f, finH, fullScale.x * 0.05f), carbonMat, trim);
+            finGo.transform.rotation = Quaternion.LookRotation(dir, Vector3.up);
         }
 
-        // antenna cluster near the turret base
-        var antennaCount = 4;
-        var antennaR = fullScale.x * 0.04f;
-        for (var i = 0; i < antennaCount; i++)
-        {
-            var angleDeg = i / (float)antennaCount * 360f;
-            var rad = angleDeg * Mathf.Deg2Rad;
-            var basePos = turretCenter - Vector3.up * (turretH * 0.5f) + new Vector3(Mathf.Sin(rad) * antennaR, 0f, Mathf.Cos(rad) * antennaR);
-            var h = fullScale.y * 0.09f;
-            builder.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (h * 0.5f),
-                new Vector3(fullScale.x * 0.008f, h * 0.5f, fullScale.x * 0.008f), aluminumMat, trim);
-        }
+        // secondary: a stepped setback ledge where the mast narrows into
+        // its top tier
+        builder.SpawnPrim(PrimitiveType.Cylinder, turretCenter + Vector3.up * (turretH * 0.5f + tierH * 2f),
+            new Vector3(mastBaseR * 1.35f, fullScale.y * 0.006f, mastBaseR * 1.35f), carbonMat, trim);
+
+        // tertiary: a slender finial above the mast, capped by a steady
+        // (not pulsing -- see HumanBlueLightMat's own doc comment on why
+        // Human lighting stays constant) blue beacon -- every Art Deco
+        // skyscraper spire wears one, and it doubles as this building's
+        // antenna silhouette read
+        var finialH = fullScale.y * 0.06f;
+        builder.SpawnPrim(PrimitiveType.Cylinder, mastTop + Vector3.up * (finialH * 0.5f),
+            new Vector3(fullScale.x * 0.01f, finialH * 0.5f, fullScale.x * 0.01f), aluminumMat, trim);
+        builder.SpawnPrim(PrimitiveType.Sphere, mastTop + Vector3.up * finialH,
+            Vector3.one * (fullScale.x * 0.02f), HumanBlueLightMat(), trim);
 
         // illuminated blue observation-deck band -- steady
         var deckH = bodyH * 0.16f;
@@ -2056,6 +2193,15 @@ public class BaseDresser : MonoBehaviour
     /// <summary>Mad Doctor faction: oxidized copper pipework.</summary>
     private static Material DoctorCopper() => MTextured("faction-doctor-copper", 0.6f, 0.36f, 0.22f, PbrTextureAtlas.OxidizedCopper, 0.4f, 0.7f);
 
+    /// <summary>2026-08 (faction gauntlet, Tesla apparatus): off-white
+    /// glazed-porcelain insulator studs, the material real high-voltage
+    /// hardware uses to keep current off the mast -- untextured (the
+    /// studs are tiny, a few pixels at typical camera height, same
+    /// reasoning as <see cref="Steel"/>) but glossier than any of this
+    /// file's stone/metal tones so it still reads as glazed ceramic
+    /// next to the matte copper coil it sits on.</summary>
+    private static Material Ceramic() => MTextured("faction-doctor-ceramic", 0.88f, 0.85f, 0.78f, null, 0.65f);
+
     /// <summary>Mad Doctor faction: dark brick walls -- reuses
     /// PbrTextureAtlas.Brick (the same texture the CITY's own civilian
     /// buildings use, BuildingDresser.Brick) tinted darker/cooler, not a
@@ -2176,6 +2322,16 @@ public class BaseDresser : MonoBehaviour
         _alienGlowMat = mat;
         return _alienGlowMat;
     }
+
+    /// <summary>2026-08 (faction gauntlet, docs/31 §5, "1950s-70s B-movie
+    /// mechanical apparatus... exposed pivots/gears/bearings"): a dark
+    /// weathered gunmetal for the mechanical-apparatus housings/dishes/
+    /// rods that "captured/bolted spacecraft" hardware needs, distinct
+    /// from AlienCrystalMat's/AlienMembraneMat's own organic-hull read --
+    /// reuses PbrTextureAtlas.CastIron (same shared texture DoctorIron
+    /// already established) rather than authoring a fourth metal texture,
+    /// only the tint differs.</summary>
+    private static Material AlienGunmetal() => MTextured("faction-alien-gunmetal", 0.24f, 0.23f, 0.27f, PbrTextureAtlas.CastIron, 0.4f, 0.6f);
 
     /// <summary>Shared by every faction's Tesla-coil/energy-arc mount --
     /// creates a LineRenderer + TeslaArc between two freshly-created

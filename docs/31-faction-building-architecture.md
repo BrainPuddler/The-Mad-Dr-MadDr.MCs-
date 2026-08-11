@@ -208,15 +208,36 @@ body" description.
 
 ## 7. Implementation status and phasing
 
-Broken into six phases; **only Phase 1 is implemented as of this doc's own
-authoring pass.** Each remaining phase is real, separately-scoped work
-(the antenna/saucer/castle phases are each comparable in size to the
-entire 2026-08 per-faction Factory/Control Centre pass that already
-shipped), not a placeholder stub.
+Broken into six phases; **Phases 1 and 2 are implemented as of this doc's
+latest revision.** Each remaining phase is real, separately-scoped work
+(the saucer/castle phases are each comparable in size to the entire
+2026-08 per-faction Factory/Control Centre pass that already shipped),
+not a placeholder stub.
 
 1. **Windows** (§2) — Alien portholes, Doctor arrow slits. **Shipped.**
-2. **Antennas** (§5) — full per-faction modular antenna systems. Not
-   started.
+2. **Antennas** (§5) — full per-faction modular antenna systems. **Shipped**
+   (Control Centre only, matching Phase 1's own scope — the Factory
+   methods keep their existing roofline detail). Human's old spinning
+   radar dish/sensor-tower/antenna-cluster block (`BuildHumanControlCentre`)
+   is replaced by a real Art Deco setback mast: three tapering drum tiers,
+   four fluted fin blades, a stepped setback ledge, and a slender finial
+   capped by a STEADY (not pulsing — matching `HumanBlueLightMat`'s own
+   established "clean and functional" language) blue beacon. Mad Doctor's
+   old symmetric 4-rod roofline ring (`BuildDoctorControlCentre`) is
+   replaced by a Tesla apparatus extending the pre-existing rod/arc
+   (`SpawnArc`) rather than a second disconnected mast: a copper coil
+   climbing the mast with ceramic insulator studs at each ring, two
+   deliberately uneven branching rods, and a glowing lamp at the tip.
+   Alien's old five-fold radially-symmetric crystalline-antenna ring
+   (`BuildAlienControlCentre`) is replaced by a real bolted-on B-movie
+   apparatus mounted at ONE asymmetric roofline point — brass-riveted
+   rotating drum, tilted oversized dish, horn antenna, telescoping rod
+   mast, loop antenna, a sagging bundled cable between the two rigs, and
+   an analog meter + pulsing indicator lamp — the brief's own "opposite
+   of Human's strict symmetry" is why this rig is singular and off-center
+   rather than repeated radially like the geometry it replaces.
+   **Two design conflicts surfaced and were resolved by proceeding under
+   this phase's own brief** (see the note at the end of this list).
 3. **Mad Doctor gothic castle transform** (massive stone construction,
    towers, battlements, buttresses replacing the current shared box
    massing — the strongest transformation the brief asks for). Not
@@ -237,6 +258,29 @@ shipped), not a placeholder stub.
    gap: antenna indicator lamps once Phase 2 exists, saucer rim lighting
    once Phase 4 exists). Not started; depends on Phases 2 and 4 existing
    first.
+
+**Phase 2 design conflicts, resolved during implementation (creator asked
+implementers to report these):**
+
+- **Alien "no visible bolts/rivets" vs. this gauntlet's "full mechanical
+  apparatus."** Already surfaced and resolved during Phase 1 (see §2's
+  own conflict writeup) — the creator's explicit call, "New gauntlet
+  wins — go full mechanical," is the standing resolution this phase's
+  Alien antenna rig (brass rivets, gunmetal housings) applies without a
+  second pause.
+- **Human's existing "communication dish... reads as a radar sweep" vs.
+  this gauntlet's explicit "never modern telecom/cellular... avoid
+  modern military radar dishes" for the Art Deco tower spec.** New: the
+  prior Control Centre doc comment described the dish as deliberately
+  reading like a radar sweep, which is precisely what §5's Human brief
+  rules out. No prior creator quote defends the radar-dish read the way
+  the Alien "no rivets" direction was explicitly defended, so this was
+  judged lower-stakes than the Alien conflict and resolved the same
+  direction (new gauntlet brief wins) without a second confirmation
+  round, consistent with "continue with execution." The dish/SlowSpin
+  mount is fully replaced by the Art Deco setback mast described above;
+  `SlowSpin.cs` itself is untouched and still used elsewhere (Alien
+  crystal spike, orbiting rings, Human cooling-tower wheel).
 
 ## 8. Performance discipline (unchanged, restated)
 
