@@ -142,13 +142,20 @@ budget-capped, and distance-culled:
   steady blue beacon (`HumanBlueLightMat`, deliberately non-pulsing) and
   Alien's pulsing purple indicator lamp on the B-movie antenna rig.
 - **Alien saucer rim lighting**: closed by §7 Phase 5 — a thin unlit
-  emissive ring (`AlienGlowMat`, no new material) right at each saucer's
-  own rim band, on both `BuildAlienFactory`'s single body and
-  `BuildAlienControlCentre`'s main saucer (not the secondary module —
-  keeping the new-lighting footprint proportionate to what the antenna
-  rig's own single lamp already adds). Deliberately NOT a ring of real
-  point `Light`s — see that code's own doc comment for why that would
-  violate §8's performance discipline.
+  emissive ring (`AlienGlowMat`, no new material), on both
+  `BuildAlienFactory`'s single body and `BuildAlienControlCentre`'s main
+  saucer (not the secondary module — keeping the new-lighting footprint
+  proportionate to what the antenna rig's own single lamp already adds).
+  Deliberately NOT a ring of real point `Light`s — see that code's own
+  doc comment for why that would violate §8's performance discipline.
+  **2026-08 fix** (creator report: "Window should never be behind other
+  facade features"): the ring originally sat AT the rim band, the exact
+  height/radius of the round porthole windows above it — the full
+  360-degree band cut directly across/behind both windows. Moved to the
+  saucer's own tapered UNDERSIDE (`underRingYFrac = 0.3`, well below the
+  window band), a glowing-underbelly accent instead — a real UFO trope
+  in its own right, and now geometrically incapable of intersecting a
+  window mounted on the rim band above it.
 
 No new dynamic `Light` budget category proposed — `DynamicLightBudget`'s
 existing nearest-N-to-camera cap (docs/28) already governs every real
@@ -223,6 +230,25 @@ cube anchor) rather than the main saucer body. Brass-riveted portholes
 (§2) are repositioned onto the main saucer's own round rim band (an
 angle-around-Y placement, not the old flat-cube-face X-offset) so they
 sit flush on the curved hull instead of floating past it.
+
+**2026-08 fix** (creator report: "all windows on alien building need to
+be the round window [...] Window should never be behind other facade
+features"). Both Alien windows already shared the SAME round-porthole
+template (`SpawnAlienPorthole` — brass ring, recessed glass, face-plane
+rivets) before this fix; the report's real finding was occlusion, not a
+shape mismatch. Two overlaps, both in `BuildAlienFactory`, both fixed:
+(1) the Phase 5 rim-light ring (see §4's own writeup) sat at the exact
+window height/radius, cutting across both portholes — moved to the
+underside. (2) `BuildAlienFactory`'s own front energy sac
+(`sacPositions[2]`, dead center at 0 degrees) has roughly a 19-degree
+angular half-width at the rim radius; the Phase 4 saucer-massing pass
+had repositioned the portholes to +-20 degrees, tight enough to crowd or
+overlap the sac's own sphere. Widened to +-32 degrees — closer to the
+~29-degree flanking gap the ORIGINAL flat-face design (`portholeXFrac =
++-0.24`) already implied before saucer massing moved windows onto the
+round rim. `BuildAlienControlCentre`'s own portholes (+-18 degrees) had
+no equivalent conflict (no energy sac on that body; the crystal/antenna
+detail all lives on the secondary module now) and were left unchanged.
 
 **Load-bearing constraint from the brief itself, satisfied by
 construction:** existing footprint must not grow. Both saucer bodies keep

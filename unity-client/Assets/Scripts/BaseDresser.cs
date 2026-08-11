@@ -1028,7 +1028,18 @@ public class BaseDresser : MonoBehaviour
         // edge, not floating past the curved hull or sunk inside it.
         var portholeRadius = fullScale.x * 0.09f;
         const float rimYFrac = 0.5f + 0.12f;
-        float[] portholeAngleDeg = { -20f, 20f };
+        // 2026-08 fix (creator report: "Window should never be behind
+        // other facade features"): widened from +-20 to +-32 degrees.
+        // The front energy sac (sacPositions[2], directly ahead at 0
+        // degrees) has its own angular half-width of roughly 19 degrees
+        // at this rim radius (sacRadius vs. the sac's own radial
+        // distance) -- +-20 left the windows crowding, sometimes
+        // overlapping, the sac's own sphere. +-32 restores real
+        // clearance, closer to the ~29-degree flanking gap the ORIGINAL
+        // flat-face design (portholeXFrac = +-0.24 of bodyW) already
+        // implied before the saucer-massing pass moved windows onto the
+        // round rim.
+        float[] portholeAngleDeg = { -32f, 32f };
         for (var pi = 0; pi < portholeAngleDeg.Length; pi++)
         {
             var rad = portholeAngleDeg[pi] * Mathf.Deg2Rad;
@@ -1065,14 +1076,27 @@ public class BaseDresser : MonoBehaviour
         // 2026-08 (faction gauntlet, docs/31 §4/§7 Phase 5-6, "saucer rim
         // lighting" -- the real per-faction emphasis-lighting gap
         // flagged before Phase 4's saucer massing existed to hang it
-        // off): a thin emissive ring right at the saucer's own rim band
-        // -- reuses AlienGlowMat (no new material) and stays UNLIT (no
-        // real Light component -- a ring of real point Lights per
-        // building would be the exact "per-decoration object explosion"
-        // §8's performance discipline rules out; the psychic core/lamp
-        // elsewhere already carry this building's real Light budget).
-        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (bodyH * rimYFrac),
-            new Vector3(bodyW * 1.01f, fullScale.y * 0.008f, bodyD * 1.01f), AlienGlowMat(), trim);
+        // off): a thin emissive ring on the saucer's own tapered
+        // UNDERSIDE, reusing AlienGlowMat (no new material) and staying
+        // UNLIT (no real Light component -- a ring of real point Lights
+        // per building would be the exact "per-decoration object
+        // explosion" §8's performance discipline rules out; the psychic
+        // core/lamp elsewhere already carry this building's real Light
+        // budget).
+        // 2026-08 fix (creator report: "Window should never be behind
+        // other facade features"): this ring originally sat at
+        // `bodyH * rimYFrac` -- the EXACT height and nearly the exact
+        // radius of the round porthole windows above, so the full 360
+        // degree band cut directly across/behind both of them. Moved to
+        // `underRingYFrac` (well below the window band, on the cone
+        // BELOW the rim rather than through it) with a smaller diameter
+        // matching the underside's own narrower radius at that height --
+        // a glowing-underbelly accent, a real UFO trope in its own
+        // right, that can never intersect a window mounted on the rim
+        // band above it.
+        const float underRingYFrac = 0.3f;
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (bodyH * underRingYFrac),
+            new Vector3(bodyW * 0.5f, fullScale.y * 0.008f, bodyD * 0.5f), AlienGlowMat(), trim);
     }
 
     /// <summary>Alien faction Control Centre -- "the hive mind": a
@@ -1293,13 +1317,18 @@ public class BaseDresser : MonoBehaviour
         }
 
         // 2026-08 (faction gauntlet, docs/31 §4/§7 Phase 5-6, "saucer rim
-        // lighting"): same unlit emissive rim ring as `BuildAlienFactory`
-        // -- see that block's own doc comment for the performance
-        // reasoning. Main saucer only (not the secondary module), same
-        // "keep the new-lighting footprint proportionate" restraint the
-        // antenna rig's own single lamp already applies.
-        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (bodyH * rimYFrac),
-            new Vector3(bodyW * 1.01f, fullScale.y * 0.008f, bodyD * 1.01f), AlienGlowMat(), trim);
+        // lighting"): same unlit emissive underbelly ring as
+        // `BuildAlienFactory` -- see that block's own doc comment for
+        // the performance reasoning AND the 2026-08 fix moving it off
+        // the window band entirely (it used to sit at `bodyH * rimYFrac`,
+        // the exact height/radius of the portholes above, cutting
+        // directly across/behind them). Main saucer only (not the
+        // secondary module), same "keep the new-lighting footprint
+        // proportionate" restraint the antenna rig's own single lamp
+        // already applies.
+        const float underRingYFrac = 0.3f;
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (bodyH * underRingYFrac),
+            new Vector3(bodyW * 0.5f, fullScale.y * 0.008f, bodyD * 0.5f), AlienGlowMat(), trim);
     }
 
     /// <summary>Human Alliance faction Factory -- "advanced automated

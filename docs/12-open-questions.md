@@ -14973,3 +14973,58 @@ full mechanical antennas; Human's "radar sweep" dish vs. "avoid modern
 military radar") -- both logged in their own Phase 2 entry above, per
 the gauntlet's own explicit "report any architectural conflicts or
 compromises discovered during implementation" instruction.
+
+## 2026-08 follow-up: Alien windows -- fixed rim-light ring occluding portholes, widened Factory clearance
+
+Creator report: "all windows on alien building need to be the round
+window. template from factory and central command, Window should never
+be behind other facade features." Investigated before changing
+anything, since the first half of the report describes something
+already true: both `BuildAlienFactory` and `BuildAlienControlCentre`
+already shared the SAME round-porthole template (`SpawnAlienPorthole`
+-- brass ring, recessed glass, face-plane rivets) from Phase 1 onward,
+confirmed by grep (only two call sites in the whole file, both using
+that one shared helper). The real finding was occlusion, and there
+were two genuine bugs, both introduced by this session's own earlier
+saucer-massing/lighting passes:
+
+1. **The Phase 5 "saucer rim lighting" ring occluded the windows it was
+   added after.** `bodyH * rimYFrac` is the EXACT height the portholes
+   themselves are mounted at (`rimYFrac` is literally the same named
+   constant both blocks use), and the ring's own radius (`bodyW * 1.01`
+   diameter) was barely larger than the portholes' own mounting radius
+   (`bodyW * 0.5`) -- a full 360-degree emissive band sitting almost
+   exactly where two round windows were already mounted, cutting across
+   both of them. Fixed by moving the ring to the saucer's own tapered
+   UNDERSIDE (`underRingYFrac = 0.3`, well below the window band) in
+   both `BuildAlienFactory` and `BuildAlienControlCentre` -- a glowing-
+   underbelly accent instead of a rim band, which reads as an equally
+   valid (arguably more iconic) UFO trope and is now geometrically
+   incapable of intersecting a window mounted on the rim band above it.
+2. **`BuildAlienFactory`'s own front energy sac crowded its flanking
+   windows.** The method's own doc comment already called these
+   "portholes flanking the front energy sac" -- but Phase 4's saucer-
+   massing pass repositioned the portholes to +-20 degrees around the
+   rim, and the sac (`sacPositions[2]`, dead center at 0 degrees) has
+   roughly a 19-degree angular half-width at that same radius (computed
+   from `sacRadius` vs. the sac's own radial distance) -- leaving
+   near-zero real clearance, worse than the ORIGINAL flat-face design's
+   own ~29-degree implied gap (`portholeXFrac = +-0.24` before Phase 4
+   moved windows onto the round rim). Widened to +-32 degrees, restoring
+   real flanking clearance. `BuildAlienControlCentre`'s own portholes
+   (+-18 degrees) have no equivalent conflict -- that body has no energy
+   sac, and all its crystal/antenna detail now lives on the secondary
+   module (Phase 4's own re-anchoring) rather than the main saucer --
+   so they were left unchanged.
+
+**Verified:** flightcheck stub-compile clean against `BaseDresser.cs`
+(forced non-incremental rebuild, zero warnings beyond the harness's own
+4 baseline `RosterFetcher` event warnings). NOT verified visually -- no
+Unity Editor in this environment, same standing caveat as every entry in
+this section. The angular-clearance math (sac half-width, rib spacing)
+is a geometric estimate reasoned from the actual scale constants in
+code, not a measured render; whether +-32 degrees reads as comfortably
+clear at typical RTS camera height, or whether the underbelly ring's own
+position (`underRingYFrac = 0.3`) sits at a visually pleasing spot on
+the tapered cone rather than just "safely far from the windows," is
+unconfirmed until a real Editor run.
