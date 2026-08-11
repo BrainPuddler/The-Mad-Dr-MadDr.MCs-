@@ -54,6 +54,19 @@ public static class PropLibrary
         // narrow throat at the mount) -- same Frustum generator, a
         // different pair of radii is the whole difference.
         Register("alien-horn-antenna", () => ProceduralMeshKit.Frustum(1f, 0.35f, 10));
+        // 2026-08 (faction gauntlet, docs/31 §7 Phase 3, "massive stone
+        // construction, towers"): a witch-hat conical tower cap -- wide
+        // base, narrow-almost-to-a-point top, same Frustum generator as
+        // every other tapered prop here.
+        Register("castle-tower-cap", () => ProceduralMeshKit.Frustum(1f, 0.03f, 12));
+        // 2026-08 (faction gauntlet, docs/31 §7 Phase 3, "buttresses"):
+        // a SEPARATE cache entry from "market-stall-canopy" even though
+        // both use the same ProceduralMeshKit.Wedge generator -- the
+        // mesh itself is identical (a lean-to wedge), it's the SCALE and
+        // MOUNTING (flush-back against a wall, sloped face outward) that
+        // makes it read as a buttress instead of an awning, not a
+        // different mesh, so no new generator is needed.
+        Register("castle-buttress", ProceduralMeshKit.Wedge);
 
         // 2026-08 docs/30 (facade grammar): the module mesh-swap points.
         // Deliberately left UNREGISTERED -- FacadeKit spawns each of these

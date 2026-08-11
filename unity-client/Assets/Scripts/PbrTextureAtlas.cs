@@ -45,6 +45,20 @@ public static class PbrTextureAtlas
     /// tone variation per shingle, same jitter technique as every other
     /// texture here.</summary>
     public static Texture2D RoofShingle { get { return _roofShingle != null ? _roofShingle : (_roofShingle = BuildRoofShingle()); } }
+
+    /// <summary>2026-08 (faction gauntlet, docs/31 §3/§7 Phase 3: "large
+    /// stone blocks, not decorative brick" -- `DoctorDarkBrick`'s own
+    /// brick-coursing texture was flagged as the WRONG texture for the
+    /// gothic-castle transform, needing a genuinely larger-scale block).
+    /// Same staggered-course technique <see cref="BuildBrick"/> already
+    /// uses, but with far fewer, far larger blocks (2 per row instead of
+    /// 4, twice the row height) and a thicker, darker joint line -- reads
+    /// as massive dressed masonry rather than a small fired brick, at
+    /// the same 64x64 atlas size as everything else here. Salt 41 --
+    /// past every salt already in use elsewhere in this file (1-6, 11-14,
+    /// 20-34, 40).</summary>
+    private static Texture2D _dressedStone;
+    public static Texture2D DressedStone { get { return _dressedStone != null ? _dressedStone : (_dressedStone = BuildDressedStone()); } }
     public static Texture2D AsphaltWet { get { return _asphaltWet != null ? _asphaltWet : (_asphaltWet = BuildAsphaltWet()); } }
     public static Texture2D Chrome { get { return _chrome != null ? _chrome : (_chrome = BuildChrome()); } }
     public static Texture2D PaintedMetal { get { return _paintedMetal != null ? _paintedMetal : (_paintedMetal = BuildPaintedMetal()); } }
@@ -192,6 +206,48 @@ public static class PbrTextureAtlas
             var fine = Jitter(x, y, 3);
             var v = 0.9f + (coarse * 0.7f + fine * 0.3f - 0.5f) * 0.18f;
             pixels[y * Size + x] = baseCol * v;
+        }
+        tex.SetPixels32(pixels);
+        tex.Apply(true);
+        return tex;
+    }
+
+    private static Texture2D BuildDressedStone()
+    {
+        var tex = NewTexture();
+        var pixels = new Color32[Size * Size];
+        const int rowHeight = 16;
+        const int jointPx = 2;
+        var stoneBase = new Color(0.42f, 0.41f, 0.4f);
+        var joint = new Color(0.14f, 0.13f, 0.13f);
+        for (var y = 0; y < Size; y++)
+        {
+            var row = y / rowHeight;
+            var inRow = y % rowHeight;
+            // staggered vertical joints, half a block offset per row --
+            // same "real mason staggers seams" idea BuildBrick uses, just
+            // at 2 blocks per row instead of 4
+            var offset = (row % 2 == 0) ? 0 : Size / 4;
+            for (var x = 0; x < Size; x++)
+            {
+                var shifted = (x + offset) % Size;
+                var blockX = shifted % (Size / 2);
+                var isJoint = inRow < jointPx || blockX < jointPx;
+                Color c;
+                if (isJoint)
+                {
+                    c = joint;
+                }
+                else
+                {
+                    // coarser per-block mottling than BuildBrick's own
+                    // per-pixel jitter -- a whole block reads one uneven
+                    // weathered tone, not a speckled surface
+                    var jitter = 0.8f + Jitter(row, shifted / (Size / 2), 41) * 0.4f;
+                    c = stoneBase * jitter;
+                }
+                pixels[y * Size + x] = c;
+            }
         }
         tex.SetPixels32(pixels);
         tex.Apply(true);

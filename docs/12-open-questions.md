@@ -14764,3 +14764,70 @@ in this environment, same standing caveat as every entry in this
 section; whether the Alien rig's asymmetric single-point placement and
 the Human mast's stacked-drum proportions read correctly at typical RTS
 camera height is unconfirmed until a real Editor run.
+
+## 2026-08: faction gauntlet Phase 3 -- Mad Doctor gothic castle transform (docs/31)
+
+Creator direction: the same faction gauntlet's mandatory Mad Doctor
+"gothic-castle architectural transform (massive stone, towers,
+battlements) -- preserving existing footprints." docs/31 §7 flagged
+this as "the strongest transformation the brief asks for," comparable
+in size to the entire 2026-08 per-faction Factory/Control Centre pass.
+
+**What shipped, in both `BuildDoctorFactory` and
+`BuildDoctorControlCentre`.** The body itself stays exactly what it was
+-- a `Placeholder()`-material cube directly under `root.transform`, so
+`TintShape`'s own single-level `GetChild` sweep keeps overwriting it to
+the owner-tint color unchanged (the SAME split every other faction/
+phase in docs/31 already relies on). The castle read comes entirely
+from new trim geometry on the SAME footprint:
+
+- **Towers.** The old flat corner pilasters ("edge objects... thicker
+  and protrude more," a 2026-07 fix) are replaced by real round corner
+  turrets at the SAME four corner positions -- a dressed-stone drum
+  rising well above the roofline, capped by a witch-hat conical iron
+  roof. New shared helper `SpawnCornerTower`, the cap using a new
+  `ProceduralMeshKit.Frustum`-backed `castle-tower-cap` prop registered
+  in `PropLibrary` (wide base, near-point top -- same generator
+  `alien-crystal-spike`/`human-cooling-tower` already use, just a
+  different taper).
+- **Battlements.** A real crenellated parapet around each building's
+  main roofline -- alternating merlon blocks with embrasure gaps
+  between them (not a solid unbroken cornice), looping all four edges
+  of the roof rectangle. New shared helper `SpawnBattlements` (+ its own
+  `SpawnBattlementEdge` sub-helper).
+- **Buttresses.** Two sloped stone supports flanking the arrow-slit
+  window wall, flush-mounted with their vertical face against the wall
+  and their sloped face projecting outward -- reuses
+  `ProceduralMeshKit.Wedge` (already built for the market-stall
+  canopy prop; a SEPARATE `PropLibrary` cache entry, `castle-buttress`,
+  since the mesh is identical and only the mounting/scale differ) via
+  `Quaternion.LookRotation(outwardDir, Vector3.up)`, the same face-
+  relative-mounting pattern `SpawnAlienPorthole` established in Phase 1.
+  New shared helper `SpawnButtress`.
+
+**New texture + material, flagged as a real gap in docs/31 §3 before
+this pass:** `DoctorDarkBrick()`'s existing brick-coursing texture
+would have been the wrong scale for "massive dressed stone," so a new
+`PbrTextureAtlas.DressedStone` (fewer, far larger staggered blocks than
+`BuildBrick`'s own coursing -- 2 blocks per row instead of 4, twice the
+row height, a thicker/darker joint line) backs a new
+`DoctorCastleStone()` material, reused across all three new geometry
+kinds rather than adding a third stone material alongside the existing
+`DoctorStone()`/`DoctorDarkBrick()`.
+
+The turret slot's own iron-dome/Tesla-apparatus treatment
+(`BuildDoctorControlCentre`) was left untouched -- it already reads as
+a gothic observatory tower and this phase's own scope is the keep body,
+not something already covered.
+
+**Verified:** flightcheck stub-compile clean against `BaseDresser.cs`/
+`PropLibrary.cs`/`PbrTextureAtlas.cs` together (rebuilt fresh, forced a
+non-incremental pass to confirm no unused-variable/other warnings beyond
+the harness's own 4 baseline `RosterFetcher` event warnings). No
+citygen-core/match-core changes this pass. NOT verified visually -- no
+Unity Editor in this environment, same standing caveat as every entry
+in this section; whether the tower/battlement proportions read as
+"massive" at typical RTS camera height, and whether the buttress wedge
+mounting looks right rather than clipping the arrow-slit windows it was
+positioned to clear (±0.42/±0.35 of body width vs. the windows' own
+±0.28/±0.2 spread), is unconfirmed until a real Editor run.

@@ -591,12 +591,20 @@ public class BaseDresser : MonoBehaviour
     // established; nothing new here, just applied to two more kinds.
 
     /// <summary>Mad Doctor faction Factory -- "massive industrial
-    /// laboratory": dark brick body (owner-tinted, unchanged shape) with
-    /// a cast-iron chimney banded in brass, stone corner pilasters,
-    /// gothic window voids, a brass pressure tank, copper pipework, a
-    /// slowly spinning flywheel on a small housing, and a softly
-    /// pulsing green glass tube (a real Light, not just an emissive
-    /// material -- see EerieChamberGlow.cs's own header for why).</summary>
+    /// laboratory": dark brick body (owner-tinted, unchanged shape;
+    /// SAME footprint the gothic-castle transform below preserves) with
+    /// a cast-iron chimney banded in brass, castle arrow-slit windows, a
+    /// brass pressure tank, copper pipework, a slowly spinning flywheel
+    /// on a small housing, and a softly pulsing green glass tube (a real
+    /// Light, not just an emissive material -- see EerieChamberGlow.cs's
+    /// own header for why).
+    /// 2026-08 (faction gauntlet, docs/31 §7 Phase 3): round dressed-
+    /// stone corner towers with witch-hat iron caps (`SpawnCornerTower`)
+    /// plus a crenellated battlement ring around the main roofline
+    /// (`SpawnBattlements`) replace the old flat corner pilasters -- the
+    /// "massive stone construction, towers, battlements" the gauntlet's
+    /// gothic-castle transform brief asks for, added as trim geometry
+    /// on the SAME footprint rather than reshaping the body.</summary>
     private void BuildDoctorFactory(GameObject root, Vector3 fullScale)
     {
         var origin = root.transform.position;
@@ -691,26 +699,37 @@ public class BaseDresser : MonoBehaviour
         // thinning with distance, the same way a real chimney's smoke reads.
         smokeGo.AddComponent<SmokePlume>().Init(2.2f, smokeAngle, 1.25f);
 
-        var stoneMat = DoctorStone();
-        // 2026-08 (creator direction: "the edge objects need to be thicker
-        // and protrude more" -- confirmed as the corner pilasters): width
-        // raised 0.07->0.10 of fullScale.x, and the old flush mount (centered
-        // so the pilaster's OUTER face landed exactly at the wall, i.e. it
-        // sat fully embedded/inside the wall with nothing sticking out) is
-        // replaced with a real protrusion -- shifted outward by 40% of the
-        // pilaster's own width, so ~60% of it still overlaps the wall (reads
-        // as attached, not floating) while the remaining ~40% now genuinely
-        // sticks out past the building's own silhouette.
-        var pilasterH = bodyH * 0.92f;
-        var pilasterW = fullScale.x * 0.1f;
-        var pilasterProtrude = pilasterW * 0.4f;
+        // 2026-08 (faction gauntlet, docs/31 §7 Phase 3, "massive stone
+        // construction, towers, battlements... preserving existing
+        // footprints"): the old corner pilasters (thin protruding stone
+        // strips, "edge objects... thicker and protrude more") are
+        // upgraded to real round corner TOWERS at the same four corner
+        // positions -- rising above the roofline with witch-hat conical
+        // caps, the actual castle-corner silhouette this phase asks for,
+        // not a stronger version of the old flat-panel accent. A
+        // battlement ring around the main roofline follows.
+        var castleStoneMat = DoctorCastleStone();
+        var towerRadius = fullScale.x * 0.09f;
+        var towerH = bodyH * 1.3f;
         float[] signs = { 1f, -1f };
         foreach (var cx in signs)
         foreach (var cz in signs)
         {
-            builder.SpawnPrim(PrimitiveType.Cube,
-                origin + new Vector3(cx * (bodyW * 0.5f - pilasterW * 0.5f + pilasterProtrude), pilasterH * 0.5f, cz * (bodyD * 0.5f - pilasterW * 0.5f + pilasterProtrude)),
-                new Vector3(pilasterW, pilasterH, pilasterW), stoneMat, trim);
+            var cornerBase = origin + new Vector3(cx * (bodyW * 0.5f - towerRadius * 0.3f), 0f, cz * (bodyD * 0.5f - towerRadius * 0.3f));
+            SpawnCornerTower(trim, cornerBase, towerRadius, towerH, castleStoneMat, DoctorIron());
+        }
+        SpawnBattlements(trim, origin, bodyW, bodyD, bodyH, castleStoneMat);
+
+        // buttresses flanking the front (arrow-slit) wall, wide enough
+        // apart to clear the windows' own -0.28..0.28 spread below
+        var buttressW = fullScale.x * 0.06f;
+        var buttressH = bodyH * 0.55f;
+        var buttressD = fullScale.x * 0.09f;
+        float[] buttressXFrac = { -0.42f, 0.42f };
+        foreach (var xf in buttressXFrac)
+        {
+            SpawnButtress(trim, origin + Vector3.right * (xf * bodyW) + Vector3.forward * (bodyD * 0.5f),
+                Vector3.forward, buttressW, buttressH, buttressD, castleStoneMat);
         }
 
         // 2026-08 (docs/31, "Mad Doctor windows should resemble CASTLE
@@ -766,10 +785,16 @@ public class BaseDresser : MonoBehaviour
 
     /// <summary>Mad Doctor faction Control Centre -- "headquarters of a
     /// brilliant but unstable scientist": dark brick keep (owner-tinted,
-    /// unchanged shape) topped by a stone turret with an iron observatory
+    /// unchanged shape; SAME footprint the gothic-castle transform below
+    /// preserves) topped by a stone turret with an iron observatory
     /// dome, a brass Tesla rod arcing to the dome (a real LineRenderer,
-    /// see TeslaArc.cs), mechanical antenna rods, corner pilasters, and
-    /// an illuminated green core near the base.</summary>
+    /// see TeslaArc.cs) extended into a full Tesla antenna apparatus, and
+    /// an illuminated green core near the base.
+    /// 2026-08 (faction gauntlet, docs/31 §7 Phase 3): round dressed-
+    /// stone corner towers with witch-hat iron caps plus a crenellated
+    /// battlement ring around the keep's own roofline replace the old
+    /// flat corner pilasters -- see `BuildDoctorFactory`'s matching doc
+    /// comment for the full reasoning, identical here.</summary>
     private void BuildDoctorControlCentre(GameObject root, Vector3 fullScale)
     {
         var origin = root.transform.position;
@@ -788,7 +813,6 @@ public class BaseDresser : MonoBehaviour
         var trim = new GameObject("HqTrim").transform;
         trim.SetParent(root.transform, false);
         var ironMat = DoctorIron();
-        var stoneMat = DoctorStone();
         var brassMat = Brass();
 
         var domeTop = turretCenter + Vector3.up * (turretH * 0.5f);
@@ -853,22 +877,39 @@ public class BaseDresser : MonoBehaviour
         var lampGo = builder.SpawnPrim(PrimitiveType.Sphere, mastTop, Vector3.one * (fullScale.x * 0.03f), DoctorGlowMat(), trim);
         SpawnPulseLight(trim, mastTop, lampGo, new Color(0.55f, 1f, 0.6f), new Color(0.55f, 1f, 0.6f) * 1.3f, fullScale.x * 3f, 3.4f);
 
-        // 2026-08 (creator direction: "the edge objects need to be thicker
-        // and protrude more" -- confirmed as the corner pilasters, same fix
-        // as BuildDoctorFactory's own matching pilasters): width raised
-        // 0.06->0.085 of fullScale.x, plus the same outward-protrusion shift
-        // (40% of the pilaster's own width) replacing the old flush mount
-        // that left the whole pilaster embedded inside the wall.
-        var pilasterH = bodyH * 0.92f;
-        var pilasterW = fullScale.x * 0.085f;
-        var pilasterProtrude = pilasterW * 0.4f;
+        // 2026-08 (faction gauntlet, docs/31 §7 Phase 3, "massive stone
+        // construction, towers, battlements... preserving existing
+        // footprints"): the old corner pilasters, same fix as
+        // BuildDoctorFactory's own matching pilasters -- real round
+        // dressed-stone corner towers with witch-hat iron caps
+        // (`SpawnCornerTower`) plus a battlement ring around the keep's
+        // main roofline (`SpawnBattlements`), on the SAME four corner
+        // positions and SAME footprint rather than reshaping the body.
+        // The turret slot itself keeps its existing iron-dome/Tesla-
+        // apparatus treatment above -- already reads as a gothic
+        // observatory tower, not something this phase needs to touch.
+        var castleStoneMat = DoctorCastleStone();
+        var towerRadius = fullScale.x * 0.08f;
+        var towerH = bodyH * 1.3f;
         float[] signs = { 1f, -1f };
         foreach (var cx in signs)
         foreach (var cz in signs)
         {
-            builder.SpawnPrim(PrimitiveType.Cube,
-                origin + new Vector3(cx * (bodyW * 0.5f - pilasterW * 0.5f + pilasterProtrude), pilasterH * 0.5f, cz * (bodyD * 0.5f - pilasterW * 0.5f + pilasterProtrude)),
-                new Vector3(pilasterW, pilasterH, pilasterW), stoneMat, trim);
+            var cornerBase = origin + new Vector3(cx * (bodyW * 0.5f - towerRadius * 0.3f), 0f, cz * (bodyD * 0.5f - towerRadius * 0.3f));
+            SpawnCornerTower(trim, cornerBase, towerRadius, towerH, castleStoneMat, ironMat);
+        }
+        SpawnBattlements(trim, origin, bodyW, bodyD, bodyH, castleStoneMat);
+
+        // buttresses flanking the front (arrow-slit) wall, wide enough
+        // apart to clear the windows' own -0.2..0.2 spread below
+        var buttressW = fullScale.x * 0.05f;
+        var buttressH = bodyH * 0.55f;
+        var buttressD = fullScale.x * 0.08f;
+        float[] buttressXFrac = { -0.35f, 0.35f };
+        foreach (var xf in buttressXFrac)
+        {
+            SpawnButtress(trim, origin + Vector3.right * (xf * bodyW) + Vector3.forward * (bodyD * 0.5f),
+                Vector3.forward, buttressW, buttressH, buttressD, castleStoneMat);
         }
 
         // 2026-08 (docs/31): arrow slits, same shape family as
@@ -1726,6 +1767,74 @@ public class BaseDresser : MonoBehaviour
         }
     }
 
+    /// <summary>2026-08 (faction gauntlet, docs/31 §7 Phase 3, "massive
+    /// stone construction... battlements"): a real crenellated stone
+    /// parapet around a rectangular roofline -- alternating merlon
+    /// blocks with gaps (embrasures) between them, the actual
+    /// castellated silhouette, not a solid unbroken cornice. Loops all
+    /// four edges of a `width` x `depth` rectangle centered on `center`
+    /// at height `roofY` (both in the caller's own world space, matching
+    /// every other trim helper's convention in this file).</summary>
+    private void SpawnBattlements(Transform parent, Vector3 center, float width, float depth, float roofY, Material stoneMat)
+    {
+        var merlonW = Mathf.Min(width, depth) * 0.09f;
+        var merlonH = merlonW * 1.6f;
+        var merlonD = merlonW * 0.8f;
+        SpawnBattlementEdge(parent, new Vector3(center.x, roofY, center.z + depth * 0.5f), true, width, merlonW, merlonH, merlonD, stoneMat);
+        SpawnBattlementEdge(parent, new Vector3(center.x, roofY, center.z - depth * 0.5f), true, width, merlonW, merlonH, merlonD, stoneMat);
+        SpawnBattlementEdge(parent, new Vector3(center.x + width * 0.5f, roofY, center.z), false, depth, merlonW, merlonH, merlonD, stoneMat);
+        SpawnBattlementEdge(parent, new Vector3(center.x - width * 0.5f, roofY, center.z), false, depth, merlonW, merlonH, merlonD, stoneMat);
+    }
+
+    private void SpawnBattlementEdge(Transform parent, Vector3 edgeCenter, bool alongX, float edgeLen,
+        float merlonW, float merlonH, float merlonD, Material stoneMat)
+    {
+        var count = Mathf.Max(3, Mathf.RoundToInt(edgeLen / (merlonW * 2f)));
+        for (var i = 0; i < count; i++)
+        {
+            // skip every other slot -- the merlon/embrasure alternation
+            // that actually reads as "battlements" rather than a solid wall
+            if (i % 2 == 1) continue;
+            var t = (i + 0.5f) / count - 0.5f;
+            var offset = alongX ? new Vector3(t * edgeLen, 0f, 0f) : new Vector3(0f, 0f, t * edgeLen);
+            var pos = edgeCenter + offset + Vector3.up * (merlonH * 0.5f);
+            var scale = alongX ? new Vector3(merlonW, merlonH, merlonD) : new Vector3(merlonD, merlonH, merlonW);
+            builder.SpawnPrim(PrimitiveType.Cube, pos, scale, stoneMat, parent);
+        }
+    }
+
+    /// <summary>2026-08 (faction gauntlet, docs/31 §7 Phase 3, "towers"):
+    /// a round corner turret -- a dressed-stone drum rising from
+    /// `basePos` capped by a witch-hat conical iron roof
+    /// (`castle-tower-cap`, `ProceduralMeshKit.Frustum`-backed via
+    /// `PropLibrary`) -- the classic castle corner-tower silhouette.</summary>
+    private void SpawnCornerTower(Transform parent, Vector3 basePos, float radius, float height, Material stoneMat, Material capMat)
+    {
+        builder.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (height * 0.5f),
+            new Vector3(radius * 2f, height * 0.5f, radius * 2f), stoneMat, parent);
+        var capH = radius * 2.2f;
+        PropLibrary.Spawn(builder, "castle-tower-cap", PrimitiveType.Cylinder, basePos + Vector3.up * (height + capH * 0.5f),
+            new Vector3(radius * 2.2f, capH, radius * 2.2f), capMat, parent);
+    }
+
+    /// <summary>2026-08 (faction gauntlet, docs/31 §7 Phase 3,
+    /// "buttresses"): a sloped stone support flush against a wall --
+    /// `ProceduralMeshKit.Wedge` (its own doc comment: "flat bottom and
+    /// back, sloping from the back-top edge down to the front-bottom
+    /// edge") mounted with its flush vertical back against the wall and
+    /// its sloped face projecting outward, oriented via
+    /// `Quaternion.LookRotation(outwardDir, Vector3.up)` -- same pattern
+    /// `SpawnAlienPorthole` already established for face-relative
+    /// mounting, so this works on any wall, not just +Z.
+    /// `wallBase` is the wall-surface point at GROUND level (the method
+    /// centers the buttress vertically itself).</summary>
+    private void SpawnButtress(Transform parent, Vector3 wallBase, Vector3 outwardDir, float width, float height, float depth, Material stoneMat)
+    {
+        var go = PropLibrary.Spawn(builder, "castle-buttress", PrimitiveType.Cube,
+            wallBase + Vector3.up * (height * 0.5f), new Vector3(width, height, depth), stoneMat, parent);
+        go.transform.rotation = Quaternion.LookRotation(outwardDir, Vector3.up);
+    }
+
     /// <summary>Defensive fallback only -- every real `BuildingKind`
     /// value is handled above; this never fires unless a new kind is
     /// added to match-core without a matching case here.</summary>
@@ -2222,6 +2331,15 @@ public class BaseDresser : MonoBehaviour
     /// texture PedestalPlaqueMat/BuildingDresser.Concrete both already
     /// share) at a cooler, more weathered tone than either.</summary>
     private static Material DoctorStone() => MTextured("faction-doctor-stone", 0.52f, 0.51f, 0.48f, PbrTextureAtlas.Limestone, 0.18f);
+
+    /// <summary>2026-08 (faction gauntlet, docs/31 §3/§7 Phase 3): "large
+    /// stone blocks, not decorative brick" for the gothic-castle
+    /// transform's new tower/battlement/buttress geometry -- reuses the
+    /// new `PbrTextureAtlas.DressedStone` (that texture's own doc comment
+    /// has the full reasoning for why `DoctorStone`'s Limestone or
+    /// `DoctorDarkBrick`'s Brick are the wrong scale here), darker and
+    /// rougher than `DoctorStone`'s own polished-cut-stone tone.</summary>
+    private static Material DoctorCastleStone() => MTextured("faction-doctor-castle-stone", 0.4f, 0.39f, 0.37f, PbrTextureAtlas.DressedStone, 0.1f);
 
     /// <summary>Mad Doctor faction: the "green illuminated tubes" --
     /// opaque, strongly emissive, paired with a real EerieChamberGlow

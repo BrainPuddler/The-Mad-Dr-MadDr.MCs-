@@ -117,13 +117,15 @@ replaced**:
 | Alien Hive | alien crystal, membrane | — | `AlienCrystal()`, `AlienMembrane()` materials |
 | Mad Doctor | cast iron, dark brick | brass, oxidized copper, limestone | `DoctorIron()`, `DoctorDarkBrick()`, `Brass()`, `DoctorCopper()`, `DoctorStone()` |
 
-§5's "large stone blocks, not decorative brick" direction means
-`DoctorDarkBrick()`'s existing brick-coursing texture (`PbrTextureAtlas.
-Brick`) is the WRONG texture for the castle-transform phase (§7,
-deferred) — that phase needs a new, larger-scale "dressed stone block"
-texture in `PbrTextureAtlas`, not a reuse of the brick atlas entry. Flagged
-here so whoever picks up Phase 3 doesn't reach for the nearest brick-toned
-material out of convenience.
+The castle-transform brief's "large stone blocks, not decorative brick"
+direction meant `DoctorDarkBrick()`'s existing brick-coursing texture
+(`PbrTextureAtlas.Brick`) would have been the WRONG texture for Phase 3's
+new tower/battlement/buttress geometry — that phase needed a new,
+larger-scale "dressed stone block" texture, not a reuse of the brick
+atlas entry. **Resolved in Phase 3 (§7): `PbrTextureAtlas.DressedStone` +
+`DoctorCastleStone()`**, both new, both reused across
+`BuildDoctorFactory`/`BuildDoctorControlCentre`'s new castle geometry
+rather than adding a third stone material.
 
 ## 4. Lighting language
 
@@ -208,11 +210,11 @@ body" description.
 
 ## 7. Implementation status and phasing
 
-Broken into six phases; **Phases 1 and 2 are implemented as of this doc's
+Broken into six phases; **Phases 1-3 are implemented as of this doc's
 latest revision.** Each remaining phase is real, separately-scoped work
-(the saucer/castle phases are each comparable in size to the entire
-2026-08 per-faction Factory/Control Centre pass that already shipped),
-not a placeholder stub.
+(the saucer-massing phase is comparable in size to the entire 2026-08
+per-faction Factory/Control Centre pass that already shipped), not a
+placeholder stub.
 
 1. **Windows** (§2) — Alien portholes, Doctor arrow slits. **Shipped.**
 2. **Antennas** (§5) — full per-faction modular antenna systems. **Shipped**
@@ -239,11 +241,25 @@ not a placeholder stub.
    **Two design conflicts surfaced and were resolved by proceeding under
    this phase's own brief** (see the note at the end of this list).
 3. **Mad Doctor gothic castle transform** (massive stone construction,
-   towers, battlements, buttresses replacing the current shared box
-   massing — the strongest transformation the brief asks for). Not
-   started. The Mixed-faction generic Hq/Factory fallback is explicitly
-   OUT of scope for this (and every other) faction-specific phase — a
-   standing decision from the prior 2026-08 pass ("no bespoke fourth
+   towers, battlements, buttresses). **Shipped**, both `BuildDoctorFactory`
+   and `BuildDoctorControlCentre` — real trim geometry on the SAME
+   owner-tinted body cube/footprint every other phase in this doc
+   preserves (the body stays a `Placeholder()`-material direct child of
+   `root` so `TintShape` keeps working unchanged, per §0's own standing
+   split), not a body reshape: four round dressed-stone corner towers
+   (`SpawnCornerTower`) with witch-hat conical iron caps replace the old
+   flat corner pilasters at the SAME four corner positions; a
+   crenellated battlement ring (`SpawnBattlements`, real alternating
+   merlon/embrasure geometry around the roofline, not a solid cornice)
+   replaces the plain roof edge; two sloped stone buttresses
+   (`SpawnButtress`, `ProceduralMeshKit.Wedge` mounted flush against the
+   wall via `Quaternion.LookRotation`) flank the arrow-slit window wall.
+   A new `PbrTextureAtlas.DressedStone` texture (large staggered blocks,
+   not `DoctorDarkBrick`'s small-brick coursing — see §3's own flag)
+   backs the new `DoctorCastleStone()` material used for all three. The
+   Mixed-faction generic Hq/Factory fallback is explicitly OUT of scope
+   for this (and every other) faction-specific phase — a standing
+   decision from the prior 2026-08 pass ("no bespoke fourth
    architectural style was asked for"), unchanged by this doc.
 4. **Alien saucer massing** (§6) — full body-massing replacement plus the
    saucer-module/passage-tube generator. Not started.
