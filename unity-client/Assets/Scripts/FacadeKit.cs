@@ -47,15 +47,23 @@ public static class FacadeKit
     // sit on the same faces this grammar dresses. A window bay centered on
     // one of those u-values -- as the old evenly-spaced -6/0/6 layout put
     // one dead-center at u=0 -- read as a pilaster punched straight through
-    // a pane of glass. These two positions sit in the middle of the two
-    // ~4.4m gaps either side of the center pilaster (window half-width
-    // 1.15 + pilaster half-width 0.55 = 1.7m needed; each position clears
-    // its nearest pilaster edge by ~1.05m), so a Large-tier building's
-    // windows read as glass BETWEEN the piers. Buildings with no pilasters
-    // on this face (every other tier) just get two windows instead of an
-    // evenly-spaced three -- a smaller cosmetic tradeoff than a floor of
-    // buildings whose windows are sliced by solid stone.
-    private static readonly float[] WindowBayU = { -2.75f, 2.75f };
+    // a pane of glass. Each pilaster half-width is 0.55m, leaving two
+    // ~4.4m-wide clear gaps either side of the center one (u in [0.55,
+    // 4.95] and its mirror).
+    //
+    // 2026-08 (creator direction: "the large buildings need many
+    // windows"): a WindowBay used to place exactly ONE window per gap (2
+    // total per floor) -- against an 18m-wide face and up to 6 floors on
+    // a Large tower, that reads as sparse punched openings rather than a
+    // real curtain wall of glass. Two narrower windows now share each
+    // gap instead of one (4 per floor total): width dropped from 2.3m to
+    // 1.7m so a pair (1.7+1.7=3.4m) plus a 0.3m mullion between plus
+    // 0.35m clearance to each pilaster edge (3.4+0.3+0.7=4.4m) still
+    // fits the SAME 4.4m gap with the SAME clearance -- the pilaster-
+    // avoidance math above is unchanged, just subdivided.
+    private static readonly float[] WindowBayU = { -3.75f, -1.75f, 1.75f, 3.75f };
+    private const float WindowBayWidth = 1.7f;
+    private const float WindowSillWidth = 2.1f;
     // OrielBay is a single wide (4.2m) window per floor -- reuses one of
     // WindowBay's clear gap positions rather than its own dead-center u=0,
     // which used to sit inside the center pilaster exactly like WindowBay's
@@ -222,29 +230,27 @@ public static class FacadeKit
                 // continuous strip is what makes the current buildings read
                 // as extruded blocks; individual openings with brick
                 // between them is what makes them read as built.
-                // Two bays, not three: the Large tier's own deco pilasters
-                // (DressOffice, full-height strips at u = -5.5/0/5.5) sit on
-                // this exact face, and three bays spaced -6/0/6 used to
-                // land almost exactly on top of them -- worst at u=0, a
-                // pilaster punched dead-center through a window on every
-                // floor. WindowBayU sits in the two ~4.4m-wide gaps either
-                // side of the center pilaster (comfortable clearance either
-                // side of both flanking piers -- see the constant's own
-                // comment for the numbers), so the bays read as glass
-                // BETWEEN the piers instead of glass WITH a pier through it.
+                // Four bays (a pair per gap), not one per gap: the Large
+                // tier's own deco pilasters (DressOffice, full-height
+                // strips at u = -5.5/0/5.5) sit on this exact face, and
+                // WindowBayU's two pairs still sit inside the two ~4.4m
+                // gaps either side of the center pilaster (see the
+                // constant's own comment for the clearance math), so the
+                // bays read as glass BETWEEN the piers instead of glass
+                // WITH a pier through it.
                 var spawned = 0;
                 for (var i = 0; i < WindowBayU.Length; i++)
                 {
                     var u = WindowBayU[i];
                     var pos = at + tan * u;
                     var go = PropLibrary.Spawn(b, KeyWindowBay, PrimitiveType.Cube, pos,
-                        Along(tan, n, 2.3f, floorH * 0.52f, Proud), mats.Glass, t);
+                        Along(tan, n, WindowBayWidth, floorH * 0.52f, Proud), mats.Glass, t);
                     RegisterWindowGlow(go, mats, pos);
                     spawned++;
                     // sill: the small horizontal that catches light and
                     // reads at distance far better than the window itself
                     b.SpawnPrim(PrimitiveType.Cube, pos + Vector3.down * (floorH * 0.3f) + n * (Proud * 0.6f),
-                        Along(tan, n, 2.7f, 0.16f, Proud * 1.8f), mats.Stone, t);
+                        Along(tan, n, WindowSillWidth, 0.16f, Proud * 1.8f), mats.Stone, t);
                     spawned++;
                 }
                 return spawned;

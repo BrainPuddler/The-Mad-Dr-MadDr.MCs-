@@ -15221,3 +15221,37 @@ section; whether Limestone's mottling reads convincingly as painted
 clapboard/stucco at typical RTS camera height (versus reading as "stone
 texture on a wooden house," which would be a genuine mismatch) is
 unconfirmed until a real Editor render.
+
+## 2026-08: large buildings need many windows -- WindowBay density doubled
+
+Creator direction: "the large buildings need many windows."
+
+**Finding.** `FacadeKit.WindowBayU` placed exactly ONE window per floor
+in each of the two ~4.4m gaps flanking the Large tier's own deco
+pilasters -- 2 windows per floor total, against an 18m-wide face and up
+to 6 floors on a Large tower (`HeightForTier(Large)=30`, floors =
+`clamp(round(30/4.2)-1, 1, 8) = 6`, so the 8-floor clamp isn't the
+binding constraint -- window count per floor was). That reads as
+sparse punched openings, not a real curtain of glass.
+
+**Fix.** `WindowBayU` now places TWO windows per gap instead of one (4
+per floor total): width dropped from 2.3m to 1.7m (`WindowBayWidth`) so
+a pair (1.7+1.7=3.4m) plus a 0.3m mullion plus 0.35m clearance to each
+pilaster edge (3.4+0.3+0.7=4.4m) still fits the SAME 4.4m gap with the
+SAME pilaster clearance the original single-window layout established --
+the collision-avoidance math is unchanged, just subdivided. Sill width
+scaled down to match (`WindowSillWidth` 2.1m, was 2.7m). This is shared
+by both Large and Medium tiers (`FacadeGrammar.GrammarAppliesTo`), so
+Medium apartment buildings gain the same window density for free.
+
+Left `RegisterWindowGlow`'s per-building `GlowBudget` (2 lit windows,
+set in `BuildingDresser.DressFacadeGrammar`) untouched -- it already
+gates how many of a building's windows may register for the animated
+day/night schedule independent of how many windows physically exist, so
+doubling the window count doesn't touch the lighting-load budget docs/28
+established.
+
+**Verified:** flightcheck stub-compile clean against `FacadeKit.cs`. No
+citygen-core changes (`FacadeGrammar.cs` itself, the solver, is
+untouched -- this was purely a Unity-side mesh-density change). NOT
+verified visually -- no Unity Editor in this environment.
