@@ -33,6 +33,7 @@ public class TrainUnitTests
     {
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(playerIndex);
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
         player.Grant(ResourceKind.Parts, 1000);
@@ -51,6 +52,7 @@ public class TrainUnitTests
         var m = MatchState.Create(1u, ArmyVsHive(), city);
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
         player.Grant(ResourceKind.Fuel, 1000);
@@ -204,6 +206,7 @@ public class TrainUnitTests
         var m = MatchState.Create(9u, DoctorVsArmy(), city);
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);   // MadDoctor
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         var startingCap = player.SupplyCap;
 
         var def = BuildingDef.Get(BuildingKind.BigBrain);
@@ -231,6 +234,7 @@ public class TrainUnitTests
         var m = MatchState.Create(10u, DoctorVsArmy(), city);
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player.Grant(ResourceKind.Brains, 20);
         player.Grant(ResourceKind.Parts, 80);
         m.Tick(new List<Command> { new Command(0, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.BigBrain, argA: hex.Q, argB: hex.R) });

@@ -20,22 +20,21 @@ using UnityEngine.InputSystem;
 /// "given a kind, preview and place it," the same split
 /// WaypointCommander (orders) keeps from whatever owns unit selection.
 ///
-/// 2026-07 worker-economy epic, Phase 3: a <see cref="BuildingKind.
-/// Factory"/> ghost also requires <see cref="RuntimeCityBuilder.Workers"/>
-/// to be non-empty -- "Factories are built by possessed human workers"
-/// (creator's own words) -- tints red and blocks the confirm click the
-/// same way an unaffordable/illegal placement already does, so the two
-/// gates read identically to the player. Every other BuildingKind is
-/// unaffected -- Factory is the one the creator specifically named. This
-/// is a UNITY-SIDE-ONLY gate: match-core's own `ApplyBuildStructure`/
-/// `CanPlaceBuilding` have no concept of a Worker at all (Workers are a
-/// Unity-legacy-combat-layer unit, `Tank.cs`'s pattern, not a match-core
-/// `SimUnit` -- see docs/12's Phase 2 entry for why), so a build command
-/// sent directly through `SimBridge.QueueBuildCommand` bypassing this
-/// ghost cursor would still succeed with zero workers. A real, flagged
-/// gap, not silently faked as sim-enforced -- closing it for real needs
-/// either a match-core-side worker concept or Workers becoming real
-/// `SimUnit`s, neither built yet.
+/// 2026-07 worker-economy epic, Phase 3 (original scope): a <see
+/// cref="BuildingKind.Factory"/> ghost required a possessed Worker on
+/// hand, Unity-side-only and Factory-only -- "Factories are built by
+/// possessed human workers" (creator's own words).
+///
+/// 2026-08 (docs/12 tech-wing epic, Phase 1, creator direction: "fix
+/// [Worker gating] first"): superseded. <see cref="MatchState.
+/// CanPlaceBuilding"/> itself now requires an available Worker for EVERY
+/// BuildingKind, for human players -- real, match-core-enforced, not a
+/// Unity-only preview a direct `SimBridge.QueueBuildCommand` call could
+/// bypass. This class no longer duplicates that check locally at all;
+/// the single `bridge.CanPlaceBuilding` call below already reflects it,
+/// same "the ghost/UI check can never disagree with what actually
+/// happens" contract this header already claims for every OTHER
+/// placement rule.
 ///
 /// The ghost shape is a single placeholder cube for every
 /// <see cref="BuildingKind"/> -- <see cref="BaseDresser"/> is the real
@@ -113,11 +112,17 @@ public class BuildGhostCursor : MonoBehaviour
         // of hover checks), or one not yet eligible.
         builder.TryReclaimHex(hex);
 
-        // 2026-07 epic: Factory construction requires a possessed Worker
-        // on hand -- every other kind is untouched (RequiresWorker(kind)
-        // is false for them, so this reduces to the original check).
-        var canPlace = bridge.CanPlaceBuilding(localPlayerIndex, kind.Value, hex)
-            && (!RequiresWorker(kind.Value) || builder.Workers.Count > 0);
+        // 2026-08 (docs/12 tech-wing epic, Phase 1): Worker gating now
+        // lives entirely in match-core's own CanPlaceBuilding (every
+        // BuildingKind, not just Factory -- see MatchState.
+        // CanPlaceBuilding's own doc comment) instead of being
+        // Unity-side-only/Factory-only. A second local Workers.Count
+        // check here would just be a redundant, driftable copy of what
+        // the real query already answers -- "the ghost/UI check can
+        // never disagree with what actually happens" (this class's own
+        // header), same reasoning that already keeps every other
+        // placement rule out of this file.
+        var canPlace = bridge.CanPlaceBuilding(localPlayerIndex, kind.Value, hex);
         ShowGhost(builder.WorldOf(hex), canPlace);
 
         if (mouse.rightButton.wasPressedThisFrame)
@@ -134,13 +139,6 @@ public class BuildGhostCursor : MonoBehaviour
             HideGhost();
         }
     }
-
-    /// <summary>2026-07 epic: which BuildingKind(s) need a Worker on hand
-    /// to place -- just Factory, per the creator's own "Factories are
-    /// built by possessed human workers." A method (not a static set)
-    /// so it reads as an intentional, easily-extended policy point if a
-    /// later phase widens the requirement, not a magic inline comparison.</summary>
-    private static bool RequiresWorker(BuildingKind kind) => kind == BuildingKind.Factory;
 
     private void ShowGhost(Vector3 hexWorldPos, bool valid)
     {

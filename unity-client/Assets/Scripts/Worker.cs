@@ -84,7 +84,15 @@ public class Worker : MonoBehaviour
         return go.transform;
     }
 
+    /// <summary>docs/12 tech-wing epic, Phase 1: previously a no-op --
+    /// dead Workers just sat in `RuntimeCityBuilder.Workers` forever at
+    /// `Alive == false`, silently inflating any caller counting that list
+    /// (the ghost-cursor preview this same phase makes load-bearing,
+    /// among others). Same "notify the builder, then destroy" shape
+    /// Tank.cs's own OnDied already establishes for a bespoke combatant.</summary>
     private void OnDied()
     {
+        if (_builder != null) _builder.OnWorkerDied(this);
+        Object.Destroy(gameObject);
     }
 }

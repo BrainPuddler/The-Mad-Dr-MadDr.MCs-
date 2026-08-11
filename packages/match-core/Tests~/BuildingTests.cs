@@ -108,6 +108,7 @@ public class BuildingTests
         var m = MatchState.Create(2u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player.Grant(ResourceKind.Bones, 50);
         player.Grant(ResourceKind.Blood, 50);
         player.Grant(ResourceKind.Parts, 30);
@@ -199,6 +200,7 @@ public class BuildingTests
         var m = MatchState.Create(7u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player.Grant(ResourceKind.Bones, 100);
         player.Grant(ResourceKind.Blood, 100);
         player.Grant(ResourceKind.Parts, 100);
@@ -226,6 +228,7 @@ public class BuildingTests
         var m = MatchState.Create(8u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
         player.Grant(ResourceKind.Parts, 1000);
@@ -269,6 +272,7 @@ public class BuildingTests
         var m = MatchState.Create(8u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one -- released again once this destroys mid-construction below, so it covers the rebuild later in this same test too
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
         player.Grant(ResourceKind.Parts, 1000);
@@ -316,6 +320,7 @@ public class BuildingTests
         var m = MatchState.Create(9u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
         player.Grant(ResourceKind.Parts, 1000);
@@ -339,6 +344,7 @@ public class BuildingTests
         var m = MatchState.Create(10u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
         player.Grant(ResourceKind.Parts, 1000);
@@ -376,6 +382,13 @@ public class BuildingTests
 
             var p0 = m.Player(0);
             var p1 = m.Player(1);
+            // 2026-08 tech-wing epic Phase 1: BuildStructure now requires
+            // an available Worker -- p0 issues 2 builds (BloodStorage +
+            // Factory) in the SAME Tick below, before either can complete
+            // and free its own Worker back up, so it needs 2 up front.
+            p0.AddWorker();
+            p0.AddWorker();
+            p1.AddWorker();
             p0.Grant(ResourceKind.Bones, 200);
             p0.Grant(ResourceKind.Blood, 200);
             p0.Grant(ResourceKind.Parts, 200);
@@ -435,6 +448,12 @@ public class BuildingTests
             };
             Assert.Equal(spots.Count, buildableKinds.Length);   // sanity: one open hex per kind
 
+            // 2026-08 tech-wing epic Phase 1: every kind below is queued
+            // in ONE Tick call, all starting UnderConstruction at once --
+            // one Worker per simultaneous build, same reasoning as the
+            // hash test just above.
+            for (var i = 0; i < buildableKinds.Length; i++) player.AddWorker();
+
             var commands = new List<Command>();
             for (var i = 0; i < buildableKinds.Length; i++)
                 commands.Add(new Command(0, CommandKind.BuildStructure, targetEntity: (uint)buildableKinds[i], argA: spots[i].Q, argB: spots[i].R));
@@ -463,6 +482,7 @@ public class BuildingTests
         var city = SmallCity();
         var m = MatchState.Create(11u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
+        m.Player(0).AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         m.Player(0).Grant(ResourceKind.Bones, 20);
         m.Player(0).Grant(ResourceKind.Blood, 10);
         m.Player(0).Grant(ResourceKind.Parts, 30);
@@ -515,6 +535,7 @@ public class BuildingTests
         var city = SmallCity();
         var m = MatchState.Create(15u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
+        m.Player(0).AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         m.Player(0).Grant(ResourceKind.Bones, 1000);
         m.Player(0).Grant(ResourceKind.Blood, 1000);
         m.Player(0).Grant(ResourceKind.Parts, 1000);
@@ -533,6 +554,7 @@ public class BuildingTests
         var city = SmallCity();
         var m = MatchState.Create(16u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
+        m.Player(0).AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         m.Player(0).Grant(ResourceKind.Bones, 100);
         m.Player(0).Grant(ResourceKind.Blood, 100);
         m.Player(0).Grant(ResourceKind.Parts, 100);

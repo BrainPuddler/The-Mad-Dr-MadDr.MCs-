@@ -79,6 +79,7 @@ public class EconomyTests
         var m = MatchState.Create(1u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player.Grant(ResourceKind.Bones, 100);
         player.Grant(ResourceKind.Blood, 100);
         player.Grant(ResourceKind.Parts, 100);
@@ -108,6 +109,7 @@ public class EconomyTests
         var m = MatchState.Create(2u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player.Grant(ResourceKind.Bones, 100);
         player.Grant(ResourceKind.Parts, 100);
 
@@ -129,6 +131,7 @@ public class EconomyTests
         var m = MatchState.Create(3u, TwoPlayers(), city);
         var hex = FindOpenHex(city, city.CenterHex);
         var player = m.Player(0);
+        player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player.Grant(ResourceKind.Bones, 100);
         player.Grant(ResourceKind.Blood, 100);
         player.Grant(ResourceKind.Parts, 100);
@@ -156,6 +159,7 @@ public class EconomyTests
         var hex = FindOpenHex(city, city.CenterHex);
         var player0 = m.Player(0);
         var player1 = m.Player(1);
+        player0.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player0.Grant(ResourceKind.Bones, 100);
         player0.Grant(ResourceKind.Parts, 100);
 
@@ -199,6 +203,7 @@ public class EconomyTests
             var m = MatchState.Create(0xCA9u, TwoPlayers(), city);
             var hex = FindOpenHex(city, city.CenterHex);
             var player = m.Player(0);
+            player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
             player.Grant(ResourceKind.Bones, 200);
             player.Grant(ResourceKind.Blood, 200);
             player.Grant(ResourceKind.Parts, 200);

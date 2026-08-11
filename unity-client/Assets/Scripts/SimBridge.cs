@@ -344,6 +344,29 @@ public class SimBridge : MonoBehaviour
         _pending.Add(new Command(playerIndex, CommandKind.BankHarvestLoad, argA: amount, argB: (int)resource));
     }
 
+    /// <summary>2026-08 (docs/12 tech-wing epic, Phase 1): queue a
+    /// RegisterWorker command for the NEXT tick boundary -- same "no
+    /// source entity to validate" shape as <see
+    /// cref="QueueBankHarvestLoadCommand"/> (a Worker isn't a SimUnit
+    /// either). Called the instant a Worker actually exists in Unity
+    /// (<see cref="RuntimeCityBuilder.OnCitizenPossessed"/>, and the
+    /// starting-Worker bootstrap grant) so match-core's own <see
+    /// cref="PlayerState.AvailableWorkers"/> -- what <see
+    /// cref="MatchState.CanPlaceBuilding"/> now actually gates
+    /// construction on -- stays in sync with Unity's own <see
+    /// cref="RuntimeCityBuilder.Workers"/> list.</summary>
+    public void QueueRegisterWorkerCommand(int playerIndex)
+    {
+        _pending.Add(new Command(playerIndex, CommandKind.RegisterWorker));
+    }
+
+    /// <summary>Sibling of <see cref="QueueRegisterWorkerCommand"/> for a
+    /// Worker's death (<see cref="Worker.OnDied"/>).</summary>
+    public void QueueUnregisterWorkerCommand(int playerIndex)
+    {
+        _pending.Add(new Command(playerIndex, CommandKind.UnregisterWorker));
+    }
+
     private void Update() => Pump(Time.deltaTime);
 
     /// <summary>The actual fixed-timestep accumulator logic, taking `dt`

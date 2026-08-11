@@ -149,6 +149,7 @@ public class AttackBuildingTests
         var mSmall = MatchState.Create(5u, TwoPlayers(), city);
         var smallHex = FindOpenHex(city, city.CenterHex);
         // BloodStorage is Small tier (armor 2)
+        mSmall.Player(0).AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         mSmall.Player(0).Grant(ResourceKind.Bones, 1000);
         mSmall.Player(0).Grant(ResourceKind.Blood, 1000);
         mSmall.Player(0).Grant(ResourceKind.Parts, 1000);

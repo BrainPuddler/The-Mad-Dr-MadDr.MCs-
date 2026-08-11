@@ -417,7 +417,16 @@ namespace MadDr.MatchCore
         {
             var building = FindBuilding(entityId);
             if (building == null) return;
+            // 2026-08 (docs/12 tech-wing epic, Phase 1): SimBuilding.
+            // ApplyDamage's own doc comment confirms "an unfinished
+            // building can be destroyed too" -- a Worker occupied on a
+            // site that dies mid-construction needs freeing here, since
+            // the main Tick loop's own release (above) only ever fires on
+            // the UnderConstruction->Complete transition, never this one.
+            var wasUnderConstruction = building.State == BuildingState.UnderConstruction;
             building.ApplyDamage(amount, Frame);
+            if (wasUnderConstruction && building.State == BuildingState.Destroyed)
+                _players[building.PlayerIndex].ReleaseWorker();
             if (building.State == BuildingState.Destroyed)
             {
                 _blockedToGround?.Remove(building.Hex);
@@ -953,6 +962,25 @@ namespace MadDr.MatchCore
             _players[cmd.PlayerIndex].Grant((ResourceKind)cmd.ArgB, cmd.ArgA);
         }
 
+        /// <summary>2026-08 (docs/12 tech-wing epic, Phase 1): a Worker was
+        /// possessed/spawned for `cmd.PlayerIndex` -- see <see
+        /// cref="CommandKind.RegisterWorker"/>'s own doc comment for why
+        /// there's no source entity to validate, same shape as <see
+        /// cref="ApplyBankHarvestLoad"/>.</summary>
+        private void ApplyRegisterWorker(Command cmd)
+        {
+            if (cmd.PlayerIndex < 0 || cmd.PlayerIndex >= _players.Length) return;
+            _players[cmd.PlayerIndex].AddWorker();
+        }
+
+        /// <summary>Sibling of <see cref="ApplyRegisterWorker"/> for a
+        /// Worker's death.</summary>
+        private void ApplyUnregisterWorker(Command cmd)
+        {
+            if (cmd.PlayerIndex < 0 || cmd.PlayerIndex >= _players.Length) return;
+            _players[cmd.PlayerIndex].RemoveWorker();
+        }
+
         /// <summary>Which of `from`'s 6 edges `to` lies beyond -- `to` must
         /// be exactly adjacent (same precondition as
         /// <see cref="Facing.ArcOf"/>, which this mirrors for the
@@ -1142,6 +1170,14 @@ namespace MadDr.MatchCore
                 {
                     ApplyStorageCapBonus(b);
                     ApplySupplyCapBonus(b);
+                    // 2026-08 (docs/12 tech-wing epic, Phase 1): the Worker
+                    // ApplyBuildStructure occupied for this site is free
+                    // again the instant it finishes -- see
+                    // PlayerState.ReleaseWorker's own doc comment for why
+                    // this is the OTHER of the two places that call it
+                    // (ApplyBuildingDamage handles the Destroyed-mid-
+                    // construction case).
+                    _players[b.PlayerIndex].ReleaseWorker();
                 }
 
                 // 2026-07 epic Phase 4: training progress, Complete
@@ -1231,6 +1267,12 @@ namespace MadDr.MatchCore
                     break;
                 case CommandKind.ScavengeDebris:
                     ApplyScavengeDebris(cmd);
+                    break;
+                case CommandKind.RegisterWorker:
+                    ApplyRegisterWorker(cmd);
+                    break;
+                case CommandKind.UnregisterWorker:
+                    ApplyUnregisterWorker(cmd);
                     break;
                 case CommandKind.None:
                 default:
@@ -1397,6 +1439,19 @@ namespace MadDr.MatchCore
             foreach (var (resource, amount) in def.Cost)
                 if (player.Wallet(resource) < amount) return false;
 
+            // 2026-08 (docs/12 tech-wing epic, Phase 1, creator direction:
+            // "fix [Worker gating] first" -- make "human workers build
+            // structures, like SCVs" literally true in match-core instead
+            // of the old Unity-only, Factory-only BuildGhostCursor.
+            // RequiresWorker cosmetic check). Human-only: AI opponents'
+            // ProductionAdvisor has no Worker-spawning path of its own
+            // (Collector/Worker are Unity MonoBehaviours the AI driver
+            // never touches) and was never gated on this before either --
+            // exempting IsAiControlled preserves its exact prior behavior
+            // rather than silently bricking every AI build order the
+            // instant this landed.
+            if (!player.IsAiControlled && player.AvailableWorkers <= 0) return false;
+
             return true;
         }
 
@@ -1480,6 +1535,13 @@ namespace MadDr.MatchCore
             var def = BuildingDef.Get(kind);
             var player = _players[cmd.PlayerIndex];
             foreach (var (resource, amount) in def.Cost) player.TrySpend(resource, amount);
+            // 2026-08 (docs/12 tech-wing epic, Phase 1): occupy the Worker
+            // CanPlaceBuilding just confirmed was free (a no-op for AI
+            // players, whose AvailableWorkers never gated this in the
+            // first place -- see CanPlaceBuilding's own comment). Freed
+            // again in the main Tick loop (Complete) or ApplyBuildingDamage
+            // (Destroyed mid-construction) -- see PlayerState.ReleaseWorker.
+            player.TryOccupyWorker();
 
             var id = AllocateEntityId();
             var building = new SimBuilding(id, cmd.PlayerIndex, kind, hex, def.MaxHp, def.BuildTimeTicks, completeImmediately: false);

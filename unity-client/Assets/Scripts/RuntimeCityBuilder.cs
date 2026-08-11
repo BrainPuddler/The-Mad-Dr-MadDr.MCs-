@@ -3017,6 +3017,20 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         _simBridge.SpawnFactoryForPlayer(0, p0Factory);
         _engagementCenters.Add(p0Factory); // docs/12 Tier 3
 
+        // 2026-08 (docs/12 tech-wing epic, Phase 1): CanPlaceBuilding now
+        // requires an available Worker for EVERY human build, not just
+        // Factory -- but Collector (the only way to ever GET a Worker in
+        // a real match today) has no auto-spawn trigger of its own yet
+        // (see SpawnCollector's own doc comment; its real production
+        // path is a future Mad-Doctor mechanic that doesn't exist). Real
+        // Worker gating with zero real way to ever earn a Worker would
+        // brick the ENTIRE build menu for the rest of the match, not
+        // just Factory -- same bootstrap-grant precedent
+        // SpawnFactoryForPlayer itself already set (docs/12 "give the
+        // player one fully functional factory on startup"), extended
+        // here so that grant is actually usable.
+        SpawnStartingWorkers(p0Hq, blocked, claimed);
+
         var opponentSeeds = AiOpponentSeedRing(center, opponents.Count, AiOpponentSeedRingRadius);
         for (var i = 0; i < opponents.Count; i++)
         {
@@ -3033,6 +3047,38 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             var faction = opponents[i].Faction;
             if (faction == FactionId.HumanArmy || faction == FactionId.AlienHive)
                 SpawnOpponentStartingArmy(playerIndex, faction, opponents[i].Personality, hq, blocked, claimed);
+        }
+    }
+
+    /// <summary>v0.1 placeholder (CLAUDE.md's standing "flag the invented
+    /// number, don't pretend it's balanced" policy) -- see <see
+    /// cref="SpawnStartingBases"/>'s own call site for why this bootstrap
+    /// exists at all. Not claimed balanced against anything; just enough
+    /// that the build menu is usable from turn one.</summary>
+    private const int StartingWorkerCount = 2;
+
+    /// <summary>docs/12 tech-wing epic, Phase 1: spawn the human player's
+    /// free starting Workers near their HQ, real Unity `Worker` units
+    /// registered with match-core exactly like <see
+    /// cref="OnCitizenPossessed"/>'s own possess-arrival path (same
+    /// `_workers`/`_combatants` bookkeeping, same <see
+    /// cref="SimBridge.QueueRegisterWorkerCommand"/> call) -- just
+    /// skipping the Collector-capture chain, the same "grant the end
+    /// state directly" precedent <see cref="SpawnFactoryForPlayer"/>
+    /// already set for the starting Factory itself.</summary>
+    private void SpawnStartingWorkers(HexCoord nearHex, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
+    {
+        for (var i = 0; i < StartingWorkerCount; i++)
+        {
+            var hex = FindOpenHexWide(nearHex, blocked, claimed, 24);
+            claimed.Add(hex);
+            var go = new GameObject("Worker_" + _workers.Count);
+            go.transform.position = WorldOf(hex);
+            var worker = go.AddComponent<Worker>();
+            worker.Init(this);
+            _workers.Add(worker);
+            if (worker.Combat != null) _combatants.Add(worker.Combat);
+            if (_simBridge != null) _simBridge.QueueRegisterWorkerCommand(0);
         }
     }
 
@@ -3265,7 +3311,28 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (worker.Combat != null) _combatants.Add(worker.Combat);
         _citizens.Remove(citizen);
         Object.Destroy(citizen.gameObject);
+        // docs/12 tech-wing epic, Phase 1: only the human (player 0) ever
+        // reaches this path -- Collector/Worker are Unity MonoBehaviours
+        // with no player-index field of their own (see this method's own
+        // "no wallet credit" framing above: they exist purely as the
+        // local human's own possessed labor pool today). Keeps match-
+        // core's PlayerState.WorkerCount in sync so CanPlaceBuilding's
+        // new real Worker gate actually reflects this Worker existing.
+        if (_simBridge != null) _simBridge.QueueRegisterWorkerCommand(0);
         Debug.Log("Citizen possessed into a Worker. Total workers: " + _workers.Count);
+    }
+
+    /// <summary>docs/12 tech-wing epic, Phase 1: a Worker died (<see
+    /// cref="Worker.OnDied"/>) -- drops it from <see cref="Workers"/> (it
+    /// used to just sit there forever at `Alive == false`, silently
+    /// inflating `Workers.Count` for any caller checking it, including
+    /// the ghost-cursor preview this same phase is making load-bearing)
+    /// and unregisters it with match-core so <see
+    /// cref="PlayerState.WorkerCount"/> stays in sync with reality.</summary>
+    public void OnWorkerDied(Worker worker)
+    {
+        _workers.Remove(worker);
+        if (_simBridge != null) _simBridge.QueueUnregisterWorkerCommand(0);
     }
 
     /// <summary>Manual test/dev entry point for spawning a Collector

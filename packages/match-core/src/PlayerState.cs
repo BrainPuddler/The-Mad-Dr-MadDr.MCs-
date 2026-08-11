@@ -75,6 +75,70 @@ namespace MadDr.MatchCore
         /// it is deliberately left OUT of <see cref="WriteTo"/>'s hash.</summary>
         public bool IsAiControlled { get; }
 
+        /// <summary>2026-08 (docs/12 tech-wing epic, Phase 1 -- "fix real
+        /// Worker gating first"): how many possessed-Worker units this
+        /// player currently has, and how many of those are tied up on an
+        /// in-progress construction site. Int counters, not per-entity
+        /// tracking -- Worker.cs itself has no individual identity beyond
+        /// existing in Unity's own `RuntimeCityBuilder.Workers` list, so
+        /// this matches that same fidelity level rather than inventing
+        /// entity IDs for something that doesn't have them yet.</summary>
+        public int WorkerCount { get; private set; }
+
+        /// <summary>Workers currently occupied building something --
+        /// <see cref="TryOccupyWorker"/>/<see cref="ReleaseWorker"/> are
+        /// the only ways this moves.</summary>
+        public int BusyWorkers { get; private set; }
+
+        /// <summary>How many Workers are free to start a NEW build right
+        /// now. Never negative by construction (<see cref="RemoveWorker"/>
+        /// clamps <see cref="BusyWorkers"/> down alongside <see
+        /// cref="WorkerCount"/> if a Worker dies mid-build).</summary>
+        public int AvailableWorkers => WorkerCount - BusyWorkers;
+
+        /// <summary>A Worker was possessed/spawned for this player --
+        /// called from <see cref="CommandKind.RegisterWorker"/>.</summary>
+        public void AddWorker() => WorkerCount++;
+
+        /// <summary>A Worker died -- called from <see
+        /// cref="CommandKind.UnregisterWorker"/>. Clamps at 0 and pulls
+        /// <see cref="BusyWorkers"/> down with it if needed (a Worker that
+        /// dies mid-build can't leave more Workers "busy" than exist) --
+        /// the building it was on keeps counting down on its own timer
+        /// regardless (<see cref="SimBuilding.Tick"/> never re-checks
+        /// worker availability once construction has started, only at the
+        /// moment it begins), matching this system's own coarse "occupied
+        /// at start, freed at the end" fidelity rather than a continuous
+        /// per-tick requirement.</summary>
+        public void RemoveWorker()
+        {
+            WorkerCount = Math.Max(0, WorkerCount - 1);
+            if (BusyWorkers > WorkerCount) BusyWorkers = WorkerCount;
+        }
+
+        /// <summary>Claim one Worker for a new build if one's free; false
+        /// (no state change) otherwise -- same validation-not-clamping
+        /// contract as <see cref="TrySpend"/>.</summary>
+        public bool TryOccupyWorker()
+        {
+            if (AvailableWorkers <= 0) return false;
+            BusyWorkers++;
+            return true;
+        }
+
+        /// <summary>Free one occupied Worker -- called when a building
+        /// leaves <see cref="BuildingState.UnderConstruction"/>, whichever
+        /// way (Complete OR Destroyed; see <see
+        /// cref="MatchState.ApplyBuildingDamage(uint, int)"/>'s own doc
+        /// comment for why destruction-mid-build needs this too). No-op,
+        /// not an exception, if nothing was actually occupied -- matches
+        /// this class's own "bad/redundant calls are silent no-ops"
+        /// convention.</summary>
+        public void ReleaseWorker()
+        {
+            if (BusyWorkers > 0) BusyWorkers--;
+        }
+
         /// <summary>The AI's decision-weighting profile, or null for a
         /// human-controlled player. <see cref="CommanderPersonality"/>'s own
         /// header already documents it as "DATA, never simulation state...
@@ -192,6 +256,8 @@ namespace MadDr.MatchCore
                 SupplyUsed = SupplyUsed,
                 SalvagedOrigins = SalvagedOrigins,
                 Mana = Mana,
+                WorkerCount = WorkerCount,
+                BusyWorkers = BusyWorkers,
             };
             Array.Copy(_wallet, c._wallet, _wallet.Length);
             Array.Copy(_walletCap, c._walletCap, _walletCap.Length);
@@ -211,6 +277,8 @@ namespace MadDr.MatchCore
             h.Add(SupplyCap);
             h.Add(SalvagedOrigins);
             h.Add(Mana);
+            h.Add(WorkerCount);
+            h.Add(BusyWorkers);
         }
     }
 }

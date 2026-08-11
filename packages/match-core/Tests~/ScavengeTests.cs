@@ -136,6 +136,7 @@ public class ScavengeTests
     public void A_fully_scavenged_hex_reopens_right_at_RubbleClearTicks()
     {
         var (m, scavengerId, buildingId, hex) = SetUpFreshWreck(6u);
+        m.Player(0).AddWorker();   // 2026-08 tech-wing epic Phase 1: CanPlaceBuilding now requires one
         m.Player(0).Grant(ResourceKind.Bones, 1000);
         m.Player(0).Grant(ResourceKind.Fuel, 1000);
         m.Player(0).Grant(ResourceKind.Parts, 1000);   // 2026-08: FuelStorage now also costs Parts
@@ -157,6 +158,7 @@ public class ScavengeTests
     public void An_unscavenged_hex_stays_blocked_past_RubbleClearTicks_until_DebrisDecayTicks_pass()
     {
         var (m, _, _, hex) = SetUpFreshWreck(7u);
+        m.Player(0).AddWorker();   // 2026-08 tech-wing epic Phase 1: CanPlaceBuilding now requires one
         m.Player(0).Grant(ResourceKind.Bones, 1000);
         m.Player(0).Grant(ResourceKind.Fuel, 1000);
         m.Player(0).Grant(ResourceKind.Parts, 1000);   // 2026-08: FuelStorage now also costs Parts

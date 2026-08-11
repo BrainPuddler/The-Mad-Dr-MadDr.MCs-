@@ -14407,3 +14407,115 @@ to mean the same thing. Can one base hold multiple wing types at once,
 and is there a one-wing-per-building cap (StarCraft-style)? No code
 changed this pass -- staying a scoped-but-open item until those
 questions get answered.
+
+## 2026-08 follow-up: tech-wing epic Phase 1 -- real, match-core-enforced Worker gating for construction
+
+The scoping entry above surfaced three design questions before any code
+could be written; the creator answered all three: tech wings unlock NEW
+UNIT TYPES for Army/Hive; Worker gating should be fixed for real
+(match-core-enforced, not the old Unity-only cosmetic check) BEFORE
+anything else; multiple building kinds can host wings. A follow-up
+question then surfaced a fourth: Mad Doctor has no fixed unit roster at
+all (fields bred creatures via the Mutator instead), so "unlocks new
+unit types" doesn't map onto it -- the creator's answer: Doctor wings
+unlock genome features instead (new part/organ slots, homolog tiers, or
+origins), a genuinely different mechanic sharing the same building-
+attachment UI. That answer means Phase 2+ (the wing data model itself)
+touches genome-core's own normative schema -- CLAUDE.md's own "docs 06/
+07/08 must change together" rule -- a materially bigger, separately-
+gated change than this pass attempts. This entry covers ONLY Phase 1:
+the "fix Worker gating first" prerequisite, landed on its own since it's
+real, valuable, and correctly scoped independent of everything else.
+
+**What "fix it first" turned out to require.** Investigating before
+writing code surfaced a load-bearing gap the creator's own direction
+didn't anticipate: `Collector` (the only way to ever GET a Worker) has
+no auto-spawn trigger in a real match -- `RuntimeCityBuilder.
+SpawnCollector`'s own doc comment already flagged it as dev-only,
+gated on a future Mad-Doctor production mechanic that doesn't exist. The
+OLD Factory-only Unity-side gate was consequently already silently
+dead in every real match (`Workers.Count` is always 0, so no Factory
+beyond the free starting one was ever buildable) -- invisible because
+nobody had reason to build a second Factory. Generalizing that same gate
+to match-core, for EVERY BuildingKind, without also fixing this would
+have made the entire build menu permanently unusable past the starting
+HQ+Factory the instant it shipped -- the opposite of what "fix it
+first" asked for. Fixed by extending the SAME bootstrap-grant precedent
+`SpawnFactoryForPlayer` already established (docs/12, "give the player
+one fully functional factory on startup"): `SpawnStartingWorkers`
+grants the human two free Worker units (`StartingWorkerCount`, v0.1
+placeholder, CLAUDE.md's standing flag-don't-guess policy) alongside the
+starting HQ/Factory, so the new gate is actually usable from turn one.
+
+**match-core (`PlayerState.cs`, `Command.cs`, `MatchState.cs`).**
+`PlayerState` gains `WorkerCount`/`BusyWorkers`/`AvailableWorkers` (int
+counters, matching Worker.cs's own no-per-entity-identity fidelity --
+included in `Clone()`/`WriteTo()` for the determinism-hash contract) and
+`AddWorker`/`RemoveWorker`/`TryOccupyWorker`/`ReleaseWorker`. Two new
+`CommandKind`s (`RegisterWorker`/`UnregisterWorker`), same "no source
+entity to validate" shape `BankHarvestLoad` already established (a
+Worker isn't a `SimUnit` either). `CanPlaceBuilding` now requires
+`AvailableWorkers > 0` for every `BuildingKind` except `Hq` (already
+excluded) -- **human players only**: AI opponents' `ProductionAdvisor`
+has no Worker-spawning path of its own and was never gated on this
+before either, so exempting `IsAiControlled` preserves AI build orders
+exactly, rather than silently bricking every one of them the moment
+this landed (a second regression the first draft of this change would
+have caused, caught before shipping). `ApplyBuildStructure` occupies a
+Worker on success; the Worker frees again wherever a building leaves
+`UnderConstruction` -- both the main Tick loop's own Complete transition
+AND `ApplyBuildingDamage`'s Destroyed-mid-construction case (`SimBuilding.
+ApplyDamage`'s own doc comment: "an unfinished building can be destroyed
+too" -- confirmed by reading the code, not assumed).
+
+**Unity (`SimBridge.cs`, `RuntimeCityBuilder.cs`, `Worker.cs`,
+`BuildGhostCursor.cs`).** `QueueRegisterWorkerCommand`/
+`QueueUnregisterWorkerCommand` mirror `QueueBankHarvestLoadCommand`'s own
+shape. `OnCitizenPossessed` (the real possess-arrival path) and the new
+`SpawnStartingWorkers` bootstrap both call Register; the new `Worker.
+OnDied` (previously a genuine no-op -- dead Workers used to sit in
+`RuntimeCityBuilder.Workers` forever at `Alive == false`, silently
+inflating any caller counting that list) now calls the new
+`RuntimeCityBuilder.OnWorkerDied` (drops it from the list, queues
+Unregister, destroys the GameObject -- same shape `Tank.cs`'s own
+`OnDied` already established for a bespoke combatant). `BuildGhostCursor`
+no longer duplicates a Worker check locally at all -- deleted the old
+Factory-only `RequiresWorker` method entirely; `bridge.CanPlaceBuilding`
+alone already reflects the real, match-core-side gate now, so the second
+copy was pure redundancy risk (a future drift between the two would have
+been a real "ghost shows green, build then silently fails" bug class).
+`EmissiveAnimator`/`GlowPointRegistry`-style null-safety wasn't needed
+here since nothing else held a Worker reference across its death.
+
+**Verified.** `dotnet test` green for both `CityGenCore.Tests.csproj`
+(217/217) and `MatchCore.Tests.csproj` (311/311) -- the latter required
+updating 6 existing test files (`BuildingTests.cs`, `EconomyTests.cs`,
+`TrainUnitTests.cs`, `AttackBuildingTests.cs`, `ScavengeTests.cs`,
+`ContainmentFuzzTests.cs`) to grant a Worker before a build they expect
+to succeed, since the new gate correctly rejected every one of them
+without it (an intended fallout of the fix, not a bug). Two of those
+tests -- `Same_seed_same_orders_hashes_identically_with_buildings_and_
+units_in_play`/`Headless_harness_builds_the_full_tech_tree_from_a_
+scripted_command_list_deterministically_twice`, plus `EconomyTests`'
+own `Same_seed_same_orders_hashes_identically_with_wallet_caps_in_play`
+-- were a real finding of their own: determinism/hash tests don't fail
+loudly when every command inside them degenerates to a no-op, since both
+runs still produce the SAME (empty) result -- they'd have kept "passing"
+vacuously, silently testing nothing, if not caught by inspection rather
+than by the test runner. `DetHarness` still prints identical hashes
+twice (10k-tick empty match and the 100-unit MoveTo scenario, both
+unaffected by this change's scope). Flightcheck stub-compile harness
+clean against the rebuilt DLLs for every touched Unity file. NOT
+verified in a real Editor -- none exists in this environment, same
+caveat as every entry in this section -- so the actual in-game feel of
+"2 starting Workers, build menu gated for real" is still unconfirmed
+on the creator's own machine.
+
+**Deferred, deliberately not started this pass:** the wing data model
+itself (BuildingDef AddOnKind + SimBuilding parent-link + hex-adjacency
+validation), Army/Hive unit-type gating wired into CanTrainUnit, the
+Mad-Doctor genome-feature-unlock mechanic (genome-core schema change,
+needs its own docs 06/07/08-coordinated pass per CLAUDE.md), and all
+Unity UI/AI wiring for wings specifically. Phase 1 here is a real,
+independently-valuable fix on its own -- worth shipping alone -- not a
+partial slice of the wing feature that depends on the rest landing too.

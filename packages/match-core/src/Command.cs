@@ -133,6 +133,18 @@ namespace MadDr.MatchCore
         /// per the creator's own "zombie workers, and monsters" (i.e. both
         /// sides' scavengers).</summary>
         ScavengeDebris = 11,
+        /// <summary>2026-08 (docs/12 tech-wing epic, Phase 1 -- real
+        /// match-core-enforced Worker gating, "fix it first" per creator
+        /// direction): PlayerIndex just gained a possessed-Worker unit --
+        /// same "no source entity to validate against" shape as <see
+        /// cref="BankHarvestLoad"/> (a Worker isn't a <see cref="SimUnit"/>
+        /// either, same reasoning), TargetEntity/ArgA/ArgB all unused.
+        /// Grants <see cref="PlayerState.AddWorker"/>. Bad PlayerIndex is
+        /// a silent no-op, same contract as every other command kind.</summary>
+        RegisterWorker = 12,
+        /// <summary>Sibling of <see cref="RegisterWorker"/> for a Worker's
+        /// death -- calls <see cref="PlayerState.RemoveWorker"/>.</summary>
+        UnregisterWorker = 13,
     }
 
     /// <summary>

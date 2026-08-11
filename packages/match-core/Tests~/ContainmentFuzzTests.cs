@@ -168,6 +168,12 @@ public class ContainmentFuzzTests
         m.Player(0).Grant(ResourceKind.Blood, 100000);
         m.Player(0).Grant(ResourceKind.Fuel, 100000);
         m.Player(0).Grant(ResourceKind.Parts, 100000);
+        // 2026-08 tech-wing epic Phase 1: BuildStructure now requires an
+        // available Worker. One is enough here -- FuelStorage's own
+        // BuildTimeTicks (100) is well under the 211-tick spacing between
+        // this fuzz loop's own build attempts below, so the single Worker
+        // is always freed again (Complete) before the next attempt fires.
+        m.Player(0).AddWorker();
 
         // Track hexes we've deliberately built on and later destroyed, to
         // spot-check exact-footprint reopening at the end (BloodStorage
