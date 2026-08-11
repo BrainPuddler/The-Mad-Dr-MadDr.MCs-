@@ -321,6 +321,11 @@ public class BaseDresser : MonoBehaviour
                 BuildHqShape(root, fullScale, playerIndex);
                 break;
             case BuildingKind.BigBrain:
+                // 2026-08 (faction gauntlet, docs/31 §7 Phase 5): the new
+                // lighthouse foundation ring is a plain sibling call, NOT
+                // a change to BuildBigBrainShape itself -- see that
+                // method's own doc comment for why.
+                BuildBigBrainLighthouseBase(root, fullScale);
                 BuildBigBrainShape(root, fullScale);
                 break;
             default:
@@ -1056,6 +1061,18 @@ public class BaseDresser : MonoBehaviour
                 new Vector3(fullScale.x * 0.08f, growthH, fullScale.x * 0.08f), crystalMat, trim);
             growthGo.AddComponent<Bob>().amplitude = fullScale.x * 0.04f;
         }
+
+        // 2026-08 (faction gauntlet, docs/31 §4/§7 Phase 5-6, "saucer rim
+        // lighting" -- the real per-faction emphasis-lighting gap
+        // flagged before Phase 4's saucer massing existed to hang it
+        // off): a thin emissive ring right at the saucer's own rim band
+        // -- reuses AlienGlowMat (no new material) and stays UNLIT (no
+        // real Light component -- a ring of real point Lights per
+        // building would be the exact "per-decoration object explosion"
+        // §8's performance discipline rules out; the psychic core/lamp
+        // elsewhere already carry this building's real Light budget).
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (bodyH * rimYFrac),
+            new Vector3(bodyW * 1.01f, fullScale.y * 0.008f, bodyD * 1.01f), AlienGlowMat(), trim);
     }
 
     /// <summary>Alien faction Control Centre -- "the hive mind": a
@@ -1274,6 +1291,15 @@ public class BaseDresser : MonoBehaviour
             var pos = origin + new Vector3(dir.x * bodyW * 0.5f, bodyH * rimYFrac, dir.z * bodyD * 0.5f);
             SpawnAlienPorthole(trim, pos, dir, portholeRadius, pi, 522);
         }
+
+        // 2026-08 (faction gauntlet, docs/31 §4/§7 Phase 5-6, "saucer rim
+        // lighting"): same unlit emissive rim ring as `BuildAlienFactory`
+        // -- see that block's own doc comment for the performance
+        // reasoning. Main saucer only (not the secondary module), same
+        // "keep the new-lighting footprint proportionate" restraint the
+        // antenna rig's own single lamp already applies.
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (bodyH * rimYFrac),
+            new Vector3(bodyW * 1.01f, fullScale.y * 0.008f, bodyD * 1.01f), AlienGlowMat(), trim);
     }
 
     /// <summary>Human Alliance faction Factory -- "advanced automated
@@ -1500,6 +1526,51 @@ public class BaseDresser : MonoBehaviour
     /// elements the brief calls for (glass edge-highlight rims, the
     /// bottom glow light, rising bubbles, brass rings + steel rivets)
     /// without touching any existing size/position number.</summary>
+    /// <summary>2026-08 (faction gauntlet, docs/31 §7 Phase 5, explicit
+    /// creator constraint: "DO NOT CHANGE THE EXISTING BIG BRAIN MODEL/
+    /// DESIGN... only mount it on a new squat circular lighthouse-like
+    /// base with a small door"). `BuildPedestal`/`BuildBigBrainShape`
+    /// themselves are NOT touched by this pass -- not one line changed
+    /// in either -- because both already build their own geometry
+    /// starting at `root.transform.position` (ground level), so there is
+    /// no seam to hook an elevation offset into without editing them.
+    /// This method instead adds a WIDER, SHORTER stone/metal foundation
+    /// ring at that SAME ground level, called as a plain sibling right
+    /// before `BuildBigBrainShape` at the dispatch switch (see that
+    /// switch's own `BuildingKind.BigBrain` case) -- the existing
+    /// pedestal/jar assembly rises up out of the middle of this new
+    /// ring unmodified, reading as "the tower sits inside/atop a
+    /// lighthouse-style base" without needing to move a single existing
+    /// coordinate. Real geometry, not decoration-only: a squat drum
+    /// wider than `BuildPedestal`'s own widest (footing) tier, with a
+    /// dark recessed door void on one face. Owner-tinted the SAME way
+    /// every other silhouette in this file is -- a `Placeholder()`-
+    /// material DIRECT child of `root`, so `TintShape`'s existing
+    /// single-level sweep picks it up with zero extra wiring.</summary>
+    private void BuildBigBrainLighthouseBase(GameObject root, Vector3 fullScale)
+    {
+        var origin = root.transform.position;
+        var radius = Mathf.Min(fullScale.x, fullScale.z) * 0.26f;
+
+        var baseD = radius * 3.4f;
+        var baseH = fullScale.y * 0.08f;
+        builder.SpawnPrim(PrimitiveType.Cylinder, origin + Vector3.up * (baseH * 0.5f),
+            new Vector3(baseD, baseH * 0.5f, baseD), Placeholder(), root.transform);
+
+        var trim = new GameObject("LighthouseBaseTrim").transform;
+        trim.SetParent(root.transform, false);
+
+        // a small door void -- dark recess flush against the ring's own
+        // outer face, same idiom BuildPedestal's own window band already
+        // establishes for openings-into-an-interior (DarkRecess, not an
+        // owner-tint material -- these read as voids, not stone).
+        var doorW = baseD * 0.16f;
+        var doorH = baseH * 0.85f;
+        builder.SpawnPrim(PrimitiveType.Cube,
+            origin + Vector3.up * (doorH * 0.5f) + Vector3.forward * (baseD * 0.5f * 0.98f),
+            new Vector3(doorW, doorH, fullScale.x * 0.015f), DarkRecess(), trim);
+    }
+
     private void BuildBigBrainShape(GameObject root, Vector3 fullScale)
     {
         var radius = Mathf.Min(fullScale.x, fullScale.z) * 0.26f;

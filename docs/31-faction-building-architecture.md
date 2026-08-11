@@ -1,6 +1,6 @@
 # 31 — Faction Building Architecture: Windows, Antennas, Lighting, Silhouette
 
-Status: Draft v0.1 · Extends [17-factions.md](17-factions.md) (creature-level
+Status: v1.0, all six §7 phases shipped · Extends [17-factions.md](17-factions.md) (creature-level
 faction identity) into the RTS layer's own **buildings** (`BaseDresser.cs`) ·
 Decision trail in [12-open-questions.md](12-open-questions.md) · Prompted by
 creator direction, 2026-08 ("Faction Architecture, Windows, Lighting &
@@ -138,9 +138,17 @@ budget-capped, and distance-culled:
   `TeslaArc.cs` real `LineRenderer` bolt + `SpawnPulseLight`'s pulsing
   green core — already exactly "architectural lighting emphasizing
   faction-specific technology," predating this doc.
-- **Alien/Human**: no per-faction emphasis lighting beyond windows exists
-  yet. Real gap, not attempted this pass (folds into §7 Phase 2/4 —
-  antenna indicator lamps, saucer rim lighting).
+- **Human/Alien antenna indicator lamps**: closed by §7 Phase 2 — Human's
+  steady blue beacon (`HumanBlueLightMat`, deliberately non-pulsing) and
+  Alien's pulsing purple indicator lamp on the B-movie antenna rig.
+- **Alien saucer rim lighting**: closed by §7 Phase 5 — a thin unlit
+  emissive ring (`AlienGlowMat`, no new material) right at each saucer's
+  own rim band, on both `BuildAlienFactory`'s single body and
+  `BuildAlienControlCentre`'s main saucer (not the secondary module —
+  keeping the new-lighting footprint proportionate to what the antenna
+  rig's own single lamp already adds). Deliberately NOT a ring of real
+  point `Light`s — see that code's own doc comment for why that would
+  violate §8's performance discipline.
 
 No new dynamic `Light` budget category proposed — `DynamicLightBudget`'s
 existing nearest-N-to-camera cap (docs/28) already governs every real
@@ -226,9 +234,9 @@ the brief's own "flattened central body" description.
 
 ## 7. Implementation status and phasing
 
-Broken into six phases; **Phases 1-4 are implemented as of this doc's
-latest revision.** Each remaining phase is real, separately-scoped work,
-not a placeholder stub.
+Broken into six phases; **all six are implemented as of this doc's
+latest revision** (the full "CLAUDE CODE — EXECUTABLE ART/DESIGN
+GAUNTLET" this doc was written to track).
 
 1. **Windows** (§2) — Alien portholes, Doctor arrow slits. **Shipped.**
 2. **Antennas** (§5) — full per-faction modular antenna systems. **Shipped**
@@ -282,16 +290,21 @@ not a placeholder stub.
    writeup for what changed and how the existing crystal/ring/strut/
    antenna/porthole detail was re-anchored onto the new massing.
 5. **Big Brain lighthouse base.** Mount the EXISTING, UNCHANGED Big Brain
-   jar (`BuildBigBrainShape`) on a new squat circular stone/metal base
-   with a small door — a new `BuildLighthouseBase`-style holder call
-   inserted between `BuildPedestal` and the jar, not a modification to
-   either. `BuildPedestal`/`BuildBigBrainShape` themselves must not
-   change a single line — the creator's own explicit constraint. Not
-   started.
+   jar on a new squat circular stone/metal base with a small door.
+   **Shipped**, via `BuildBigBrainLighthouseBase` — a genuinely NEW
+   method, called as a plain sibling right before `BuildBigBrainShape`
+   at the `BuildingKind.BigBrain` dispatch case, NOT a modification to
+   `BuildPedestal`/`BuildBigBrainShape` (zero lines changed in either —
+   the creator's own explicit constraint, satisfied by construction:
+   both already build starting at `root.transform.position`/ground
+   level, so a wider, shorter foundation ring at that SAME ground level
+   reads as "the tower rises out of a lighthouse-style base" without
+   needing to move a single existing coordinate). Owner-tinted the same
+   way every other silhouette here is (`Placeholder()`, direct child of
+   `root`), with a `DarkRecess` door void on one face.
 6. **Per-faction emphasis lighting beyond windows/Tesla arc** (§4's real
-   gap: antenna indicator lamps once Phase 2 exists, saucer rim lighting
-   once Phase 4 exists). Not started; depends on Phases 2 and 4 existing
-   first.
+   gap: antenna indicator lamps, saucer rim lighting). **Shipped** — see
+   §4's own updated writeup for what closed each half of the gap.
 
 **Phase 2 design conflicts, resolved during implementation (creator asked
 implementers to report these):**

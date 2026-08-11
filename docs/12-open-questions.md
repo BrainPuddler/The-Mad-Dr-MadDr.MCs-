@@ -14903,3 +14903,73 @@ normals for this specific 5-ring profile, not just the simpler 2-ring
 unconfirmed until a real Editor render, and is the single highest-risk
 unverified claim in this pass -- flagged explicitly rather than assumed
 fine by analogy.
+
+## 2026-08: faction gauntlet Phases 5-6 -- Big Brain lighthouse base + per-faction emphasis lighting (docs/31)
+
+Creator direction: the faction gauntlet's remaining two phases -- "DO
+NOT CHANGE THE EXISTING BIG BRAIN MODEL/DESIGN... only mount it on a new
+squat circular lighthouse-like base with a small door" and per-faction
+architectural emphasis lighting beyond windows. This is the sixth and
+final docs/12 entry closing out the gauntlet; docs/31 §7 is now "all six
+phases shipped."
+
+**Phase 5 -- Big Brain lighthouse base.** The creator's constraint --
+`BuildPedestal`/`BuildBigBrainShape` must not change -- was satisfied
+literally: neither method has a single line touched. Both already
+build their own geometry starting at `root.transform.position` (ground
+level), so there's no seam to hook an elevation offset into without
+editing them, and moving the shared building `root`'s own
+`transform.position` to fake an offset was rejected -- other systems
+(placement, hit detection, `TintShape`'s single-level child sweep) all
+assume `root` sits at the building's real ground anchor, and `TintShape`
+in particular would stop finding the pedestal/jar's own renderers if
+they ended up nested under a proxy transform instead of staying DIRECT
+children of `root`. Instead, a genuinely NEW method,
+`BuildBigBrainLighthouseBase`, is called as a plain sibling right
+BEFORE `BuildBigBrainShape` at the `BuildingKind.BigBrain` dispatch
+case (`BaseDresser`'s own building-kind switch) -- a wider (`radius *
+3.4` vs. `BuildPedestal`'s own widest footing tier at `radius * 2.55`),
+much shorter (`fullScale.y * 0.08`) foundation ring at the SAME ground
+level, so the existing pedestal/jar assembly visually rises up out of
+the middle of it unmodified -- "the tower sits inside/atop a lighthouse-
+style base" without moving a single existing coordinate. Owner-tinted
+the same way every other silhouette in this file is (`Placeholder()`,
+direct child of `root`, so `TintShape` picks it up with zero extra
+wiring) with a small `DarkRecess` door void on one face -- reusing
+BOTH existing materials, no new ones needed.
+
+**Phase 6 -- per-faction emphasis lighting beyond windows/Tesla arc.**
+docs/31 §4 had flagged this as a real, deliberately-deferred gap
+("Alien/Human: no per-faction emphasis lighting beyond windows exists
+yet... folds into Phase 2/4"). Half of it turned out to already be
+closed by Phase 2's own antenna work (Human's steady blue beacon, Alien's
+pulsing purple indicator lamp) -- confirmed by re-reading that pass
+rather than assumed. The remaining half, "saucer rim lighting," needed
+Phase 4's saucer massing to exist first: a thin UNLIT emissive ring
+(reusing `AlienGlowMat`, no new material) right at each saucer's own rim
+band, added to both `BuildAlienFactory`'s single body and
+`BuildAlienControlCentre`'s main saucer (not the secondary module,
+keeping the addition proportionate to what the antenna rig's own single
+lamp already contributes). Deliberately NOT a ring of real point
+`Light`s -- that would be exactly the "per-decoration object explosion"
+docs/31 §8's own performance discipline rules out; the psychic core and
+antenna lamp elsewhere already carry this building's real per-instance
+`Light` budget.
+
+**Verified:** flightcheck stub-compile clean against `BaseDresser.cs`
+(forced non-incremental rebuild, zero warnings beyond the harness's own
+4 baseline `RosterFetcher` event warnings). No citygen-core/match-core
+changes this pass. NOT verified visually -- no Unity Editor in this
+environment, same standing caveat as every entry in this section; in
+particular whether the lighthouse ring's proportions (wider-but-shorter
+than the pedestal's own footing tier) read as "the tower rising out of a
+base" rather than "a flat disc under a tower" is unconfirmed until a
+real Editor render.
+
+This closes all six docs/31 §7 phases from the original "CLAUDE CODE --
+EXECUTABLE ART/DESIGN GAUNTLET" creator direction. Two design conflicts
+were surfaced and resolved during implementation (Alien "no rivets" vs.
+full mechanical antennas; Human's "radar sweep" dish vs. "avoid modern
+military radar") -- both logged in their own Phase 2 entry above, per
+the gauntlet's own explicit "report any architectural conflicts or
+compromises discovered during implementation" instruction.
