@@ -76,8 +76,39 @@ public class ResourceHud : MonoBehaviour
         if (bridge == null || !bridge.HasMatch) return;
         var prevMatrix = UiScale.Begin();
 
+        var supplyUsed = bridge.PlayerSupplyUsed(localPlayerIndex);
+        var supplyCap = bridge.PlayerSupplyCap(localPlayerIndex);
+        var supplyText = "Supply " + supplyUsed + "/" + supplyCap;
+
+        var lines = new string[Kinds.Length];
+        for (var i = 0; i < Kinds.Length; i++)
+        {
+            var amount = bridge.PlayerWallet(localPlayerIndex, Kinds[i]);
+            var cap = bridge.PlayerWalletCap(localPlayerIndex, Kinds[i]);
+            lines[i] = Icons[i] + " " + amount + (cap < int.MaxValue ? "/" + cap : "");
+        }
+
+        // 2026-08 (creator direction: "make sure the resource text is
+        // never clipped"): `panelWidth` used to be a fixed Inspector
+        // guess (220px) regardless of how long the actual wallet numbers
+        // got -- fine at small values, but nothing stopped a cap/amount
+        // from growing past whatever 220px could fit. Measured against
+        // the ACTUAL text every line will draw this frame (CalcSize, same
+        // fix pattern the build-menu info line and the Minimap legend
+        // both already use) and widened to fit -- `panelWidth` is now a
+        // FLOOR, not a fixed value, so short numbers still get the
+        // original compact panel and nothing is ever silently clipped.
+        var style = GUI.skin.label;
+        var neededWidth = style.CalcSize(new GUIContent(supplyText)).x;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var w = style.CalcSize(new GUIContent(lines[i])).x;
+            if (w > neededWidth) neededWidth = w;
+        }
+        var actualPanelWidth = Mathf.Max(panelWidth, neededWidth + Padding * 2f);
+
         var height = Padding * 2f + LineHeight * (Kinds.Length + 1);   // +1 for the supply row
-        var rect = GetPanelRect(height);
+        var rect = GetPanelRect(height, actualPanelWidth);
         if (rect.width <= 0f) { UiScale.End(prevMatrix); return; }
 
         GUI.color = backingColor;
@@ -88,19 +119,16 @@ public class ResourceHud : MonoBehaviour
         var y = rect.y + Padding;
         var innerWidth = rect.width - Padding * 2f;
 
-        var supplyUsed = bridge.PlayerSupplyUsed(localPlayerIndex);
-        var supplyCap = bridge.PlayerSupplyCap(localPlayerIndex);
         var supplyColor = supplyUsed >= supplyCap && supplyCap > 0 ? cappedColor : labelColor;
-        DrawShadowedLabel(new Rect(x, y, innerWidth, LineHeight), "Supply " + supplyUsed + "/" + supplyCap, supplyColor);
+        DrawShadowedLabel(new Rect(x, y, innerWidth, LineHeight), supplyText, supplyColor);
         y += LineHeight;
 
         for (var i = 0; i < Kinds.Length; i++)
         {
             var amount = bridge.PlayerWallet(localPlayerIndex, Kinds[i]);
             var cap = bridge.PlayerWalletCap(localPlayerIndex, Kinds[i]);
-            var text = Icons[i] + " " + amount + (cap < int.MaxValue ? "/" + cap : "");
             var atCap = cap < int.MaxValue && amount >= cap;
-            DrawShadowedLabel(new Rect(x, y, innerWidth, LineHeight), text, atCap ? cappedColor : labelColor);
+            DrawShadowedLabel(new Rect(x, y, innerWidth, LineHeight), lines[i], atCap ? cappedColor : labelColor);
             y += LineHeight;
         }
 
@@ -116,7 +144,7 @@ public class ResourceHud : MonoBehaviour
         GUI.color = Color.white;
     }
 
-    private Rect GetPanelRect(float height)
+    private Rect GetPanelRect(float height, float width)
     {
         // 2026-08 (creator direction: "the ui is not scaling properly to
         // screen sizes"): reads UiScale.Width/Height (the fixed reference
@@ -126,17 +154,23 @@ public class ResourceHud : MonoBehaviour
         // or the matrix would double-scale it off-screen. UiScale's own
         // constants are never 0, so the old zero-Screen-size fallback/
         // warning this replaced is no longer a real code path.
+        //
+        // `width` (2026-08, "make sure the resource text is never
+        // clipped"): the caller passes the ACTUAL needed width (measured
+        // against this frame's real text, floored at the Inspector
+        // `panelWidth`), not the raw `panelWidth` field directly -- so a
+        // long wallet number widens the panel instead of clipping.
         var screenW = UiScale.Width;
         var screenH = UiScale.Height;
-        if (useCustomPosition) return new Rect(customTopLeftPixels.x, customTopLeftPixels.y, panelWidth, height);
+        if (useCustomPosition) return new Rect(customTopLeftPixels.x, customTopLeftPixels.y, width, height);
         float x, y;
         switch (corner)
         {
             case ScreenCorner.BottomLeft: x = marginPixels.x; y = screenH - marginPixels.y - height; break;
-            case ScreenCorner.BottomRight: x = screenW - marginPixels.x - panelWidth; y = screenH - marginPixels.y - height; break;
+            case ScreenCorner.BottomRight: x = screenW - marginPixels.x - width; y = screenH - marginPixels.y - height; break;
             case ScreenCorner.TopLeft: x = marginPixels.x; y = marginPixels.y + topOffsetPixels; break;
-            default: x = screenW - marginPixels.x - panelWidth; y = marginPixels.y + topOffsetPixels; break;   // TopRight
+            default: x = screenW - marginPixels.x - width; y = marginPixels.y + topOffsetPixels; break;   // TopRight
         }
-        return new Rect(x, y, panelWidth, height);
+        return new Rect(x, y, width, height);
     }
 }

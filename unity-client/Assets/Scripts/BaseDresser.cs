@@ -2703,8 +2703,14 @@ public class BaseDresser : MonoBehaviour
     /// for anyone not sitting in slot 0 or 1. Human Alliance's own tone
     /// changes here too, from the old olive-drab military approximation
     /// to actual blue -- an explicit, in-scope correction per that same
-    /// direction, not an accidental drift.</summary>
-    private static Color OwnerBaseColor(FactionId faction)
+    /// direction, not an accidental drift.
+    ///
+    /// Public (2026-08): <see cref="BuildingFactionSkin"/>'s own HUD-side
+    /// accent color reuses this exact mapping rather than inventing a
+    /// second, possibly-drifting one -- the same faction should read as
+    /// the same color whether it's tinting a base in the 3D world or a
+    /// build-menu icon in the HUD.</summary>
+    public static Color OwnerBaseColor(FactionId faction)
     {
         switch (faction)
         {

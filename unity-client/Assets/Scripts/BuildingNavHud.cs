@@ -29,17 +29,26 @@ using UnityEngine.InputSystem;
 /// directions; a no-op (arrows simply don't draw) when there's nothing
 /// else of that kind to jump to.
 ///
-/// IMGUI, same layer as every other HUD element in this project (colored-
-/// swatch-plus-shadowed-label "icons" -- there is no real icon sprite/
-/// texture art anywhere in this repo yet, matching how BuildMenuHud's own
-/// roster rows are text, not icons either). New Input System API
-/// exclusively for the keyboard paging (see WaypointCommander's own
-/// header for why the legacy Input class is off-limits in this project).
+/// IMGUI, same layer as every other HUD element in this project. New
+/// Input System API exclusively for the keyboard paging (see
+/// WaypointCommander's own header for why the legacy Input class is
+/// off-limits in this project).
 ///
 /// A no-op (renders nothing) until <see cref="Init"/> is called with a
 /// live <see cref="SimBridge"/> that <see cref="SimBridge.HasMatch"/> --
 /// same discipline every other SimBridge-reading HUD element in this
 /// project already follows.
+///
+/// 2026-08 (creator direction: "Update the ui to reflect each theme,
+/// faction style... All user Building must have thumbnail icons"): icons
+/// used to be a flat per-kind color plus a 2-3 letter text abbreviation
+/// -- this project's own doc comments were explicit that there was no
+/// real icon sprite art anywhere. <see cref="DrawIcon"/> now draws a
+/// real procedurally-baked silhouette pictogram per kind (<see
+/// cref="BuildingIconKit"/>) tinted with the local player's own faction
+/// accent (<see cref="BuildingFactionSkin"/>) instead -- shape carries
+/// kind, color carries faction, the same split <see cref="BuildMenuHud"/>'s
+/// own command-card tiles now use.
 /// </summary>
 public class BuildingNavHud : MonoBehaviour
 {
@@ -216,11 +225,15 @@ public class BuildingNavHud : MonoBehaviour
     {
         var sameKind = mine.FindAll(b => b.Kind == highlighted.Kind);
         var indexWithinKind = sameKind.FindIndex(b => b.EntityId == highlighted.EntityId);
-        var def = BuildingDef.Get(highlighted.Kind);
+        // 2026-08 ("reflect each theme, faction style"): the local
+        // player's own faction-skinned name (BuildingFactionSkin), not
+        // the sim's generic BuildingDef.Name -- the same name this
+        // building shows in BuildMenuHud's own info line.
+        var name = BuildingFactionSkin.NameFor(highlighted.Kind, bridge.PlayerFaction(localPlayerIndex));
 
         var label = sameKind.Count > 1
-            ? def.Name + " " + (indexWithinKind + 1) + "/" + sameKind.Count
-            : def.Name;
+            ? name + " " + (indexWithinKind + 1) + "/" + sameKind.Count
+            : name;
         DrawShadowedLabel(new Rect(rowStartX, rowY - 18f, effIconSize * mine.Count + effIconGap * (mine.Count - 1), 16f), label, new Color(0.95f, 0.9f, 0.7f, 1f), TextAnchor.MiddleCenter);
 
         if (sameKind.Count <= 1) return;
@@ -240,6 +253,15 @@ public class BuildingNavHud : MonoBehaviour
         if (GUI.Button(nextRect, ">")) CycleSameKind(1);
     }
 
+    /// <summary>2026-08 (creator direction: "Update the ui to reflect
+    /// each theme, faction style... All user Building must have
+    /// thumbnail icons"): replaced the old per-kind flat color + text
+    /// abbreviation with the local player's own faction accent (<see
+    /// cref="BuildingFactionSkin.AccentColorFor"/>) plus a real
+    /// silhouette pictogram (<see cref="BuildingIconKit.IconFor"/>) --
+    /// same "shape=kind, color=faction" split <see cref="BuildMenuHud"/>'s
+    /// own command-card tiles now use, so the SAME building reads as the
+    /// same icon/color in both places.</summary>
     private void DrawIcon(Rect rect, SimBuilding b, bool highlighted)
     {
         GUI.color = highlighted ? new Color(0.9f, 0.75f, 0.2f, 1f) : new Color(0.15f, 0.15f, 0.18f, 0.95f);
@@ -247,8 +269,15 @@ public class BuildingNavHud : MonoBehaviour
 
         var inset = highlighted ? 4f : 2f;
         var innerRect = new Rect(rect.x + inset, rect.y + inset, rect.width - inset * 2f, rect.height - inset * 2f);
-        GUI.color = IconColorFor(b.Kind);
+        var faction = bridge.PlayerFaction(localPlayerIndex);
+        GUI.color = BuildingFactionSkin.AccentColorFor(faction);
         GUI.DrawTexture(innerRect, Texture2D.whiteTexture);
+        GUI.color = Color.white;
+
+        var iconInset = innerRect.width * 0.14f;
+        var iconRect = new Rect(innerRect.x + iconInset, innerRect.y + iconInset, innerRect.width - iconInset * 2f, innerRect.height - iconInset * 2f);
+        GUI.color = new Color(0.92f, 0.88f, 0.78f, 1f);
+        GUI.DrawTexture(iconRect, BuildingIconKit.IconFor(b.Kind));
         GUI.color = Color.white;
 
         if (b.IsDamaged)
@@ -256,54 +285,6 @@ public class BuildingNavHud : MonoBehaviour
             GUI.color = new Color(0.9f, 0.15f, 0.15f, 0.45f);
             GUI.DrawTexture(innerRect, Texture2D.whiteTexture);
             GUI.color = Color.white;
-        }
-
-        DrawShadowedLabel(new Rect(rect.x, rect.y + rect.height - 14f, rect.width, 14f), IconAbbrevFor(b.Kind), Color.white, TextAnchor.MiddleCenter);
-    }
-
-    /// <summary>Distinct per-kind colors, the same "shape/color carries
-    /// identity" swatch idiom <see cref="RegionPickerHud"/>/<see
-    /// cref="MatchSetupHud"/> already use for their own option rows --
-    /// this project has no real icon sprite art, so a colored square plus
-    /// a short abbreviation IS this codebase's established "icon."
-    /// Public (2026-08): <see cref="BuildMenuHud"/>'s own StarCraft-style
-    /// icon grid reuses this exact mapping rather than inventing a second,
-    /// possibly-drifting one -- the same building should read as the same
-    /// color everywhere it shows up as an "icon" in this project.</summary>
-    public static Color IconColorFor(BuildingKind kind)
-    {
-        switch (kind)
-        {
-            case BuildingKind.Hq: return new Color(0.85f, 0.7f, 0.25f);
-            case BuildingKind.BloodStorage: return new Color(0.75f, 0.15f, 0.15f);
-            case BuildingKind.FuelPump: return new Color(0.25f, 0.65f, 0.3f);
-            case BuildingKind.FuelStorage: return new Color(0.2f, 0.5f, 0.25f);
-            case BuildingKind.PartsStorage: return new Color(0.55f, 0.55f, 0.55f);
-            case BuildingKind.HarvestPost: return new Color(0.55f, 0.4f, 0.25f);
-            case BuildingKind.Factory: return new Color(0.8f, 0.45f, 0.15f);
-            case BuildingKind.Defense: return new Color(0.55f, 0.2f, 0.2f);
-            case BuildingKind.BigBrain: return new Color(0.55f, 0.3f, 0.75f);
-            default: return new Color(0.5f, 0.5f, 0.5f);
-        }
-    }
-
-    /// <summary>Public (2026-08): shared with <see cref="BuildMenuHud"/>'s
-    /// icon grid, same reasoning as <see cref="IconColorFor"/>'s own doc
-    /// comment.</summary>
-    public static string IconAbbrevFor(BuildingKind kind)
-    {
-        switch (kind)
-        {
-            case BuildingKind.Hq: return "HQ";
-            case BuildingKind.BloodStorage: return "Bld";
-            case BuildingKind.FuelPump: return "Pmp";
-            case BuildingKind.FuelStorage: return "Fue";
-            case BuildingKind.PartsStorage: return "Prt";
-            case BuildingKind.HarvestPost: return "Hrv";
-            case BuildingKind.Factory: return "Fac";
-            case BuildingKind.Defense: return "Def";
-            case BuildingKind.BigBrain: return "Brn";
-            default: return "?";
         }
     }
 

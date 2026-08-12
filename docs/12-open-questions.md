@@ -15989,3 +15989,118 @@ actually read as distinct silhouettes at true 220px on-screen scale
 (rather than just "slightly different blobs"), and whether the compass/
 legend docking logic behaves sensibly across all four corner presets in
 practice, are unconfirmed until a real render.
+
+## 2026-08: build-menu/nav-bar UI gets real thumbnail icons + faction-themed names; resource text hardened against clipping
+
+Creator direction: "Update the ui to reflect each theme, faction style
+established by the maps and period style. Including All user Building
+must have thumbnail icons and make sure the resource text is never
+clipped." Follow-up, narrowing scope: "Resource requirements for the
+building. Text is not clipped."
+
+**Scope decision, stated plainly.** This project has 21 separate IMGUI
+HUD scripts; re-theming every one of them in one pass, with no Unity
+Editor available to check any of it, would be irresponsible breadth.
+Scoped to the two concrete, well-specified, high-value pieces the
+request actually names: (1) building identity -- names/colors/icons,
+the two HUD elements that show buildings (`BuildMenuHud`,
+`BuildingNavHud`) -- and (2) the resource-requirement text specifically
+flagged as clipped (`BuildMenuHud`'s cost info line), plus the other
+"resource" panel in the game (`ResourceHud`'s wallet display) as the
+same fix applied consistently. Did NOT touch HudStatus/SelectionHud/
+RecallHud/BattalionHud/etc. -- flagged as out of scope for this pass,
+not silently skipped.
+
+**The gap this closes was already named in the sim's own code.**
+`BuildingDef.cs`'s own doc comment has said, since Phase 2: "Per-faction
+display SKINS (Blood Bank / Plasma Reserve / Ichor Cistern, ...) are a
+Unity/display concern... the sim only ever reasons about the generic
+kind." That skin never got built on the Unity side -- every building
+showed the SAME generic name and the SAME flat per-kind color
+regardless of which of the three real factions (`FactionId.MadDoctor`/
+`HumanArmy`/`AlienHive`) the local player had picked.
+
+**New `BuildingFactionSkin.cs`** -- `NameFor(BuildingKind, FactionId)`:
+27 faction-flavored names (9 kinds x 3 factions; `Mixed` and any
+unrecognized faction fall back to the sim's own generic
+`BuildingDef.Name`, since Mixed has no single origin/energy of its own
+to theme toward -- `FactionDef`'s own doc comment). Reuses exact wording
+already canonized elsewhere in this codebase where it existed
+(`BloodStorage`'s "Blood Bank / Plasma Reserve / Ichor Cistern" is
+`BuildingDef.cs`'s own literal example; `Factory`'s Doctor name
+"Stitchworks" is docs/22 §7's own established term, quoted directly in
+that same file's comment; `Hq` reuses `FactionDef.BaseName` verbatim
+rather than a second copy of "The Sanatorium/Fort Vigilance/The Brood
+Nest"). `AccentColorFor(FactionId)` is a thin passthrough to `BaseDresser.
+OwnerBaseColor` (promoted `public`, was `private`) rather than a second
+palette -- the same faction reads as the same color in the 3D world and
+the HUD.
+
+**New `BuildingIconKit.cs`** -- real thumbnail icons, not the old flat-
+color-square-plus-2-letter-abbreviation "icon" both `BuildMenuHud` and
+`BuildingNavHud`'s own doc comments admitted was standing in for one.
+Same technique the Minimap legibility pass (two entries above) already
+established for this project's "no real icon sprite art anywhere"
+constraint: procedurally bake a small (28x28) white-silhouette-on-
+transparent `Texture2D` per `BuildingKind`, ONCE, cached forever, tinted
+live via `GUI.color` -- one bake per KIND works for all three factions'
+own accent colors without needing 9x3=27 separate textures. Nine
+distinct pictograms, each built from analytic shape tests (circle/ring/
+rect/taper), not hand-drawn art: Hq = command roundel (ring + cross),
+BloodStorage = droplet (circular bulb, linear taper to a point),
+FuelPump = tank + nozzle + a punched-through gauge cutout, FuelStorage =
+barrel with two transparent hoop-line gaps, PartsStorage = two offset
+stacked crates, HarvestPost = upward chevron over a base, Factory = base
+block + sawtooth roofline + one chimney (deliberately overlapped past
+the roofline's own maximum height so it can't float above a gap
+regardless of sawtooth phase), Defense = shield (flat top, tapered
+point), BigBrain = three overlapping lobes. Caught and fixed three real
+sign-convention bugs during review before they shipped (FuelPump's
+nozzle/gauge, HarvestPost's base, Factory's chimney) -- see the git
+history for the exact before/after; texture-space Y grows DOWNWARD, and
+it's an easy, silent mistake to place a "top" feature at positive dy by
+reflex.
+
+**Wiring.** `BuildMenuHud.DrawTile` and `BuildingNavHud.DrawIcon` both
+switched from `BuildingNavHud.IconColorFor`/`IconAbbrevFor` (now fully
+unused -- deleted outright, not left as dead code, once both consumers
+stopped calling them) to `BuildingFactionSkin.AccentColorFor` (tile
+background) + `BuildingIconKit.IconFor` (silhouette on top, tinted
+ivory for contrast) + `BuildingFactionSkin.NameFor` (info line / nav
+label). Shape now carries KIND, color carries FACTION -- the same split
+the Minimap pass already applied to its own landmark markers, now
+consistent across every "icon" in this project's UI.
+
+**Resource text clipping.** `BuildMenuHud`'s info line (`hovered.Name +
+" — " + CostLabel(hovered)`) used a fixed 20px height with no word-wrap
+-- "Factory — 30 Bones, 15 Blood, 50 Parts" at the grid's own ~176px
+width genuinely doesn't fit one line. New `WorstCaseInfoHeight` measures
+every real def's OWN faction-skinned name+cost line via `GUI.skin.
+label.CalcHeight` (word-wrap on) and reserves the tallest one up front
+-- the panel's height is fixed per-frame (doesn't jump around as the
+mouse moves between tiles) and guaranteed large enough for whichever
+line is actually showing. New `DrawWrappedShadowedLabel` (word-wrap
+variant of the existing drop-shadow label helper) draws the actual
+text. Applied the SAME `CalcSize`-based "measure the real text, don't
+guess a fixed width" fix to `ResourceHud`'s wallet panel too (`panelWidth`
+is now a floor, widened to fit whatever the actual wallet/cap numbers
+need this frame) -- the other place in the game literally labeled
+"resource" text, even though the creator's own follow-up narrowed the
+immediate ask to the build-menu specifically.
+
+**Verified:** Manual review only -- confirmed brace/paren counts balance
+across all five touched/new files (`BuildingIconKit.cs`,
+`BuildingFactionSkin.cs`, `BuildingNavHud.cs`, `BuildMenuHud.cs`,
+`ResourceHud.cs`, plus the one-line `BaseDresser.cs` visibility change).
+Confirmed grep shows zero remaining references to the deleted
+`IconColorFor`/`IconAbbrevFor` anywhere in the codebase. Worked through
+`BuildingIconKit`'s own dx/dy sign convention by hand for every one of
+the nine shapes (not just spot-checked) after catching the first three
+bugs, specifically because a plausible-looking but backwards shape is
+exactly the kind of mistake that survives casual review. No flightcheck
+harness or Unity Editor available this session -- NOT verified to
+compile against real Unity assemblies, and NOT verified visually.
+Whether the nine pictograms actually read as recognizable/distinct at
+true ~44-56px on-screen tile size (rather than "nine similar blurry
+blobs"), and whether the 27 invented faction names land the right
+period/faction tone, are both unconfirmed until a real render.
