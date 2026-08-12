@@ -13,7 +13,7 @@ The design documentation for **Mad Doctor's Construction Set (MadDr.MCs)** — a
 | [05-component-economy.md](05-component-economy.md) | Blood/Bones/Parts/Brains: sources, sinks, reanimation costs, anti-snowball | Draft |
 | [06-mutator-design.md](06-mutator-design.md) | **The genome schema (normative)**, brain budget, **the Workshop**: Mutate/Splice/Graft/Megabrain Augmentation/Cannibalize, resource-driven construction | Draft |
 | [07-mutator-server-architecture.md](07-mutator-server-architecture.md) | The cross-device Mutator service: data model, API, commute mode, scaling | Draft |
-| [08-creature-visualization.md](08-creature-visualization.md) | Genome → 3D: socketed parts, blend shapes, uber-shader, perf budgets | Draft |
+| [08-creature-visualization.md](08-creature-visualization.md) | Genome → 3D: socketed parts, blend shapes, uber-shader, perf budgets. **Superseded in practice** — see the doc's own 2026-08 status note: the shipped renderer (`packages/creature-mesh`) is procedural parametric geometry, not hand-authored blend-shape assets; a real morph-target-style blend (`CreatureBuilder.TorsoLevels`, three named torso silhouettes) now exists as the working equivalent | Draft |
 | [09-multiplayer-architecture.md](09-multiplayer-architecture.md) | Server-authoritative netcode, mobile resilience, matchmaking, anti-cheat | Draft |
 | [10-engine-evaluation.md](10-engine-evaluation.md) | Unity vs Godot vs Unreal — scored matrix, recommendation, validation spike | Draft |
 | [11-roadmap.md](11-roadmap.md) | Risk-first phases from paper playtest to launch; de-scope ladder | Draft |

@@ -16236,3 +16236,119 @@ gray," and whether the porthole collar's recess is subtle enough to
 read as integrated rather than as its own visible extra ring, are all
 unconfirmed until a real render -- see docs/31 §9 for the fuller
 writeup and the same caveats stated once more, in context.
+
+## 2026-08: morph-target torso pass -- CreatureBuilder.TorsoLevels goes from 2 blended targets to 3
+
+Creator direction: "I need to revamp the body shape system with morph
+targets. So the breeding and evolution is more realistic and generates
+more options."
+
+**Investigated before implementing.** Dispatched a research agent to
+map the actual genome body-shape schema, docs/08's "blend shapes"
+design, and the real renderer -- given "morph targets" is a specific
+Unity feature (real vertex-level `BlendShape`/`SkinnedMeshRenderer`
+data), and this project has no DCC/Editor asset pipeline, I needed to
+know what was actually feasible before designing anything. Findings:
+(1) docs/08's own "socketed parts + hand-authored blend shapes"
+architecture was NEVER built -- a whole-tree grep confirmed zero real
+`BlendShape`/`SkinnedMeshRenderer` usage anywhere in `unity-client`.
+What shipped instead (`packages/creature-mesh/src/CreatureBuilder.cs`,
+invoked from `MonsterBody.cs`) is hand-authored PARAMETRIC PROCEDURAL
+GEOMETRY per body plan -- closer to docs/08's own explicitly-REJECTED
+"full procedural generation" alternative. (2) The genome's body
+representation (a `plan` string + 4 continuous `[0,1]` axes --
+`posture, bulk, limb, tail`, `packages/genome-core/src/genome.ts:96-99`,
+`BODY_AXES` at `:33`) is real, tested, and already blended CONTINUOUSLY
+by breeding's own crossover (`operators.ts:260-265`) -- solid ground
+to build on without any genome schema change. (3) `CreatureBuilder.
+TorsoLevels` (the Tetrapod/Winged torso-radius-profile generator)
+ALREADY did a genuine 2-target morph blend -- two named radius-profile
+arrays (`ProfilePear`/`ProfileGor`), lerped by the `Limb` axis, with
+its own doc comment reading "everything between breeds smoothly." Its
+sibling `Lathe` method's own doc comment even named a THIRD profile,
+"pear/barrel/gorilla," that was never actually authored. This was the
+obvious, lowest-risk, highest-leverage place to build a REAL morph-
+target system: extend an already-working 2-target blend to 3, using
+the procedurally-generated target shapes AS the "morph targets"
+(a legitimate reading of the technique -- blending N target shapes by
+weight -- even though the targets are formula outputs, not sculpted
+vertex deltas from a DCC tool this environment doesn't have).
+
+**What changed** (`packages/creature-mesh/src/CreatureBuilder.cs`):
+new `ProfileLean` (a genuinely distinct third silhouette -- athletic,
+narrower overall than either Pear or Gorilla, a gentle taper rather
+than Gorilla's exaggerated V) joins the existing `ProfilePear`/
+`ProfileGor`. `TorsoLevels` now does a proper piecewise 3-target blend:
+blend in [0, 0.5] lerps Pear->Gorilla (unchanged from before), blend in
+[0.5, 1] lerps Gorilla->Lean (new). New `GorillaWeight(blend)` helper
+-- a triangular function, 0 at blend=0 or blend=1, 1 at blend=0.5 --
+replaces the raw blend value for every trait that's specifically
+Gorilla-flavored (forward hunch, barrel-chest depth). This mattered
+for correctness, not just style: in the OLD 2-target version, Gorilla
+always sat at the blend=1 endpoint, so "scale an effect with the raw
+blend value" and "scale it with gorilla-ness" were the same formula.
+They stopped being the same formula the moment a third target moved
+into that slot.
+
+**A real bug caught and fixed during the same pass, not after.**
+`PlanTetrapod` had TWO of its own downstream call sites that reused
+the raw `Limb`/`b` value directly for effects that are ALSO
+Gorilla-specific: the brute deltoid-cap ellipsoids (gated `if (b >
+0.5)`, sized by `b`) and an outward hand-socket shift sized to clear
+those same deltoids. Left as-is, a "full Lean" creature (limb=1) would
+have grown Gorilla-style brute shoulders sized by how lean it is --
+backwards, and a direct consequence of the 3-target upgrade, not a
+pre-existing issue. Both fixed to use the new `GorillaWeight(b)`
+instead, so deltoid caps (and the hand-socket adjustment they require)
+now correctly peak at the Gorilla midpoint and vanish at both other
+extremes. `PlanWinged` (the torso profile's other consumer, feeding it
+from `Bulk * 0.85` rather than `Limb`) was checked and confirmed to
+have no equivalent downstream reuse needing the same fix.
+
+**Why no genome schema change was needed.** The morph-target blend
+reuses the SAME existing `Limb`/`Bulk` axes breeding already blends
+continuously between parents -- widening what those axes DO (three
+reachable silhouettes instead of two, with correct trait-gating) widens
+bred offspring's own reachable shape space for free, without touching
+`packages/genome-core`, `mutator-service`, or docs 06/07 (the
+normative-schema trio CLAUDE.md requires changing together for an
+actual schema edit). Scoped deliberately narrower than a full genome
+revamp for exactly this reason -- the creator's own "more options"
+goal is served by the renderer alone reinterpreting existing genes more
+richly, not by adding new ones.
+
+**Scope, stated plainly.** This pass touched the Tetrapod/Winged torso
+profile specifically (the two plans that share `TorsoLevels`), not all
+nine body plans -- Blob/Serpentine/Crab/Arachnid/Avian/Treant/Floater
+each use their own separate formula-driven geometry (ellipsoids/tubes/
+lathes with different structure) and would each need their OWN
+morph-target design, not a mechanical copy-paste of this one. Flagged
+as a natural, well-precedented next round rather than attempted here
+in the same pass.
+
+**Verified:** `packages/creature-mesh` has a real `dotnet test` suite
+(`Tests~/CreatureBuilderTests.cs`), unlike the Unity-side work
+elsewhere in this log -- but no .NET SDK is installed in this specific
+remote environment either (`dotnet: command not found`, confirmed),
+so even this package's own real automated tests could not actually be
+RUN this session, only written and manually reviewed. Four new tests
+added: `TetrapodTorsoIsThreeDistinctSilhouettesNotTwo` (Pear/Gorilla/
+Lean produce pairwise-distinct max-width, Gorilla widest of the three),
+`TetrapodDeltoidCapsOnlyAppearNearTheGorillaMidpoint` (triangle count
+at Limb=1 and Limb=0 are both lower than at Limb=0.5 -- the actual bug
+fix, verified at the test level), `TorsoBlendIsContinuousAcrossThePearGorillaGorillaLeanSeam`
+(sampling just below/above the blend=0.5 piecewise seam lands close
+together, no visible pop), `WingedTorsoAlsoReachesAllThreeTargetsViaBulk`
+(confirms the shared `TorsoLevels`/`GorillaWeight` code genuinely
+affects both consuming plans, not just Tetrapod). Confirmed brace
+balance (249/249) across the whole `CreatureBuilder.cs` file both
+before and after, and confirmed real-code paren balance (1060/1060)
+with comment-only lines stripped out, after a raw whole-file paren
+count flagged a false-positive 1-off mismatch traced by hand to prose
+punctuation inside doc comments (the same false-positive shape this
+log has hit twice already this session on other files). NOT verified
+by an actual compiler or test run -- the biggest honesty gap in this
+entry, and worth re-running `dotnet test Tests~/CreatureMesh.Tests.csproj`
+from `packages/creature-mesh/` the moment a real .NET SDK is available,
+before trusting these four tests actually pass rather than just
+type-check by manual read-through.

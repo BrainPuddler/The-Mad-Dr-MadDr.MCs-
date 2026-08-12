@@ -47,6 +47,22 @@ public class CreatureBuilderTests
         return TotalTrisIn(r.Chunks);
     }
 
+    /// <summary>2026-08 (morph-target torso pass): the widest |X| position
+    /// across every emitted vertex -- a simple proxy for "how wide does
+    /// this creature's torso/shoulders read," good enough to prove the
+    /// Pear/Gorilla/Lean targets produce genuinely DIFFERENT silhouettes
+    /// without needing to isolate the torso chunk specifically (the
+    /// widest point on a Tetrapod is always torso/shoulder/deltoid
+    /// geometry, never the head or legs).</summary>
+    private static double MaxAbsX(CreatureMeshResult r)
+    {
+        var max = 0.0;
+        foreach (var c in r.Chunks)
+            for (var i = 0; i < c.Positions.Count; i += 3)
+                max = System.Math.Max(max, System.Math.Abs(c.Positions[i]));
+        return max;
+    }
+
     private static int TotalTrisIn(System.Collections.Generic.IReadOnlyList<MeshChunk> chunks)
     {
         var n = 0;
@@ -794,5 +810,91 @@ public class CreatureBuilderTests
         // sanity: this is a REAL rotation away from the untilted case, not
         // a no-op that happens to pass the equality checks above by luck
         Assert.True(System.Math.Abs(n[2]) > 0.4, $"cap normal barely rotated (n.Z={n[2]:F3})");
+    }
+
+    // ---- 2026-08 morph-target torso pass (creator direction: "revamp
+    // the body shape system with morph targets... more realistic and
+    // generates more options") -- TorsoLevels/GorillaWeight are private,
+    // so these test the PUBLIC CreatureBuilder.Build API and inspect the
+    // emergent geometry, same convention every other test in this file
+    // already uses (checking colors/triangle counts/alpha, not internals
+    // via reflection -- this is a real dotnet-test package, not a
+    // no-Editor Unity script needing the flightcheck-style workaround). ----
+
+    [Fact]
+    public void TetrapodTorsoIsThreeDistinctSilhouettesNotTwo()
+    {
+        // Limb 0/0.5/1 = Pear/Gorilla/Lean (see TorsoLevels' own doc
+        // comment). Before this pass, Limb only ever blended between TWO
+        // targets (Pear<->Gorilla) -- confirming all three widths are
+        // pairwise distinct is the direct proof a third, genuinely
+        // different target now exists and breeding can actually reach it
+        // (crossover already blends Limb continuously between parents,
+        // packages/genome-core's splice()).
+        var pear = MaxAbsX(CreatureBuilder.Build(Genome(bodyParams: new[] { 0.5, 0.5, 0.0, 0.5 })));
+        var gorilla = MaxAbsX(CreatureBuilder.Build(Genome(bodyParams: new[] { 0.5, 0.5, 0.5, 0.5 })));
+        var lean = MaxAbsX(CreatureBuilder.Build(Genome(bodyParams: new[] { 0.5, 0.5, 1.0, 0.5 })));
+
+        Assert.NotEqual(pear, gorilla);
+        Assert.NotEqual(gorilla, lean);
+        Assert.NotEqual(pear, lean);
+        // Gorilla is the widest of the three by design (huge chest/
+        // shoulders plus brute deltoid caps) -- both other targets should
+        // read narrower than it, not just "different."
+        Assert.True(gorilla > pear, $"gorilla ({gorilla:F3}) should be wider than pear ({pear:F3})");
+        Assert.True(gorilla > lean, $"gorilla ({gorilla:F3}) should be wider than lean ({lean:F3})");
+    }
+
+    [Fact]
+    public void TetrapodDeltoidCapsOnlyAppearNearTheGorillaMidpoint()
+    {
+        // 2026-08 bug caught during the 3-target upgrade: the brute
+        // deltoid caps used to gate on `limb > 0.5` directly, which only
+        // meant "gorilla-dominant" back when Gorilla WAS the limb=1
+        // endpoint. Left ungated, a "full Lean" creature (limb=1) would
+        // have grown deltoid caps sized by how lean it is -- exactly
+        // backwards. GorillaWeight (a triangular weight peaking at
+        // limb=0.5) fixes this; the triangle count at limb=1 should be
+        // LOWER than at limb=0.5 (no deltoid ellipsoids), and should be
+        // close to limb=0's count (also no deltoids), not close to
+        // limb=0.5's.
+        var pearTris = TotalTris(CreatureBuilder.Build(Genome(bodyParams: new[] { 0.5, 0.5, 0.0, 0.5 })));
+        var gorillaTris = TotalTris(CreatureBuilder.Build(Genome(bodyParams: new[] { 0.5, 0.5, 0.5, 0.5 })));
+        var leanTris = TotalTris(CreatureBuilder.Build(Genome(bodyParams: new[] { 0.5, 0.5, 1.0, 0.5 })));
+
+        Assert.True(gorillaTris > leanTris,
+            $"gorilla ({gorillaTris}) should have MORE triangles than lean ({leanTris}) -- deltoid caps only belong on gorilla");
+        Assert.True(gorillaTris > pearTris,
+            $"gorilla ({gorillaTris}) should have MORE triangles than pear ({pearTris}) -- deltoid caps only belong on gorilla");
+    }
+
+    [Fact]
+    public void TorsoBlendIsContinuousAcrossThePearGorillaGorillaLeanSeam()
+    {
+        // The 3-target blend is two piecewise-linear segments meeting at
+        // limb=0.5 -- "everything between breeds smoothly" (TorsoLevels'
+        // own long-standing comment) means there must be no visible POP
+        // right at that seam. Sampling just below and just above 0.5
+        // should land close together, not jump.
+        var justBelow = MaxAbsX(CreatureBuilder.Build(Genome(bodyParams: new[] { 0.5, 0.5, 0.499, 0.5 })));
+        var atMid = MaxAbsX(CreatureBuilder.Build(Genome(bodyParams: new[] { 0.5, 0.5, 0.5, 0.5 })));
+        var justAbove = MaxAbsX(CreatureBuilder.Build(Genome(bodyParams: new[] { 0.5, 0.5, 0.501, 0.5 })));
+
+        Assert.True(System.Math.Abs(justBelow - atMid) < 0.05,
+            $"visible pop approaching the seam from below: {justBelow:F4} -> {atMid:F4}");
+        Assert.True(System.Math.Abs(justAbove - atMid) < 0.05,
+            $"visible pop approaching the seam from above: {atMid:F4} -> {justAbove:F4}");
+    }
+
+    [Fact]
+    public void WingedTorsoAlsoReachesAllThreeTargetsViaBulk()
+    {
+        // PlanWinged feeds TorsoLevels from Bulk (capped at *0.85), not
+        // Limb -- confirming its own torso genuinely varies too, not just
+        // Tetrapod's, since TorsoLevels/GorillaWeight are shared code
+        // between both plans.
+        var low = MaxAbsX(CreatureBuilder.Build(Genome(plan: "winged", bodyParams: new[] { 0.5, 0.0, 0.5, 0.5 })));
+        var mid = MaxAbsX(CreatureBuilder.Build(Genome(plan: "winged", bodyParams: new[] { 0.5, 0.6, 0.5, 0.5 })));
+        Assert.NotEqual(low, mid);
     }
 }

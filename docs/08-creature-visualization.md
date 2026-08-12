@@ -1,6 +1,50 @@
 # 08 — Creature Visualization: Genome → 3D Monster
 
-Status: Draft v0.1 · Pillars served: 1 · Consumes the normative genome schema in [06-mutator-design.md](06-mutator-design.md). Highest technical-risk art system — validated by the Phase-1 spike ([11-roadmap.md](11-roadmap.md), [10-engine-evaluation.md](10-engine-evaluation.md)).
+Status: Draft v0.1 (superseded in practice — see the note immediately
+below) · Pillars served: 1 · Consumes the normative genome schema in
+[06-mutator-design.md](06-mutator-design.md). Highest technical-risk art
+system — validated by the Phase-1 spike ([11-roadmap.md](11-roadmap.md),
+[10-engine-evaluation.md](10-engine-evaluation.md)).
+
+**2026-08 status note, read before the rest of this doc.** What's
+actually shipped (`packages/creature-mesh/src/CreatureBuilder.cs`,
+invoked from `unity-client/Assets/Scripts/MonsterBody.cs`) is NOT the
+"modular socketed parts + hand-authored blend shapes" architecture §
+"The strategy decision" below describes — this environment never had a
+DCC/Editor pipeline to author the per-archetype rig/socket/blend-shape
+asset library that plan calls for, and no `SkinnedMeshRenderer`/real
+Unity `BlendShape` is used anywhere in this codebase (confirmed by a
+whole-tree grep, 2026-08). What got built instead is closer to this
+doc's own **rejected** "full procedural mesh generation" alternative
+(§ "Rejected alternatives," below) — hand-authored PARAMETRIC FORMULAS
+per body plan (lathe/tube/ellipsoid primitives), not per-vertex-authored
+art. This is genome-driven and deterministic exactly as this doc
+requires, just via a different mechanism than the one it specifies.
+
+The "blend shapes" AMBITION this doc describes (§4: "weights across the
+part's 2-4 authored blend shapes... a deterministic weight vector") was
+finally given a real, working equivalent in 2026-08 -- a genuine
+morph-target-style blend, just built from procedurally-generated target
+SHAPES instead of hand-sculpted vertex deltas (creator direction:
+"revamp the body shape system with morph targets... more realistic and
+generates more options"). `CreatureBuilder.TorsoLevels` (Tetrapod and
+Winged body plans, more to follow) blends between THREE named torso
+silhouettes -- Pear (bottom-heavy egg), Gorilla (huge chest/shoulders,
+hunched), Lean (athletic, upright) -- via the genome's existing `Limb`/
+`Bulk` body axis, continuously, the same "everything between breeds
+smoothly" property real blend shapes have. No genome schema change was
+needed: breeding's own existing crossover (`packages/genome-core`'s
+`splice()`) already blends these axis values continuously between
+parents, so this alone widens the range of DISTINCT bred silhouettes
+without touching 06's normative schema. Full writeup: docs/12's 2026-08
+"morph-target torso pass" entry.
+
+This doc's numbered plan below is kept as the ORIGINAL design record
+(useful context for why sockets/rigs/blend-shape terminology shows up
+elsewhere in this codebase's comments even though none of it is real
+Unity BlendShape usage) -- treat every mechanism it describes as
+aspirational/historical, not a description of the live system, until
+this doc gets a fuller rewrite.
 
 ## Goals & constraints
 

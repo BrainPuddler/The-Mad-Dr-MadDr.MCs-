@@ -246,10 +246,20 @@ namespace MadDr.CreatureMesh
 
             Prims.Lathe(mb, levels, o.Skin, 0.28, 0, 18);
             var shl = levels[3];
-            if (b > 0.5)                          // brute deltoid caps
+            // 2026-08: was `if (b > 0.5)` / sized directly by `b` -- a
+            // real bug once TorsoLevels became a 3-target blend (see
+            // GorillaWeight's own doc comment): `b > 0.5` used to mean
+            // "gorilla-dominant" because Gorilla WAS the b=1 endpoint,
+            // but now b in (0.5, 1] means increasingly LEAN, and a lean
+            // creature getting brute deltoid caps -- sized bigger the
+            // MORE lean it is -- makes no sense. Gated and sized by
+            // GorillaWeight(b) instead, which correctly peaks at b=0.5
+            // and returns to 0 at both b=0 (pear) and b=1 (lean).
+            var gorillaW = GorillaWeight(b);
+            if (gorillaW > 0.15)                  // brute deltoid caps
                 foreach (var s in Sides)
                     Prims.Ellipsoid(mb, new Vec3(s * shl.Rx * 0.85, shl.Y + 0.15, shl.Z),
-                        new Vec3(w * 0.48 * b, w * 0.42 * b, w * 0.44 * b), o.Skin, 0.28, 0, 10);
+                        new Vec3(w * 0.48 * gorillaW, w * 0.42 * gorillaW, w * 0.44 * gorillaW), o.Skin, 0.28, 0, 10);
             var ch = levels[2];
             StitchSeam(mb, ch.Y - h * 0.12, ch.Rx, ch.Rz, ch.Z);
             BuildPelvis(mb, o, levels[0].Rx, waistY);
@@ -270,7 +280,12 @@ namespace MadDr.CreatureMesh
             {
                 Hand = new Sock
                 {
-                    P = new Vec3(shl.Rx * 0.92 + (b > 0.5 ? w * 0.28 * b : 0), shl.Y, shl.Z + 0.15),
+                    // 2026-08: was `b > 0.5 ? w * 0.28 * b : 0` -- same
+                    // GorillaWeight fix as the deltoid caps above; this
+                    // outward shift exists to clear the brute deltoid
+                    // caps' own bulk, so it needs the same weight they're
+                    // sized by, not the raw (post-3-target) blend value.
+                    P = new Vec3(shl.Rx * 0.92 + w * 0.28 * gorillaW, shl.Y, shl.Z + 0.15),
                     Nrm = new Vec3(1, slope * 0.5, 0.15).Norm(),
                     Mirror = true,
                 },
@@ -475,7 +490,12 @@ namespace MadDr.CreatureMesh
 
         private static Sockets PlanWinged(Builder mb, Ctx o)
         {
-            var b = o.Bulk * 0.85;               // bulk sets the build: imp vs gargoyle
+            // bulk sets the torso blend: imp (low, toward TorsoLevels'
+            // Pear target) vs gargoyle (mid-high, toward its Gorilla
+            // target) -- capped at *0.85 so a Winged body never reaches
+            // the full-1.0 Lean end of the 2026-08 3-target blend, which
+            // reads as too slight/human for this plan's own silhouette.
+            var b = o.Bulk * 0.85;
             var w = 1.5 + 0.8 * o.Bulk;
             var h = 2.8 + 0.6 * o.Bulk;
             var waistY = o.LegLen + 0.95;
@@ -955,26 +975,81 @@ namespace MadDr.CreatureMesh
 
         // ---- torso -----------------------------------------------------------
 
-        /// <summary>Torso profiles: build 0 = pear (bottom-heavy egg),
-        /// 1 = gorilla (triangular -- huge chest and shoulders over narrow
-        /// hips, hunched forward). Everything between breeds smoothly.</summary>
+        /// <summary>Torso profiles -- THREE named silhouettes now, not two
+        /// (2026-08, "revamp the body shape system with morph targets...
+        /// more realistic and generates more options"): limb 0 = pear
+        /// (bottom-heavy egg, narrow shoulders/wide hips), limb 0.5 =
+        /// gorilla (triangular -- huge chest/shoulders over narrow hips,
+        /// hunched forward), limb 1 = lean (athletic -- narrow all over,
+        /// a gentle taper, upright). `Lathe`'s own doc comment already
+        /// named "pear/barrel/gorilla" as the intended silhouette-variety
+        /// set when this file was first ported -- "barrel" never actually
+        /// got authored as a third profile until now; `ProfileLean` is
+        /// that missing target (a distinct silhouette, not just an
+        /// average of the other two: smaller radii across the board, a
+        /// gentler taper than Gorilla's exaggerated V).
+        ///
+        /// A genuine 3-target morph blend, not a single formula: two
+        /// piecewise-linear segments (pear-&gt;gorilla for blend in [0,0.5],
+        /// gorilla-&gt;lean for blend in [0.5,1]), each of the 5 control
+        /// points interpolated independently -- "everything between
+        /// breeds smoothly" (the original 2-target version's own
+        /// comment), now across a richer 3-corner space instead of one
+        /// line segment. `blend` is plan-specific (Tetrapod passes its
+        /// own Limb axis, Winged passes a scaled Bulk -- see each call
+        /// site's own comment; this function doesn't assume which), and
+        /// since breeding's own crossover already blends genome body
+        /// axes continuously between parents (packages/genome-core's
+        /// `splice()`), this alone makes bred offspring reach a wider,
+        /// richer range of DISTINCT torso silhouettes -- no genome schema
+        /// change needed, the same existing axes just do more.</summary>
         private static readonly double[] ProfilePear = { 1.02, 1.22, 0.90, 0.62, 0.38 };
         private static readonly double[] ProfileGor = { 0.60, 0.80, 1.24, 1.40, 0.58 };
+        private static readonly double[] ProfileLean = { 0.55, 0.68, 0.72, 0.85, 0.42 };
         private static readonly double[] ProfileT = { 0, 0.30, 0.60, 0.86, 1 };
 
-        private static Prims.LatheLevel[] TorsoLevels(double build, double w, double h, double y0, double lean)
+        /// <summary>2026-08: how "gorilla-dominant" a `TorsoLevels` blend
+        /// position currently reads -- 0 at blend=0 (full pear) or
+        /// blend=1 (full lean), 1 at blend=0.5 (full gorilla), a
+        /// triangular peak. Traits that are specifically Gorilla-flavored
+        /// (forward hunch, barrel-chest depth, brute deltoid caps, an
+        /// outward-shifted hand reach to clear big shoulders) all need
+        /// THIS weight, not the raw blend position -- Gorilla used to
+        /// always sit at the blend=1 endpoint (the old 2-target version),
+        /// so "scale with blend directly" and "scale with gorilla-ness"
+        /// were the same formula; they no longer are now that a THIRD
+        /// target (Lean) sits at blend=1 instead. Every call site that
+        /// still reused the raw blend value for a Gorilla-specific effect
+        /// after this file's 3-target upgrade was a real bug (a Lean
+        /// creature getting brute deltoids sized by how "lean" it is
+        /// makes no sense) -- see `PlanTetrapod`'s own deltoid-cap and
+        /// hand-socket fixes for the two it had.</summary>
+        private static double GorillaWeight(double blend) => 1.0 - Math.Abs(blend - 0.5) * 2.0;
+
+        private static Prims.LatheLevel[] TorsoLevels(double blend, double w, double h, double y0, double lean)
         {
             var lv = new Prims.LatheLevel[5];
+            var hunchT = GorillaWeight(blend);
             for (var i = 0; i < 5; i++)
             {
                 var t = ProfileT[i];
-                var rx = w * (ProfilePear[i] + (ProfileGor[i] - ProfilePear[i]) * build);
+                double rx;
+                if (blend <= 0.5)
+                {
+                    var k = blend / 0.5;
+                    rx = w * (ProfilePear[i] + (ProfileGor[i] - ProfilePear[i]) * k);
+                }
+                else
+                {
+                    var k = (blend - 0.5) / 0.5;
+                    rx = w * (ProfileGor[i] + (ProfileLean[i] - ProfileGor[i]) * k);
+                }
                 lv[i] = new Prims.LatheLevel(
                     y0 + t * h,
                     0,
-                    t > 0.45 ? lean * build * (t - 0.45) / 0.55 : 0,
+                    t > 0.45 ? lean * hunchT * (t - 0.45) / 0.55 : 0,
                     rx,
-                    rx * (i == 2 ? 0.82 + 0.30 * build : 0.80));   // deep gorilla chest
+                    rx * (i == 2 ? 0.82 + 0.30 * hunchT : 0.80));   // deep chest only when gorilla-dominant
             }
             return lv;
         }
