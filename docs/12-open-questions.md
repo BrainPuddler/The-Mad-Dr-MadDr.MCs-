@@ -15835,3 +15835,56 @@ flightcheck harness or Unity Editor available this session -- NOT
 verified to compile against real Unity assemblies, and NOT verified
 visually (whether a real Big City build now shows coherently-lit-or-dark
 towers instead of patchy segments is unconfirmed until a real render).
+
+## 2026-08: WindowsLit chance made tier-dependent -- fixing the per-hex bug had made Large towers honestly dark 60% of the time
+
+Immediate creator follow-up to the round above: "now no lights are
+going on in the larger buildings" -> clarified "in some of the larger
+buildings" once asked to narrow it down.
+
+**Diagnosis, not a new bug.** The per-hex fix above was correct on its
+own terms -- every segment of a building now agrees on one `WindowsLit`
+roll instead of disagreeing. But that fix had a real, unintended side
+effect specifically for Large (4-hex) towers: BEFORE it, each of a
+tower's 4 segments rolled the flat "2 in 5" chance independently, so
+the odds of the WHOLE tower ending up with zero lit segments was only
+0.6^4 ~ 13% -- the inconsistency bug was accidentally making big towers
+look occupied almost every night, purely because with 4 independent
+rolls it's unlikely ALL of them miss. Once every segment was made to
+share ONE roll (the correct fix for the "half-lit tower" glitch), that
+same flat "2 in 5" chance meant a Large tower was now HONESTLY dark 60%
+of the time -- same rate as a single small house, despite implying
+dozens of households/offices. The consistency fix was right; the flat
+40%-for-every-tier number underneath it was never actually appropriate
+for a building that size, it was just being masked by the bug before.
+
+**Fix.** New `BuildingDresser.WindowsLitChance(BuildingTier)` helper:
+90% for Large, 60% for Medium (up from the flat 40% both tiers
+shared) -- both v0.1 placeholders like every other invented magnitude
+in this file, not derived from anything more precise. `WindowsLit`'s
+assignment changed from the `(hash / 11) % 5 < 2` idiom to `(hash %
+100) < WindowsLitChance(building.Tier)`, a plain percentage roll that's
+easier to retune per-tier than adjusting a fixed-denominator fraction
+would be. Still hashes `building.Footprint[0]` (unchanged from the
+round above) -- this is layered ON TOP of the per-building consistency
+fix, not a reversion of it; a Large tower is still ONE consistent
+building-wide decision, just a 90%-likely-yes one instead of a
+40%-likely-yes one.
+
+**While in the file:** also caught and fixed a stale doc comment on
+`DressFacadeGrammar` itself, left over from two rounds ago -- it still
+said "only STREET faces get the full grammar... party walls get
+nothing at all," which stopped being true once Alley and PartyWall
+faces both started getting real windows. Updated to describe the
+current behavior (every non-Street face gets windows; Street is the
+one that additionally gets shopfronts/entrances/fire escapes).
+
+**Verified:** Manual review only -- `WindowsLitChance` returns `int`,
+`Hash(...) % 100` is always non-negative (the existing `Hash` helper
+masks its result with `& 0x7FFFFFFF` before returning), so the `<`
+comparison and the overall `bool` type of `WindowsLit` both check out.
+No flightcheck harness or Unity Editor available this session -- NOT
+verified to compile against real Unity assemblies, and NOT verified
+visually. Whether 90%/60% are the right numbers (rather than, say,
+Large deserving even closer to 100%, or Medium needing its own bump
+too) is a felt/visual judgment unconfirmed until a real render.

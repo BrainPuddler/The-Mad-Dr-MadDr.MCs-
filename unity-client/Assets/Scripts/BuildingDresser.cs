@@ -206,15 +206,29 @@ public static class BuildingDresser
     private static Material DarkRecess() { return M(0.09f, 0.09f, 0.11f); }
     private static Material IronDark() { return M(0.15f, 0.15f, 0.17f); }
 
+    /// <summary>Percent chance (0-100) that a whole building has ANY lit
+    /// windows tonight at all, keyed by tier -- see the long comment on
+    /// `WindowsLit`'s own assignment in `DressFacadeGrammar` for why this
+    /// is tier-dependent rather than one flat number: a Large tower
+    /// implies dozens of households/offices, so realistically SOME window
+    /// is lit almost every night, while a single Medium walk-up
+    /// plausibly goes fully dark some nights. Both numbers are v0.1
+    /// placeholders, same as every other invented magnitude in this
+    /// file.</summary>
+    private static int WindowsLitChance(BuildingTier tier)
+    {
+        return tier == BuildingTier.Large ? 90 : 60;
+    }
+
     /// <summary>Solve and build every face of one footprint hex.
     ///
-    /// Cost discipline, stated rather than discovered later: only STREET
-    /// faces get the full grammar. Alley faces get their crown only (a
-    /// cornice genuinely does run around a corner, so this is period-
-    /// correct rather than a pure saving) and party walls get nothing at
-    /// all. That keeps a grammar-dressed hex in the same order of
-    /// magnitude as the window-strip dressing it replaces instead of
-    /// multiplying it by four faces.</summary>
+    /// Every non-Street face (Alley -- open ground that isn't a road --
+    /// AND PartyWall -- a neighboring hex, another building's own or this
+    /// SAME building's own, genuinely touching) now gets real windows too
+    /// (2026-08, docs/12) -- only Street gets the FULLER grammar
+    /// (shopfronts/entrances/fire escapes), not the only one that gets
+    /// windows at all, despite what this comment used to say before that
+    /// round.</summary>
     private static void DressFacadeGrammar(RuntimeCityBuilder b, Building building, HexCoord hex,
         Transform t, float height, int h, bool industrial, bool suburb, Material wall)
     {
@@ -244,30 +258,41 @@ public static class BuildingDresser
             Rust = RustRed(),
             Sign = SignWhite(),
             GlowColor = WindowGlowColor,
-            // Same "roughly 2 in 5 are lit" read the strip dressing had --
-            // decided per BUILDING, not per strip. 2026-08 bug fix: this
-            // used `h`, which is THIS specific footprint hex's own hash
-            // (`Hash(hex, 1)`, computed fresh per hex by `Dress()`'s own
-            // loop) -- for a multi-hex Medium/Large building (Medium
-            // targets 2 hexes, Large 4, `CityGenerator.cs`), each hex
-            // segment rolled WindowsLit INDEPENDENTLY, so "decided per
-            // building" was only true by accident for single-hex
-            // buildings. A real multi-hex tower could show one segment
-            // fully lit and its immediate neighbor -- same physical
-            // building, including that segment's own street-facing wall
-            // -- permanently, deterministically dark forever, and a
-            // smaller multi-hex building had a real chance of EVERY
-            // segment rolling dark, showing zero lit windows anywhere on
-            // the whole building. Fixed by hashing `building.Footprint[0]`
-            // (the SAME primary hex on every one of this building's own
-            // `DressFacadeGrammar` calls) instead of `hex` itself -- one
-            // stable value shared by every segment of the same building,
-            // so the "is this building occupied tonight" read is
-            // genuinely building-wide again. `h` itself is left alone for
-            // every OTHER per-hex choice below (trim color, glow seeds,
-            // etc.) -- those varying per segment is real facade variety
-            // on a big building's face, not a bug.
-            WindowsLit = (Hash(building.Footprint[0], 1) / 11) % 5 < 2,
+            // "Is this building occupied tonight at all" -- decided per
+            // BUILDING via `WindowsLitChance` below, hashed from
+            // `building.Footprint[0]` (the SAME primary hex on every one
+            // of this building's own `DressFacadeGrammar` calls, since
+            // `Dress()` always dresses `footprint[0]` first) rather than
+            // `hex` (THIS specific footprint hex being dressed this
+            // call) -- one stable value shared by every segment of a
+            // multi-hex Medium/Large building. 2026-08 bug fix history:
+            // this used to hash `hex` itself, so each segment of a
+            // multi-hex tower rolled independently -- one segment could
+            // be fully lit while its immediate neighbor, same physical
+            // building, was permanently dark forever, including that
+            // segment's own street-facing wall.
+            //
+            // 2026-08 IMMEDIATE follow-up ("no lights are going on in
+            // some of the larger buildings"): fixing the per-hex
+            // inconsistency above had a real side effect on Large towers
+            // specifically. Before the fix, a 4-hex Large building's
+            // segments rolled independently at "roughly 2 in 5," so the
+            // odds of the WHOLE tower having zero lit segments was only
+            // 0.6^4 ~ 13% -- the bug was accidentally making big towers
+            // look occupied almost every night. Once every segment
+            // agreed, a flat "2 in 5" meant a Large tower was now
+            // honestly dark 60% of the time, same rate as a single small
+            // house -- unrealistic for a building that size (Large's
+            // own `DressOffice` archetype implies dozens of units/
+            // offices, not one household) and, per the creator's report,
+            // visibly wrong. `WindowsLitChance` below is now keyed to
+            // Tier so a Large building (many households/offices --
+            // realistically SOME window is lit almost every night) is
+            // lit far more often than a Medium walk-up (fewer units,
+            // more plausible for the whole building to be out some
+            // nights) -- the size-appropriate fix, not just reverting to
+            // the per-hex inconsistency.
+            WindowsLit = (Hash(building.Footprint[0], 1) % 100) < WindowsLitChance(building.Tier),
             // 2026-08, two rounds. Round 1 ("2 window per building is not
             // enough, at least 30-40% of the lights should be on in the
             // building at night"): the flat `GlowBudget = 2` this used to
