@@ -28,4 +28,20 @@ public static class DayNightState
     /// night" apart from any other point in the night. This raw position
     /// can.</summary>
     public static float CycleProgress;
+
+    /// <summary>0.5 (full daylight) .. 1 (evening/prime night) .. down to
+    /// a late-night floor (see LumenCycleController.LateNightActivityFloor),
+    /// wrapping every cycle. 2026-08 creator direction: "50% less lights
+    /// in the daytime and the maximum number at night... late at night
+    /// the lights should also reduce appropriately." Deliberately a
+    /// THIRD, separate published curve from NightAmount (mood/ambient --
+    /// stays flat through the whole night on purpose, row 12) and
+    /// CycleProgress (raw position, used for per-window arrival/bedtime
+    /// timestamps) -- this one answers "how MANY lights/windows should be
+    /// on right now," consumed by DynamicLightBudget (scales the real-
+    /// light budget count, not just per-light intensity) and
+    /// EmissiveAnimator (an extra per-window "is anyone awake at this
+    /// activity level" gate on top of the existing arrival/bedtime
+    /// schedule).</summary>
+    public static float LightActivity = 1f;
 }

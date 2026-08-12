@@ -155,6 +155,26 @@ public class LumenCycleController : MonoBehaviour
     [Range(0f, 1f)]
     public float dayNeonBoost = 0.35f;
 
+    // 2026-08 creator direction: "50% less lights in the daytime and the
+    // maximum number at night... late at night the lights should also
+    // reduce appropriately." Feeds DayNightState.LightActivity (see
+    // ComputeLightActivity below), which scales QUANTITY -- how many real
+    // Lights compete for DynamicLightBudget's pool, and how many
+    // EmissiveAnimator.Window entries pass their own activity gate --
+    // distinct from dayNeonBoost/dayIntensityFraction above, which scale
+    // BRIGHTNESS. "50%" was the creator's own explicit number; the
+    // late-night floor wasn't given a number ("reduce appropriately"), so
+    // it's a v0.1 placeholder like every other invented magnitude in this
+    // file -- both exposed live rather than baked in, so either can be
+    // retuned without a code change once this is actually seen running.
+    [Tooltip("Fraction of the max light quantity (real lights + emissive windows) active during full daylight -- the creator's own explicit '50% less lights in the daytime' target.")]
+    [Range(0f, 1f)]
+    public float dayLightActivity = 0.5f;
+
+    [Tooltip("Fraction of the max light quantity active late at night, after LateNightDecayStartTick -- represents residents going to sleep. Decays from 1 (evening/prime-night max) down to this floor, then continues fading toward dayLightActivity through Dawn.")]
+    [Range(0f, 1f)]
+    public float lateNightActivityFloor = 0.6f;
+
     // 2026-07 creator: "Give me both per phase and a multiplier fog
     // density." Fog density previously existed only as hardcoded literals
     // inside BuildGrades' per-phase PhaseGrade table (each phase's own
@@ -337,6 +357,8 @@ public class LumenCycleController : MonoBehaviour
         nightAmbientTint = profile.NightAmbientTint;
         nightFillLift = profile.NightFillLift;
         dayNeonBoost = profile.DayNeonBoost;
+        dayLightActivity = profile.DayLightActivity;
+        lateNightActivityFloor = profile.LateNightActivityFloor;
         fogDensityDawn = profile.FogDensityDawn;
         fogDensityDay = profile.FogDensityDay;
         fogDensityDusk = profile.FogDensityDusk;
@@ -583,6 +605,7 @@ public class LumenCycleController : MonoBehaviour
         // about "the lights," not the whole day/night mood.
         var nightAmount = ComputeNightIntensity(cycleT);
         DayNightState.CycleProgress = cycleT / (float)LumenClock.CycleTicks;
+        DayNightState.LightActivity = ComputeLightActivity(cycleT);
 
         var ambient = Color.Lerp(a.Ambient, b.Ambient, blend);
         var flooredNightAmbient = Mathf.Max(nightAmbient, MinNightAmbient);
@@ -705,6 +728,62 @@ public class LumenCycleController : MonoBehaviour
             return Mathf.SmoothStep(0f, 1f, rampT / LightsOnRampTicks);
 
         return 1f;   // rest of Day, all of Dusk, all of Night: fully on
+    }
+
+    // ~2/3 into Night (Night is [1500,2400)) -- late enough that most
+    // residents would plausibly already be asleep, giving a real ~30s
+    // (300-tick) wind-down before Dawn's own fade takes over. A tick
+    // position, not a magnitude, so this stays a const like
+    // LightsOnStartTick/LightsOnRampTicks above rather than an Inspector
+    // field -- this file's own established split between "code-only
+    // timing constants" and "live-tunable brightness/fraction fields."
+    private const int LateNightDecayStartTick = 2100;
+
+    /// <summary>2026-08 creator direction: "50% less lights in the
+    /// daytime and the maximum number at night... late at night the
+    /// lights should also reduce appropriately." A QUANTITY curve,
+    /// distinct from ComputeNightIntensity above (which is the on/off
+    /// TIMING trapezoid consumed as a 0..1 Lerp weight) -- this one's own
+    /// value IS the target fraction, published as DayNightState.
+    /// LightActivity and consumed by DynamicLightBudget (scales how many
+    /// real Lights compete for the budget, not just their intensity) and
+    /// EmissiveAnimator (an extra per-window "is anyone awake at this
+    /// activity level" gate).
+    ///
+    /// Reuses ComputeNightIntensity's own Dawn-fade and evening-ramp
+    /// timing (same FadeOutFraction/LightsOnStartTick/LightsOnRampTicks
+    /// constants) so both curves cross their transitions at the same
+    /// moments -- only the FLOOR/CEILING differ (dayLightActivity..1
+    /// here, not 0..1) and this curve ALSO decays late in Night instead
+    /// of holding flat at 1.0 for the whole thing the way
+    /// ComputeNightIntensity deliberately does (that flat hold is still
+    /// correct for on/off TIMING -- a window that's already lit shouldn't
+    /// flicker off from this alone -- but "how many windows/lights are
+    /// on" is exactly the thing that should keep dropping as the night
+    /// gets later).</summary>
+    private float ComputeLightActivity(int cycleT)
+    {
+        var dawnEnd = LumenClock.DawnTicks;
+
+        if (cycleT < dawnEnd)   // Dawn: fade DOWN from the late-night floor to the day floor
+        {
+            var fadeTicks = LumenClock.DawnTicks * FadeOutFraction;
+            if (cycleT >= fadeTicks) return dayLightActivity;
+            var p = Mathf.SmoothStep(0f, 1f, cycleT / fadeTicks);
+            return Mathf.Lerp(lateNightActivityFloor, dayLightActivity, p);
+        }
+
+        if (cycleT < LightsOnStartTick) return dayLightActivity;   // rest of Dawn + most of Day
+
+        var rampT = cycleT - LightsOnStartTick;
+        if (rampT < LightsOnRampTicks)   // dial 5:00 -> ~5:22: ramp from the day floor up to max
+            return Mathf.Lerp(dayLightActivity, 1f, Mathf.SmoothStep(0f, 1f, rampT / LightsOnRampTicks));
+
+        if (cycleT < LateNightDecayStartTick) return 1f;   // rest of Day, Dusk, evening/prime Night: max
+
+        var decayT = cycleT - LateNightDecayStartTick;
+        var decaySpan = LumenClock.CycleTicks - LateNightDecayStartTick;
+        return Mathf.Lerp(1f, lateNightActivityFloor, Mathf.SmoothStep(0f, 1f, decayT / decaySpan));
     }
 
     /// <summary>Sun elevation as one continuous arc across the whole

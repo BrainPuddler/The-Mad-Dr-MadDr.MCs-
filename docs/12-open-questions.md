@@ -15668,3 +15668,99 @@ behavior change for Street faces. No flightcheck harness or Unity
 Editor available this session -- NOT verified to compile against real
 Unity assemblies, NOT verified for actual generation-time cost, and NOT
 verified visually.
+
+## 2026-08: light QUANTITY now scales with time of day, not just brightness (docs/28-adjacent)
+
+Creator direction: "There should be 50% less lights in the daytime and
+the maximum number at night. Light should shut on and off at random,
+logical intervals as if a human was going to sleep, entering a dark
+room ect. Late at night the lights should also reduce appropriately."
+
+**Gap.** Every prior round this session scaled BRIGHTNESS with time of
+day (`dayNeonBoost`, `DynamicLightBudget.dayIntensityFraction`) but
+never COUNT. `DynamicLightBudget`'s real-light selection was nearest-
+camera-first against a flat `budget` (64) regardless of time -- the
+same up-to-64 real `Light` components are "on" (at some intensity) at
+noon as at midnight, just dimmer at noon. And `NightAmount` (the
+existing 0..1 mood/timing curve) deliberately holds FLAT at 1.0 through
+the ENTIRE Night phase (a prior round's own "hold for the duration of
+the night" fix) -- there was no mechanism at all for "fewer lights very
+late at night" distinct from "fewer lights at prime evening."
+
+**Fix: a third published curve.** `DayNightState.LightActivity` (new),
+alongside the existing `NightAmount` (mood/ambient, stays flat through
+Night by design, untouched) and `CycleProgress` (raw position, used for
+per-window arrival/bedtime timestamps, untouched). `LightActivity`'s own
+value IS the target quantity fraction: `dayLightActivity` (0.5, the
+creator's own explicit number) through Dawn and most of Day, ramping to
+1.0 (the "maximum... at night") on the SAME 5:00-dial ramp timing
+`ComputeNightIntensity` already uses (`LumenCycleController.
+ComputeLightActivity`, reusing `FadeOutFraction`/`LightsOnStartTick`/
+`LightsOnRampTicks` so both curves transition at the same moments), then
+holding at 1.0 through Dusk and prime-evening Night, then -- new --
+decaying down to `lateNightActivityFloor` (0.6, an invented placeholder
+like every other unspecified magnitude in this file) starting at a new
+`LateNightDecayStartTick` (tick 2100, ~2/3 into Night) through to Dawn.
+Both magnitudes are live Inspector fields (mirrored onto
+`CityLightingProfile.DayLightActivity`/`LateNightActivityFloor`,
+`ApplyProfile` wired), matching this file's own "50%" was explicit from
+the creator, the late-night floor wasn't given a number, so it's tunable
+without a code change once someone can actually see it running.
+
+**Consumers.**
+- `DynamicLightBudget.Refresh()`: `activeBudget` (previously just
+  `enableRealLights ? budget : 0`) is now `Mathf.RoundToInt(budget *
+  DayNightState.LightActivity)` -- literally fewer real `Light`
+  components compete for a pooled slot during the day/late night, not
+  just dimmer ones. Distinct from `dayIntensityFraction` (unchanged),
+  which still dims each SELECTED light's own brightness -- both
+  dimensions now read as "daytime" together.
+- `EmissiveAnimator`: new per-`Window`-entry `ActivityThreshold`, a
+  fourth decorrelated draw off the same registration `seed`
+  (`Frac(seed * 113.7f + 19f)`, following the file's own established
+  three-draws-off-one-seed pattern for `OnCycleFrac`/`OffCycleFrac`/
+  `AlwaysOn`). `OccupancyGate` now additionally requires
+  `DayNightState.LightActivity` to have climbed to or past a window's
+  own threshold (smoothstepped across a small `ActivityGateBand`, 0.08,
+  so windows near the same threshold don't all pop in lockstep) before
+  it can show as lit, on top of its existing arrival/bedtime span.
+  `AlwaysOn` windows (15%, "not all lights go off") skip this gate
+  entirely, same as they already skip the bedtime check -- a fixed
+  always-occupied subset, unaffected by how quiet the city gets.
+
+**How this answers "random, logical intervals... as if a human was
+going to sleep, entering a dark room."** Not a new state machine --
+the existing per-window arrival/bedtime randomization (docs/28 row 13)
+already gives each window its own "someone's home"/"someone went to
+bed" moment; what `ActivityThreshold` adds is a SECOND axis of
+per-window variation layered on top: a low-threshold window reads as
+"always seems occupied" (lit even at the 0.5 daytime floor), a
+high-threshold window only lights up during peak evening activity and
+is among the first to go dark as `LightActivity` decays late in the
+night. Different windows crossing their own threshold at different
+activity levels is what makes the city's lights turn on/off staggered
+across the whole building stock as activity rises and falls, rather
+than a single synchronized city-wide flip -- combined with the
+already-staggered arrival/bedtime spread, this is the "random, logical"
+read being asked for, built from two existing/new per-window random
+draws rather than a new multi-toggle-per-night simulation, which would
+have been a much larger, harder-to-verify-blind addition for a
+gain this session has no way to visually confirm anyway.
+
+**Verified:** Manual review only -- confirmed `ComputeLightActivity`
+(now an instance method, reading the two new instance fields, matching
+`ComputeSunElevationDeg`'s existing non-static pattern rather than
+staying a `static` method reading `const`s) is called once per
+`ApplyBlend` tick and published before any consumer reads it that same
+frame; confirmed `DynamicLightBudget`/`EmissiveAnimator` both reference
+`DayNightState.LightActivity` (a plain static field, no new coupling
+needed, same idiom `NightAmount`/`CycleProgress` already use); confirmed
+both new fields are wired through `ApplyProfile` and mirrored onto
+`CityLightingProfile` with matching defaults. No flightcheck harness or
+Unity Editor available this session -- NOT verified to compile against
+real Unity assemblies, and NOT verified visually. The exact shape of
+"random, logical" is inherently a felt/visual judgment this session's
+tooling cannot settle -- whether the two-axis (arrival/bedtime +
+activity-threshold) staggering reads as naturalistic rather than still
+noticeably synchronized, and whether 0.5/0.6 are the right magnitudes,
+are both unconfirmed until a real render.

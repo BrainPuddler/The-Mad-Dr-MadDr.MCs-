@@ -81,6 +81,7 @@ public static class EmissiveAnimator
         public float OnCycleFrac;   // Window only: this window's "someone's home" time (0..1 of the full cycle)
         public float OffCycleFrac;  // Window only: this window's "lights out" time (0..1 of the full cycle)
         public bool AlwaysOn;       // Window only: skips OffCycleFrac entirely -- "not all lights go off"
+        public float ActivityThreshold;   // Window only (non-AlwaysOn): this window only shows lit while DayNightState.LightActivity is at or above this
     }
 
     // Window occupancy timing, as fractions of the FULL day/night cycle
@@ -108,6 +109,16 @@ public static class EmissiveAnimator
     // cycle -- a hard instant snap would read as a glitch, not a person
     // flipping a switch. ~0.01 of a 240s cycle is ~2.4s.
     private const float OccupancyTransitionFrac = 0.01f;
+
+    // 2026-08 creator direction: "50% less lights in the daytime and the
+    // maximum number at night... late at night the lights should also
+    // reduce appropriately." How wide a band of DayNightState.LightActivity
+    // a window's own ActivityThreshold smoothsteps across, instead of
+    // snapping instantly the moment activity crosses it -- LightActivity
+    // itself already eases (SmoothStep, in LumenCycleController), but a
+    // hard `>=` compare here would still make every window sitting near
+    // the SAME threshold value pop in lockstep at that exact instant.
+    private const float ActivityGateBand = 0.08f;
 
     private static readonly List<Entry> Animated = new List<Entry>();
 
@@ -167,6 +178,21 @@ public static class EmissiveAnimator
             entry.OnCycleFrac = Mathf.Lerp(OnRangeStart, OnRangeEnd, Frac(seed * 41.3f));
             entry.OffCycleFrac = Mathf.Lerp(OffRangeStart, OffRangeEnd, Frac(seed * 59.7f + 3f));
             entry.AlwaysOn = Frac(seed * 91.1f + 7f) < AlwaysOnProbability;
+            // A fourth decorrelated draw on the same seed -- this
+            // window's own "how much city-wide activity does it take for
+            // someone to be home and awake here" threshold, uniform in
+            // [0,1). Compared live against DayNightState.LightActivity in
+            // OccupancyGate, so a LOW-threshold window is one of the
+            // "always seems occupied" ones (lit even at the 0.5 daytime
+            // floor), a HIGH-threshold window only lights up during
+            // peak evening activity and is among the first to go dark as
+            // LightActivity decays late in the night -- different
+            // windows crossing their own threshold at different activity
+            // levels is what makes the city's lights turn on/off
+            // staggered across the whole building stock rather than all
+            // at once, on top of the per-window arrival/bedtime spread
+            // OnCycleFrac/OffCycleFrac already give.
+            entry.ActivityThreshold = Frac(seed * 113.7f + 19f);
         }
         Apply(entry, 1f);
         Animated.Add(entry);
@@ -254,7 +280,9 @@ public static class EmissiveAnimator
     /// active, 0 otherwise, with a short smoothstep transition at each
     /// edge instead of an instant snap (a person flipping a switch reads
     /// as a beat of motion, not a single-frame pop). AlwaysOn skips the
-    /// off half entirely -- "not all lights go off."</summary>
+    /// off half AND the activity gate below entirely -- "not all lights
+    /// go off," a fixed always-occupied subset unaffected by how quiet
+    /// the city gets.</summary>
     private static float OccupancyGate(Entry e, float cycleProgress)
     {
         if (!WindowScheduleEnabled || e.AlwaysOn) return 1f;
@@ -262,7 +290,18 @@ public static class EmissiveAnimator
             e.OnCycleFrac - OccupancyTransitionFrac, e.OnCycleFrac + OccupancyTransitionFrac, cycleProgress));
         var offGate = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(
             e.OffCycleFrac - OccupancyTransitionFrac, e.OffCycleFrac + OccupancyTransitionFrac, cycleProgress));
-        return Mathf.Min(onGate, offGate);
+        // 2026-08: on top of this window's OWN arrival/bedtime span above,
+        // it also needs city-wide LightActivity to have climbed at least
+        // to its own ActivityThreshold -- fewer windows clear a HIGH
+        // threshold during the low-activity daytime/late-night floors,
+        // more do once activity ramps to its evening peak. Different
+        // windows have different thresholds, so this produces a staggered
+        // spread of on/off transitions across the building stock as
+        // activity rises and falls, not a single city-wide flip.
+        var activityGate = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(
+            e.ActivityThreshold - ActivityGateBand, e.ActivityThreshold + ActivityGateBand,
+            DayNightState.LightActivity));
+        return Mathf.Min(onGate, offGate, activityGate);
     }
 
     private static void Apply(Entry e, float mult)

@@ -36,6 +36,7 @@ using UnityEngine;
 ///   * night reads as near-total black (not just moody) -> check the Night PhaseGrade's own Contrast/PostExposure in LumenCycleController.BuildGrades FIRST -- a steep contrast curve or dark exposure baseline can crush nightFillLift's gains right back down; confirmed by a real screenshot once in this project's own history (docs/28 row 31/32)
 ///   * lights fully off during the day (want a faint daytime glow too) -> LumenCycleController.dayNeonBoost (emissive) + DynamicLightBudget.dayIntensityFraction (real lights) -- both default low, raise for more daytime presence (docs/28 row 33)
 ///   * want more windows already lit before the evening ramp -> EmissiveAnimator.OnRangeStart (code constant, not live -- rebuild to see it)
+///   * too many/too few lights ON at once (COUNT, not brightness) -> LumenCycleController.dayLightActivity (daytime) / lateNightActivityFloor (deep night) -- scales DynamicLightBudget's active real-light count AND how many EmissiveAnimator.Window entries pass their activity gate, live (docs/12 2026-08 "50% less lights in the daytime")
 /// </summary>
 [CreateAssetMenu(fileName = "CityLightingProfile", menuName = "MadDr/City Lighting Profile")]
 public class CityLightingProfile : ScriptableObject
@@ -92,6 +93,15 @@ public class CityLightingProfile : ScriptableObject
     [Tooltip("The boost at full Day -- kept low so neon/bulbs are barely visible against daylight, per the target look.")]
     [Range(0f, 1f)]
     public float DayNeonBoost = 0.35f;
+
+    [Header("Light quantity (how MANY lights are on, not how bright)")]
+    [Tooltip("Fraction of the max light quantity (real lights + emissive windows) active during full daylight -- the creator's own explicit '50% less lights in the daytime' target. See LumenCycleController.dayLightActivity.")]
+    [Range(0f, 1f)]
+    public float DayLightActivity = 0.5f;
+
+    [Tooltip("Fraction of the max light quantity active late at night, representing residents going to sleep. See LumenCycleController.lateNightActivityFloor.")]
+    [Range(0f, 1f)]
+    public float LateNightActivityFloor = 0.6f;
 
     [Header("Post-processing (Night mood)")]
     [Tooltip("Multiplies URP Bloom intensity at EVERY time of day (not just night) -- a true scale on the authored curve, not an absolute target. High values are what turn a city full of lit windows/signs into a wall of white bloom.")]

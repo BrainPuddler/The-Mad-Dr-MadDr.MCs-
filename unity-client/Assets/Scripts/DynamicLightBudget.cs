@@ -265,7 +265,19 @@ public class DynamicLightBudget : MonoBehaviour
         var cam = Camera.main;
         if (cam == null) return;
         var camPos = cam.transform.position;
-        var activeBudget = enableRealLights ? budget : 0;
+        // 2026-08 creator direction: "50% less lights in the daytime and
+        // the maximum number at night... late at night the lights should
+        // also reduce appropriately." `budget` itself is the NIGHT
+        // ceiling (the "maximum number" the request names); DayNightState.
+        // LightActivity (published by LumenCycleController, 0.5 in full
+        // daylight, 1 through evening/prime night, decaying back down
+        // late in the night) scales the actual COUNT of real lights that
+        // compete for a pooled Light this refresh -- distinct from
+        // dayIntensityFraction below, which dims each SELECTED light's
+        // own brightness rather than changing how many are selected at
+        // all. Both dimensions -- fewer lights AND dimmer lights -- read
+        // as "daytime," together.
+        var activeBudget = enableRealLights ? Mathf.RoundToInt(budget * DayNightState.LightActivity) : 0;
 
         _picked.Clear();
         _pickedSq.Clear();
