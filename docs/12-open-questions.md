@@ -15888,3 +15888,104 @@ verified to compile against real Unity assemblies, and NOT verified
 visually. Whether 90%/60% are the right numbers (rather than, say,
 Large deserving even closer to 100%, or Medium needing its own bump
 too) is a felt/visual judgment unconfirmed until a real render.
+
+## 2026-08: Minimap legibility pass -- colour-coded arterial roads, landmark icon silhouettes, guaranteed-uncropped compass/legend
+
+Creator direction: "Revise the mini map to be more legible. Colour
+coding the streets. Icons for buildings and make sure non of the text
+is cropped." Then, on being asked to proceed: "consult art directors
+for period style maps."
+
+**Process.** Rather than design this solo, ran three parallel research
+passes (Agent tool, general-purpose subagents with WebSearch) each
+briefed as an "art director" with the SAME technical constraints
+(256px baked texture, IMGUI-only, no custom fonts/icon assets, existing
+palette) but a different period lens: 1950s military/tactical
+situation maps, 1950s Rand McNally/AAA road-map conventions, and this
+project's own established gothic-palette/journal doctrine (the
+`maddr-aesthetic-preferences` skill, consulted first). All three
+independently converged on the same two fixes -- not a coincidence
+worth ignoring: (1) arterial roads should get a bolder, warmer color
+than ordinary streets ("red = the road that matters," a convention
+every one of those map traditions shares -- USGS topo sheets and
+Rand-McNally highway maps both reserve red/heavier ink specifically for
+the through-route); (2) landmark markers should get a distinct pixel
+SILHOUETTE per kind, not just a different color on the same blob shape
+-- the old Emitter/CommunityHub markers were literally the SAME square
+stamp differing only by hue, which this project's own doctrine (§5:
+"shape communicates origin/kind, color communicates state") names as a
+recurring mistake class, not a style nitpick.
+
+**Roads.** `Minimap.BakeTerrain()` now splits `city.Roads` against
+`city.ArterialRoads` (the generator's own Main Street tag, from the
+facade-grammar-adjacent arterial-road pass) into two stamping passes:
+residential stays close to the old tone but darkened slightly for
+contrast (`(0.50,0.48,0.43)`, was `(0.55,0.53,0.47)`), arterial gets a
+muted oxblood red (`(0.62,0.20,0.15)`) at one texel wider than the base
+stamp radius. Arterial is plotted AFTER residential so an arterial hex
+can never be overdrawn back to the duller tone.
+
+**Landmark icons.** New `Plot(h, c, radius)` overload (radius defaults
+to the existing shared `stampRadius` when omitted) plus two new local
+functions in the same closure: `PlotStar` (a solid core one texel
+smaller than `iconRadius`, plus four single-texel spikes at N/S/E/W --
+the Emitter, "broadcasts something") and `PlotRing` (a hollow
+Chebyshev-distance ring at `iconRadius`, leaving whatever's already
+painted at the center showing through -- the CommunityHub, "a place
+people gather AROUND"). `iconRadius` is `stampRadius + 1` (clamped
+2-6) so landmarks read as both bigger AND differently-shaped than an
+ordinary building blob. CommunityHub's own color moved off red (was
+`(0.9,0.2,0.2)`) to a warm amber `(0.85,0.55,0.15)` -- red now means
+"arterial road," and this file's OWN existing blip-color grammar
+already uses red for a hostile unit (`DrawBlips`), so a red landmark
+marker would have collided with both. Ordinary tiered buildings
+(Small/Medium/Large) were deliberately left as flat color fill, not
+given their own icon shapes -- they already communicate tier via
+footprint SIZE (a Large building's multi-hex footprint is visibly
+bigger than a Small one's single hex) as well as color, so they weren't
+actually suffering from the "color doing shape's job" problem landmarks
+were; only single-point markers needed a real silhouette.
+
+**Text/cropping.** The minimap had ZERO text before this pass, so
+"make sure non of the text is cropped" is a requirement ON the new
+text this pass adds, not a report of a pre-existing crop bug. Two new
+methods, both drawn AFTER `GUI.matrix` is restored to `oldMatrix` in
+`OnGUI()` -- deliberately OUTSIDE the `rotateWithCamera` rotation block,
+since rotated IMGUI text reads poorly and risks exactly this kind of
+crop/garble; a documented, deliberate simplification (compass shows
+"up," not literal true north, in the non-default rotate mode) traded
+for guaranteed-legible text in the default mode:
+- `DrawCompass`: a small "N" chip pinned above (or, if that would go
+  off-screen, below) the map's own frame, sized via `GUI.skin.label.
+  CalcSize` on the actual glyph, then clamped against `UiScale.Width`/
+  `Height` on both axes.
+- `DrawLegend`: a swatch-key panel (Arterial road / Beacon-Emitter /
+  Hub-Community) docked to whichever HALF of the screen the map ISN'T
+  hugging (computed from the map rect's own center vs. screen center,
+  so it works for any corner preset or custom position, not just the
+  default), every row's `Rect` sized from `CalcSize` on its own label
+  text, panel position clamped against both screen edges. Same "dock
+  against the minimap's live position" idiom `SelectionHud`/
+  `RecallHud`/`BattalionHud` already use for their own placement.
+
+Both new backing boxes (and the map's own existing frame, previously
+flat black) now use a shared `BackingColor` -- warm sepia-ink
+`(0.15,0.10,0.06,0.78)` instead of neutral black -- so every readability
+backing in this component reads as one consistent journal-page
+material rather than a generic HUD box.
+
+**Verified:** Manual review only -- caught and fixed a real compile
+error during review (`Span<(Color32, string)> rows = stackalloc
+(Color32, string)[3]` does not compile: a tuple containing `string`
+isn't an unmanaged type, so `stackalloc` can't hold it; replaced with a
+plain array). Confirmed brace/paren counts balance across the whole
+file after all edits. Confirmed `city.ArterialRoads` is always a real
+(possibly empty, never null) list from `CityGenerator`'s own
+`CityModel` constructor call, so `new HashSet<HexCoord>(city.
+ArterialRoads)` can't throw. No flightcheck harness or Unity Editor
+available this session -- NOT verified to compile against real Unity
+assemblies, and NOT verified visually. Whether the star/ring icons
+actually read as distinct silhouettes at true 220px on-screen scale
+(rather than just "slightly different blobs"), and whether the compass/
+legend docking logic behaves sensibly across all four corner presets in
+practice, are unconfirmed until a real render.

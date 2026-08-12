@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using MadDr.CityGen;
 using UnityEngine;
 
@@ -31,6 +32,24 @@ using UnityEngine;
 /// system; this one just controls whether the MINIMAP respects it).
 /// Enemy-unit blips (tanks) are gated by fog (visible-now only); a
 /// player's own monsters always show, the standard RTS convention.
+///
+/// Legibility pass (2026-08, creator direction: "colour coding the
+/// streets. Icons for buildings and make sure non of the text is
+/// cropped"), designed after consulting three period-map art-direction
+/// research passes (1950s military situation maps, 1950s Rand McNally/
+/// AAA road-map conventions, this project's own gothic-palette/journal
+/// doctrine) that independently converged on the same two fixes -- see
+/// `BakeTerrain`'s own doc comment for the full reasoning: arterial
+/// roads now get their own bolder/warmer color and wider stamp than
+/// ordinary streets, and the two landmark kinds get a distinct pixel
+/// SILHOUETTE (a starburst vs. a hollow ring) instead of same-shape
+/// blobs differing only by color. `DrawCompass`/`DrawLegend` add the new
+/// "N" chip and a swatch-key panel, both sized off their own actual text
+/// via `CalcSize` and clamped to the reference canvas so neither can
+/// ever crop off-screen regardless of which corner the map itself sits
+/// in -- see those methods' own doc comments for why they're
+/// deliberately drawn screen-locked (never rotated with the map, even
+/// when `rotateWithCamera` is on).
 /// </summary>
 public class Minimap : MonoBehaviour
 {
@@ -93,6 +112,16 @@ public class Minimap : MonoBehaviour
     private const int FogTexRes = 128;
     private const float FogRepaintInterval = 0.4f;
 
+    // 2026-08 (art-direction consultation, "make sure none of the text is
+    // cropped" pass): warm sepia-ink instead of flat black -- the same
+    // "translucent dark box so text/frame reads against any city color
+    // behind it" trick this file already used, just tinted to sit in the
+    // journal-page family instead of a neutral HUD gray/black. Used for
+    // the map's own frame AND the new compass/legend chips below, so
+    // every backing box in this component reads as one consistent
+    // material.
+    private static readonly Color BackingColor = new Color(0.15f, 0.10f, 0.06f, 0.78f);
+
     private RuntimeCityBuilder _builder;
     private WaypointCommander _commander;
     private FogOfWar _fog;
@@ -129,7 +158,28 @@ public class Minimap : MonoBehaviour
     /// waste. Palette matches CityGizmo's Scene-view gizmo (water/ridge/
     /// bridge/building-tier/landmark colors), except roads: the gizmo's
     /// near-black reads fine against a lit 3D scene but disappears at
-    /// minimap scale, so roads get a lighter tone here specifically.</summary>
+    /// minimap scale, so roads get a lighter tone here specifically.
+    ///
+    /// 2026-08 creator direction ("colour coding the streets... icons for
+    /// buildings"), designed after consulting three period-map art-
+    /// direction passes (1950s military situation maps, 1950s Rand
+    /// McNally/AAA road-map conventions, and this project's own gothic-
+    /// palette/journal doctrine) -- all three independently converged on
+    /// the same two fixes, which is the actual justification for them:
+    /// (1) arterial roads (the generator's own Main Street tag) get a
+    /// distinct, bolder color from ordinary streets, echoing the "red =
+    /// the road that matters" convention every one of those real map
+    /// traditions shares; (2) landmark sites get a distinct pixel
+    /// SILHOUETTE per kind (a starburst vs. a ring) instead of same-shape
+    /// blobs differing only by color -- the old approach had color doing
+    /// shape's job, which this project's own "shape = kind, color =
+    /// state" doctrine calls out as a real mistake class, not a style
+    /// nitpick. Ordinary tiered buildings are left as flat color fill --
+    /// they already communicate kind via footprint SIZE (a Large
+    /// building's multi-hex footprint is visibly bigger than a Small
+    /// one's single hex) as well as color, so they weren't actually
+    /// suffering from the same "color doing shape's job" problem
+    /// landmarks were.</summary>
     private void BakeTerrain()
     {
         var city = _builder.City;
@@ -162,14 +212,15 @@ public class Minimap : MonoBehaviour
         var texelsPerHex = TerrainTexRes / Mathf.Max(1f, (_maxX - _minX) / (float)HexCoord.HexMeters);
         var stampRadius = Mathf.Clamp(Mathf.RoundToInt(texelsPerHex * 0.6f), 1, 6);
 
-        void Plot(HexCoord h, Color32 c)
+        void Plot(HexCoord h, Color32 c, int radius = -1)
         {
+            if (radius < 0) radius = stampRadius;
             var (px, py) = WorldToTexel(_builder.WorldOf(h), TerrainTexRes);
-            for (var dy = -stampRadius; dy <= stampRadius; dy++)
+            for (var dy = -radius; dy <= radius; dy++)
             {
                 var y = py + dy;
                 if (y < 0 || y >= TerrainTexRes) continue;
-                for (var dx = -stampRadius; dx <= stampRadius; dx++)
+                for (var dx = -radius; dx <= radius; dx++)
                 {
                     var x = px + dx;
                     if (x < 0 || x >= TerrainTexRes) continue;
@@ -178,9 +229,69 @@ public class Minimap : MonoBehaviour
             }
         }
 
+        // A distinct silhouette per landmark kind, not just a differently-
+        // colored blob -- both stamp at ONE texel beyond the base
+        // stampRadius (clamped so the hollow center of the ring can't
+        // degenerate to a solid square at the smallest map scales) so
+        // landmarks read as bigger, more important marks than an ordinary
+        // building, on top of their own distinct shape.
+        var iconRadius = Mathf.Clamp(stampRadius + 1, 2, 6);
+
+        // Emitter: a solid core (one texel smaller than the full icon
+        // radius) plus four single-texel spikes at N/S/E/W beyond it --
+        // "broadcasts something," the lighthouse/compass-rose read every
+        // one of the three art-direction passes converged on.
+        void PlotStar(HexCoord h, Color32 c)
+        {
+            Plot(h, c, iconRadius - 1);
+            var (px, py) = WorldToTexel(_builder.WorldOf(h), TerrainTexRes);
+            void Tick(int tx, int ty) { if (tx >= 0 && tx < TerrainTexRes && ty >= 0 && ty < TerrainTexRes) pixels[ty * TerrainTexRes + tx] = c; }
+            Tick(px, py - iconRadius); Tick(px, py + iconRadius);
+            Tick(px - iconRadius, py); Tick(px + iconRadius, py);
+        }
+
+        // CommunityHub: a hollow ring (only the outermost Chebyshev-
+        // distance texels of the icon radius) -- "a place people gather
+        // AROUND," visually the opposite of the Emitter's solid-core-plus-
+        // spikes. Leaves whatever's already painted at the center (ground/
+        // road) showing through rather than filling it.
+        void PlotRing(HexCoord h, Color32 c)
+        {
+            var (px, py) = WorldToTexel(_builder.WorldOf(h), TerrainTexRes);
+            for (var dy = -iconRadius; dy <= iconRadius; dy++)
+            {
+                var y = py + dy;
+                if (y < 0 || y >= TerrainTexRes) continue;
+                for (var dx = -iconRadius; dx <= iconRadius; dx++)
+                {
+                    var x = px + dx;
+                    if (x < 0 || x >= TerrainTexRes) continue;
+                    if (Mathf.Max(Mathf.Abs(dx), Mathf.Abs(dy)) < iconRadius) continue;   // hollow center
+                    pixels[y * TerrainTexRes + x] = c;
+                }
+            }
+        }
+
         foreach (var h in city.Water) Plot(h, new Color(0.15f, 0.30f, 0.85f));
         foreach (var h in city.Ridges) Plot(h, new Color(0.35f, 0.55f, 0.25f));
-        foreach (var h in city.Roads) Plot(h, new Color(0.55f, 0.53f, 0.47f));   // lighter than the gizmo's near-black -- reads at minimap scale
+
+        // Arterial (the generator's own Main Street tag, docs/12) gets a
+        // bolder, warmer color AND a wider stamp than an ordinary
+        // residential street -- "red = the road that matters," the one
+        // convention every period map this file's own header describes
+        // consulting (1950s military situation maps, 1950s Rand McNally/
+        // AAA road atlases) shares. Plotted in its own pass, AFTER
+        // residential, so an arterial hex is never overdrawn back to the
+        // duller residential tone.
+        var arterial = new HashSet<HexCoord>(city.ArterialRoads);
+        var arterialRadius = Mathf.Min(6, stampRadius + 1);
+        foreach (var h in city.Roads)
+        {
+            if (arterial.Contains(h)) continue;
+            Plot(h, new Color(0.50f, 0.48f, 0.43f));   // residential -- lighter than the gizmo's near-black, but duller than arterial so the through-route reads as THE route
+        }
+        foreach (var h in arterial) Plot(h, new Color(0.62f, 0.20f, 0.15f), arterialRadius);   // oxblood -- USGS/Rand-McNally "highway red," muted for the gothic LUT
+
         foreach (var br in city.Bridges) foreach (var h in br.Footprint) Plot(h, new Color(0.5f, 0.33f, 0.15f));
         foreach (var b in city.Buildings)
         {
@@ -196,8 +307,15 @@ public class Minimap : MonoBehaviour
         }
         foreach (var lm in city.Landmarks)
         {
-            var c = lm.Kind == LandmarkKind.Emitter ? new Color(0.2f, 0.9f, 0.9f) : new Color(0.9f, 0.2f, 0.2f);
-            Plot(lm.Site, c);
+            if (lm.Kind == LandmarkKind.Emitter)
+                PlotStar(lm.Site, new Color(0.2f, 0.9f, 0.9f));
+            else
+                // 2026-08: moved off red (was `new Color(0.9f, 0.2f, 0.2f)`)
+                // -- red now means "arterial road" above, and this file's
+                // OWN existing color grammar already uses red for a
+                // hostile unit blip (see DrawBlips) -- a red CommunityHub
+                // marker would collide with both. Warm amber instead.
+                PlotRing(lm.Site, new Color(0.85f, 0.55f, 0.15f));
         }
 
         _terrainTex = new Texture2D(TerrainTexRes, TerrainTexRes, TextureFormat.RGB24, false);
@@ -314,7 +432,7 @@ public class Minimap : MonoBehaviour
             UiScale.RotateAroundReferencePivot(-cam.transform.eulerAngles.y, pivot);
 
         // frame
-        GUI.color = new Color(0f, 0f, 0f, 0.6f);
+        GUI.color = BackingColor;
         GUI.DrawTexture(new Rect(rect.x - 3f, rect.y - 3f, rect.width + 6f, rect.height + 6f), Texture2D.whiteTexture);
         GUI.color = Color.white;
 
@@ -332,8 +450,110 @@ public class Minimap : MonoBehaviour
         DrawCameraFrustum(rect, texCoords, cam);
         HandleInput(rect, texCoords, rig);
 
+        // 2026-08 ("make sure non of the text is cropped"): compass +
+        // legend are drawn AFTER restoring `oldMatrix` -- deliberately
+        // NOT inside the `rotateWithCamera` rotation block above. Rotated
+        // IMGUI text reads poorly (font rendering isn't built for
+        // arbitrary-angle text) and IS exactly the kind of thing that
+        // ends up visually cropped/garbled, so both stay screen-locked
+        // and always upright regardless of map rotation -- a known,
+        // deliberate simplification: with `rotateWithCamera` on, the "N"
+        // compass chip labels the panel as a map rather than tracking
+        // true north on the rotated display. `rotateWithCamera` defaults
+        // off, so this trades a minor accuracy gap in a non-default mode
+        // for guaranteed-legible text in the default one.
         GUI.matrix = oldMatrix;
+        DrawCompass(rect);
+        DrawLegend(rect);
         UiScale.End(prevMatrix);
+    }
+
+    /// <summary>Small "N" chip pinned to the top-center of the map's own
+    /// frame -- sized off the actual glyph via CalcSize (not a guessed
+    /// fixed width) and clamped to the reference canvas so it can never
+    /// clip off-screen even when the map itself sits flush against a
+    /// screen edge (TopLeft/TopRight corner, or a tight custom
+    /// position).</summary>
+    private void DrawCompass(Rect rect)
+    {
+        var content = new GUIContent("N");
+        var textSize = GUI.skin.label.CalcSize(content);
+        var chipSize = Mathf.Max(textSize.x, textSize.y) + 8f;
+
+        var chipRect = new Rect(rect.x + rect.width * 0.5f - chipSize * 0.5f, rect.y - chipSize - 4f, chipSize, chipSize);
+        if (chipRect.y < 0f) chipRect.y = rect.yMax + 4f;   // no room above -- sit below the map instead
+        chipRect.x = Mathf.Clamp(chipRect.x, 0f, Mathf.Max(0f, UiScale.Width - chipRect.width));
+        chipRect.y = Mathf.Clamp(chipRect.y, 0f, Mathf.Max(0f, UiScale.Height - chipRect.height));
+
+        GUI.color = BackingColor;
+        GUI.DrawTexture(chipRect, Texture2D.whiteTexture);
+        GUI.color = Color.white;
+        GUI.Label(new Rect(chipRect.x + (chipRect.width - textSize.x) * 0.5f,
+            chipRect.y + (chipRect.height - textSize.y) * 0.5f, textSize.x + 2f, textSize.y + 2f), content);
+    }
+
+    /// <summary>Key for the three markers this pass added/recolored
+    /// (arterial roads, the two landmark icon kinds) -- docked BESIDE the
+    /// 256px bake rather than crammed onto it (there's no room and no
+    /// custom font to draw small legible text into a handful of texels),
+    /// same "dock against the minimap's actual live position" idiom
+    /// SelectionHud/RecallHud/BattalionHud already use. Every row's Rect
+    /// is sized from `GUI.skin.label.CalcSize` on its OWN text, and the
+    /// whole panel picks whichever side of the map has open screen space
+    /// and clamps against both screen edges -- the direct fix for "make
+    /// sure non of the text is cropped," not just a cosmetic pass.</summary>
+    private void DrawLegend(Rect rect)
+    {
+        // (Color32, string) isn't unmanaged (string is a reference type),
+        // so this is a plain array, not stackalloc -- three tiny, one-
+        // time-per-frame allocations, not a hot path.
+        var rows = new (Color32 swatch, string label)[]
+        {
+            (new Color(0.62f, 0.20f, 0.15f), "Arterial road"),
+            (new Color(0.2f, 0.9f, 0.9f), "Beacon (Emitter)"),
+            (new Color(0.85f, 0.55f, 0.15f), "Hub (Community)"),
+        };
+
+        const float swatchSize = 10f;
+        const float swatchGap = 6f;
+        const float rowGap = 4f;
+        const float pad = 6f;
+
+        var sizes = new Vector2[rows.Length];
+        var maxRowWidth = 0f;
+        var totalHeight = pad * 2f;
+        for (var i = 0; i < rows.Length; i++)
+        {
+            sizes[i] = GUI.skin.label.CalcSize(new GUIContent(rows[i].label));
+            var rowWidth = swatchSize + swatchGap + sizes[i].x;
+            if (rowWidth > maxRowWidth) maxRowWidth = rowWidth;
+            totalHeight += Mathf.Max(swatchSize, sizes[i].y) + (i > 0 ? rowGap : 0f);
+        }
+        var panelWidth = maxRowWidth + pad * 2f;
+
+        // dock to whichever half of the screen the map ISN'T hugging, so
+        // the panel can't run off whichever edge the map's own corner
+        // preset already sits against.
+        var mapCenterX = rect.x + rect.width * 0.5f;
+        var dockRight = mapCenterX < UiScale.Width * 0.5f;
+        var panelX = dockRight ? rect.xMax + 8f : rect.x - 8f - panelWidth;
+        panelX = Mathf.Clamp(panelX, 0f, Mathf.Max(0f, UiScale.Width - panelWidth));
+        var panelY = Mathf.Clamp(rect.y, 0f, Mathf.Max(0f, UiScale.Height - totalHeight));
+
+        GUI.color = BackingColor;
+        GUI.DrawTexture(new Rect(panelX, panelY, panelWidth, totalHeight), Texture2D.whiteTexture);
+        GUI.color = Color.white;
+
+        var y = panelY + pad;
+        for (var i = 0; i < rows.Length; i++)
+        {
+            var rowH = Mathf.Max(swatchSize, sizes[i].y);
+            GUI.color = rows[i].swatch;
+            GUI.DrawTexture(new Rect(panelX + pad, y + (rowH - swatchSize) * 0.5f, swatchSize, swatchSize), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            GUI.Label(new Rect(panelX + pad + swatchSize + swatchGap, y, sizes[i].x + 4f, rowH), rows[i].label);
+            y += rowH + rowGap;
+        }
     }
 
     private void UpdatePointerOverFlag(Rect rect)
