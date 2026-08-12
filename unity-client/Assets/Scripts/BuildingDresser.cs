@@ -291,11 +291,34 @@ public static class BuildingDresser
 
             if (role == FaceRole.Alley)
             {
-                // crown only -- cornices wrap corners; the rest of an
-                // alley wall is the massing cube's own brick.
-                var alley = FacadeGrammar.Solve(FaceRole.Alley, 0, style,
+                // 2026-08 creator direction: "there should be windows on
+                // every side except those where there is a very narrow
+                // distance between separate building walls that are very
+                // close together." An Alley face (FacadeGrammar.FaceRole's
+                // own definition: faces open ground that ISN'T a road --
+                // a yard or gap, not another building pressed flush
+                // against it) used to solve with `floors = 0`, forcing a
+                // crown-only strip regardless of the building's real height --
+                // "cornices wrap corners; the rest of an alley wall is the
+                // massing cube's own brick," a deliberate cost-control
+                // choice, not an architectural one. That's exactly the
+                // "windows missing on a side that isn't actually a narrow
+                // gap" the creator is pointing at -- the TRUE narrow-gap
+                // case (another building's footprint hex directly
+                // touching this one) is `FaceRole.PartyWall`, handled by
+                // the `continue` two lines up, genuinely windowless and
+                // untouched by this change. Alley now solves with the
+                // real `floors`, same as Street -- `FacadeGrammar`'s own
+                // `UpperDomain` already gives Alley faces a different,
+                // blinder window mix than Street (WindowBay/BlindBay only,
+                // no OrielBay, no FireEscapeBay -- see that method's own
+                // comment), so this isn't "treat alley like street," it's
+                // "let alley faces use the window vocabulary the grammar
+                // already defines for them instead of skipping straight to
+                // crown-only."
+                var alley = FacadeGrammar.Solve(FaceRole.Alley, floors, style,
                     new Rng(unchecked((uint)(h + f * 7919))), allowFireEscape: false);
-                FacadeKit.BuildFace(b, t, t.position, face, alley, height, mats);
+                if (!alley.IsFallback) FacadeKit.BuildFace(b, t, t.position, face, alley, height, mats);
                 continue;
             }
 

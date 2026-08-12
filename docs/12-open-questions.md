@@ -15535,3 +15535,79 @@ some structure (WindowBay's own fixed left-right pair-of-two layout means
 even a random per-window roll can't fully hide the underlying grid), and
 whether 0.45 lands the visible lit fraction in the requested 30-40% band,
 is unconfirmed until a real render.
+
+## 2026-08: Alley-facing walls on Medium/Large buildings now get real windows, not crown-only
+
+Creator direction: "on the large apartment buildings there should be
+windows on every side except those where there is a vary narrow
+distance between separate buildings walls that are very close together."
+
+**Finding.** The facade-grammar system (this file's own "facade grammar
+(WFC)" entry above) already classifies every building face as `Street`,
+`Alley`, or `PartyWall` (`FacadeGrammar.ClassifyFaces`) -- and
+`PartyWall` is EXACTLY the case being asked to keep windowless: it's set
+only when a neighbouring hex belongs to a genuinely different building's
+own footprint (or, for a multi-hex building, another hex of the SAME
+building) -- i.e. real zero-clearance, another wall physically pressed
+against this one. `BuildingDresser.DressFacadeGrammar` already skips
+`PartyWall` faces entirely (`continue`, no dressing at all), so that half
+of the request was already correct and untouched.
+
+`Alley`, though, means something different: "faces open ground that
+ISN'T a road" -- a yard, a gap, a side with clearance, just not a street
+frontage. That's NOT "very close together" in the sense of the request.
+But `DressFacadeGrammar` solved every Alley face with `FacadeGrammar.
+Solve(FaceRole.Alley, 0, style, ...)` -- floors forced to `0` regardless
+of the building's real height, producing a ground band + crown only and
+skipping every upper-floor window cell, by original design ("crown only
+-- cornices wrap corners; the rest of an alley wall is the massing
+cube's own brick") as a deliberate cost-control choice from the facade-
+grammar rollout itself, not an architectural one. On a Medium/Large
+tower with alley faces on 2-3 of its 4 sides, that's most of the
+building showing zero windows on
+anything but its street frontage -- exactly the gap the creator is
+pointing at.
+
+**Fix.** Alley faces now solve with the SAME real `floors` count as
+Street faces, in `BuildingDresser.DressFacadeGrammar`. This isn't "treat
+alley like street" -- `FacadeGrammar.UpperDomain` already gives the
+`Alley` role its own, blinder window vocabulary (`WindowBay`/`BlindBay`
+only; no `OrielBay`, "a street-facing display element by definition"; no
+`FireEscapeBay`, since `allowFireEscape: false` is passed same as
+before), and `GroundDomain`'s Alley branch keeps its existing
+`BlankPlinth`/`LoadingDock` ground treatment (no shopfronts on a side
+nobody walks past) -- this fix only removes the artificial `floors = 0`
+truncation that skipped the upper-floor window cells the grammar was
+already capable of placing there. Added an `IsFallback` guard matching
+the Street branch's own pattern (`if (!alley.IsFallback) ...`), which
+the original crown-only 2-cell solve never needed to check but a real
+multi-floor solve reasonably should for consistency, even though
+`Alley`'s domains structurally can never trigger the solver's one
+contradiction rule (the fire-escape-continuity check, since `FireEscapeBay`
+never enters an Alley cell's domain to begin with).
+
+**Cost tradeoff, stated plainly.** This directly reverses the
+docs-recorded reason the `floors = 0` truncation existed: "keeps a
+grammar-dressed hex in the same order of magnitude as the window-strip
+dressing it replaces instead of multiplying it by four faces." A
+building with alley faces on 2-3 of its 4 sides will now spawn roughly
+2-4x the upper-floor facade geometry (and window-glow registrations,
+feeding into the just-added `GlowChance` roll two entries above) it did
+before. Not silently absorbed: `EmissiveAnimator.Tick()`'s distance
+culling (`EmissiveTickRangeMeters`) already amortizes the PER-FRAME cost
+of extra off-screen/far registrations, same mitigation the two window-
+lighting rounds above leaned on, but the one-time GameObject/mesh spawn
+cost at city-build time genuinely goes up with this change -- flagged
+here rather than left for a profiler to discover, since nothing in this
+environment can measure it directly.
+
+**Verified:** Manual review only -- `floors` is the same already-in-scope
+`int` the Street branch two lines below already passes to `FacadeGrammar.
+Solve`, so this is a one-argument change plus the new fallback guard, not
+new plumbing. No flightcheck harness or Unity Editor available this
+session -- NOT verified to compile against real Unity assemblies, NOT
+verified for actual generation time on a Big City build, and NOT
+verified visually (whether alley-side windows read correctly from the
+RTS camera angle they're normally never seen from, and whether the
+generation-time cost increase is acceptable, are both unconfirmed until
+a real render/profile).
