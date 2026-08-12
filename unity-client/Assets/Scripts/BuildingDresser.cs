@@ -247,27 +247,39 @@ public static class BuildingDresser
             // Same "roughly 2 in 5 are lit" read the strip dressing had,
             // decided per building rather than per strip.
             WindowsLit = (h / 11) % 5 < 2,
-            // 2026-08 creator direction: "2 window per building is not
+            // 2026-08, two rounds. Round 1 ("2 window per building is not
             // enough, at least 30-40% of the lights should be on in the
-            // building at night." The flat `2` below was sized (see
-            // docs/12) so a grammar-dressed building registered no MORE
-            // glow entries than the single per-floor strip pair it
-            // replaced -- a real constraint at the time (docs/30 flagged
-            // tens of thousands of unconditional per-frame registrations
-            // as already strained), but it capped a tall building's LIT
-            // window count at 2 regardless of size, nowhere close to
-            // 30-40% of even a single floor's ~4 window openings on a
-            // multi-floor Medium/Large tower. That perf risk is smaller
-            // now: EmissiveAnimator.Tick() (added since) skips any
-            // registration outside EmissiveTickRangeMeters of the camera,
-            // so a distant building's extra registrations cost nothing
-            // per frame either way. Scaled with `floors` (already known
-            // here) instead of a flat constant -- floors * 2 sits at
-            // roughly half of a WindowBay face's own ~4-windows-per-floor
-            // count, which comfortably clears the 30-40% floor once the
-            // EmissiveAnimator.Window occupancy schedule (not every
-            // registered window is lit at every instant) is factored in.
-            GlowBudget = Mathf.Max(2, floors * 2),
+            // building at night"): the flat `GlowBudget = 2` this used to
+            // be was sized (docs/12) so a grammar-dressed building
+            // registered no MORE glow entries than the single per-floor
+            // strip pair it replaced -- a real docs/30 perf constraint at
+            // the time, smaller now that EmissiveAnimator.Tick()'s
+            // distance culling (added since) already skips any
+            // registration outside camera range for free. First fix
+            // scaled the budget with `floors` instead -- still a
+            // sequential FIRST-N-windows counter, which turned out to
+            // have its own bug (round 2 below).
+            //
+            // Round 2, immediate creator correction with ASCII art showing
+            // the actual on-screen pattern: solid lit rows stacked under
+            // solid dark rows ("XX XX XX / OO OO OO"), not scattered --
+            // "it should be more like this: XX OO OX ... Random." Root
+            // cause: `GlowBudget` was consumed by a sequential counter
+            // (`TryTakeGlowBudget`) that grants to the FIRST N windows
+            // encountered in build order (bottom floor upward, left to
+            // right) and refuses every one after -- so the SAME
+            // contiguous block (whichever floors happened to build before
+            // the budget ran out) lit every time, and every floor above it
+            // was permanently dark, never just probabilistically off.
+            // Replaced with `GlowChance`, an independent per-window roll
+            // (`FacadeMaterials.RollGlow`) -- no ordering, no clumping,
+            // each window's own hash decides for itself, same mechanism
+            // `SpawnWindowStrip` already uses for Small-tier buildings
+            // (which never had this bug for exactly that reason). 0.45
+            // targets roughly the same registered fraction the old
+            // `floors * 2` scaling aimed for, now scattered instead of
+            // blocked -- see FacadeMaterials.GlowChance's own doc comment.
+            GlowChance = 0.45f,
         };
 
         for (var f = 0; f < 4; f++)

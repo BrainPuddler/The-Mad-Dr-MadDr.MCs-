@@ -15465,3 +15465,73 @@ FacadeGrammar solver's actual module mix (which varies per building and
 mixes in OrielBay/FireEscapeBay/BlindBay at various floors) -- whether
 the real on-screen lit fraction lands in the requested 30-40% band, or
 needs the multiplier tuned further, is unconfirmed until a real render.
+
+## 2026-08: window-glow selection switched from a sequential budget to an independent per-window roll (docs/28 row 35)
+
+Immediate creator correction to the round above, illustrated with ASCII
+art of the actual on-screen pattern:
+
+```
+XX XX  XX.                                                                   XX OO XX
+XX  XX  XX                                                                  OO XX XX
+OO OO OO                                                                XO XO OO
+OO OO OO    it should be more like this:   XX OO OX
+```
+
+Read as: solid rows of lit windows stacked directly under solid rows of
+dark windows -- not the scattered mix ("XX OO OX ... Random") a real
+occupied building shows, where individual windows are independently on
+or off regardless of which floor they're on.
+
+**Root cause.** The previous round scaled `GlowBudget` up (`floors * 2`)
+but never looked at HOW it was spent. `FacadeKit.RegisterWindowGlow`
+consumed it through `FacadeMaterials.TryTakeGlowBudget` -- a plain
+sequential counter: grant to the FIRST `GlowBudget` windows encountered,
+refuse every one after. `FacadeKit.BuildFace` builds a facade bottom
+floor upward, and within a floor, `BuildUpper`'s `WindowBay` case
+registers its windows left to right (`WindowBayU` array order) -- so the
+"first N" was always the SAME contiguous set of low floors, every
+building, every night, with zero randomness in WHICH windows got a
+chance to light up. Floors above wherever the budget ran out were
+permanently, deterministically dark -- not "usually off," genuinely
+incapable of ever glowing. Raising the budget number (row 34) made the
+lit block taller; it never fixed the block shape into a scatter, which
+is what the creator's ASCII art was actually pointing at. The Small-tier
+`BuildingDresser.SpawnWindowStrip` path (houses/apartments) never had
+this failure mode, because it was never order/budget-based to begin with
+-- each window strip already rolls its own independent ~40% chance.
+
+**Fix.** Removed the sequential mechanism outright rather than patching
+around it: `FacadeMaterials.GlowBudget` (`int`), `TryTakeGlowBudget()`,
+and its `_glowUsed` counter are gone. New `FacadeMaterials.GlowChance`
+(`float`, default 0.45 -- picked to land near the same overall registered
+fraction row 34's `floors * 2` scaling was aiming for) plus
+`RollGlow(float seed)`, which re-hashes the window's own already-computed
+`NextGlowSeed()` value (`Frac(seed * 13.7f + 1.3f) < GlowChance`) rather
+than reusing it raw -- the same seed value is also handed to
+`EmissiveAnimator.Register` as that window's animation phase offset, and
+decorrelating the roll from it with its own multiplier/offset follows the
+same pattern `EmissiveAnimator`'s own `OnCycleFrac`/`OffCycleFrac` already
+use on a single shared seed. `RegisterWindowGlow` now calls
+`mats.NextGlowSeed()` once per window and rolls immediately, independent
+of every other window on the building and of build order entirely --
+there is no longer any concept of "used up" budget, so nothing about
+which specific windows light up depends on where they sit in the
+iteration. `BuildingDresser.DressFacadeGrammar` sets `GlowChance = 0.45f`
+flat (no longer needs the `floors`-based formula -- a probability scales
+with the window count automatically, a fixed budget never did).
+
+**Verified:** Manual review only -- confirmed `RollGlow`/`NextGlowSeed`/
+`GlowChance` are the only members `RegisterWindowGlow` now touches (no
+stray reference to the removed `GlowBudget`/`TryTakeGlowBudget`/
+`_glowUsed` anywhere in the codebase, checked by grep), and that
+`BuildingDresser`'s `floors` local is still used elsewhere in the same
+method (the `FacadeGrammar.Solve` call) so removing it from the glow
+calculation doesn't leave an unused variable. No flightcheck harness or
+Unity Editor available this session -- NOT verified to compile against
+real Unity assemblies, and NOT verified visually. Whether the resulting
+pattern actually reads as "scattered/random" rather than still showing
+some structure (WindowBay's own fixed left-right pair-of-two layout means
+even a random per-window roll can't fully hide the underlying grid), and
+whether 0.45 lands the visible lit fraction in the requested 30-40% band,
+is unconfirmed until a real render.

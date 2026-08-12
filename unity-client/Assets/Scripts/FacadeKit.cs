@@ -359,7 +359,7 @@ public static class FacadeKit
     }
 
     /// <summary>Hook a window into the city's existing two-tier lighting
-    /// model, but only when the caller's budget allows it.
+    /// model, but only when this window's own independent roll says so.
     ///
     /// docs/28's model is "unlimited free emissive, one shared budgeted
     /// pool of real lights." That holds only while the number of
@@ -369,27 +369,45 @@ public static class FacadeKit
     /// grammar spawns MORE windows per face than the old single strip did,
     /// so registering every one would make a known-strained system
     /// materially worse. Instead the emissive material still renders on
-    /// every lit window (free), and only a bounded sample per building
-    /// registers for animation and the real-light budget.</summary>
+    /// every lit window (free), and only a sampled subset per building
+    /// registers for animation and the real-light budget.
+    ///
+    /// 2026-08 correction: that sample used to be the FIRST `GlowBudget`
+    /// windows encountered in build order (bottom floor upward, left to
+    /// right within a floor) -- a sequential counter that fills up and
+    /// stops, not a random pick. Since floors build bottom-up, this always
+    /// lit the SAME contiguous block (whichever floors got processed
+    /// before the budget ran out) and left every floor above it
+    /// permanently dark, every building, every night -- solid lit rows
+    /// stacked under solid dark rows, not the scattered "some windows on,
+    /// some off, mixed together" a real occupied building reads as
+    /// (creator, showing the exact wrong pattern with ASCII art: "XX XX
+    /// XX / OO OO OO" blocks, wanted "XX OO OX ... Random" instead). Fixed
+    /// by rolling each window independently against `GlowChance` -- same
+    /// mechanism `BuildingDresser.SpawnWindowStrip`'s per-strip roll
+    /// already uses for Small-tier buildings, which never had this
+    /// clumping bug because it was never budget/order-based to begin
+    /// with.</summary>
     private static void RegisterWindowGlow(GameObject go, FacadeMaterials mats, Vector3 pos)
     {
         if (go == null || !mats.WindowsLit) return;
-        if (!mats.TryTakeGlowBudget()) return;
+        var seed = mats.NextGlowSeed();
+        if (!mats.RollGlow(seed)) return;
 
         var renderer = go.GetComponent<Renderer>();
         if (renderer == null) return;
 
         renderer.sharedMaterial = mats.GlassLit;
         EmissiveAnimator.Register(renderer, mats.GlowColor * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
-            LightBehaviorKind.Window, mats.NextGlowSeed());
+            LightBehaviorKind.Window, seed);
         GlowPointRegistry.Register(go.transform, mats.GlowColor);
     }
 }
 
-/// <summary>The material set and per-building budget one facade solve
-/// draws from. Passed in rather than looked up per module so every
+/// <summary>The material set and per-building glow chance one facade
+/// solve draws from. Passed in rather than looked up per module so every
 /// material stays a shared cached instance (SRP-batcher friendly, the
-/// project's established convention) and so the glow budget is genuinely
+/// project's established convention) and so the glow chance is genuinely
 /// per-building rather than a hidden global.</summary>
 public sealed class FacadeMaterials
 {
@@ -408,26 +426,32 @@ public sealed class FacadeMaterials
     /// hash says it's dark tonight.</summary>
     public bool WindowsLit;
 
-    /// <summary>Hard ceiling on how many windows of THIS building may
-    /// register for emissive animation + the real-light budget. Set by the
-    /// caller (BuildingDresser.DressFacadeGrammar), scaled with the
-    /// building's own floor count so a tall Medium/Large tower gets
-    /// meaningfully more lit windows than a short one, per 2026-08
-    /// creator direction ("at least 30-40% of the lights should be on in
-    /// the building at night") -- see that call site's own comment for
-    /// the sizing reasoning and the docs/30 perf history this
-    /// supersedes.</summary>
-    public int GlowBudget;
+    /// <summary>Independent per-window chance of registering for emissive
+    /// animation + the real-light budget -- set by the caller
+    /// (BuildingDresser.DressFacadeGrammar). Replaced a sequential
+    /// first-N-windows `GlowBudget` counter (2026-08, docs/28 row 35):
+    /// that always lit the SAME contiguous block in build order (bottom
+    /// floors up) and left everything above it permanently dark, not the
+    /// scattered/random mix of on and off windows a real occupied
+    /// building reads as. `RollGlow` below decides each window on its
+    /// own, independent of every other window on the building, so the
+    /// result scatters across floors and positions instead of clumping.</summary>
+    public float GlowChance;
 
-    private int _glowUsed;
     private int _seedCursor;
 
-    public bool TryTakeGlowBudget()
+    /// <summary>seed is itself already a ~uniform pseudo-random value in
+    /// [0,1) (see NextGlowSeed) -- re-hashed with its own multiplier/
+    /// offset here (same decorrelation trick EmissiveAnimator's
+    /// OnCycleFrac/OffCycleFrac use on a shared seed) so this roll doesn't
+    /// just reuse the raw seed value the caller ALSO passes to
+    /// EmissiveAnimator.Register as its animation phase offset.</summary>
+    public bool RollGlow(float seed)
     {
-        if (_glowUsed >= GlowBudget) return false;
-        _glowUsed++;
-        return true;
+        return Frac(seed * 13.7f + 1.3f) < GlowChance;
     }
+
+    private static float Frac(float v) { return v - Mathf.Floor(v); }
 
     public float NextGlowSeed()
     {
