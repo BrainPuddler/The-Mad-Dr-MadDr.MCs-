@@ -86,8 +86,20 @@ public static class EmissiveAnimator
     // Window occupancy timing, as fractions of the FULL day/night cycle
     // (DayNightState.CycleProgress: 0 at Dawn's start, 1 at Night's end).
     // Ticks, for reference (LumenClock, 10 ticks/s): Dawn [0,300)
-    // Day [300,1200) Dusk [1200,1500) Night [1500,2400).
-    private const float OnRangeStart = 0.375f;   // 900 ticks -- 3/4 through Day: earliest arrivals
+    // Day [300,1200) Dusk [1200,1500) Night [1500,2400). The global
+    // "lights on" ramp (LumenCycleController.LightsOnStartTick) sits at
+    // tick 1000 (the dial's 5:00).
+    //
+    // 2026-08 creator direction: "I want to see more window lights at
+    // night [that turn on] earlier before 5pm." OnRangeStart used to be
+    // 0.375 (tick 900, only 100 ticks -- 10 sim-seconds -- before the
+    // ramp), so only the earliest sliver of arrivals could beat 5pm.
+    // Pulled back to 0.2 (tick 480, solidly mid-Day) so a much larger
+    // share of windows have already "arrived home" (and, since
+    // dayNeonBoost/dayIntensityFraction now keep lights faintly visible
+    // through the day too, actually READ as lit) well before the evening
+    // ramp, not just right at it.
+    private const float OnRangeStart = 0.2f;     // 480 ticks -- mid-Day: earliest arrivals
     private const float OnRangeEnd = 0.75f;      // 1800 ticks -- 1/3 into Night: latest arrivals
     private const float OffRangeStart = 0.75f;   // 1800 ticks -- earliest bedtimes
     private const float OffRangeEnd = 0.98f;     // 2352 ticks -- latest bedtimes, just shy of Dawn

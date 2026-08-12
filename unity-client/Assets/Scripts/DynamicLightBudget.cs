@@ -113,8 +113,10 @@ public class DynamicLightBudget : MonoBehaviour
     // sticks -- edit these fields instead, they're the actual source.
     [Header("Real dynamic lights -- editable live in Play mode")]
     [Tooltip("Total real Light components across the WHOLE city (streetlamps + windows + neon combined), spent on whichever glow points are nearest the camera.")]
+    // 2026-08 creator direction: "a LOT more lights should be turned on
+    // after 5pm" -- bumped from the earlier untuned middle-ground 24.
     [Range(0, 128)]
-    public int budget = 24;
+    public int budget = 64;
 
     // 2026-07, two rounds. Round 1 diagnostic: creator confirmed real
     // lights ARE visible at a deliberately-blown-out 80 (ruled out "not
@@ -154,6 +156,20 @@ public class DynamicLightBudget : MonoBehaviour
     [Tooltip("Spot-type real-light intensity floor in HEAVY fog at full night.")]
     [Range(0f, 300f)]
     public float spotIntensityMin = 34.2f;
+
+    // 2026-08 creator direction, reversing the earlier "ALL the lights
+    // should turn off during the day" round: "I want to see lights on
+    // during daylight as well as night." Point/Spot intensity used to
+    // Lerp from a hard 0f up to its fog-adjusted ceiling as `boost`
+    // (DayNightState.NightAmount) rose from 0 -- so real lights were
+    // fully off for all of Dawn + most of Day. This is the new LOW stop,
+    // as a FRACTION of each type's own ceiling (rather than a separate
+    // absolute Max/Min pair like fog dimming uses) so it scales
+    // automatically with whatever pointIntensityMax/spotIntensityMax are
+    // tuned to, instead of needing its own four numbers kept in sync.
+    [Tooltip("Fraction of each type's (fog-adjusted) intensity ceiling that real lights show during full daylight (before the evening ramp) -- 0 means real lights are fully off until the ramp; raise this so streetlamps/windows/neon stay faintly, believably lit even at midday instead of snapping off.")]
+    [Range(0f, 1f)]
+    public float dayIntensityFraction = 0.15f;
 
     // 2026-07 creator: "it should add a glow to the light diffusing it,
     // like real lights in the fog." Basic RenderSettings fog only fades
@@ -231,6 +247,7 @@ public class DynamicLightBudget : MonoBehaviour
         pointIntensityMin = profile.RealLightPointIntensityMin;
         spotIntensityMax = profile.RealLightSpotIntensityMax;
         spotIntensityMin = profile.RealLightSpotIntensityMin;
+        dayIntensityFraction = profile.RealLightDayIntensityFraction;
         fogDimReferenceDensity = profile.FogDimReferenceDensity;
         range = profile.RealLightRange;
     }
@@ -310,27 +327,27 @@ public class DynamicLightBudget : MonoBehaviour
         // every refresh, so dragging them in Play mode takes effect
         // within one refresh interval (~0.35s).
         //
-        // 2026-07 correction: the low end used to be a 0.02 floor, not a
-        // hard 0 -- "ALL the lights should turn off during the day" means
-        // exactly that, not "very dim." NightAmount itself now genuinely
-        // reaches 0 for the whole Day (LumenCycleController's
-        // ComputeNightIntensity), so Lerp(0f, ceiling, 0) is exactly 0,
-        // not a residual glow.
-        //
         // 2026-07 round 2: "give me a setting... for the max and minimum
         // ON setting" + fog should actively throttle real lights. Each
         // type's ceiling is no longer a flat peakIntensity -- it's
         // Lerp(Max, Min, fogT), where fogT is how close the CURRENT fog
         // density is to fogDimReferenceDensity. Heavier fog pulls the
-        // ceiling down toward Min; the night boost above still separately
-        // gates the whole thing to 0 during the day.
+        // ceiling down toward Min.
+        //
+        // 2026-08 correction: the low end of the boost-driven Lerp below
+        // used to be a hard 0f ("ALL the lights should turn off during
+        // the day" meant exactly that) -- reversed by creator direction,
+        // "I want to see lights on during daylight as well as night."
+        // dayIntensityFraction is the new low stop, as a fraction of each
+        // type's own (already fog-adjusted) ceiling, so real lights stay
+        // faintly on through Dawn + most of Day instead of snapping to 0.
         var boost = DayNightState.NightAmount;
         var fogT = fogDimReferenceDensity > 0f
             ? Mathf.Clamp01(RenderSettings.fogDensity / fogDimReferenceDensity) : 0f;
         var pointCeiling = Mathf.Lerp(pointIntensityMax, pointIntensityMin, fogT);
         var spotCeiling = Mathf.Lerp(spotIntensityMax, spotIntensityMin, fogT);
-        var pointIntensity = Mathf.Lerp(0f, pointCeiling, boost);
-        var spotIntensity = Mathf.Lerp(0f, spotCeiling, boost);
+        var pointIntensity = Mathf.Lerp(pointCeiling * dayIntensityFraction, pointCeiling, boost);
+        var spotIntensity = Mathf.Lerp(spotCeiling * dayIntensityFraction, spotCeiling, boost);
         for (var i = 0; i < _pool.Count; i++)
         {
             if (i < _picked.Count)

@@ -34,14 +34,18 @@ using UnityEngine;
 ///   * fog too thin/thick overall -> LumenCycleController.fogDensityScale (live)
 ///   * fog wrong at one time of day -> LumenCycleController.fogDensityDawn/Day/Dusk/Night (rebuild city)
 ///   * night reads as near-total black (not just moody) -> check the Night PhaseGrade's own Contrast/PostExposure in LumenCycleController.BuildGrades FIRST -- a steep contrast curve or dark exposure baseline can crush nightFillLift's gains right back down; confirmed by a real screenshot once in this project's own history (docs/28 row 31/32)
+///   * lights fully off during the day (want a faint daytime glow too) -> LumenCycleController.dayNeonBoost (emissive) + DynamicLightBudget.dayIntensityFraction (real lights) -- both default low, raise for more daytime presence (docs/28 row 33)
+///   * want more windows already lit before the evening ramp -> EmissiveAnimator.OnRangeStart (code constant, not live -- rebuild to see it)
 /// </summary>
 [CreateAssetMenu(fileName = "CityLightingProfile", menuName = "MadDr/City Lighting Profile")]
 public class CityLightingProfile : ScriptableObject
 {
     [Header("Real dynamic lights (budgeted, nearest-to-camera only)")]
     [Tooltip("Total real Light components shared across EVERY light kind combined (streetlamps, windows, neon, marquee) -- not per-kind. This is the whole city's real-light budget. Raise for a beefier machine, lower for a slower one.")]
+    // 2026-08 creator direction: "a LOT more lights should be turned on
+    // after 5pm" -- bumped from the earlier untuned middle-ground 24.
     [Range(4, 128)]
-    public int RealLightBudget = 24;
+    public int RealLightBudget = 64;
 
     // 2026-07: kept in sync with DynamicLightBudget's own fields of the
     // same names minus the "RealLight" prefix -- see that component for
@@ -67,6 +71,10 @@ public class CityLightingProfile : ScriptableObject
     [Tooltip("Fog density at which lights reach their fog-dimmed minimum -- see DynamicLightBudget.fogDimReferenceDensity.")]
     [Range(0.001f, 0.05f)]
     public float FogDimReferenceDensity = 0.016f;
+
+    [Tooltip("Fraction of each type's intensity ceiling that real lights show during full daylight (before the evening ramp) -- 0 means real lights are fully off until the ramp. See DynamicLightBudget.dayIntensityFraction.")]
+    [Range(0f, 1f)]
+    public float RealLightDayIntensityFraction = 0.15f;
 
     [Tooltip("How far each light reaches, in meters, as a straight-line radius from the light itself -- NOT a ground-projected pool size. Needs to comfortably exceed the tallest fixture's mount height (~5.9m for the ornate lamppost globes) or it can't reach the ground at all.")]
     [Range(1f, 25f)]

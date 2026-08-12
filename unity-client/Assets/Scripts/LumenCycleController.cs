@@ -138,6 +138,23 @@ public class LumenCycleController : MonoBehaviour
     [Range(0f, 2f)]
     public float bloomThreshold = 0.6f;
 
+    // 2026-08 creator direction, reversing the earlier "ALL the lights
+    // should turn off during the day" round (see neonBoost's own comment
+    // in ApplyBlend): "I want to see lights on during daylight as well as
+    // night." This is the LOW stop of the neonBoost Lerp below -- was a
+    // hard 0f, now this live field, matching the original pre-"all off"
+    // design (Day's own authored PhaseGrade.NeonBoost was 0.35, "barely
+    // visible against daylight") and CityLightingProfile's own
+    // DayNeonBoost field, which existed but was never actually wired up
+    // to anything after that earlier round hardcoded 0f in its place.
+    // The trapezoid TIMING (off through most of Day, ramp at the dial's
+    // 5:00, hold through Dusk/Night, fade in Dawn) is unchanged -- this
+    // only raises the floor of the "off" stretch so it reads as "faint,
+    // barely-there daytime glow" instead of "completely dark."
+    [Tooltip("Neon/bulb boost during full daylight (before the evening ramp) -- 0 means lights are fully off until the ramp; raise this so streetlamps/windows/neon stay faintly visible even at midday. Blends up to the full night boost as nightAmount ramps toward 1 -- same ramp timing as before, this only changes the low end.")]
+    [Range(0f, 1f)]
+    public float dayNeonBoost = 0.35f;
+
     // 2026-07 creator: "Give me both per phase and a multiplier fog
     // density." Fog density previously existed only as hardcoded literals
     // inside BuildGrades' per-phase PhaseGrade table (each phase's own
@@ -319,6 +336,7 @@ public class LumenCycleController : MonoBehaviour
         nightAmbient = profile.NightAmbientBrightness;
         nightAmbientTint = profile.NightAmbientTint;
         nightFillLift = profile.NightFillLift;
+        dayNeonBoost = profile.DayNeonBoost;
         fogDensityDawn = profile.FogDensityDawn;
         fogDensityDay = profile.FogDensityDay;
         fogDensityDusk = profile.FogDensityDusk;
@@ -582,18 +600,18 @@ public class LumenCycleController : MonoBehaviour
         RenderSettings.fogColor = Color.Lerp(a.Fog, b.Fog, blend);
         RenderSettings.fogDensity = fogDensity;
 
-        // Hard 0 -> Night's own authored NeonBoost are the two stops --
-        // same reasoning as nightAmount just above, so the glowing bulbs/
-        // signs/windows snap on and off in step with the real lights and
-        // ambient darkness instead of lagging behind on the slower
-        // 4-stop mood curve. 2026-07 correction: this used to blend
-        // toward Day's own authored NeonBoost (0.35 -- "barely visible
-        // against daylight," the ORIGINAL design intent), not all the way
-        // to 0. "ALL the lights should turn off during the day" supersedes
-        // that -- 0 is the low stop now, so nightAmount == 0 (all of Day)
-        // means genuinely off, not just dim.
+        // dayNeonBoost -> Night's own authored NeonBoost are the two
+        // stops -- same reasoning as nightAmount just above, so the
+        // glowing bulbs/signs/windows track the real lights and ambient
+        // darkness instead of lagging behind on the slower 4-stop mood
+        // curve. 2026-08 correction: this briefly used a hard 0f low stop
+        // ("ALL the lights should turn off during the day"), then the
+        // creator reversed that -- "I want to see lights on during
+        // daylight as well as night" -- so the low stop is dayNeonBoost
+        // (a live field) again, matching the original pre-"all off"
+        // design (Day's own authored NeonBoost was 0.35).
         var nightNeonBoost = _grades[(int)LumenPhase.Night].NeonBoost;
-        var neonBoost = Mathf.Lerp(0f, nightNeonBoost, nightAmount) * emissiveScale;
+        var neonBoost = Mathf.Lerp(dayNeonBoost, nightNeonBoost, nightAmount) * emissiveScale;
         NeonRegistry.SetBoost(neonBoost);
         DayNightState.NeonBoost = neonBoost;
         DayNightState.NightAmount = nightAmount;

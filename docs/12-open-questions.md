@@ -15323,3 +15323,83 @@ recopied per this file's own build instructions; mutator-service
 rebuilt against the new genome-core and its own `npm test` (32/32)
 green. No citygen-core/match-core changes this pass (investigated, no
 applicable code to change).
+
+## 2026-08: lights faintly on during daylight too, more windows lit before 5pm, bigger real-light budget (docs/28 row 33)
+
+Creator report: "light may turn on during daylight hours and a LOT more
+lights should be turned on after 5 pm." Ambiguous enough (which
+direction, how much) to check rather than guess -- asked via
+AskUserQuestion. Answer reversed the apparent literal reading of the
+first half: "I want to see lights on during daylight as well as night.
+and I want to see more window lights at night are earlier before 5pm."
+So not a bug report about premature lights -- a direct reversal of the
+docs/28 row 12/29 "ALL the lights should turn off during the day"
+direction from a few rounds back, plus a request for MORE windows to
+already be lit by the time the evening ramp hits. Second question
+(budget size) answered directly: "Big jump -- 64."
+
+**Daytime lights floor.** `LumenCycleController.neonBoost` and
+`DynamicLightBudget`'s real point/spot intensity both `Lerp`'d FROM a
+hard `0f` up to their night ceiling as the day/night `boost` rose --
+genuinely off for all of Dawn + most of Day, exactly as row 12/29 asked
+for at the time. New live field `LumenCycleController.dayNeonBoost`
+(default 0.35, restoring Day's own originally-authored
+`PhaseGrade.NeonBoost` value from before that round zeroed it) replaces
+the hard `0f` low stop for neon/bulb emissive boost; mirrors the
+already-present-but-orphaned `CityLightingProfile.DayNeonBoost` field
+(existed since the profile asset was built, never actually wired to
+anything after the "all off" round hardcoded 0f in its place) -- now
+wired into `ApplyProfile`. New `DynamicLightBudget.dayIntensityFraction`
+(default 0.15, a FRACTION of each type's own fog-adjusted ceiling,
+deliberately not a second absolute Max/Min pair needing its own four
+numbers kept in sync) replaces the hard `0f` low stop for real
+streetlamp/window/neon `Light` components; `CityLightingProfile.
+RealLightDayIntensityFraction` mirrors it. Both trapezoid TIMINGs (ramp
+starting at the dial's 5:00/tick 1000, hold through Dusk/Night, fade
+during Dawn) are unchanged -- only the floor of the "off" stretch moved
+up, so daylight hours read as a faint, barely-there glow instead of
+pure black, matching the pre-row-12/29 original design intent stated in
+`CityLightingProfile.DayNeonBoost`'s own tooltip ("barely visible
+against daylight").
+
+**More windows lit before 5pm.** `EmissiveAnimator`'s per-window
+"someone's home" arrival window (`OnRangeStart`, a fraction of the full
+day/night cycle) was 0.375 (tick 900) -- only a 100-tick sliver (10
+sim-seconds) before the row-29 evening ramp at tick 1000, so barely any
+window could have arrived early even before this round. And until the
+daytime-floor fix above landed, an early arrival wouldn't have been
+visible anyway -- `NeonBoost` was still a hard 0f the whole time,
+regardless of whether a given window's own occupancy gate said "on."
+Pulled `OnRangeStart` back to 0.2 (tick 480, solidly mid-Day) --
+widens the arrival window from 900 ticks to 1320 ticks, so roughly 39%
+of windows now land before tick 1000 instead of roughly 11%, and
+(combined with the floor fix) an early arrival now actually reads as
+lit at the day-floor brightness instead of being invisibly gated.
+
+**Bigger real-light budget.** `DynamicLightBudget.budget` (and its
+`CityLightingProfile.RealLightBudget` mirror) raised from the earlier
+untuned middle-ground 24 to 64, directly per "Big jump -- 64" -- roughly
+2.5x more real `Light` components active at once, shared across the
+whole city's streetlamps/windows/neon combined (still budgeted,
+nearest-camera-first, same mechanism as before -- this is a bigger
+number fed into the existing system, not a new one).
+
+`CityLightingProfile`'s own "where to tune" doc-comment quick-reference
+gained two new entries pointing at `dayNeonBoost`/`dayIntensityFraction`
+for "lights fully off during the day" and at `EmissiveAnimator.
+OnRangeStart` for "want more windows lit before the ramp." docs/28 row
+33 added with the full before/after reasoning.
+
+**Verified:** Manual review of every call site (`ApplyBlend`,
+`DynamicLightBudget.Refresh`, both `ApplyProfile` methods,
+`EmissiveAnimator`'s window-arrival math) confirms the new fields are
+actually wired end-to-end, same shape as every prior live-tunable in
+this file. No flightcheck harness or Unity Editor available in this
+environment this session (unlike most other entries in this log, which
+at least had the stub-compile harness) -- NOT verified to compile
+against real Unity assemblies, and NOT verified visually. Whether 0.35/
+0.15 read as "faint daytime glow" rather than either invisible or loud
+enough to break the "barely visible against daylight" target look is
+exactly the kind of visual-feel call this session's tooling can't
+settle -- flagged for a real-render check next time an Editor is
+available.
