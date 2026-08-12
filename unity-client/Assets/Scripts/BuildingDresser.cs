@@ -285,37 +285,47 @@ public static class BuildingDresser
         for (var f = 0; f < 4; f++)
         {
             var role = roles[f];
-            if (role == FaceRole.PartyWall) continue;
-
             var face = (FacadeFace)f;
 
-            if (role == FaceRole.Alley)
+            if (role != FaceRole.Street)
             {
-                // 2026-08 creator direction: "there should be windows on
-                // every side except those where there is a very narrow
-                // distance between separate building walls that are very
-                // close together." An Alley face (FacadeGrammar.FaceRole's
-                // own definition: faces open ground that ISN'T a road --
-                // a yard or gap, not another building pressed flush
-                // against it) used to solve with `floors = 0`, forcing a
-                // crown-only strip regardless of the building's real height --
-                // "cornices wrap corners; the rest of an alley wall is the
-                // massing cube's own brick," a deliberate cost-control
-                // choice, not an architectural one. That's exactly the
-                // "windows missing on a side that isn't actually a narrow
-                // gap" the creator is pointing at -- the TRUE narrow-gap
-                // case (another building's footprint hex directly
-                // touching this one) is `FaceRole.PartyWall`, handled by
-                // the `continue` two lines up, genuinely windowless and
-                // untouched by this change. Alley now solves with the
-                // real `floors`, same as Street -- `FacadeGrammar`'s own
-                // `UpperDomain` already gives Alley faces a different,
-                // blinder window mix than Street (WindowBay/BlindBay only,
-                // no OrielBay, no FireEscapeBay -- see that method's own
-                // comment), so this isn't "treat alley like street," it's
-                // "let alley faces use the window vocabulary the grammar
-                // already defines for them instead of skipping straight to
-                // crown-only."
+                // 2026-08, two rounds. Round 1 ("windows on every side
+                // except those where there is a very narrow distance
+                // between separate building walls that are very close
+                // together"): gave Alley faces (open ground that isn't a
+                // road) real windows instead of the old floors-forced-to-0
+                // crown-only strip, but kept skipping `FaceRole.PartyWall`
+                // faces entirely (a neighbor hex belongs to another
+                // building's footprint, or to this SAME building's own
+                // footprint for a multi-hex Medium/Large building) as the
+                // genuine "very narrow/touching" case the request wanted
+                // excluded.
+                //
+                // Round 2, immediate follow-up: "if it's more
+                // computationally more expensive ignore - remove the
+                // close building window rule." Rather than keep the
+                // PartyWall/Alley split (which needs its own solve branch
+                // and its own IsFallback check), PartyWall now folds into
+                // this SAME branch -- every non-Street face gets windows,
+                // full stop, no distinction left for "how close is the
+                // neighbor." `FacadeGrammar.Solve` itself still hardcodes
+                // an all-Blank result if passed `FaceRole.PartyWall`
+                // (`role == FaceRole.PartyWall` short-circuits to blanks
+                // regardless of `floors` -- see that method), so this
+                // deliberately passes `FaceRole.Alley`, not `role`, to get
+                // the real windowed solve either way.
+                //
+                // Known, accepted consequence: for a multi-hex Large/
+                // Medium building, the face between two hexes of the SAME
+                // building is genuinely interior -- physically pressed
+                // against its own neighboring massing cube with no gap,
+                // never visible from outside. Windows spawned there are
+                // wasted geometry/registrations, not a visual bug (nothing
+                // renders where it'd be seen), but also not free -- the
+                // simplification this round asked for accepts that cost
+                // rather than keeping the extra classification logic
+                // needed to tell "my own other hex" apart from "someone
+                // else's close wall."
                 var alley = FacadeGrammar.Solve(FaceRole.Alley, floors, style,
                     new Rng(unchecked((uint)(h + f * 7919))), allowFireEscape: false);
                 if (!alley.IsFallback) FacadeKit.BuildFace(b, t, t.position, face, alley, height, mats);

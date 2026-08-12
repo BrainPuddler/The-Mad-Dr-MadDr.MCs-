@@ -15611,3 +15611,60 @@ verified visually (whether alley-side windows read correctly from the
 RTS camera angle they're normally never seen from, and whether the
 generation-time cost increase is acceptable, are both unconfirmed until
 a real render/profile).
+
+## 2026-08: PartyWall exception removed too -- every non-Street face gets windows
+
+Immediate creator follow-up to the round above: "if it's more
+computationally more expensive ignore - remove the close building
+window rule."
+
+Rather than try to measure whether the just-shipped Alley change
+(above) was actually too expensive -- unmeasurable in this environment
+anyway, no Editor/profiler available -- the creator's own instruction
+was to drop the cost question and simplify: remove the rule that
+distinguishes "how close is the neighboring wall" at all. `FaceRole.
+PartyWall` (a neighbor hex belongs to another building's own footprint,
+or -- for a multi-hex Medium/Large building, since Large targets a
+4-hex footprint and Medium a 2-hex one, `packages/citygen-core/src/
+CityGenerator.cs` -- to THIS building's own footprint) was still being
+skipped entirely even after the Alley fix; that's the "close building"
+exception being asked to go.
+
+**Fix.** `BuildingDresser.DressFacadeGrammar`'s per-face loop no longer
+special-cases `FaceRole.PartyWall` at all -- the `if (role == FaceRole.
+PartyWall) continue;` line is gone, and the branch condition inverted
+from `if (role == FaceRole.Alley)` to `if (role != FaceRole.Street)`,
+so both the old Alley case AND the old PartyWall case now fall into the
+SAME windowed-solve branch added last round. `FacadeGrammar.Solve`
+itself still hardcodes an all-Blank result specifically when passed
+`FaceRole.PartyWall` (an early return, independent of `floors`), so the
+branch deliberately solves with `FaceRole.Alley` regardless of which of
+the two the face actually was -- there is no code path left that can
+produce a windowless non-Street face anymore.
+
+**Known, accepted consequence -- stated rather than silently
+accepted.** For a multi-hex Medium/Large building, the face between two
+hexes of the SAME building is genuinely interior: each footprint hex
+gets its own separate massing cube (`RuntimeCityBuilder.BuildBuildings`,
+one holder GameObject per footprint hex), so a shared internal boundary
+sits physically pressed against its own neighboring cube with no gap --
+never visible from any camera angle, real or RTS. Windows now spawned
+there are wasted geometry and window-glow registrations (feeding
+`GlowChance`/`EmissiveAnimator`, two entries above), not a visual
+regression (nothing wrongly appears on screen, since it's fully
+occluded) but a real, non-zero generation-time and per-frame-tick cost
+increase with zero visual return. This is exactly the tradeoff the
+creator's instruction accepted explicitly ("if it's more computationally
+expensive, ignore [that]") rather than something slipped in
+unannounced.
+
+**Verified:** Manual review only -- confirmed the loop's remaining
+`FacadeGrammar.Solve(role, floors, ...)` call (the true-Street path) is
+now only ever reached when `role == FaceRole.Street`, matching its
+pre-existing behavior exactly (previously reached by falling through
+past two other early-outs; now reached by the single inverted
+condition) -- same solve, same `escapeFace` fire-escape gating, no
+behavior change for Street faces. No flightcheck harness or Unity
+Editor available this session -- NOT verified to compile against real
+Unity assemblies, NOT verified for actual generation-time cost, and NOT
+verified visually.
