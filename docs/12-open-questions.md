@@ -15403,3 +15403,65 @@ enough to break the "barely visible against daylight" target look is
 exactly the kind of visual-feel call this session's tooling can't
 settle -- flagged for a real-render check next time an Editor is
 available.
+
+## 2026-08: Medium/Large building window-glow budget scaled with floor count (docs/28 row 34)
+
+Creator direction, immediate follow-up to the daylight-lights round
+above: "I need more window lights on. 2 window per building is not
+enough night at least 30-40% of the lights should be on in the building
+at night."
+
+**Finding.** Two separate window-lighting paths exist. Small-tier houses
+and apartments (`BuildingDresser.SpawnWindowStrip`) already have no
+per-building cap -- each window strip independently rolls its own ~40%
+"lit tonight" chance and, if lit, registers unconditionally. Medium/Large
+towers (`DressFacadeGrammar`, the newer facade-grammar system) go through
+a DIFFERENT path: `FacadeKit.RegisterWindowGlow` gates every window
+behind a per-building `FacadeMaterials.GlowBudget`, which was a flat
+constant `2` -- regardless of the building's own size. A 6-8 floor tower
+with dozens of window openings across its street faces (WindowBay alone
+places ~4 per floor per face, before OrielBay/FireEscapeBay variety) was
+capped at exactly 2 lit windows total, nowhere close to 30-40% -- this
+was specifically a Medium/Large-tier gap, not a citywide one.
+
+**Why the cap existed.** Not an oversight -- the facade-grammar system
+was new when that budget was written, and docs/30 had already flagged
+per-frame emissive registration counts (tens of thousands citywide) as a
+real, already-strained cost; `GlowBudget = 2` was deliberately sized so a
+grammar-dressed building couldn't register MORE glow entries than the
+single per-floor strip pair the old (pre-grammar) dresser used to. That
+constraint is smaller today than when it was written: `EmissiveAnimator.
+Tick()` gained distance culling since (`CityLightingProfile.
+EmissiveTickRangeMeters`, the Tier 0 perf pass) -- any registration
+outside camera range is skipped every frame regardless of how many exist,
+so a distant building's extra registrations no longer cost anything
+per-frame. The original perf reasoning no longer justifies a flat cap
+this tight.
+
+**Fix.** `GlowBudget` in `DressFacadeGrammar` changed from the flat `2`
+to `Mathf.Max(2, floors * 2)` -- `floors` is already computed at that
+call site from the building's own height. A 1-floor building keeps the
+old value (2); an 8-floor tower (the tier's max) gets up to 16. `floors
+* 2` was picked as roughly half of a single WindowBay face's own
+~4-windows-per-floor count -- generous enough that, once
+`EmissiveAnimator.Window`'s occupancy schedule (not every REGISTERED
+window is lit at every instant -- windows have their own randomized
+arrival/bedtime, docs/28 row 13) is factored in, the actually-visible-lit
+fraction at any given moment during full night should clear 30-40%
+rather than sit at a hard-capped handful. `FacadeMaterials.GlowBudget`'s
+own doc comment (`FacadeKit.cs`) updated to point at this sizing
+reasoning instead of the now-superseded flat-cap one it referenced
+before.
+
+**Verified:** Manual review only -- `floors` is an existing `int` already
+in scope at the edit site (`Mathf.Clamp(Mathf.RoundToInt(height / 4.2f) -
+1, 1, 8)`), and `Mathf.Max(2, floors * 2)` type-checks against
+`GlowBudget`'s own `int` field; call-site wiring unchanged otherwise. No
+flightcheck harness or Unity Editor available this session -- NOT
+verified to compile against real Unity assemblies, and NOT verified
+visually. The `floors * 2` multiplier is a reasoned estimate against
+WindowBay's own known per-floor window count, not a measurement of the
+FacadeGrammar solver's actual module mix (which varies per building and
+mixes in OrielBay/FireEscapeBay/BlindBay at various floors) -- whether
+the real on-screen lit fraction lands in the requested 30-40% band, or
+needs the multiplier tuned further, is unconfirmed until a real render.

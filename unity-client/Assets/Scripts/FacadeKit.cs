@@ -409,11 +409,14 @@ public sealed class FacadeMaterials
     public bool WindowsLit;
 
     /// <summary>Hard ceiling on how many windows of THIS building may
-    /// register for emissive animation + the real-light budget. A v0.1
-    /// placeholder like every other tuning number in this project, chosen
-    /// so a grammar-dressed building registers no more than the single
-    /// per-floor strip the old dresser registered -- i.e. this change
-    /// cannot make the existing lighting load worse.</summary>
+    /// register for emissive animation + the real-light budget. Set by the
+    /// caller (BuildingDresser.DressFacadeGrammar), scaled with the
+    /// building's own floor count so a tall Medium/Large tower gets
+    /// meaningfully more lit windows than a short one, per 2026-08
+    /// creator direction ("at least 30-40% of the lights should be on in
+    /// the building at night") -- see that call site's own comment for
+    /// the sizing reasoning and the docs/30 perf history this
+    /// supersedes.</summary>
     public int GlowBudget;
 
     private int _glowUsed;

@@ -247,11 +247,27 @@ public static class BuildingDresser
             // Same "roughly 2 in 5 are lit" read the strip dressing had,
             // decided per building rather than per strip.
             WindowsLit = (h / 11) % 5 < 2,
-            // Sized so a grammar-dressed building registers no MORE
-            // emissive/glow entries than the single per-floor strip pair
-            // it replaces -- this change cannot worsen the existing
-            // lighting load, which docs/30 flagged as already strained.
-            GlowBudget = 2,
+            // 2026-08 creator direction: "2 window per building is not
+            // enough, at least 30-40% of the lights should be on in the
+            // building at night." The flat `2` below was sized (see
+            // docs/12) so a grammar-dressed building registered no MORE
+            // glow entries than the single per-floor strip pair it
+            // replaced -- a real constraint at the time (docs/30 flagged
+            // tens of thousands of unconditional per-frame registrations
+            // as already strained), but it capped a tall building's LIT
+            // window count at 2 regardless of size, nowhere close to
+            // 30-40% of even a single floor's ~4 window openings on a
+            // multi-floor Medium/Large tower. That perf risk is smaller
+            // now: EmissiveAnimator.Tick() (added since) skips any
+            // registration outside EmissiveTickRangeMeters of the camera,
+            // so a distant building's extra registrations cost nothing
+            // per frame either way. Scaled with `floors` (already known
+            // here) instead of a flat constant -- floors * 2 sits at
+            // roughly half of a WindowBay face's own ~4-windows-per-floor
+            // count, which comfortably clears the 30-40% floor once the
+            // EmissiveAnimator.Window occupancy schedule (not every
+            // registered window is lit at every instant) is factored in.
+            GlowBudget = Mathf.Max(2, floors * 2),
         };
 
         for (var f = 0; f < 4; f++)
