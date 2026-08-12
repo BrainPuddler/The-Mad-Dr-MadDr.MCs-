@@ -15764,3 +15764,74 @@ tooling cannot settle -- whether the two-axis (arrival/bedtime +
 activity-threshold) staggering reads as naturalistic rather than still
 noticeably synchronized, and whether 0.5/0.6 are the right magnitudes,
 are both unconfirmed until a real render.
+
+## 2026-08: WindowsLit was per-HEX, not per-BUILDING -- a multi-hex tower could show one segment lit and its neighbor permanently dark
+
+Creator direction: "check the residual street facing for tall building
+is not disabling lighting on those building walls or building being
+completely omitted from lit windows." An audit request, not a described
+symptom -- investigated the whole registration chain rather than
+guessing at a fix.
+
+**What was checked and cleared first.** Re-verified the `role !=
+FaceRole.Street` branch from two rounds ago didn't regress the true
+Street path: `FacadeGrammar.Solve(role, floors, ...)` with its own
+`allowFireEscape`/`IsFallback` handling is only ever reached when `role
+== FaceRole.Street` (the branch above it `continue`s for everything
+else), unchanged from before that round -- confirmed no bug there.
+
+**What was actually broken.** `FacadeMaterials.WindowsLit` (`h / 11) %
+5 < 2`, "roughly 2 in 5 buildings have any lit windows tonight at all")
+used `h` -- but `h` is `Hash(hex, 1)`, computed FRESH per footprint hex
+by `BuildingDresser.Dress()`'s own loop (`var h = Hash(hex, 1);`, once
+per iteration), then passed down into `DressOffice`/`DressApartment` ->
+`DressFacadeGrammar` for THAT hex's own massing cube. Medium buildings
+target a 2-hex footprint and Large a 4-hex one
+(`CityGenerator.cs`), and `Dress()` calls the whole dressing chain
+separately for EVERY footprint hex of a multi-hex building -- so
+`WindowsLit`, despite its own doc comment saying "decided per building
+rather than per strip," was actually rolled INDEPENDENTLY per hex
+SEGMENT of that building. Concretely: a 4-hex Large tower could have
+segment #1 fully lit and segment #2 -- the SAME physical tower, one hex
+over -- permanently, deterministically dark forever (same hex, same
+hash, every night), including on segment #2's own street-facing wall
+(exactly "disabling lighting on those building walls"). And a 2-hex
+Medium building had a real ~36% chance (0.6 x 0.6) of BOTH segments
+rolling dark, showing zero lit windows anywhere on the whole building
+(exactly "building being completely omitted from lit windows") --
+worse, this also meant the building-wide lit-window fraction two rounds
+ago's `GlowChance = 0.45` was actually targeting was silently diluted:
+averaged across a whole multi-hex tower including its dark segments,
+the REAL city-wide lit fraction was closer to 0.4 x 0.45 = 18%, well
+under the 30-40% target, not because `GlowChance` was wrong but because
+this bug was quietly killing entire segments before `GlowChance` ever
+got to roll on their windows.
+
+**Fix.** `WindowsLit` now hashes `building.Footprint[0]` -- the SAME
+primary hex on every one of a given building's own `DressFacadeGrammar`
+calls, since `Dress()` always dresses `footprint[0]` first (`var
+primary = i == 0`) -- instead of `hex` (the specific hex being dressed
+THIS call). Every segment of the same building now computes the exact
+same `WindowsLit` value, so "is this building occupied tonight" is
+genuinely building-wide again: either the whole tower participates or
+none of it does, matching how a real building's occupancy would read.
+For a single-hex building this is a no-op (`building.Footprint[0] ==
+hex` when the footprint has exactly one entry, so the hash is identical
+to before) -- the bug only ever affected multi-hex Medium/Large
+buildings. `h` itself is untouched for every OTHER per-hex choice in
+this method (trim color, per-window glow seeds, roof-form picks, etc.)
+-- those genuinely varying per segment is real facade variety across a
+big building's face, not something this fix should flatten.
+
+**Verified:** Manual review only -- confirmed `Hash` is a private
+static helper already in scope, `building.Footprint` is
+`IReadOnlyList<HexCoord>` (indexable), and `building` is already an
+existing parameter of `DressFacadeGrammar` (used two lines earlier to
+build the `footprint` `HashSet`) -- no new parameter threading needed,
+this is a one-line change at the assignment itself. Confirmed both
+`DressApartment` and `DressOffice` call the SAME `DressFacadeGrammar`
+method (grepped both call sites), so the fix covers both tiers. No
+flightcheck harness or Unity Editor available this session -- NOT
+verified to compile against real Unity assemblies, and NOT verified
+visually (whether a real Big City build now shows coherently-lit-or-dark
+towers instead of patchy segments is unconfirmed until a real render).

@@ -244,9 +244,30 @@ public static class BuildingDresser
             Rust = RustRed(),
             Sign = SignWhite(),
             GlowColor = WindowGlowColor,
-            // Same "roughly 2 in 5 are lit" read the strip dressing had,
-            // decided per building rather than per strip.
-            WindowsLit = (h / 11) % 5 < 2,
+            // Same "roughly 2 in 5 are lit" read the strip dressing had --
+            // decided per BUILDING, not per strip. 2026-08 bug fix: this
+            // used `h`, which is THIS specific footprint hex's own hash
+            // (`Hash(hex, 1)`, computed fresh per hex by `Dress()`'s own
+            // loop) -- for a multi-hex Medium/Large building (Medium
+            // targets 2 hexes, Large 4, `CityGenerator.cs`), each hex
+            // segment rolled WindowsLit INDEPENDENTLY, so "decided per
+            // building" was only true by accident for single-hex
+            // buildings. A real multi-hex tower could show one segment
+            // fully lit and its immediate neighbor -- same physical
+            // building, including that segment's own street-facing wall
+            // -- permanently, deterministically dark forever, and a
+            // smaller multi-hex building had a real chance of EVERY
+            // segment rolling dark, showing zero lit windows anywhere on
+            // the whole building. Fixed by hashing `building.Footprint[0]`
+            // (the SAME primary hex on every one of this building's own
+            // `DressFacadeGrammar` calls) instead of `hex` itself -- one
+            // stable value shared by every segment of the same building,
+            // so the "is this building occupied tonight" read is
+            // genuinely building-wide again. `h` itself is left alone for
+            // every OTHER per-hex choice below (trim color, glow seeds,
+            // etc.) -- those varying per segment is real facade variety
+            // on a big building's face, not a bug.
+            WindowsLit = (Hash(building.Footprint[0], 1) / 11) % 5 < 2,
             // 2026-08, two rounds. Round 1 ("2 window per building is not
             // enough, at least 30-40% of the lights should be on in the
             // building at night"): the flat `GlowBudget = 2` this used to
