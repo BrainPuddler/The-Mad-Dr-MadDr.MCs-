@@ -662,7 +662,7 @@ public class BaseDresser : MonoBehaviour
 
         var trim = new GameObject("FactoryTrim").transform;
         trim.SetParent(root.transform, false);
-        var brassMat = Brass();
+        var brassMat = DoctorBrass();
         var brickMat = DoctorDarkBrick();
         var flueVoidMat = DoctorFlueVoidMat();
 
@@ -830,7 +830,7 @@ public class BaseDresser : MonoBehaviour
         var trim = new GameObject("HqTrim").transform;
         trim.SetParent(root.transform, false);
         var ironMat = DoctorIron();
-        var brassMat = Brass();
+        var brassMat = DoctorBrass();
 
         var domeTop = turretCenter + Vector3.up * (turretH * 0.5f);
         var domeRadius = turretSize * 0.55f;
@@ -988,10 +988,17 @@ public class BaseDresser : MonoBehaviour
 
         var trim = new GameObject("FactoryTrim").transform;
         trim.SetParent(root.transform, false);
-        var crystalMat = AlienCrystalMat();
-        var membraneMat = AlienMembraneMat();
+        // 2026-08 silver-steel pass: both were AlienCrystalMat()/
+        // AlienMembraneMat() (organic purple crystal/membrane, now
+        // deleted) -- kept as two separate locals (both now the SAME
+        // AlienSilverSteel(), MTextured's own cache means this doesn't
+        // create two Materials) rather than collapsing every call site
+        // below to one name, so this diff stays a material swap, not a
+        // variable-naming rewrite.
+        var crystalMat = AlienSilverSteel();
+        var membraneMat = AlienSilverSteel();
 
-        // crystal growth replacing the chimney slot -- same offset/height
+        // steel spire replacing the chimney slot -- same offset/height
         // envelope the original silhouette used there, reshaped.
         var spikeXZ = new Vector3(fullScale.x * 0.32f, 0f, fullScale.z * 0.32f);
         var spikeH = fullScale.y * 0.9f;
@@ -1000,7 +1007,10 @@ public class BaseDresser : MonoBehaviour
             new Vector3(fullScale.x * 0.22f, spikeH, fullScale.x * 0.22f), crystalMat, trim);
         spikeGo.AddComponent<SlowSpin>().degreesPerSecond = 8f;
 
-        // pulsing energy sacs bulging off two faces
+        // steel energy pods bulging off two faces -- same shape/Bob-
+        // animation/pulse-light as the old organic membrane sacs, just
+        // reskinned (2026-08 silver-steel pass); the pulse light on the
+        // front pod is what still sells "energy," not the material.
         var sacPositions = new[]
         {
             origin + Vector3.right * (bodyW * 0.5f * 0.9f) + Vector3.up * (bodyH * 0.6f),
@@ -1048,7 +1058,8 @@ public class BaseDresser : MonoBehaviour
             SpawnAlienPorthole(trim, pos, dir, portholeRadius, pi, 521);
         }
 
-        // organic ribs -- thin vertical crystal struts around the body
+        // thin vertical steel ribs around the body (was "organic ribs,"
+        // same shape/positions, reskinned 2026-08)
         var ribCount = 6;
         var ribR = Mathf.Max(bodyW, bodyD) * 0.52f;
         for (var i = 0; i < ribCount; i++)
@@ -1060,7 +1071,8 @@ public class BaseDresser : MonoBehaviour
                 new Vector3(fullScale.x * 0.025f, bodyH * 0.48f, fullScale.x * 0.025f), crystalMat, trim);
         }
 
-        // hovering crystal growths near the roofline
+        // hovering steel sensor pods near the roofline (was "hovering
+        // crystal growths," same shape/Bob animation, reskinned 2026-08)
         for (var i = 0; i < 3; i++)
         {
             var angleDeg = (i / 3f) * 360f + 40f;
@@ -1151,7 +1163,8 @@ public class BaseDresser : MonoBehaviour
 
         var trim = new GameObject("HqTrim").transform;
         trim.SetParent(root.transform, false);
-        var crystalMat = AlienCrystalMat();
+        // 2026-08 silver-steel pass: was AlienCrystalMat() (now deleted).
+        var crystalMat = AlienSilverSteel();
 
         // passage-tube connector -- a Frustum-style tapered cylinder
         // (`alien-passage-tube`) plus two flat docking-collar rings at
@@ -1167,10 +1180,13 @@ public class BaseDresser : MonoBehaviour
         builder.SpawnPrim(PrimitiveType.Cylinder, tubeTop,
             new Vector3(tubeR * 2.4f, fullScale.y * 0.012f, tubeR * 2.4f), crystalMat, trim);
 
-        // hive-mind crystal, floating above the secondary module -- same
-        // "replaces the turret slot, same offset/height envelope" idea
-        // as before, just re-anchored to `secondaryCenter` instead of a
-        // turret cube's own top.
+        // hive-mind core spire (was an organic crystal, reskinned to
+        // steel 2026-08 -- variable names below keep the `crystal*`
+        // prefix since they're positional references, not a material
+        // claim), floating above the secondary module -- same "replaces
+        // the turret slot, same offset/height envelope" idea as before,
+        // just re-anchored to `secondaryCenter` instead of a turret
+        // cube's own top.
         var crystalCenter = secondaryCenter + Vector3.up * (secondaryH * 0.5f + fullScale.y * 0.18f);
         var crystalH = fullScale.y * 0.37f;
         var crystalGo = PropLibrary.Spawn(builder, "alien-crystal-spike", PrimitiveType.Cylinder, crystalCenter,
@@ -2435,11 +2451,45 @@ public class BaseDresser : MonoBehaviour
         // so its rotation is derived from outwardDir instead of a fixed
         // Euler literal.
         var faceRot = Quaternion.LookRotation(outwardDir, Vector3.up);
-        var ringGo = builder.SpawnPrim(PrimitiveType.Cylinder, pos,
+
+        // 2026-08 (faction gauntlet, "make the portholes feel integrated
+        // into the saucer's architecture rather than simply attached to
+        // the surface... small, tight, precise seams"): a flush hull-
+        // toned collar sits exactly AT the surface, sized slightly larger
+        // than the brass ring; the ring itself is then pulled slightly
+        // INWARD (recessed) instead of sitting exactly flush. Without
+        // this, the brass ring sat flat right at the hull surface with
+        // nothing transitioning between "flat hull" and "round fitting,"
+        // reading as a decal stuck on top rather than a fixture built
+        // into the hull's own thickness.
+        //
+        // The collar uses `SolidMatFor(FactionId.AlienHive)` directly --
+        // the EXACT material `TintShape` applies to the hull's own direct
+        // children -- rather than `Placeholder()`, because this method is
+        // called on `trim` (a grandchild of `root`), and `TintShape` only
+        // re-tints `root`'s DIRECT children (see that method's own body).
+        // A `Placeholder()` collar here would never actually get owner-
+        // tinted and would show its own fixed default color forever,
+        // mismatching the real hull -- exactly the seam problem this
+        // collar exists to hide. Known, accepted limitation: `TintShape`
+        // re-tints the hull reactively as damage state changes (`Update`/
+        // `UpdateScaffold`, `DamagedMatFor`), but this collar is baked in
+        // once at construction and always uses the UNDAMAGED tint -- a
+        // small, static trim ring not matching a heavily-damaged hull's
+        // darker/scorched re-tint is a minor cosmetic gap, not attempted
+        // here (would need `TintShape` itself extended to walk into
+        // per-shape trim children, a larger change than this pass's own
+        // scope).
+        var collarGo = builder.SpawnPrim(PrimitiveType.Cylinder, pos,
+            new Vector3(radius * 2.3f, radius * 0.05f, radius * 2.3f), SolidMatFor(FactionId.AlienHive), parent);
+        collarGo.transform.rotation = faceRot * Quaternion.Euler(90f, 0f, 0f);
+
+        var ringPos = pos - outwardDir * (radius * 0.1f);
+        var ringGo = builder.SpawnPrim(PrimitiveType.Cylinder, ringPos,
             new Vector3(radius * 2f, radius * 0.18f, radius * 2f), Brass(), parent);
         ringGo.transform.rotation = faceRot * Quaternion.Euler(90f, 0f, 0f);
 
-        var glassPos = pos - outwardDir * (radius * 0.15f);
+        var glassPos = ringPos - outwardDir * (radius * 0.15f);
         var lit = PbrTextureAtlas.Jitter(index, seedSalt, 130) < 0.4f;
         var glassMat = lit ? PedestalWindowGlowMat() : PedestalWindowMat();
         var glassGo = builder.SpawnPrim(PrimitiveType.Cylinder, glassPos,
@@ -2455,6 +2505,11 @@ public class BaseDresser : MonoBehaviour
         // rivet ring in the window's own face plane -- the two axes
         // perpendicular to outwardDir, derived from faceRot rather than
         // assumed to be world X/Y (which only held when outwardDir was Z).
+        // Anchored to `ringPos` (the ring's own now-recessed depth), not
+        // the original flush `pos` -- these rivets are bolting down the
+        // BRASS RING specifically, so they belong at the ring's own
+        // depth, not floating out at the hull's flush surface in front
+        // of it.
         const int rivetCount = 10;
         var rivetR = radius * 1.02f;
         var rivetSize = radius * 0.1f;
@@ -2463,7 +2518,7 @@ public class BaseDresser : MonoBehaviour
         for (var i = 0; i < rivetCount; i++)
         {
             var a = i / (float)rivetCount * 2f * Mathf.PI + PbrTextureAtlas.Jitter(i, seedSalt, 132) * 0.15f;
-            var rp = pos + (faceRight * Mathf.Sin(a) + faceUp * Mathf.Cos(a)) * rivetR;
+            var rp = ringPos + (faceRight * Mathf.Sin(a) + faceUp * Mathf.Cos(a)) * rivetR;
             builder.SpawnPrim(PrimitiveType.Sphere, rp, Vector3.one * rivetSize, Steel(), parent);
         }
     }
@@ -2483,11 +2538,36 @@ public class BaseDresser : MonoBehaviour
     // Control Centre for every race") ----------------------------------
 
     /// <summary>Mad Doctor faction: dark heavy cast-iron framework
-    /// (chimneys, machinery housings).</summary>
-    private static Material DoctorIron() => MTextured("faction-doctor-iron", 0.22f, 0.22f, 0.23f, PbrTextureAtlas.CastIron, 0.32f, 0.55f);
+    /// (chimneys, machinery housings). 2026-08 weathering pass ("the
+    /// heaviest weathering and aging of all factions"): smoothness
+    /// dropped further (0.32 -> 0.22) on top of `PbrTextureAtlas.
+    /// CastIron`'s own now-intensified rust/grime fields -- a matte,
+    /// worn surface scatters light instead of showing a clean specular
+    /// highlight, which reads as "handled/aged" independent of the
+    /// texture itself. `CastIron` is Doctor-exclusive again as of this
+    /// pass (Alien's own gunmetal moved to `AlienSilverSteel`/a
+    /// rewired `AlienGunmetal`, both on the clean Chrome texture
+    /// instead), so pushing this darker/rougher can't bleed into a
+    /// faction whose own brief says "avoid excessive grime."</summary>
+    private static Material DoctorIron() => MTextured("faction-doctor-iron", 0.19f, 0.19f, 0.2f, PbrTextureAtlas.CastIron, 0.22f, 0.5f);
 
-    /// <summary>Mad Doctor faction: oxidized copper pipework.</summary>
-    private static Material DoctorCopper() => MTextured("faction-doctor-copper", 0.6f, 0.36f, 0.22f, PbrTextureAtlas.OxidizedCopper, 0.4f, 0.7f);
+    /// <summary>Mad Doctor faction: oxidized copper pipework. 2026-08
+    /// weathering pass: smoothness dropped (0.4 -> 0.3) alongside
+    /// `PbrTextureAtlas.OxidizedCopper`'s own intensified patina/streak
+    /// fields, same "matte reads as aged" reasoning as `DoctorIron`.</summary>
+    private static Material DoctorCopper() => MTextured("faction-doctor-copper", 0.6f, 0.36f, 0.22f, PbrTextureAtlas.OxidizedCopper, 0.3f, 0.7f);
+
+    /// <summary>Mad Doctor faction: the SAME shared `PbrTextureAtlas.
+    /// Brass` texture <see cref="Brass"/> (the Big Brain jar's own ring
+    /// material, also reused by Alien's porthole hardware) already uses
+    /// -- but a darker, dirtier TINT and lower smoothness, not a second
+    /// texture. Same technique `DoctorDarkBrick` already established for
+    /// `PbrTextureAtlas.Brick` ("brick coursing reads the same regardless
+    /// of which building it's on; only the tone needs to shift") --
+    /// `Brass()` itself is untouched (still feeds the Big Brain jar and
+    /// Alien's own cleaner brass hardware), so Doctor's Tesla-coil/trim
+    /// brass can go heavier without darkening either of those.</summary>
+    private static Material DoctorBrass() => MTextured("faction-doctor-brass", 0.52f, 0.4f, 0.22f, PbrTextureAtlas.Brass, 0.32f, 0.6f);
 
     /// <summary>2026-08 (faction gauntlet, Tesla apparatus): off-white
     /// glazed-porcelain insulator studs, the material real high-voltage
@@ -2546,8 +2626,16 @@ public class BaseDresser : MonoBehaviour
         return _doctorGlowMat;
     }
 
-    /// <summary>Human Alliance faction: brushed aluminum panels.</summary>
-    private static Material HumanAluminum() => MTextured("faction-human-aluminum", 0.82f, 0.84f, 0.86f, PbrTextureAtlas.BrushedAluminum, 0.62f, 0.5f);
+    /// <summary>Human Alliance faction: brushed aluminum panels. 2026-08
+    /// weathering pass ("basic dirt, dust, grime, and moderate wear
+    /// rather than extreme deterioration... keep the structures
+    /// functional and maintained"): smoothness nudged down slightly
+    /// (0.62 -> 0.56) to pair with `PbrTextureAtlas.BrushedAluminum`'s
+    /// own new subtle dirt-speckle field -- a light touch, deliberately
+    /// far short of `DoctorIron`'s matching drop (0.32 -> 0.22), since
+    /// this faction stays "practical and military," not "old and
+    /// neglected."</summary>
+    private static Material HumanAluminum() => MTextured("faction-human-aluminum", 0.82f, 0.84f, 0.86f, PbrTextureAtlas.BrushedAluminum, 0.56f, 0.5f);
 
     /// <summary>Human Alliance faction: carbon-fiber accent panels.</summary>
     private static Material HumanCarbon() => MTextured("faction-human-carbon", 0.5f, 0.52f, 0.55f, PbrTextureAtlas.CarbonFiberPanel, 0.55f, 0.1f);
@@ -2592,49 +2680,41 @@ public class BaseDresser : MonoBehaviour
         return _humanBlueLightMat;
     }
 
-    /// <summary>Alien faction: translucent glowing purple crystal --
-    /// transparent (LabMeshBuilder.MakeTransparent, same technique the
-    /// Big Brain jar's own glass uses) with a faint baked-in emission on
-    /// top of whatever real light lands on it, since "glowing crystal"
-    /// should read even in shadow, not just under direct light.</summary>
-    private static Material _alienCrystalMat;
-    private static Material AlienCrystalMat()
-    {
-        if (_alienCrystalMat != null) return _alienCrystalMat;
-        var mat = new Material(ShaderUtil.FindRenderableShader());
-        mat.color = new Color(0.6f, 0.4f, 0.85f, 0.55f);
-        if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", PbrTextureAtlas.AlienCrystal);
-        if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.9f);
-        if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", 0f);
-        mat.EnableKeyword("_EMISSION");
-        mat.SetColor("_EmissionColor", new Color(0.55f, 0.25f, 0.9f) * 0.35f);
-        LabMeshBuilder.MakeTransparent(mat);
-        _alienCrystalMat = mat;
-        return _alienCrystalMat;
-    }
-
-    /// <summary>Alien faction: "living surfaces" -- a softer, blobbier,
-    /// less-faceted organic membrane than AlienCrystalMat's own crisp
-    /// crystal read, for hull/body surfaces rather than growths/spikes.</summary>
-    private static Material _alienMembraneMat;
-    private static Material AlienMembraneMat()
-    {
-        if (_alienMembraneMat != null) return _alienMembraneMat;
-        var mat = new Material(ShaderUtil.FindRenderableShader());
-        mat.color = new Color(0.5f, 0.28f, 0.58f, 0.85f);
-        if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", PbrTextureAtlas.AlienMembrane);
-        if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.55f);
-        mat.EnableKeyword("_EMISSION");
-        mat.SetColor("_EmissionColor", new Color(0.5f, 0.2f, 0.65f) * 0.15f);
-        LabMeshBuilder.MakeTransparent(mat);
-        _alienMembraneMat = mat;
-        return _alienMembraneMat;
-    }
+    /// <summary>2026-08 (faction gauntlet, "Replace the existing
+    /// biological components with shiny silver steel... engineered and
+    /// premium, with controlled reflections and subtle surface
+    /// variation... avoid excessive grime or weathering"): the Alien
+    /// hull-detail material -- crystal spike, energy sacs/pods, organic
+    /// ribs, roofline growths, passage tube + docking collars, hive
+    /// core, struts, orbiting rings -- EVERY site that used to call the
+    /// now-deleted `AlienCrystalMat()`/`AlienMembraneMat()`. Reuses
+    /// `PbrTextureAtlas.Chrome` (already the 1950s "diner chrome/parked-
+    /// car trim" texture `RoadDresser`/`BuildingDresser` use for the
+    /// civilian city, clean by construction -- no rust/patina field of
+    /// any kind, unlike every faction metal texture above) rather than
+    /// authoring a fifth metal texture; a bright, cool platinum tint plus
+    /// near-maximum smoothness/metallic is what actually sells "shiny...
+    /// controlled reflections," not the texture choice alone. Opaque, no
+    /// emission of its own -- the "living energy" read this replaces now
+    /// comes from the SEPARATE, untouched `AlienGlowMat`/pulse-light
+    /// psychic-core/indicator-lamp geometry (engineered power/sensor
+    /// glow, not organic bioluminescence, and explicitly not a
+    /// "biological component" the brief asked to remove) rather than a
+    /// baked-in glow on the hull material itself. Preserves faction
+    /// identity through the UNCHANGED shapes/silhouette/proportions of
+    /// every site it's applied to, per the brief's own "preserve
+    /// identity through shape... not through biological-looking
+    /// materials" instruction -- this is a material swap, not a geometry
+    /// rewrite.</summary>
+    private static Material AlienSilverSteel() => MTextured("faction-alien-silver-steel", 0.84f, 0.87f, 0.92f, PbrTextureAtlas.Chrome, 0.88f, 0.85f);
 
     /// <summary>Alien faction: pure bright emissive purple -- the visible
     /// SOURCE paired with EerieChamberGlow's real Light, same "avoid...
     /// a generic video-game point light, pair it with something visible"
-    /// reasoning as the Big Brain jar's own glow disc.</summary>
+    /// reasoning as the Big Brain jar's own glow disc. Untouched by the
+    /// 2026-08 silver-steel pass -- this is engineered power/sensor glow
+    /// (a reactor core, an indicator lamp), not the organic-material read
+    /// that pass removed.</summary>
     private static Material _alienGlowMat;
     private static Material AlienGlowMat()
     {
@@ -2649,14 +2729,18 @@ public class BaseDresser : MonoBehaviour
     }
 
     /// <summary>2026-08 (faction gauntlet, docs/31 §5, "1950s-70s B-movie
-    /// mechanical apparatus... exposed pivots/gears/bearings"): a dark
-    /// weathered gunmetal for the mechanical-apparatus housings/dishes/
-    /// rods that "captured/bolted spacecraft" hardware needs, distinct
-    /// from AlienCrystalMat's/AlienMembraneMat's own organic-hull read --
-    /// reuses PbrTextureAtlas.CastIron (same shared texture DoctorIron
-    /// already established) rather than authoring a fourth metal texture,
-    /// only the tint differs.</summary>
-    private static Material AlienGunmetal() => MTextured("faction-alien-gunmetal", 0.24f, 0.23f, 0.27f, PbrTextureAtlas.CastIron, 0.4f, 0.6f);
+    /// mechanical apparatus... exposed pivots/gears/bearings"): the
+    /// mechanical-apparatus housings/dishes/rods that "captured/bolted
+    /// spacecraft" hardware needs. 2026-08 silver-steel pass: rewired OFF
+    /// `PbrTextureAtlas.CastIron` (that texture became Doctor-exclusive
+    /// and was pushed considerably darker/rustier the same pass -- see
+    /// `DoctorIron`'s own comment -- keeping Alien's antenna hardware on
+    /// it would have made this faction's own gear read as weathered too,
+    /// directly against its "avoid excessive grime" brief) onto the SAME
+    /// clean `Chrome` texture `AlienSilverSteel` uses, just a darker,
+    /// less-bright tint -- a two-tone bright-hull / darker-hardware
+    /// scheme, both clean, both distinct from Doctor's dark rusted iron.</summary>
+    private static Material AlienGunmetal() => MTextured("faction-alien-gunmetal", 0.34f, 0.35f, 0.39f, PbrTextureAtlas.Chrome, 0.72f, 0.78f);
 
     /// <summary>Shared by every faction's Tesla-coil/energy-arc mount --
     /// creates a LineRenderer + TeslaArc between two freshly-created

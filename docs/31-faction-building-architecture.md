@@ -1,6 +1,6 @@
 # 31 — Faction Building Architecture: Windows, Antennas, Lighting, Silhouette
 
-Status: v1.0, all six §7 phases shipped · Extends [17-factions.md](17-factions.md) (creature-level
+Status: v1.1, all six §7 phases shipped + §9 material/weathering refresh · Extends [17-factions.md](17-factions.md) (creature-level
 faction identity) into the RTS layer's own **buildings** (`BaseDresser.cs`) ·
 Decision trail in [12-open-questions.md](12-open-questions.md) · Prompted by
 creator direction, 2026-08 ("Faction Architecture, Windows, Lighting &
@@ -373,3 +373,140 @@ already enforced elsewhere in this codebase, not a new policy:
   instance per shape, reused via `RuntimeCityBuilder.SpawnMesh`/
   `BaseDresser`'s own equivalent, scaled per-instance via the Transform,
   never regenerated per building.
+
+## 9. Material/weathering refresh (2026-08, "AAA quality... push the
+architecture toward a polished AAA-quality game standard")
+
+**Scope of this round, stated plainly.** The creator's brief asked for a
+sweeping pass: silhouette/proportions, architectural flow, geometry
+quality, bump/normal detail, seams/paneling, weathering placement, and
+construction language, across all three factions plus the saucer. §§1-8
+above already shipped the big-ticket GEOMETRY half of that ask in prior
+rounds (castle towers, saucer massing, antennas, Big Brain base) — this
+round is the MATERIAL half: weathering, and the Alien organic-to-steel
+swap. It does not re-touch silhouette/proportions (those were judged
+already-shipped and correct per §§1-8) and does not attempt true
+normal/bump-mapped surface depth (see the honest ceiling note below) —
+scoped narrower than the full brief on purpose, not from running out of
+ideas.
+
+**Faction weathering, via the existing procedural-texture technique
+(`PbrTextureAtlas.cs`), not a new system.** This project's materials
+were already "small, layered noise fields baked into a 64x64 texture at
+load time" (patina/rust/scratch fields already existed for Brass/
+CastIron/OxidizedCopper before this round) — the fix was intensifying
+and layering that EXISTING technique per-faction, not inventing a new
+one:
+- **Mad Doctor ("heaviest weathering of all factions"):** `CastIron`
+  (now Doctor-EXCLUSIVE — see below) gained a second, coarser soot/
+  grime field layered on top of a widened/intensified rust field.
+  `OxidizedCopper` gained a second "verdigris streak" patina tone
+  layered on the original. `DressedStone` (the castle transform's own
+  stone) gained a moss/damp-staining field, deliberately BIASED to
+  appear more often near block joints than block centers — the
+  brief's own "should collect around seams, recesses, drainage areas"
+  instruction, honored as an actual positional bias in the noise field,
+  not just "more weathering everywhere." New `DoctorBrass()` (a darker/
+  dirtier TINT of the shared `Brass` texture, same technique
+  `DoctorDarkBrick` already used for `Brick`) replaces `Brass()` at
+  Doctor's own two Tesla-coil/trim call sites, WITHOUT touching `Brass()`
+  itself (still shared by the Big Brain jar ring and Alien's own
+  cleaner brass hardware). Every Doctor metal material's own smoothness
+  was also dropped (matte reads as "worn/handled," independent of the
+  texture) — `DoctorIron` 0.32→0.22, `DoctorCopper` 0.4→0.3.
+- **Human Army ("basic dirt, dust, grime, moderate wear... keep
+  structures functional and maintained"):** `BrushedAluminum` gained a
+  SINGLE, low-coverage/low-opacity dirt-speckle field — deliberately a
+  much lighter touch than any Doctor field (no rust/patina at all, this
+  faction stays maintained). `HumanAluminum`'s own smoothness nudged
+  down slightly (0.62→0.56), a fraction of Doctor's equivalent drop.
+- **Alien Hive ("shiny, clean, technologically advanced... avoid
+  excessive grime"):** received ZERO new weathering fields — the
+  opposite direction, on purpose. Its own `Chrome`-based materials (see
+  below) were never weathered to begin with, so nothing needed adding;
+  this faction's whole material update is the crystal/membrane swap.
+
+**Alien: biological components replaced with silver steel.** New
+`AlienSilverSteel()` (bright, cool platinum tint, near-maximum
+smoothness/metallic) reuses `PbrTextureAtlas.Chrome` — already this
+project's "1950s diner chrome/parked-car trim" texture
+(`RoadDresser`/`BuildingDresser`), clean by construction (no rust/patina
+field of any kind), reused rather than authoring a fifth metal texture.
+Replaces the now-DELETED `AlienCrystalMat()`/`AlienMembraneMat()`
+(organic purple crystal/"living tissue" membrane, plus their own
+`PbrTextureAtlas.AlienCrystal`/`AlienMembrane` textures) at every call
+site: the crystal spike/spire, energy pods (was "pulsing energy sacs"),
+hull ribs (was "organic ribs"), roofline sensor pods (was "hovering
+crystal growths") on the Factory; the passage-tube connector + docking
+collars, hive-core spire, struts, and orbiting rings on the Control
+Centre. `AlienGunmetal` (the antenna-rig hardware material) was
+REWIRED off `CastIron` — which became Doctor-exclusive and considerably
+darker/rustier this same round — onto the same clean `Chrome` texture,
+just a darker tint than `AlienSilverSteel`, giving Alien a deliberate
+two-tone bright-hull/darker-hardware scheme, both clean.
+
+This is a MATERIAL swap only, not a geometry rewrite — every shape,
+position, Bob/SlowSpin animation, and the pulse-light/`AlienGlowMat`
+"engineered power glow" (kept, since the brief's own "biological
+components" language reads as organic material/geometry, not the
+separate reactor-core/indicator-lamp lighting language) are UNCHANGED,
+per the brief's own "preserve identity through shape... not through
+biological-looking materials" instruction.
+
+**Porthole integration ("make the portholes feel integrated... rather
+than simply attached... small, tight, precise seams").**
+`SpawnAlienPorthole` gained a flush hull-toned COLLAR (sized slightly
+larger than the brass ring) sitting exactly at the hull surface, with
+the brass ring itself pulled slightly inward (recessed) rather than
+sitting flush — a flat decal read becomes a socketed-fitting read. The
+collar uses `SolidMatFor(FactionId.AlienHive)` directly (the exact
+material `TintShape` applies to the hull's own direct children), NOT
+`Placeholder()` — `SpawnAlienPorthole` is called on the `trim` holder (a
+GRANDCHILD of `root`), and `TintShape` only re-tints `root`'s direct
+children, so a `Placeholder()` collar there would never actually pick
+up the owner tint and would mismatch the real hull, the opposite of
+this fix's own goal. **Known, accepted limitation:** this collar is
+baked in once at construction and always shows the undamaged tint —
+`TintShape` re-tints the hull reactively as damage state changes
+(`DamagedMatFor`), but the collar doesn't follow; a small, static trim
+ring not matching a heavily-damaged hull's scorched re-tint is a minor
+cosmetic gap, not fixed here (would need `TintShape` extended to walk
+into per-shape trim children, out of this round's own scope).
+
+**Honest ceiling: no true normal/bump-mapped surface depth.** The
+brief's own "convincing bump/normal detail that gives the surfaces
+physical depth" was investigated, not silently skipped. `MTextured`
+(the material helper every faction color above goes through) only ever
+sets `_BaseMap`/`_Smoothness`/`_Metallic` — no bump/normal plumbing at
+all. Exactly ONE place in this codebase sets `_BumpMap`/`_NORMALMAP`
+(`BrainMaterial`, the Big Brain jar), and that method's OWN doc comment
+already flags the pattern as "correct per Unity's own URP Lit shader
+source... genuinely unconfirmed in THIS project (no prior usage to
+check against, and no Editor here to compile/render it)." `PbrTextureAtlas.cs`
+has no normal-map textures at all for any material — every texture
+here is albedo-only, with shading/depth FAKED via baked tone variation,
+not a real height/normal channel. Building real per-faction normal maps
+would mean authoring a whole new procedural normal-map generator (a
+genuinely new subsystem, following `BrainTextureKit`'s own precedent for
+what that would look like) using a shader pattern this codebase has
+used exactly once and never confirmed renders correctly — judged too
+large and too unverifiable a bet for this round; flagged here as a real
+future avenue rather than attempted and left silently half-working.
+
+**Verified:** Manual review only — confirmed brace/paren balance across
+`PbrTextureAtlas.cs`/`BaseDresser.cs` after every edit, grepped the
+whole `unity-client` tree to confirm the deleted `AlienCrystalMat`/
+`AlienMembraneMat`/`PbrTextureAtlas.AlienCrystal`/`AlienMembrane` have
+zero remaining references anywhere, confirmed `CastIron` had exactly
+two callers (`DoctorIron`/`AlienGunmetal`) before this round so
+intensifying it can't have silently affected an unrelated material, and
+confirmed `Brass()`'s own four call sites individually (two Doctor, one
+Alien, one Big Brain) before splitting only the two Doctor ones off to
+`DoctorBrass()`. No flightcheck harness or Unity Editor available this
+session — NOT verified to compile against real Unity assemblies, and
+NOT verified visually. Whether the weathering reads as "heaviest of all
+factions" vs. "moderate" vs. "none" at actual in-game camera distance,
+whether the Alien silver steel actually reads as "premium" rather than
+just "generic gray," and whether the porthole collar's recess is subtle
+enough to read as integrated rather than as its own visible extra ring,
+are all unconfirmed until a real render.

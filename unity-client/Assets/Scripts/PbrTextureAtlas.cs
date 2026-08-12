@@ -88,8 +88,6 @@ public static class PbrTextureAtlas
     private static Texture2D _oxidizedCopper;
     private static Texture2D _brushedAluminum;
     private static Texture2D _carbonFiberPanel;
-    private static Texture2D _alienCrystal;
-    private static Texture2D _alienMembrane;
 
     /// <summary>Mad Doctor faction: dark, heavy, matte cast iron for
     /// factory/control-centre framework, with sparse rust-colored
@@ -116,17 +114,18 @@ public static class PbrTextureAtlas
     /// carbon-fiber panel accents.</summary>
     public static Texture2D CarbonFiberPanel { get { return _carbonFiberPanel != null ? _carbonFiberPanel : (_carbonFiberPanel = BuildCarbonFiberPanel()); } }
 
-    /// <summary>Alien faction: purple crystal base tone plus thin bright
-    /// facet lines -- the same difference-of-two-shifted-noise-fields
-    /// vein technique BrainTextureKit.VeinMask uses for blood vessels,
-    /// reading here as crystal facet edges instead of vessels.</summary>
-    public static Texture2D AlienCrystal { get { return _alienCrystal != null ? _alienCrystal : (_alienCrystal = BuildAlienCrystal()); } }
-
-    /// <summary>Alien faction: mottled organic "living tissue" purple-
-    /// pink blotching for the Factory's bio-organic hull surfaces --
-    /// deliberately softer/blobbier than AlienCrystal's own faceted
-    /// read (a bigger low-frequency field, no thin vein lines).</summary>
-    public static Texture2D AlienMembrane { get { return _alienMembrane != null ? _alienMembrane : (_alienMembrane = BuildAlienMembrane()); } }
+    // AlienCrystal/AlienMembrane (the purple organic crystal/"living
+    // tissue" textures) removed 2026-08 (faction gauntlet, "Replace the
+    // existing biological components with shiny silver steel... preserve
+    // the Alien visual identity through shapes/proportions/detailing --
+    // not through biological-looking building components"). BaseDresser's
+    // Alien geometry now uses AlienSilverSteel (built on the existing
+    // Chrome texture, already clean/premium by construction) for every
+    // site that used to call AlienCrystalMat/AlienMembraneMat -- deleted
+    // outright rather than left unused, same "no dead code" discipline
+    // this project applies everywhere else. Grepped the whole unity-client
+    // tree first to confirm nothing outside BaseDresser.cs ever referenced
+    // either texture.
 
     /// <summary>A tiny deterministic hash for per-pixel jitter -- NOT
     /// UnityEngine.Random/System.Random (this project's own determinism
@@ -220,6 +219,12 @@ public static class PbrTextureAtlas
         const int jointPx = 2;
         var stoneBase = new Color(0.42f, 0.41f, 0.4f);
         var joint = new Color(0.14f, 0.13f, 0.13f);
+        // 2026-08 (Mad Doctor weathering pass): a dark, cool moss/damp-
+        // staining tone -- distinct from CastIron's warm rust and
+        // OxidizedCopper's brighter verdigris, so a Doctor building's
+        // three main weathered surfaces (iron/copper/stone) don't all
+        // converge on the same green-brown wash.
+        var mossCol = new Color(0.18f, 0.22f, 0.16f);
         for (var y = 0; y < Size; y++)
         {
             var row = y / rowHeight;
@@ -245,6 +250,20 @@ public static class PbrTextureAtlas
                     // weathered tone, not a speckled surface
                     var jitter = 0.8f + Jitter(row, shifted / (Size / 2), 41) * 0.4f;
                     c = stoneBase * jitter;
+
+                    // 2026-08 (Mad Doctor weathering pass, "heaviest...
+                    // grime, staining... should collect around seams,
+                    // recesses, drainage areas"): a per-BLOCK (not
+                    // per-pixel) moss/grime patch field, biased to land
+                    // more often on blocks nearer the joint (`blockX`/
+                    // `inRow` small) than block centers -- real damp-
+                    // staining spreads outward FROM a seam, it doesn't
+                    // appear in the middle of an open face at random.
+                    var nearJoint = blockX < jointPx * 6 || inRow < jointPx * 6;
+                    var mossField = Jitter(row, shifted / (Size / 2), 45);
+                    var mossThreshold = nearJoint ? 0.45f : 0.8f;
+                    if (mossField > mossThreshold)
+                        c = Color.Lerp(c, mossCol, (mossField - mossThreshold) / (1f - mossThreshold) * 0.6f);
                 }
                 pixels[y * Size + x] = c;
             }
@@ -418,12 +437,28 @@ public static class PbrTextureAtlas
         return tex;
     }
 
+    /// <summary>Mad Doctor faction, EXCLUSIVELY, as of the 2026-08
+    /// per-faction weathering pass ("the heaviest weathering and aging of
+    /// all factions... deep, layered weathering... grime, staining,
+    /// corrosion, discoloration"). Used to be shared with Alien's own
+    /// gunmetal (`AlienGunmetal` -- see that method's own comment history)
+    /// -- that faction moved to a clean Chrome-based steel instead
+    /// (`AlienSilverSteel`/rewired `AlienGunmetal`), specifically so this
+    /// texture could be pushed harder without also making the "avoid
+    /// excessive grime" faction look dirty. Rust coverage/intensity both
+    /// raised from the original shared-with-Alien version, plus a NEW,
+    /// coarser soot/grime field layered on top (a separate noise field,
+    /// not blended into the rust one, so the two read as distinct
+    /// accumulation types the way Brass's own patina-vs-scratches split
+    /// already does) -- "layered weathering," not just "more of one
+    /// effect."</summary>
     private static Texture2D BuildCastIron()
     {
         var tex = NewTexture();
         var pixels = new Color32[Size * Size];
-        var baseCol = new Color(0.16f, 0.16f, 0.17f);
-        var rustCol = new Color(0.32f, 0.18f, 0.12f);
+        var baseCol = new Color(0.14f, 0.14f, 0.15f);
+        var rustCol = new Color(0.34f, 0.19f, 0.12f);
+        var grimeCol = new Color(0.07f, 0.07f, 0.07f);
         for (var y = 0; y < Size; y++)
         for (var x = 0; x < Size; x++)
         {
@@ -433,7 +468,10 @@ public static class PbrTextureAtlas
             var c = baseCol * tone;
 
             var rustField = Jitter(x / 7, y / 7, 22);
-            if (rustField > 0.75f) c = Color.Lerp(c, rustCol, (rustField - 0.75f) / 0.25f * 0.5f);
+            if (rustField > 0.55f) c = Color.Lerp(c, rustCol, (rustField - 0.55f) / 0.45f * 0.75f);
+
+            var grimeField = Jitter(x / 11, y / 11, 42);
+            if (grimeField > 0.6f) c = Color.Lerp(c, grimeCol, (grimeField - 0.6f) / 0.4f * 0.55f);
 
             pixels[y * Size + x] = c;
         }
@@ -442,12 +480,18 @@ public static class PbrTextureAtlas
         return tex;
     }
 
+    /// <summary>Mad Doctor faction. 2026-08 weathering pass: patina
+    /// coverage/intensity both raised, plus a second, darker "verdigris
+    /// streak" field layered on top of the original patina -- two
+    /// distinct green-oxide tones rather than one uniform wash, closer to
+    /// how real weathered copper actually accumulates unevenly.</summary>
     private static Texture2D BuildOxidizedCopper()
     {
         var tex = NewTexture();
         var pixels = new Color32[Size * Size];
         var baseCol = new Color(0.62f, 0.35f, 0.2f);
         var patinaCol = new Color(0.32f, 0.58f, 0.46f);
+        var deepPatinaCol = new Color(0.22f, 0.42f, 0.34f);
         for (var y = 0; y < Size; y++)
         for (var x = 0; x < Size; x++)
         {
@@ -457,7 +501,10 @@ public static class PbrTextureAtlas
             var c = baseCol * tone;
 
             var patinaField = Jitter(x / 8, y / 8, 25);
-            if (patinaField > 0.55f) c = Color.Lerp(c, patinaCol, (patinaField - 0.55f) / 0.45f * 0.75f);
+            if (patinaField > 0.4f) c = Color.Lerp(c, patinaCol, (patinaField - 0.4f) / 0.6f * 0.8f);
+
+            var streakField = Jitter(x / 13, y / 13, 43);
+            if (streakField > 0.72f) c = Color.Lerp(c, deepPatinaCol, (streakField - 0.72f) / 0.28f * 0.7f);
 
             pixels[y * Size + x] = c;
         }
@@ -466,11 +513,19 @@ public static class PbrTextureAtlas
         return tex;
     }
 
+    /// <summary>Human Army faction. 2026-08 weathering pass ("basic dirt,
+    /// dust, grime, and moderate wear rather than extreme deterioration"):
+    /// a SUBTLE dirt-speckle field layered onto the original clean
+    /// brushed banding -- deliberately much lower coverage/opacity than
+    /// Doctor's own rust/grime fields above (this is "practical and
+    /// military," not "old and neglected"), and no rust/patina at all
+    /// (Human hardware stays maintained, per the same brief).</summary>
     private static Texture2D BuildBrushedAluminum()
     {
         var tex = NewTexture();
         var pixels = new Color32[Size * Size];
         var baseCol = new Color(0.78f, 0.79f, 0.81f);
+        var dirtCol = new Color(0.52f, 0.5f, 0.46f);
         for (var y = 0; y < Size; y++)
         for (var x = 0; x < Size; x++)
         {
@@ -480,7 +535,12 @@ public static class PbrTextureAtlas
             // not the same chrome re-tinted.
             var band = 0.88f + 0.24f * Mathf.Abs(((y % 5) / 5f) - 0.5f) * 2f;
             var speck = Jitter(x, y, 26) > 0.97f ? 1.15f : 1f;
-            pixels[y * Size + x] = baseCol * band * speck;
+            var c = baseCol * band * speck;
+
+            var dirtField = Jitter(x / 10, y / 10, 44);
+            if (dirtField > 0.82f) c = Color.Lerp(c, dirtCol, (dirtField - 0.82f) / 0.18f * 0.3f);
+
+            pixels[y * Size + x] = c;
         }
         tex.SetPixels32(pixels);
         tex.Apply(true);
@@ -511,57 +571,4 @@ public static class PbrTextureAtlas
         return tex;
     }
 
-    private static Texture2D BuildAlienCrystal()
-    {
-        var tex = NewTexture();
-        var pixels = new Color32[Size * Size];
-        var baseCol = new Color(0.55f, 0.32f, 0.72f);
-        var veinCol = new Color(0.85f, 0.6f, 1f);
-        for (var y = 0; y < Size; y++)
-        for (var x = 0; x < Size; x++)
-        {
-            var coarse = Jitter(x / 9, y / 9, 28);
-            var fine = Jitter(x, y, 29);
-            var tone = 0.8f + (coarse * 0.6f + fine * 0.4f - 0.5f) * 0.35f;
-            var c = baseCol * tone;
-
-            // thin bright facet lines -- the same difference-of-two-
-            // shifted-noise-fields technique BrainTextureKit.VeinMask
-            // uses for blood vessels, reading here as crystal facet
-            // edges instead.
-            var a = Jitter(x / 3, y / 3, 30);
-            var b = Jitter(x / 3 + 5, y / 3 + 9, 31);
-            var vein = 1f - Mathf.Clamp01(Mathf.Abs(a - b) / 0.12f);
-            c = Color.Lerp(c, veinCol, vein * 0.6f);
-
-            pixels[y * Size + x] = c;
-        }
-        tex.SetPixels32(pixels);
-        tex.Apply(true);
-        return tex;
-    }
-
-    private static Texture2D BuildAlienMembrane()
-    {
-        var tex = NewTexture();
-        var pixels = new Color32[Size * Size];
-        var baseCol = new Color(0.42f, 0.22f, 0.5f);
-        var glowCol = new Color(0.72f, 0.4f, 0.85f);
-        for (var y = 0; y < Size; y++)
-        for (var x = 0; x < Size; x++)
-        {
-            var coarse = Jitter(x / 10, y / 10, 32);
-            var med = Jitter(x / 4, y / 4, 33);
-            var tone = 0.8f + (coarse * 0.6f + med * 0.4f - 0.5f) * 0.4f;
-            var c = baseCol * tone;
-
-            var glowField = Jitter(x / 6, y / 6, 34);
-            if (glowField > 0.68f) c = Color.Lerp(c, glowCol, (glowField - 0.68f) / 0.32f * 0.55f);
-
-            pixels[y * Size + x] = c;
-        }
-        tex.SetPixels32(pixels);
-        tex.Apply(true);
-        return tex;
-    }
 }
