@@ -16557,3 +16557,51 @@ button's exact click target, and the four-panel stack's real pixel
 gaps at HudStatus's various live states (0-4 status lines) are all
 unverified by eye and worth a first look the moment a real Editor is
 available.
+
+## 2026-08 follow-up: "when I hit train nothing happens" -- Train failures were silent, now diagnosed
+
+Creator report, immediately after the overlap fix above shipped: "when
+I hit train noting happens."
+
+**Root cause: not a broken command, a silent one with no feedback
+channel.** `TryTrain`/`BeginCollectorBattalion` (the previous entry)
+were written to the same "bad input is a no-op" discipline this
+project's real match-core commands use everywhere else -- but that
+discipline works there because something ELSE already told the player
+why beforehand (a grayed-out unaffordable build tile, a red ghost-
+cursor preview). The Train button had no such preview, so EVERY one of
+its three real failure modes -- no Complete Big Brain owned yet, every
+owned Big Brain already mid-battalion (single-slot-per-building, by
+design), or simply not enough Bones -- looked identical to the player:
+nothing happens. Given the Big Brain itself costs Brains+Parts (not
+Bones) to build, "I have a Big Brain now" says nothing about whether
+its owner also has the ~30+ Bones a default 3-unit battalion needs --
+the insufficient-Bones case is the most likely single explanation, but
+all three were equally silent, so the fix diagnoses all three rather
+than guessing which one hit.
+
+**Fix, `CollectorLabHud.cs` only (no match-core/RuntimeCityBuilder
+change needed -- the underlying training logic was already correct,
+confirmed by re-reading `BeginCollectorBattalion` line by line):**
+
+- `TryTrain` rewritten to check each real failure condition explicitly,
+  in order, and call a new `SetStatus(message)` describing exactly
+  which one hit -- "Need a Complete Big Brain building first.",
+  "Every Big Brain is already training a battalion.", "Not enough
+  Bones (need X, have Y)." -- before ever reaching the actual
+  `BeginCollectorBattalion` call. Success also sets a status
+  ("Training "Name" started.").
+- `_statusMessage`/`_statusMessageTimer` (4s, ticked in `Update`) show
+  the message in the panel itself, colored green for the success case
+  and amber/red for every failure case (`DrawShadowedLabel` gained an
+  optional `Color?` parameter for this -- previously always the same
+  cream color). `PanelHeight` accounts for the extra row only while a
+  message is actually showing, matching the same
+  "mirror DrawPanel's own conditionals exactly" discipline the classes/
+  orders sections already established.
+
+**Verified manually**: brace/paren balance (26/26, 135/135) confirmed
+after the edit; traced that `_builder.WalletBones` (a public property
+already read elsewhere, e.g. `TrySpendBones`) is the right live read
+for the affordability pre-check, not a stale/cached copy. Not seen in
+a real render -- same standing limitation as every entry in this log.

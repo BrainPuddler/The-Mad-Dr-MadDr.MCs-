@@ -64,6 +64,19 @@ public class CollectorLabHud : MonoBehaviour
     private CollectorTrim _trim = CollectorTrim.Standard;
     private int _batchSize = 3;
 
+    // 2026-08 follow-up (creator report: "when I hit train nothing
+    // happens"): every real reason a Train click can fail -- no Complete
+    // Big Brain yet, every owned one already mid-battalion, not enough
+    // Bones -- used to be a totally silent no-op (same "bad input is a
+    // no-op" discipline this project's real match-core COMMANDS use, but
+    // wrong for a direct UI button with no other feedback channel: a
+    // command's silence is fine because the ghost-cursor preview or a
+    // grayed-out tile already told the player why beforehand; this
+    // button had no such preview). `TryTrain` now diagnoses the exact
+    // reason and shows it here for a few seconds instead of nothing.
+    private string _statusMessage = "";
+    private float _statusMessageTimer;
+
     public void Init(RuntimeCityBuilder builder, int playerIndex)
     {
         _builder = builder;
@@ -72,6 +85,7 @@ public class CollectorLabHud : MonoBehaviour
 
     private void Update()
     {
+        if (_statusMessageTimer > 0f) _statusMessageTimer -= Time.deltaTime;
         if (_builder == null || _builder.SimBridge == null || !_builder.SimBridge.HasMatch) return;
         var keyboard = Keyboard.current;
         if (keyboard != null && keyboard.lKey.wasPressedThisFrame) _open = !_open;
@@ -119,8 +133,9 @@ public class CollectorLabHud : MonoBehaviour
         var orderCount = _builder.CollectorOrders.Count;
         var classRows = classCount > 0 ? 1 + classCount : 0;
         var orderRows = orderCount > 0 ? 1 + orderCount : 0;
-        var gaps = (classCount > 0 ? 4f : 0f) + (orderCount > 0 ? 4f : 0f);
-        return rowHeight * (fixedRows + classRows + orderRows) + gaps + 16f;
+        var statusRows = _statusMessageTimer > 0f ? 1 : 0;
+        var gaps = (classCount > 0 ? 4f : 0f) + (orderCount > 0 ? 4f : 0f) + (statusRows > 0 ? 4f : 0f);
+        return rowHeight * (fixedRows + classRows + orderRows + statusRows) + gaps + 16f;
     }
 
     private void DrawPanel(Rect panelRect)
@@ -183,6 +198,14 @@ public class CollectorLabHud : MonoBehaviour
             }
         }
 
+        if (_statusMessageTimer > 0f)
+        {
+            y += 4f;
+            var statusColor = _statusMessage.StartsWith("Training") ? new Color(0.55f, 0.9f, 0.55f, 1f) : new Color(0.95f, 0.55f, 0.4f, 1f);
+            DrawShadowedLabel(new Rect(x, y, innerWidth, rowHeight), _statusMessage, statusColor);
+            y += rowHeight;
+        }
+
         var orders = _builder.CollectorOrders;
         if (orders.Count > 0)
         {
@@ -199,35 +222,50 @@ public class CollectorLabHud : MonoBehaviour
         }
     }
 
-    /// <summary>Picks the player's own nearest-to-idle Complete Big
-    /// Brain building (preferring one with no order already running) and
-    /// starts a battalion there. Silent no-op on failure (no Big Brain
-    /// built yet, or unaffordable) -- same "bad input is a no-op"
-    /// discipline every other command surface in this project follows;
-    /// the cost/afford preview above is what tells the player why before
-    /// they click.</summary>
+    /// <summary>Picks the player's own idle (no order already running)
+    /// Complete Big Brain building and starts a battalion there --
+    /// diagnoses and reports the exact reason via <see cref="SetStatus"/>
+    /// when it can't (no Complete Big Brain owned at all, every owned
+    /// one already busy, or simply unaffordable), instead of the silent
+    /// no-op this used to be.</summary>
     private void TryTrain(CollectorClassDef def)
     {
         var bridge = _builder.SimBridge;
-        if (bridge == null || !bridge.HasMatch) return;
+        if (bridge == null || !bridge.HasMatch) { SetStatus("No live match."); return; }
 
         uint? candidate = null;
+        var hasCompleteBigBrain = false;
         for (var i = 0; i < bridge.BuildingCount; i++)
         {
             var b = bridge.BuildingAt(i);
             if (b.PlayerIndex != _playerIndex || b.Kind != BuildingKind.BigBrain || b.State != BuildingState.Complete) continue;
+            hasCompleteBigBrain = true;
             if (!_builder.CollectorOrders.ContainsKey(b.EntityId)) { candidate = b.EntityId; break; }
-            if (candidate == null) candidate = b.EntityId;
         }
-        if (candidate == null) return;
-        _builder.BeginCollectorBattalion(candidate.Value, def);
+
+        if (!hasCompleteBigBrain) { SetStatus("Need a Complete Big Brain building first."); return; }
+        if (candidate == null) { SetStatus("Every Big Brain is already training a battalion."); return; }
+
+        var clampedBatch = Mathf.Clamp(def.BatchSize, CollectorClassDef.MinBatchSize, CollectorClassDef.MaxBatchSize);
+        var cost = def.BonesCostPerUnit * clampedBatch;
+        if (_builder.WalletBones < cost) { SetStatus("Not enough Bones (need " + cost + ", have " + _builder.WalletBones + ")."); return; }
+
+        SetStatus(_builder.BeginCollectorBattalion(candidate.Value, def)
+            ? "Training \"" + def.Name + "\" started."
+            : "Couldn't start training.");
     }
 
-    private static void DrawShadowedLabel(Rect rect, string text)
+    private void SetStatus(string message)
+    {
+        _statusMessage = message;
+        _statusMessageTimer = 4f;
+    }
+
+    private static void DrawShadowedLabel(Rect rect, string text, Color? color = null)
     {
         GUI.color = new Color(0f, 0f, 0f, 0.8f);
         GUI.Label(new Rect(rect.x + 1f, rect.y + 1f, rect.width, rect.height), text);
-        GUI.color = new Color(0.92f, 0.88f, 0.78f, 1f);
+        GUI.color = color ?? new Color(0.92f, 0.88f, 0.78f, 1f);
         GUI.Label(rect, text);
         GUI.color = Color.white;
     }
