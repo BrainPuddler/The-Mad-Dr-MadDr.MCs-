@@ -42,6 +42,23 @@ using UnityEngine;
 /// selectable/move-orderable (<see cref="WaypointCommander"/>'s own new
 /// parallel `_selectedWorkers` path) even though attacks themselves
 /// aren't a separate player-issued order in this v0.1 pass.
+///
+/// 2026-08 follow-up (docs/12 "scavenging-site" entry, creator direction:
+/// "more workers assigned to a site must clear it faster... workers
+/// should contribute concurrently, not wait for one another... avoid
+/// fixed delays"): scavenging used to be one instant full-pile gulp the
+/// moment a single Worker arrived (<see
+/// cref="RuntimeCityBuilder.DrainBuildingScavenge"/> called with
+/// `int.MaxValue`) -- meaning a SECOND Worker reaching the same wreck
+/// found nothing left, so more Workers never cleared anything faster,
+/// they just raced for who got there first. Reworked into a persistent
+/// <see cref="ZombieState.Scavenging"/> state: each Worker independently
+/// requests its own small `ScavengeRatePerSecond`-sized slice every
+/// tick for as long as it stays in range. Concurrency needs no shared
+/// "how many Workers are here" bookkeeping at all -- Unity's single-
+/// threaded `Update()` order means N Workers' independent per-frame
+/// drain requests against the SAME `BuildingRuntimeState` simply SUM
+/// (superposition), so N Workers drain at N times the rate for free.
 /// </summary>
 public class Worker : MonoBehaviour
 {
@@ -53,11 +70,27 @@ public class Worker : MonoBehaviour
     private const float AggroRadius = 25f;   // short zombie leash -- Tank's own 150f is a patrolling combat unit's awareness, not cannon fodder's
     private const float ArriveThreshold = 1.5f;
 
-    private enum ZombieState { Idle, PlayerMove, SeekBuild, Staffing, SeekScavenge }
+    // 2026-08 (scavenging-site redesign): per-Worker continuous drain
+    // rate -- Small (100)/Medium (200)/Large (400)/Landmark (800) wrecks
+    // (BuildingStats.ScavengeValue) clear solo in ~10/20/40/80s, N
+    // Workers concurrently in ~1/N of that (pure superposition, see this
+    // class's own header). `ScavengeTickInterval` throttles how often
+    // the actual (relatively expensive, O(buildings-in-city)) <see
+    // cref="RuntimeCityBuilder.DrainBuildingScavenge"/> lookup runs --
+    // NOT a "wait": the Worker never stops or idles for it, it just
+    // batches ~7 real drain calls/second into one slightly larger
+    // request instead of 60/second into tiny ones, so a city with many
+    // simultaneously-scavenging Workers doesn't re-scan the whole
+    // destroyed-building list every single rendered frame per Worker.
+    private const float ScavengeRatePerSecond = 10f;
+    private const float ScavengeTickInterval = 0.15f;
+
+    private enum ZombieState { Idle, PlayerMove, SeekBuild, Staffing, SeekScavenge, Scavenging }
     private ZombieState _state = ZombieState.Idle;
     private Vector3 _moveTarget;
     private uint? _stationedBuildingId;
     private Building _scavengeTarget;
+    private float _scavengeTickTimer;
 
     private RuntimeCityBuilder _builder;
     private UnitCombat _combat;
@@ -105,6 +138,7 @@ public class Worker : MonoBehaviour
             case ZombieState.SeekBuild: TickSeekBuild(dt); break;
             case ZombieState.Staffing: TickStaffing(); break;
             case ZombieState.SeekScavenge: TickSeekScavenge(dt); break;
+            case ZombieState.Scavenging: TickScavenging(dt); break;
             default: TickIdle(); break;
         }
 
@@ -147,6 +181,7 @@ public class Worker : MonoBehaviour
         UnstaffIfStaffing();
         _stationedBuildingId = null;
         _scavengeTarget = null;
+        _scavengeTickTimer = 0f;
         _moveTarget = destination;
         _state = ZombieState.PlayerMove;
     }
@@ -246,18 +281,58 @@ public class Worker : MonoBehaviour
         flat.y = 0f;
         if (flat.magnitude <= ScavengeReach)
         {
-            // no onboard tank on a Worker (unlike a harvester Monster) --
-            // one gulp banks the whole remaining pile straight to the
-            // real wallet via the SAME delivery path harvesters use.
-            var drained = _builder.DrainBuildingScavenge(_scavengeTarget, int.MaxValue);
-            if (drained > 0) _builder.BankHarvestLoad(0f, 0f, 0f, drained);
-            _scavengeTarget = null;
-            _state = ZombieState.Idle;
+            _scavengeTickTimer = 0f;
+            _state = ZombieState.Scavenging;
             return;
         }
         var dir = flat.normalized;
         transform.position += dir * (MoveSpeed * dt);
         transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
+    }
+
+    /// <summary>In reach, actively clearing -- continuously requests its
+    /// own <see cref="ScavengeRatePerSecond"/> share every <see
+    /// cref="ScavengeTickInterval"/>, banking through the SAME onboard-
+    /// tank-free delivery path the old one-shot gulp used. Concurrent
+    /// Workers at the same site each run this independently; their
+    /// requests sum against the one shared `BuildingRuntimeState`, so
+    /// more Workers here genuinely clears faster with no coordination
+    /// needed (see this class's own header). Falls back to re-approaching
+    /// (<see cref="ZombieState.SeekScavenge"/>) if separation/collision
+    /// nudged this Worker out of reach, rather than draining from a
+    /// distance.</summary>
+    private void TickScavenging(float dt)
+    {
+        if (_scavengeTarget == null) { _state = ZombieState.Idle; return; }
+        var bp = NearestFootprintPoint(_scavengeTarget);
+        var flat = bp - transform.position;
+        flat.y = 0f;
+        if (flat.magnitude > ScavengeReach)
+        {
+            _state = ZombieState.SeekScavenge;
+            return;
+        }
+
+        _scavengeTickTimer += dt;
+        if (_scavengeTickTimer < ScavengeTickInterval) return;
+        var elapsed = _scavengeTickTimer;
+        _scavengeTickTimer = 0f;
+
+        // no onboard tank on a Worker (unlike a harvester Monster) --
+        // each small slice banks straight to the real wallet via the
+        // SAME delivery path harvesters use, instead of accumulating
+        // toward one final instant credit.
+        var request = Mathf.Max(1, Mathf.RoundToInt(ScavengeRatePerSecond * elapsed));
+        var drained = _builder.DrainBuildingScavenge(_scavengeTarget, request);
+        if (drained > 0) _builder.BankHarvestLoad(0f, 0f, 0f, drained);
+        if (drained <= 0)
+        {
+            // pile's empty -- either this tick or an earlier one (by
+            // this or another concurrently-scavenging Worker) finished
+            // it. Either way, nothing left here.
+            _scavengeTarget = null;
+            _state = ZombieState.Idle;
+        }
     }
 
     private Vector3 NearestFootprintPoint(Building building)

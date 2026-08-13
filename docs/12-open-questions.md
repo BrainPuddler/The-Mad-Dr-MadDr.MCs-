@@ -16958,3 +16958,119 @@ interaction with real gameplay timing (does a Worker reliably reach a
 freshly-placed building before the player notices construction stalled
 at 0%?) and the new parallel Worker-selection UX, both worth a first
 real look the moment either environment is available.
+
+## 2026-08 follow-up: scavenging-site clearing -- concurrent, rate-based, no more "whoever arrives first takes it all"
+
+Direct follow-up to the Zombie entry above, full spec: "Update the
+scavenging-site system to make clearing visibly progress toward a
+buildable site" -- more Workers must clear faster (concurrently, not
+waiting their turn), debris must visibly decrease throughout, a fully
+cleared site must have zero debris AND clearly read as buildable,
+architecture stays otherwise untouched, no artificial fixed delays,
+stays performant with many sites/Workers active at once.
+
+**Root cause: the Zombie entry's own `TickSeekScavenge` was a single
+instant full-pile gulp.** `DrainBuildingScavenge(_scavengeTarget,
+int.MaxValue)` on arrival -- meaning ONE Worker cleared the entire pile
+in a single frame, and a SECOND Worker reaching the same wreck any time
+after found nothing left. "More Workers clear faster" was actually
+FALSE before this entry: extra Workers didn't speed anything up, they
+just raced to see who got there first.
+
+**Inspected before touching anything (the task's own first instruction):**
+`packages/citygen-core/src/Destruction.cs`'s `BuildingRuntimeState` --
+turns out the data model was ALREADY fully ready for this. `
+WithScavengeConsumed(int amount)` is immutable-functional and already
+takes an arbitrary PARTIAL amount (clamped at 0, no-op if invalid) --
+nothing here was ever built assuming "all or nothing." `
+RuntimeCityBuilder.DrainBuildingScavenge`'s own chunk-visual math
+(`Mathf.CeilToInt(chunks.Count * (remaining / value))`, removing excess
+chunks down to that target) already recomputes correctly on every call
+regardless of how much was drained -- it was simply never CALLED
+repeatedly with small amounts before, so the proportional shrink never
+had a chance to animate; it always jumped from 100% to 0% in one call.
+**Net effect: zero changes needed in citygen-core.** The whole fix is
+about HOW OFTEN and HOW MUCH `DrainBuildingScavenge` gets called, not
+what it does.
+
+**The concurrency design, and why no new "who's assigned here" tracking
+was needed:** Unity's `Update()` loop is single-threaded -- N Workers
+independently calling `DrainBuildingScavenge` against the SAME
+`BuildingRuntimeState` in the same frame simply queue up and each
+correctly reads whatever the PREVIOUS call in that same frame already
+left. Their requests sum by plain superposition: 1 Worker requesting
+10 Parts/sec drains at 10/sec, 4 Workers each independently requesting
+10/sec drain the SAME pile at 40/sec, with no locking, no shared
+"assigned count" field, and no coordination between them at all. This
+is the whole reason "more Workers = faster, concurrently, no waiting"
+falls out for free from the existing single-threaded execution model
+once the drain itself is small-and-repeated instead of one giant grab.
+
+**Shipped, `Worker.cs` (the only behavioral rework):**
+
+- New `ZombieState.Scavenging`, distinct from the existing
+  `SeekScavenge` (walking toward the wreck): `TickSeekScavenge` now
+  transitions into `Scavenging` on arrival instead of draining
+  immediately. `TickScavenging` re-checks range every frame (falls back
+  to `SeekScavenge` if separation/collision nudged the Worker out --
+  never drains from a distance), accumulates real elapsed time, and
+  every `ScavengeTickInterval` (0.15s -- a PERFORMANCE THROTTLE on how
+  often the relatively expensive O(buildings-in-city) `
+  DrainBuildingScavenge` lookup runs, not a stall: the Worker is
+  continuously IN the Scavenging state the whole time, never idling)
+  requests `ScavengeRatePerSecond * elapsed` (10 Parts/sec/Worker, a
+  v0.1 placeholder same as every other invented number in this
+  codebase) and immediately banks whatever it actually got via the
+  existing `BankHarvestLoad` real-wallet path (same session's earlier
+  wallet-unification work). The instant a request returns 0 (pile
+  emptied by this Worker or another one concurrently working the same
+  site), transitions back to `Idle`.
+- `OrderMoveTo`/`UnstaffIfStaffing` interrupt paths already cleared `
+  _scavengeTarget` unconditionally (from the prior Zombie entry) -- now
+  also resets `_scavengeTickTimer`, tidiness rather than a correctness
+  fix (the timer is re-armed on next `Scavenging` entry regardless).
+
+**Shipped, `RuntimeCityBuilder.cs` (closing the "clearly communicate
+buildable" gap the redesign exposed):** investigating criterion 5
+("player can immediately recognize the site as buildable") surfaced a
+separate, real, pre-existing gap: `SpawnScorchDecal`'s dark ground
+patches (spawned once at destruction) were NEVER tracked or removed by
+anything -- a fully-scavenged lot with every rubble chunk gone still
+showed permanent burn marks, reading as "still damaged," not clean and
+buildable. New `_scorchDecalsByBuilding` dictionary (same lifecycle as
+the existing `_debrisChunksByBuilding`); `SpawnScorchDecal` now returns
+its spawned decals instead of void; `DrainBuildingScavenge`'s existing
+`IsFullyScavenged` branch (which already unblocks the hex for
+construction) now also destroys any remaining scorch decals and drops
+BOTH tracking dictionary entries for that building, so neither grows
+unbounded over a long match. `MonsterAgent`'s own unrelated instant-
+gulp scavenging (unchanged, still bounded by its own onboard-tank room,
+not this entry's business per the earlier Zombie entry's "auto-gathers
+debris only" scope) benefits from this cleanup too, automatically, on
+whichever call happens to finish a pile off -- same method, same branch,
+no special-casing needed for either caller.
+
+**What this deliberately does NOT do:** no change to `MonsterAgent`'s
+own scavenging (out of scope -- the request said "workers," and
+Monsters already have their own separate, tank-capacity-based economy
+distinct from site-clearing); no per-site "N Workers assigned" HUD
+readout (nothing asked for one); no artificial minimum clear time or
+cap on how many Workers can pile onto one site (an unbounded pile-on is
+allowed, matching "concurrent, not gated" literally).
+
+**Verified manually** (no dotnet/Unity Editor in this environment, same
+standing limitation as every entry in this log): brace/paren balance
+confirmed on both touched files (`RuntimeCityBuilder.cs`'s raw
+whole-file count hit the same recurring comment-punctuation false
+positive this log has hit repeatedly -- stripped comment lines and
+recounted, 1666/1666, balanced); confirmed `SpawnScorchDecal` has
+exactly one call site before changing its return type from void to
+`List<GameObject>` (a source-compatible change either way, since C#
+allows discarding a non-void return, but confirmed anyway); traced
+`WithScavengeConsumed`/`DrainBuildingScavenge`'s exact existing
+semantics by reading `Destruction.cs` directly before concluding no
+citygen-core changes were needed, rather than assuming. Not seen in a
+real render -- whether 10 Parts/sec/Worker actually FEELS right (too
+fast to notice progress, too slow to feel responsive) is exactly the
+kind of number this project's own v0.1-placeholder policy expects to
+get re-tuned once someone can actually watch it happen.

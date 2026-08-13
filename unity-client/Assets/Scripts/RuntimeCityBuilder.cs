@@ -203,6 +203,17 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     // either already destroyed or repurposed as squished dressing, not
     // the actual visible rubble silhouette).
     private readonly Dictionary<Building, List<GameObject>> _debrisChunksByBuilding = new Dictionary<Building, List<GameObject>>();
+    // 2026-08 (Zombie scavenging redesign, docs/12: "the site must
+    // clearly communicate that it is fully cleared and available for
+    // construction"): the permanent scorch-mark decals SpawnScorchDecal
+    // spawns at destruction time were never tracked anywhere and never
+    // removed -- a fully-scavenged lot with every rubble chunk gone
+    // still showed dark burn patches, reading as "still damaged," not
+    // "buildable." Tracked here so DrainBuildingScavenge can clear them
+    // the instant the pile is fully cleared, same lifecycle as
+    // `_debrisChunksByBuilding` (both entries removed together so
+    // neither dictionary grows unbounded over a long match).
+    private readonly Dictionary<Building, List<GameObject>> _scorchDecalsByBuilding = new Dictionary<Building, List<GameObject>>();
     // 2026-08 (creator direction: "spawn fire when under attack"):
     // idempotency guard for IgniteBuildingIfNeeded -- a building ignites
     // at most once, the moment an attacker is confirmed in range and
@@ -2522,7 +2533,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 var scatterHost = RubbleDresser.Scatter(this, building, rubbleMat, _buildingsHost);
                 for (var c = 0; c < scatterHost.childCount; c++) debrisChunks.Add(scatterHost.GetChild(c).gameObject);
                 DamageFx.DustBurst(WorldOf(building.Footprint[0]), _buildingsHost);
-                SpawnScorchDecal(building, _buildingsHost);
+                _scorchDecalsByBuilding[building] = SpawnScorchDecal(building, _buildingsHost);
             }
             _debrisChunksByBuilding[building] = debrisChunks;
             // 2026-08 (creator report: "I don't see people fleeing from
@@ -2797,7 +2808,23 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// hex the instant the pile is fully cleared. Silent no-op (returns
     /// 0) if the building isn't actually Destroyed, has nothing left to
     /// loot, or `amount` isn't positive -- same bad-input contract as
-    /// <see cref="ApplyBuildingDamage(Building, int, HexCoord)"/>.</summary>
+    /// <see cref="ApplyBuildingDamage(Building, int, HexCoord)"/>.
+    ///
+    /// 2026-08 (Zombie scavenging redesign, docs/12: "the site must
+    /// clearly communicate that it is fully cleared and available for
+    /// construction"): callers are now expected to invoke this
+    /// REPEATEDLY with small per-tick amounts (concurrent Workers each
+    /// requesting their own share every tick -- see <see
+    /// cref="Worker.TickScavenging"/>) rather than once with the whole
+    /// remaining pile, so the proportional chunk-shrink below now
+    /// actually animates instead of jumping straight from full to empty
+    /// in one call. On the tick that fully clears the pile, also
+    /// destroys any still-standing scorch decals (<see
+    /// cref="SpawnScorchDecal"/>) and drops both this building's tracking
+    /// dictionary entries -- previously only the rubble CHUNKS were ever
+    /// removed; the permanent scorch marks stayed forever, so a "fully
+    /// cleared" lot still visibly read as damaged/burnt rather than
+    /// buildable.</summary>
     public int DrainBuildingScavenge(Building building, int amount)
     {
         if (_simBridge == null || amount <= 0) return 0;
@@ -2824,7 +2851,17 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         }
 
         if (next.IsFullyScavenged)
+        {
             foreach (var hex in building.Footprint) _simBridge.UnblockProceduralBuildingHex(hex);
+
+            List<GameObject> decals;
+            if (_scorchDecalsByBuilding.TryGetValue(building, out decals))
+            {
+                foreach (var d in decals) if (d != null) Object.Destroy(d);
+                _scorchDecalsByBuilding.Remove(building);
+            }
+            _debrisChunksByBuilding.Remove(building);
+        }
 
         return actuallyConsumed;
     }
@@ -2983,13 +3020,14 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// wreckage itself, but left the ground it fell on unmarked. Terrain-
     /// following (GroundHeightAt), colliderless -- purely a scorched-earth
     /// read, no gameplay weight.</summary>
-    private void SpawnScorchDecal(Building building, Transform parent)
+    private List<GameObject> SpawnScorchDecal(Building building, Transform parent)
     {
         // several small, irregular-sized patches per hex, NOT one big
         // disc spanning the whole footprint -- a single hex-wide circle
         // read as a "radiating puddle" from the RTS camera rather than
         // a scorch accent under the (now-shattered) rubble
         var mat = NewMaterial(new Color(0.12f, 0.11f, 0.1f));
+        var decals = new List<GameObject>();
         foreach (var hex in building.Footprint)
         {
             var center = WorldOf(hex);
@@ -3005,8 +3043,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 var decal = SpawnPrim(PrimitiveType.Cylinder, pos,
                     new Vector3(size, 0.05f, size * (0.75f + (hi % 3) * 0.1f)), mat, parent);
                 decal.name = "Scorch";
+                decals.Add(decal.gameObject);
             }
         }
+        return decals;
     }
 
     // ---- population ---------------------------------------------------------------
