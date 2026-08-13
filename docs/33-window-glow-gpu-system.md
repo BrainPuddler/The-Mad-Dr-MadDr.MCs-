@@ -300,3 +300,41 @@ still wrong after this, the report should look qualitatively different
 now: no longer "dots instead of rectangles" (that specific symptom
 should be gone), so whatever's next is very likely a different bug,
 not a third attempt at this same one.
+
+## 9. §8 confirmed the rectangle now renders; the glass texture itself was wrong
+
+Creator confirmed §8's fix worked (rectangle visible now) and reported
+the follow-on issue precisely: "the glass glazing texture looks like a
+solid line not glass." Different bug, same file family (`PbrTextureAtlas.
+BuildGlass()`), unrelated to culling/z-fighting.
+
+**Root cause**: `BuildingWindowGrid.Build()` gives every individual
+window its own private, un-tiled `0..1` UV square (`uv0.Add(new
+Vector2(0,0))` etc. at build time) — one pane = exactly one full sample
+of the shared `_BaseMap` texture, never repeated. `PbrTextureAtlas.cs`'s
+own header already documents this project's texture convention as "no
+per-object UV tiling... every material gets one fixed tiling scale," so
+that part is correct and by design. But `BuildGlass()`'s diagonal-sheen
+band was written as `(x + y) % Size` thresholded near both `0` and
+`Size` — a pattern authored assuming wraparound TILING (so the band
+reads as one continuous streak once repeated across a surface, the way
+`BaseDresser` uses this same texture with `SetTextureScale(2,1)`).
+Sampled exactly once per window (no tiling), that condition is only
+true near TWO opposite corners of the square, not along one continuous
+line — a single small on-screen pane showed two disconnected corner
+slivers that blurred together under bilinear filtering into a flat
+diagonal gradient, not a glint. Literally "a solid line," not glass.
+
+**Fix**: rewrote the band math to be tiling-independent — `diag = x + y`
+with no modulo, thresholded by distance from one fixed band center, so
+a single un-tiled `0..1` sample shows exactly one soft diagonal sheen
+streak (smooth falloff via `Clamp01`, not a hard on/off edge, so it
+reads as a highlight rather than a stripe). Still procedurally
+generated per this file's own established convention (§0 of this file's
+header), not a real imported glass texture — this project has no
+texture-asset pipeline in this environment (`PbrTextureAtlas.cs`'s own
+top-of-file doc comment).
+
+**Not verified in a real render** (same standing caveat as §5/§7/§8) —
+reasoned from the pixel math and the texture's known sample footprint
+per window, not from seeing it rendered.

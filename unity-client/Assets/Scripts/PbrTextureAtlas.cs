@@ -387,14 +387,30 @@ public static class PbrTextureAtlas
         var tex = NewTexture();
         var pixels = new Color32[Size * Size];
         var baseCol = new Color(0.55f, 0.62f, 0.68f);
+        // 2026-08 (creator report on a rendered window pane: "looks like
+        // a solid line not glass"): BuildingWindowGrid gives every window
+        // its own private, un-tiled 0..1 UV square (one pane = one full
+        // sample of this texture, never repeated -- consistent with this
+        // file's own "no per-object UV tiling" doc comment above, so the
+        // fix belongs here, not in added tiling). The old `(x + y) % Size`
+        // band was written assuming wraparound tiling: within a single
+        // untiled 0..1 sample it only crosses threshold near TWO opposite
+        // corners of the square, not along one continuous line, so a
+        // single small on-screen pane showed two disconnected corner
+        // slivers that blurred into a flat diagonal gradient instead of a
+        // recognizable glint. `diag` here is unwrapped (no modulo) so one
+        // sample shows exactly one soft diagonal sheen streak, with a
+        // smooth falloff (not a hard on/off band) so it reads as a
+        // highlight rather than a stripe.
+        var diagMax = (Size - 1) * 2f;
+        var bandCenter = diagMax * 0.38f;
+        const float bandWidth = 9f;
         for (var y = 0; y < Size; y++)
         for (var x = 0; x < Size; x++)
         {
-            // a diagonal sheen band standing in for a specular
-            // highlight -- no real transparency (Opaque material, this
-            // project has no transparent-material convention yet)
-            var diag = (x + y) % Size;
-            var sheen = diag > Size - 10 || diag < 10 ? 1.6f : 1f;
+            var diag = x + y;
+            var dist = Mathf.Abs(diag - bandCenter);
+            var sheen = 1f + 0.8f * Mathf.Clamp01(1f - dist / bandWidth);
             pixels[y * Size + x] = baseCol * sheen;
         }
         tex.SetPixels32(pixels);
