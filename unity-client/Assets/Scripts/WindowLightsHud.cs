@@ -21,6 +21,14 @@ using UnityEngine;
 /// should always be reachable.</summary>
 public class WindowLightsHud : MonoBehaviour
 {
+    /// <summary>This panel's own bottom edge, published for the same
+    /// "don't hardcode an offset that might overlap" reason as <see
+    /// cref="HudStatus.ContentBottom"/> -- <see cref="BuildMenuHud"/>
+    /// stacks below this instead of jumping straight from HudStatus,
+    /// since this panel (unconditional, always reachable) always sits
+    /// between the two.</summary>
+    public static float Bottom { get; private set; }
+
     private void OnGUI()
     {
         var prevMatrix = UiScale.Begin();
@@ -30,6 +38,7 @@ public class WindowLightsHud : MonoBehaviour
         var label = (on ? "🏠 Window lights: ON" : "🏠 Window lights: OFF");
         var rect = new Rect(12f, y, 200f, 24f);
         if (GUI.Button(rect, label)) EmissiveAnimator.WindowScheduleEnabled = !on;
+        Bottom = rect.yMax;
 
         UiScale.End(prevMatrix);
     }

@@ -16475,3 +16475,85 @@ never itself committed to the tree, per that entry's own description);
 `SimBuilding`'s `EntityId`/`PlayerIndex`/`Kind`/`Hex`/`State` field
 names confirmed against `packages/match-core/src/SimBuilding.cs`
 directly rather than assumed from memory.
+
+## 2026-08 follow-up: Collector Lab hidden under HudStatus's text -- chained top-left anchoring, help text moved behind an (i) popup
+
+Creator report, immediately after the entry above shipped: "collector
+lab is hidden under a lot of text. give me an (i) button to display
+that text on the screen as a pop window with a close button to hide it.
+Make sure all the buttons are never over written or hidden by other
+buttons or text."
+
+**Root cause, found by reading, not guessing:** `CollectorLabHud`'s tab
+was anchored at a flat `marginPixels = 12f` from the top -- it never
+read `HudStatus.ContentBottom`, the exact field `HudStatus.cs`'s own
+header says exists "so other top-left panels can read it and stay
+clear without duplicating HudStatus's own line-counting logic," and
+which a PRIOR creator report ("instructions and icons in the top left
+... overlapping") had already forced `BuildMenuHud`/`WindowLightsHud`
+to adopt. The new panel simply didn't follow the precedent its own
+neighbors already established -- landing its tab inside HudStatus's
+5-line always-on control-reference block (left-click/right-click/A-P/
+camera/G-key instructions), which never changes and only ever grows
+the overlap risk for whatever's anchored near it.
+
+**A second, latent bug found while fixing the first:** `BuildMenuHud`
+read `HudStatus.ContentBottom` directly, but `WindowLightsHud` ALSO
+reads `HudStatus.ContentBottom` directly and docks immediately below
+it -- two panels independently anchoring off the SAME field, one on
+top of the other, with no coordination between them. At HudStatus's
+shortest state (no selection, no traffic: `ContentBottom` = 128px) this
+put `WindowLightsHud` at y=136..160 and `BuildMenuHud` at y=140 --
+already overlapping, before Collector Lab ever entered the picture.
+Not something the creator reported this round, but exactly the kind of
+thing "make sure all the buttons are never overwritten or hidden"
+asks for, so fixed in the same pass rather than left for a third report.
+
+**Fix -- a real chained-anchor stack, not more independent guesses:**
+
+1. `HudStatus.cs`: the 5 static control-reference lines (never depend
+   on match state) moved out of the always-on block entirely, behind a
+   new small "(i)" button drawn at the end of the live-status lines
+   (wallet/traffic/selection only now). Clicking it toggles a popup
+   drawn by `DrawHelpPopup` -- **centered on screen** (`(UiScale.Width -
+   width) * 0.5f`, y=60), deliberately NOT corner-stacked like every
+   other panel, so it can never compete with a button row for space
+   even while open; a small "X" button in its top-right corner closes
+   it. New `HudStatus.PointerOver` (true over the (i) button or, while
+   open, the popup) added to `WaypointCommander`'s existing
+   `PointerOver` aggregation, so a click on either doesn't also land as
+   a world-space order underneath. Net effect: HudStatus's own default
+   footprint (and therefore `ContentBottom`) shrinks from up to 9 lines
+   to at most 4 (wallet + traffic + up to 3 selection lines) plus the
+   one button row -- the actual fix for "hidden under a lot of text,"
+   since everything downstream chains off this value.
+2. `WindowLightsHud.cs`: unchanged position (`HudStatus.ContentBottom +
+   8f`, the one panel that's genuinely supposed to sit right there),
+   but now publishes its own `Bottom` (`rect.yMax`) the same way
+   `HudStatus.ContentBottom` is published.
+3. `BuildMenuHud.cs`: `topY` now reads `WindowLightsHud.Bottom +
+   HudStatusGap` instead of `HudStatus.ContentBottom + HudStatusGap`
+   directly -- this is the fix for the latent overlap above, since
+   WindowLightsHud unconditionally sits between the two (docs/12's
+   "always reachable" note on that panel already established this).
+   Publishes its own `Bottom` in turn.
+4. `CollectorLabHud.cs`: tab now reads `BuildMenuHud.Bottom +
+   dockGapPixels` (falling back to `WindowLightsHud.Bottom` for the one
+   frame before `BuildMenuHud` has rendered yet, since `Bottom` starts
+   at the float default 0). Four panels now share the top-left corner
+   -- HudStatus, WindowLightsHud, BuildMenuHud, Collector Lab -- each
+   genuinely anchored below the real bottom edge of the one above it,
+   not a fixed pixel guess.
+
+**Verified manually** (no Unity Editor/`dotnet` in this environment,
+same standing limitation as every entry in this log): brace/paren
+balance confirmed across all five touched files; every new
+`PointerOver`/`Bottom` static field's declaration and every read site
+traced by grep to confirm they agree on name and type; `UiScale.Width`
+confirmed as an existing static float (already used the same way in
+`BuildingNavHud.cs`) before relying on it to center the help popup.
+Not seen in a real render -- the centered-popup layout, the (i)
+button's exact click target, and the four-panel stack's real pixel
+gaps at HudStatus's various live states (0-4 status lines) are all
+unverified by eye and worth a first look the moment a real Editor is
+available.

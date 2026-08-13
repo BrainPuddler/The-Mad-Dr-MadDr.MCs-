@@ -48,11 +48,16 @@ using UnityEngine;
 /// no traffic yet) -- HudStatus's own line count grows with traffic
 /// present and with a single unit selected (3 lines instead of 1), and
 /// at its tallest its text runs well past 140, straight into this
-/// panel's title bar. Now reads <see cref="HudStatus.ContentBottom"/>
-/// (HudStatus's own actual bottom edge that frame, in the same
-/// reference-space pixels) and only falls back to `topLeftPixels.y` as
-/// a floor, so it tracks HudStatus's real height instead of guessing at
-/// its tallest case up front.
+/// panel's title bar. Reads <see cref="WindowLightsHud.Bottom"/> (which
+/// itself chains off <see cref="HudStatus.ContentBottom"/> -- 2026-08
+/// follow-up, creator report "collector lab is hidden under a lot of
+/// text": WindowLightsHud always sits between HudStatus and this panel,
+/// so chaining off ITS bottom instead of HudStatus's directly is what
+/// actually stays clear of both, not just the one this panel used to
+/// check) and only falls back to `topLeftPixels.y` as a floor, so it
+/// tracks the real stack height instead of guessing at any one panel's
+/// tallest case up front. Publishes its own <see cref="Bottom"/> in
+/// turn, for <see cref="CollectorLabHud"/> to chain off next.
 ///
 /// A no-op (renders nothing) until <see cref="Init"/> is called with a
 /// live <see cref="SimBridge"/> that <see cref="SimBridge.HasMatch"/> --
@@ -88,6 +93,16 @@ public class BuildMenuHud : MonoBehaviour
     /// own <c>PointerOver</c> flag exists for, so a menu-tile click doesn't
     /// ALSO land as a world-space build-placement click underneath it.</summary>
     public bool PointerOverPanel { get; private set; }
+
+    /// <summary>This panel's own bottom edge, published for <see
+    /// cref="CollectorLabHud"/> to stack below -- same chained-anchor
+    /// idiom as <see cref="HudStatus.ContentBottom"/>/<see
+    /// cref="WindowLightsHud.Bottom"/>, so the top-left column never
+    /// relies on two panels independently guessing the same offset.
+    /// Stale (last frame's value) whenever this panel didn't render --
+    /// harmless, since every consumer shares this panel's own
+    /// <c>bridge.HasMatch</c> gate.</summary>
+    public static float Bottom { get; private set; }
 
     public void Init(SimBridge simBridge, int playerIndex)
     {
@@ -207,11 +222,12 @@ public class BuildMenuHud : MonoBehaviour
         var infoHeight = WorstCaseInfoHeight(gridWidth, faction);
         var panelHeight = Padding * 2f + TitleHeight + gridHeight + infoHeight;
 
-        var topY = Mathf.Max(topLeftPixels.y, HudStatus.ContentBottom + HudStatusGap);
+        var topY = Mathf.Max(topLeftPixels.y, WindowLightsHud.Bottom + HudStatusGap);
         var rect = new Rect(topLeftPixels.x, topY, panelWidth, panelHeight);
         var e = Event.current;
         var mousePos = e != null ? e.mousePosition : new Vector2(-1f, -1f);
         PointerOverPanel = rect.Contains(mousePos);
+        Bottom = rect.yMax;
 
         GUI.color = new Color(0.02f, 0.02f, 0.02f, 0.65f);
         GUI.DrawTexture(rect, Texture2D.whiteTexture);

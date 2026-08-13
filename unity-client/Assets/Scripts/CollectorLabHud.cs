@@ -27,17 +27,29 @@ using UnityEngine.InputSystem;
 /// Mad Doctor only (Collector is Mad-Doctor apparatus, docs/17) -- a
 /// no-op for any other local faction, or before a match exists.
 /// Collapsed to a small corner tab by default, toggled by the 'L' key
-/// (mnemonic: Lab) or a click on the tab itself, top-left corner (every
-/// other docked panel in this project claims the bottom edge around the
-/// minimap or the top-right resource wallet, so top-left is clear).
+/// (mnemonic: Lab) or a click on the tab itself.
+///
+/// 2026-08 follow-up (creator report: "collector lab is hidden under a
+/// lot of text... make sure all the buttons are never overwritten or
+/// hidden"): used to anchor its tab at a fixed `marginPixels` from the
+/// top -- landing it squarely inside HudStatus's always-on text block,
+/// which is exactly the bug this report caught. Now the last link in
+/// the same chained-anchor idiom <see cref="HudStatus.ContentBottom"/>
+/// started: HudStatus publishes its own bottom, <see
+/// cref="WindowLightsHud"/> stacks below THAT and publishes its own,
+/// <see cref="BuildMenuHud"/> stacks below that one and publishes its
+/// own <see cref="BuildMenuHud.Bottom"/> -- this panel stacks below
+/// THAT. Four panels sharing the same corner, each genuinely below the
+/// last, none guessing a fixed pixel offset.
 /// </summary>
 public class CollectorLabHud : MonoBehaviour
 {
     private RuntimeCityBuilder _builder;
     private int _playerIndex;
 
-    [Header("Placement (top-left corner)")]
-    public float marginPixels = 12f;
+    [Header("Placement (top-left corner, stacked below BuildMenuHud)")]
+    public float leftMarginPixels = 12f;
+    public float dockGapPixels = 8f;
     public float tabWidth = 150f;
     public float tabHeight = 24f;
     public float panelWidth = 320f;
@@ -76,7 +88,8 @@ public class CollectorLabHud : MonoBehaviour
         if (!IsMadDoctor()) { PointerOver = false; return; }
         var prevMatrix = UiScale.Begin();
 
-        var tabRect = new Rect(marginPixels, marginPixels, tabWidth, tabHeight);
+        var tabY = BuildMenuHud.Bottom > 0f ? BuildMenuHud.Bottom + dockGapPixels : WindowLightsHud.Bottom + dockGapPixels;
+        var tabRect = new Rect(leftMarginPixels, tabY, tabWidth, tabHeight);
         var e = Event.current;
         PointerOver = e != null && tabRect.Contains(e.mousePosition);
 
@@ -87,7 +100,7 @@ public class CollectorLabHud : MonoBehaviour
 
         if (_open)
         {
-            var panelRect = new Rect(marginPixels, tabRect.yMax + 4f, panelWidth, PanelHeight());
+            var panelRect = new Rect(leftMarginPixels, tabRect.yMax + 4f, panelWidth, PanelHeight());
             if (e != null && panelRect.Contains(e.mousePosition)) PointerOver = true;
             DrawPanel(panelRect);
         }
