@@ -39,18 +39,23 @@ using UnityEngine.InputSystem;
 /// "Spawning more based on the amount of resources required": v0.1
 /// placeholder economy (CLAUDE.md's standing policy for every invented
 /// cost number in this project) -- a flat Blood cost per clone, spent
-/// from <see cref="RuntimeCityBuilder.WalletBlood"/> (the SAME wallet
-/// eating citizens already fills, so cloning literally spends the Blood
-/// harvested from citizens, a real thematic fit rather than an arbitrary
-/// choice), keeps spawning clones for as long as the wallet affords the
-/// next one, capped at <see cref="maxClonesPerDrop"/> so a very full
-/// wallet can't spawn an unbounded pile in one drop. Not routed through
-/// match-core: the Mad Doctor has no fixed `RosterUnitKind` roster at all
-/// (bred creatures only, per `FactionRoster.cs`'s own header) -- cloning
-/// an already-live genome doesn't fit that model, and a full new
-/// match-core `CommandKind` for it is real, separate, not-yet-attempted
-/// scope, flagged here rather than silently built as a parallel spend
-/// path match-core's own wallet never sees.
+/// via <see cref="RuntimeCityBuilder.TrySpendBlood"/> against the REAL
+/// match-core wallet (2026-08 fix, docs/12: this and <see
+/// cref="RuntimeCityBuilder.OnCitizenEaten"/> both used to read/write a
+/// disconnected client-side counter -- now both go through the same
+/// real wallet, so cloning genuinely spends the Blood harvested from
+/// citizens, a real thematic fit rather than an arbitrary choice), keeps
+/// spawning clones for as long as the wallet affords the next one,
+/// capped at <see cref="maxClonesPerDrop"/> so a very full wallet can't
+/// spawn an unbounded pile in one drop. The CLONE action itself is still
+/// not routed through match-core: the Mad Doctor has no fixed
+/// `RosterUnitKind` roster at all (bred creatures only, per
+/// `FactionRoster.cs`'s own header) -- cloning an already-live genome
+/// doesn't fit that model, and a full new match-core `CommandKind` for
+/// spawning a duplicate unit is real, separate, not-yet-attempted scope.
+/// Only the resource DEBIT needed a real command
+/// (`CommandKind.SpendResource`, new) -- that part is generic and
+/// doesn't require a roster kind at all.
 ///
 /// IMGUI-free: this component draws nothing itself (the claw is a REAL OS
 /// cursor, not a screen-space icon) -- only Cursor.SetCursor and Update()

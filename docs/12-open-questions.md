@@ -16683,3 +16683,116 @@ exact command-dispatch switch; re-running them (impossible in this
 environment) is the natural first check the moment a real .NET SDK is
 available, before trusting `SpendResource` behaves correctly under
 anything but manual read-through.
+
+## 2026-08 follow-up: retiring the shadow wallet entirely -- eating citizens, special-attack casts, and creature-cloning all spend/grant the real wallet now
+
+Direct follow-up to the entry above: "Let's tackle that eating citizens
+issue, what do you need to know." Two clarifying questions asked via
+`AskUserQuestion` before implementing (both answered with the
+recommended option):
+
+1. **Scope** -- fix only `OnCitizenEaten`, or also retire the other two
+   spends built on the same disconnected shadow wallet (special-attack
+   casts, `GrabCursor`'s creature-cloning)? Answered: **everything.**
+2. **HudStatus's top-left wallet line**, once it reads the real wallet
+   -- mirror `ResourceHud`'s numbers (some on-screen duplication, zero
+   risk of disagreeing again), or drop to just "eaten citizens: N"?
+   Answered: **mirror the real wallet.**
+
+**The full shape of the problem, once actually mapped:** THREE places
+mutated `RuntimeCityBuilder.WalletBlood`/`WalletBones`/`WalletBrains`
+(the disconnected shadow counter from the entry above) -- `OnCitizenEaten`
+(+2/+1/+1, a grant), `SpendWalletForCast` (special-attack casts, an
+unblockable "floors at 0" sink), and `TrySpendBlood` (`GrabCursor`'s
+creature-cloning, a GATED real-purchase spend). `BankHarvestLoad`
+(harvester delivery) had ALREADY been through this exact bug once
+before -- its own 2026-07 doc comment records a prior creator report
+("the list under the clock, never seems to change") that got it
+crediting the real wallet via `QueueBankHarvestLoadCommand`, but it
+kept a parallel shadow-`WalletBlood` increment "purely because HudStatus
+still reads it as a separate legacy debug line" -- i.e. this was already
+flagged as vestigial, just never finished being torn out.
+
+**A real correctness risk found and designed around, not just papered
+over:** naively swapping every shadow read/write for a live
+`SimBridge.PlayerWallet` read + `QueueSpendResourceCommand` call would
+have introduced a NEW bug. Commands are queued and only actually land
+on the wallet the following sim tick (`SimBridge.Pump`'s own
+accumulator, `_pending.Clear()` right after `_match.Tick()`) -- multiple
+`Update()` frames elapse per tick. `GrabCursor.TickProduction` calls
+`TrySpendBlood` on EVERY frame while its queue is non-empty and
+unaffordable ("try again next frame," its own doc comment says so
+explicitly) -- a naive "read the real wallet, if enough queue a spend"
+check would see the SAME pre-spend balance on several consecutive
+frames before the first queued spend actually lands, and queue several
+spends for a single successful clone. Fixed with a small local
+reservation ledger (`_pendingSpend`, keyed by `ResourceKind`) that
+increments the instant a spend is queued and nets out of every
+`EffectiveWallet` read for the rest of that sim tick, clearing once
+`SimBridge.CurrentFrame` (already a public accessor) actually advances
+-- the queued command has landed for real by then, so the reservation's
+job is done. This is the "optimistic local prediction, corrected once
+the authoritative tick lands" pattern, applied narrowly rather than
+resurrecting a second full shadow wallet.
+
+**Shipped, `RuntimeCityBuilder.cs`:**
+
+- `EffectiveWallet(ResourceKind)`: the real wallet, net of this tick's
+  pending reservations. Public -- `CollectorLabHud`'s own affordability
+  check now reads this instead of a raw `PlayerWallet` call, so a
+  double-click on Train can't pass two affordability checks against the
+  same stale balance either.
+- `TrySpendReal(ResourceKind, amount)`: the one real gated-spend
+  primitive everything else now routes through -- reserves, queues
+  `SpendResource`, returns false/unchanged if unaffordable.
+- `SpendRealClamped(ResourceKind, amount)`: the unblockable-sink twin
+  (spends `Min(amount, EffectiveWallet)`, never refuses) --
+  `SpendWalletForCast(blood, bones)` is now a two-line caller of this,
+  kept as its own named method since every cast site already spends
+  both resources together.
+- `GrantReal(ResourceKind, amount)`: thin wrapper over the existing
+  `QueueBankHarvestLoadCommand` -- `BankHarvestLoad` (harvester
+  delivery) now calls this for all four lanes (Blood/Bones/Brains/Parts)
+  instead of hand-rolling the same four `if` blocks, and its own dead
+  shadow-`WalletBlood` increment (the "legacy debug line" the 2026-07
+  comment already flagged) is gone.
+- `TrySpendBlood(amount)` kept as a one-line named wrapper over
+  `TrySpendReal(ResourceKind.Blood, amount)` specifically so
+  `GrabCursor`'s existing call site (`if (!builder.TrySpendBlood(...))
+  return;`) needed zero changes -- only its doc comment (and
+  `GrabCursor.cs`'s own header, which claimed cloning spent "the SAME
+  wallet eating citizens already fills" -- true in fiction, false in
+  code until this entry) needed updating.
+- `OnCitizenEaten`: the three `WalletX += n` lines replaced with three
+  `GrantReal` calls -- the actual bug fix this whole sub-thread was
+  about.
+- `WalletBlood`/`WalletBones`/`WalletBrains` properties deleted
+  entirely -- grepped the whole `unity-client` tree afterward to
+  confirm zero remaining code references (two hits, both inside doc
+  comments describing the OLD behavior for historical context, left in
+  place deliberately).
+
+**`HudStatus.cs`:** the top-left wallet line now reads `SimBridge.
+PlayerWallet(0, kind)` for Blood/Bones/Brains directly (gained a `using
+MadDr.MatchCore;`), guarded the same "no live match -> show 0" way
+`ResourceHud` already guards itself. Deliberately duplicates
+`ResourceHud`'s own numbers now (the creator's own "mirror the real
+wallet" choice) -- two panels, same source, can never disagree again.
+
+**Verified manually** (no dotnet/.NET SDK or Unity Editor in this
+environment, same standing limitation as every match-core-touching
+entry in this log): brace/paren balance confirmed across all four
+touched files (`RuntimeCityBuilder.cs`'s raw whole-file paren count
+showed the same recurring comment-punctuation false-positive this log
+has hit repeatedly -- stripped `///`/`//` lines and recounted,
+1639/1639, balanced); grepped for every remaining `WalletBlood`/
+`WalletBones`/`WalletBrains` reference after deleting the properties
+(two hits, both doc-comment-only, confirmed harmless); traced
+`GrabCursor.TickProduction`'s exact call frequency (gated by
+`_productionTimer`, but retries every single frame once past threshold
+and unaffordable) by reading the method directly rather than assuming
+it was a one-shot check, since that's precisely the call pattern the
+reservation-ledger fix exists for. Not seen in a real render or a real
+`dotnet test` run -- worth confirming the reservation ledger's frame-
+boundary logic against `SimBridge.CurrentFrame`'s real tick cadence the
+moment either environment is available.

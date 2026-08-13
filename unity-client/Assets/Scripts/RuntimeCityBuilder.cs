@@ -304,10 +304,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
     public CityModel City { get { return _city; } }
     public int CityVersion { get { return _cityVersion; } }
-    public int WalletBlood { get; private set; }
-    public int WalletBones { get; private set; }
-    public int WalletBrains { get; private set; }
     public int CitizensEaten { get; private set; }
+
+    // 2026-08 (docs/12 "eating citizens" fix): reservation tracking for
+    // TrySpendReal -- see that method's own header for why this exists.
+    private readonly Dictionary<ResourceKind, int> _pendingSpend = new Dictionary<ResourceKind, int>();
+    private int _pendingSpendFrame = -1;
 
     /// <summary>Every fighting unit -- monsters and tanks. The health-bar
     /// HUD, enemy targeting, and no-overlap separation all read this.</summary>
@@ -3290,14 +3292,8 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// <summary>A harvester unloads its onboard tank (docs/22). Called
     /// when a laden harvester idles near its home/Vat or (per the newer
     /// Factory-delivery loop) its own Factory. Credits match-core's real
-    /// per-player wallet via a queued <see
-    /// cref="SimBridge.QueueBankHarvestLoadCommand"/> per resource lane
-    /// -- ResourceHud reads THAT wallet, not this class's own <see
-    /// cref="WalletBlood"/>, so a fix here was required for a delivered
-    /// load to ever show up on screen (2026-07, creator report: "the
-    /// list under the clock, never seems to change" -- traced to this
-    /// call incrementing only the legacy field below, never
-    /// match-core's).
+    /// per-player wallet via <see cref="GrantReal"/> per resource lane --
+    /// ResourceHud reads that same wallet.
     ///
     /// 2026-08 (creator direction: "humans have all the resources, make
     /// sure those are properly being harvested... all harvesters can
@@ -3311,10 +3307,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// with no offsetting benefit, not the intended "every harvester
     /// collects everything, just at different rates" design. Now takes
     /// each carried lane separately and banks whichever are actually
-    /// nonzero. `WalletBlood` itself is left tracking Blood only, purely
-    /// because <see cref="HudStatus"/> still reads it as a separate
-    /// legacy debug line -- not because anything downstream of THIS
-    /// method needs it anymore.
+    /// nonzero.
     ///
     /// 2026-08 follow-up (creator direction: "check that monsters can
     /// harvest metal and other building salvage" -&gt; "carry it home"):
@@ -3333,31 +3326,105 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var bankedParts = Mathf.RoundToInt(parts);
         if (bankedBlood <= 0 && bankedBones <= 0 && bankedBrains <= 0 && bankedParts <= 0) return;
 
-        if (bankedBlood > 0) WalletBlood += bankedBlood;
-        var haveMatch = _simBridge != null && _simBridge.HasMatch;
-        if (bankedBlood > 0 && haveMatch) _simBridge.QueueBankHarvestLoadCommand(0, bankedBlood, ResourceKind.Blood);
-        if (bankedBones > 0 && haveMatch) _simBridge.QueueBankHarvestLoadCommand(0, bankedBones, ResourceKind.Bones);
-        if (bankedBrains > 0 && haveMatch) _simBridge.QueueBankHarvestLoadCommand(0, bankedBrains, ResourceKind.Brains);
-        if (bankedParts > 0 && haveMatch) _simBridge.QueueBankHarvestLoadCommand(0, bankedParts, ResourceKind.Parts);
+        GrantReal(ResourceKind.Blood, bankedBlood);
+        GrantReal(ResourceKind.Bones, bankedBones);
+        GrantReal(ResourceKind.Brains, bankedBrains);
+        GrantReal(ResourceKind.Parts, bankedParts);
         Debug.Log("Harvester banked " + bankedBlood + " blood, " + bankedBones + " bones, " + bankedBrains
-            + " brains, " + bankedParts + " parts. Wallet: " + WalletBlood + " blood.");
+            + " brains, " + bankedParts + " parts.");
     }
 
-    /// <summary>docs/26 Phase 10 (Special Attacks System): draws down the
-    /// wallet for a special-attack cast. Clamped at 0, NEVER goes
-    /// negative and NEVER blocks the cast that called it -- this is a
-    /// pure economy sink, not a gate. Matches docs/22 §1's "Floors, not
-    /// stalls" design contract to the letter: "A depleted resource
-    /// degrades a unit; it never disables, strands, or kills it... a
-    /// player who ignores this entire system must still have a
-    /// functional army." An empty wallet reads as "no more free lunch,"
-    /// never "out of bullets, can't fire" -- so casters can't be
-    /// deliberately economy-starved into uselessness the way a hard
-    /// ammo gate would allow.</summary>
+    // ---- real wallet spend/grant helpers (2026-08, docs/12 "eating
+    // citizens" fix) ---------------------------------------------------
+    //
+    // Every one of these used to mutate a client-side shadow int
+    // (WalletBlood/Bones/Brains) synchronously -- correct in isolation,
+    // but completely disconnected from match-core's real PlayerState
+    // wallet (the one ResourceHud/BuildMenuHud/every real purchase
+    // actually reads/writes), which is why eating citizens could show 30
+    // in one place and 6 in another (docs/12's dated entry has the full
+    // story: "I have 30 bones in inventory screen but Train say I have
+    // 6"). All spends/grants below go through the real wallet instead.
+    //
+    // Spending is a QUEUED command (SimBridge.QueueSpendResourceCommand)
+    // that only actually lands on the NEXT sim tick -- so a naive "read
+    // PlayerWallet, if enough queue a spend" check, called every
+    // Update() frame (multiple frames elapse per tick), would double- or
+    // triple-spend the same balance before the first spend actually
+    // lands (GrabCursor's clone-production loop calls TrySpendBlood
+    // exactly this way, once per frame, until it succeeds).
+    // `_pendingSpend` reserves the amount locally the instant it's
+    // queued and nets it out of every later same-tick read via <see
+    // cref="EffectiveWallet"/>, then clears once <see
+    // cref="SimBridge.CurrentFrame"/> actually advances (the queued
+    // command has landed for real by then).
+
+    /// <summary>The real wallet amount still available to spend THIS
+    /// tick, net of anything already reserved by an earlier <see
+    /// cref="TrySpendReal"/> call this same tick that hasn't landed in
+    /// match-core yet. Always safe to call even with no live match
+    /// (returns 0).</summary>
+    public int EffectiveWallet(ResourceKind kind)
+    {
+        if (_simBridge == null || !_simBridge.HasMatch) return 0;
+        if (_simBridge.CurrentFrame != _pendingSpendFrame)
+        {
+            _pendingSpendFrame = _simBridge.CurrentFrame;
+            _pendingSpend.Clear();
+        }
+        _pendingSpend.TryGetValue(kind, out var reserved);
+        return Mathf.Max(0, _simBridge.PlayerWallet(0, kind) - reserved);
+    }
+
+    /// <summary>Gated real spend -- false and unchanged if unaffordable
+    /// (checked against <see cref="EffectiveWallet"/>, not the raw
+    /// wallet, so repeated same-tick calls can't double-spend), true and
+    /// queues a real <see cref="SimBridge.QueueSpendResourceCommand"/>
+    /// otherwise. Same validation-not-clamping discipline match-core's
+    /// own `PlayerState.TrySpend` follows.</summary>
+    public bool TrySpendReal(ResourceKind kind, int amount)
+    {
+        if (amount <= 0 || _simBridge == null || !_simBridge.HasMatch) return false;
+        if (EffectiveWallet(kind) < amount) return false;
+        _pendingSpend.TryGetValue(kind, out var existing);
+        _pendingSpend[kind] = existing + amount;
+        _simBridge.QueueSpendResourceCommand(0, amount, kind);
+        return true;
+    }
+
+    /// <summary>docs/26 Phase 10 (Special Attacks System): unblockable
+    /// sink twin of <see cref="TrySpendReal"/> -- spends UP TO `amount`,
+    /// clamped to whatever's actually available, never negative, never
+    /// refuses. Matches docs/22 §1's "Floors, not stalls" design
+    /// contract to the letter: "A depleted resource degrades a unit; it
+    /// never disables, strands, or kills it... a player who ignores this
+    /// entire system must still have a functional army." An empty
+    /// wallet reads as "no more free lunch," never "out of bullets,
+    /// can't fire."</summary>
+    public void SpendRealClamped(ResourceKind kind, int amount)
+    {
+        if (amount <= 0) return;
+        var spend = Mathf.Min(amount, EffectiveWallet(kind));
+        if (spend > 0) TrySpendReal(kind, spend);
+    }
+
+    /// <summary>docs/26 Phase 10: cast-cost twin of <see
+    /// cref="SpendRealClamped"/>, kept as its own named entry point since
+    /// every existing call site already spends Blood+Bones together for
+    /// a cast.</summary>
     public void SpendWalletForCast(int blood, int bones)
     {
-        WalletBlood = Mathf.Max(0, WalletBlood - blood);
-        WalletBones = Mathf.Max(0, WalletBones - bones);
+        SpendRealClamped(ResourceKind.Blood, blood);
+        SpendRealClamped(ResourceKind.Bones, bones);
+    }
+
+    /// <summary>Credits the real wallet via the same queued command
+    /// every other income source (harvester banking, scavenger salvage)
+    /// already uses.</summary>
+    public void GrantReal(ResourceKind kind, int amount)
+    {
+        if (amount <= 0 || _simBridge == null || !_simBridge.HasMatch) return;
+        _simBridge.QueueBankHarvestLoadCommand(0, amount, kind);
     }
 
     /// <summary>2026-07 (GrabCursor's clone-onto-Factory feature): a
@@ -3365,23 +3432,24 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// cref="SpendWalletForCast"/>'s own "never blocks, floors at 0"
     /// design -- cloning a whole creature is a real purchase ("spawning
     /// more based on the amount of resources required"), not an
-    /// unblockable economy sink, so it needs a real affordability check.
-    /// Same validation-not-clamping discipline match-core's own
-    /// `PlayerState.TrySpend` follows: false and unchanged if
-    /// unaffordable, never a partial/negative spend.</summary>
-    public bool TrySpendBlood(int amount)
-    {
-        if (amount < 0 || WalletBlood < amount) return false;
-        WalletBlood -= amount;
-        return true;
-    }
+    /// unblockable economy sink. Thin named wrapper over <see
+    /// cref="TrySpendReal"/> so <see cref="GrabCursor"/>'s own
+    /// once-per-frame retry loop (call again next frame if this returns
+    /// false) didn't need to change at all.</summary>
+    public bool TrySpendBlood(int amount) => TrySpendReal(ResourceKind.Blood, amount);
 
+    /// <summary>2026-08 fix (creator report: "I have 30 bones in
+    /// inventory screen but Train say I have 6" -- traced back to THIS
+    /// method, the actual source of the divergence): docs/20's per-
+    /// citizen yield (Blood 2 / Bones 1 / Brains 1) now credits the REAL
+    /// match-core wallet via <see cref="GrantReal"/>, the same wallet
+    /// every purchase in the game actually spends from -- previously it
+    /// only ever moved a client-side counter nothing else read.</summary>
     public void OnCitizenEaten(Citizen citizen)
     {
-        // docs/20 per-citizen yield: Blood 2 / Bones 1 / Brains 1
-        WalletBlood += 2;
-        WalletBones += 1;
-        WalletBrains += 1;
+        GrantReal(ResourceKind.Blood, 2);
+        GrantReal(ResourceKind.Bones, 1);
+        GrantReal(ResourceKind.Brains, 1);
         CitizensEaten++;
         _citizens.Remove(citizen);
         if (citizen != null && _buildingsHost != null)
@@ -3391,7 +3459,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             DamageFx.BloodSplatter(pos, _buildingsHost);
         }
         if (citizen != null) Object.Destroy(citizen.gameObject);
-        Debug.Log("Citizen eaten. Wallet: " + WalletBlood + " blood / " + WalletBones + " bones / " + WalletBrains + " brains.");
+        Debug.Log("Citizen eaten (" + CitizensEaten + " total).");
     }
 
     /// <summary>Every spawned Collector -- for a future selection/order
@@ -3569,17 +3637,16 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// 2026-08 fix (creator report: "I have 30 bones in inventory screen
     /// but Train say I have 6"): this used to check/spend against
     /// `RuntimeCityBuilder.WalletBones` -- a client-side counter that
-    /// ONLY ever moves via <see cref="OnCitizenEaten"/> (+1/citizen) and
+    /// ONLY ever moved via <see cref="OnCitizenEaten"/> (+1/citizen) and
     /// this method's own old <c>TrySpendBones</c> call, completely
     /// disconnected from the real match-core wallet every other Bones
     /// SOURCE (harvester banking, scavenger salvage) and every other
     /// Bones SINK (building construction) actually reads/writes. Now
-    /// reads <see cref="SimBridge.PlayerWallet"/> for the affordability
-    /// check and spends via the real <see
-    /// cref="SimBridge.QueueSpendResourceCommand"/> (new -- see <see
-    /// cref="CommandKind.SpendResource"/>'s own doc comment) instead of
-    /// a shadow counter, so "what Collector training can afford" and
-    /// "what the wallet HUD shows" are finally the same number.</summary>
+    /// spends via <see cref="TrySpendReal"/> (new -- see <see
+    /// cref="CommandKind.SpendResource"/>'s own doc comment), the same
+    /// real-wallet spend every other purchase in this class now uses, so
+    /// "what Collector training can afford" and "what the wallet HUD
+    /// shows" are finally the same number.</summary>
     public bool BeginCollectorBattalion(uint bigBrainEntityId, CollectorClassDef def)
     {
         if (def == null || _simBridge == null || !_simBridge.HasMatch) return false;
@@ -3596,8 +3663,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
         var clampedBatch = Mathf.Clamp(def.BatchSize, CollectorClassDef.MinBatchSize, CollectorClassDef.MaxBatchSize);
         var cost = def.BonesCostPerUnit * clampedBatch;
-        if (_simBridge.PlayerWallet(0, ResourceKind.Bones) < cost) return false;
-        _simBridge.QueueSpendResourceCommand(0, cost, ResourceKind.Bones);
+        if (!TrySpendReal(ResourceKind.Bones, cost)) return false;
 
         _collectorOrders[bigBrainEntityId] = new CollectorBattalionOrder
         {

@@ -1,9 +1,20 @@
+using MadDr.MatchCore;
 using UnityEngine;
 
 /// <summary>On-screen session status: the harvest wallet (docs/20 yields
 /// from eaten citizens), the selected monster's order and physiology
 /// speeds. IMGUI -- fine alongside the new Input System, which only
-/// replaces the Input class, not OnGUI.</summary>
+/// replaces the Input class, not OnGUI.
+///
+/// 2026-08 (docs/12 "eating citizens" fix): the wallet line now reads
+/// the REAL match-core wallet (<see cref="SimBridge.PlayerWallet"/>)
+/// instead of a disconnected client-side counter -- so this line always
+/// agrees with <see cref="ResourceHud"/>'s own top-right panel, which
+/// reads the same source. The two panels are intentionally redundant
+/// (creator direction, choosing "mirror the real wallet" over
+/// simplifying this line to just the eaten-citizen tally): this one
+/// stays a fast at-a-glance readout next to the selection info,
+/// ResourceHud is the full six-currency-plus-supply breakdown.</summary>
 public class HudStatus : MonoBehaviour
 {
     private RuntimeCityBuilder _builder;
@@ -57,7 +68,12 @@ public class HudStatus : MonoBehaviour
         PointerOver = false;
 
         var y = 8f;
-        Line(ref y, "🩸 " + _builder.WalletBlood + "   🦴 " + _builder.WalletBones + "   🧠 " + _builder.WalletBrains
+        var bridge = _builder.SimBridge;
+        var haveMatch = bridge != null && bridge.HasMatch;
+        var blood = haveMatch ? bridge.PlayerWallet(0, ResourceKind.Blood) : 0;
+        var bones = haveMatch ? bridge.PlayerWallet(0, ResourceKind.Bones) : 0;
+        var brains = haveMatch ? bridge.PlayerWallet(0, ResourceKind.Brains) : 0;
+        Line(ref y, "🩸 " + blood + "   🦴 " + bones + "   🧠 " + brains
             + "   (eaten citizens: " + _builder.CitizensEaten + ")");
 
         if (_builder.TrafficCarCount > 0)

@@ -250,11 +250,12 @@ public class CollectorLabHud : MonoBehaviour
         var cost = def.BonesCostPerUnit * clampedBatch;
         // 2026-08 fix (creator report: "I have 30 bones in inventory
         // screen but Train say I have 6"): reads the REAL match-core
-        // wallet (same source ResourceHud displays), not the disconnected
-        // client-side WalletBones counter this used to check -- see
-        // RuntimeCityBuilder.BeginCollectorBattalion's own header for
-        // the full story.
-        var haveBones = bridge.PlayerWallet(_playerIndex, ResourceKind.Bones);
+        // wallet via EffectiveWallet (same source ResourceHud displays,
+        // net of anything queued-but-not-yet-landed this tick), not the
+        // disconnected client-side WalletBones counter this used to
+        // check -- see RuntimeCityBuilder.BeginCollectorBattalion's own
+        // header for the full story.
+        var haveBones = _builder.EffectiveWallet(ResourceKind.Bones);
         if (haveBones < cost) { SetStatus("Not enough Bones (need " + cost + ", have " + haveBones + ")."); return; }
 
         SetStatus(_builder.BeginCollectorBattalion(candidate.Value, def)
