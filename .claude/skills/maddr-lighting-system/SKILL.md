@@ -249,6 +249,47 @@ worked to catch this before shipping:
   row — this project's creator has been receptive to that and it's
   cheaper than another correction round.
 
+## 6. Destruction and the light system don't talk to each other (2026-08)
+
+Two separate gaps found while investigating "destroyed collapsed
+building do not have lights," both in `RuntimeCityBuilder.
+ApplyBuildingDamage`'s Destroyed branch — worth knowing before touching
+either the destruction path or the light-registry self-prune logic
+again:
+
+- **Rubble itself had zero emissive surfaces.** Neither `rubbleMat` nor
+  the scorch-decal material (`SpawnScorchDecal`) ever called
+  `EnableKeyword("_EMISSION")`/`SetColor("_EmissionColor", ...)` — only
+  `.color`. Combat fire on a Damaged building is destroyed outright with
+  the massing cube the instant it collapses, never converted to
+  lingering embers. Fixed: `DamageFx.CollapseEmbers` /
+  `CollapseEmbersFx` now scatter a handful of small warm-orange emissive
+  spheres across the collapse point (same `EnableKeyword`/`SetColor`
+  technique as `BuildingDresser`'s window materials — §1's Tier 1
+  emissive-material approach, not a real `Light`), pulsing out of phase,
+  fading and self-destroying after 90s. Not routed through
+  `EmissiveAnimator`'s batched system — a handful of embers per collapse
+  is nowhere near the "hundreds of windows" scale that exists to batch
+  for; see `RubblePileFx` right next to it in `DamageFx.cs` for the same
+  "own Update(), own fade, self-destroy" shape.
+- **Real latent bug, found but NOT fixed (flagged in docs/12 instead):**
+  a destroyed building's dressing-holder cubes — the ones carrying
+  `BuildingDresser`'s window strips, each individually
+  `EmissiveAnimator.Register`'d/`GlowPointRegistry.Register`'d — are
+  never `Object.Destroy`'d on collapse, only squished to 12% height with
+  every child renderer's material force-overwritten. Both registries'
+  self-prune logic (§ elsewhere: `if (e.Renderer == null)` in
+  `EmissiveAnimator.cs`, similarly in `DynamicLightBudget.cs`) never
+  fires, since the renderer survives — just recolored — so every former
+  window on every destroyed building keeps ticking in
+  `EmissiveAnimator.Tick()` and can occupy a `DynamicLightBudget`
+  real-light slot, invisibly, for the rest of the match. Confirmed this
+  produces no visible light (so it's not what any creator report would
+  actually describe) — a pure CPU/light-budget hygiene issue. Next
+  person touching destruction or the registries: either
+  `Object.Destroy` those renderers on collapse (same as massing cubes
+  already get) or add a proper `Unregister` to both registries.
+
 ## When you're not sure
 
 Read `docs/28` §0.5 (the bug-history table) top to bottom before
