@@ -53,16 +53,19 @@ public enum LightBehaviorKind
     /// (deterministic from `seed`) "someone gets home" time somewhere
     /// across late day/dusk/early night, and most get their own randomized
     /// "someone goes to bed" time somewhere in the back half of night --
-    /// dark outside that window, lit (with the same Flicker-style wobble)
-    /// inside it. A held-out fraction never gets a bedtime at all (lit
-    /// the whole night through) -- the "not all lights go off" case.
-    /// Distinct from Flicker: Flicker just wobbles brightness within an
-    /// already-on/off state driven by the GLOBAL day/night boost; Window
-    /// adds its OWN per-instance on/off schedule on top of that, since
-    /// nightAmount itself now holds perfectly flat through the whole
-    /// night (see LumenCycleController.ComputeNightIntensity) and can't
-    /// tell "just got dark" apart from "3am" the way a per-window
-    /// schedule needs to.</summary>
+    /// dark outside that window, lit inside it, a hard instant flip at
+    /// each edge (2026-08 creator direction: "Always like a light switch
+    /// NOT a dimmer" -- no fade, no per-instance wobble while lit; used
+    /// to share Flicker's sine wobble, removed). A held-out fraction
+    /// never gets a bedtime at all (lit the whole night through) -- the
+    /// "not all lights go off" case. Distinct from Flicker: Flicker
+    /// wobbles brightness within an already-on/off state driven by the
+    /// GLOBAL day/night boost; Window adds its OWN per-instance on/off
+    /// schedule on top of that, since nightAmount itself now holds
+    /// perfectly flat through the whole night (see
+    /// LumenCycleController.ComputeNightIntensity) and can't tell "just
+    /// got dark" apart from "3am" the way a per-window schedule
+    /// needs to.</summary>
     Window,
 }
 
@@ -105,20 +108,20 @@ public static class EmissiveAnimator
     private const float OffRangeStart = 0.75f;   // 1800 ticks -- earliest bedtimes
     private const float OffRangeEnd = 0.98f;     // 2352 ticks -- latest bedtimes, just shy of Dawn
     private const float AlwaysOnProbability = 0.15f;
-    // How long the on/off transition itself takes, as a fraction of the
-    // cycle -- a hard instant snap would read as a glitch, not a person
-    // flipping a switch. ~0.01 of a 240s cycle is ~2.4s.
-    private const float OccupancyTransitionFrac = 0.01f;
-
-    // 2026-08 creator direction: "50% less lights in the daytime and the
-    // maximum number at night... late at night the lights should also
-    // reduce appropriately." How wide a band of DayNightState.LightActivity
-    // a window's own ActivityThreshold smoothsteps across, instead of
-    // snapping instantly the moment activity crosses it -- LightActivity
-    // itself already eases (SmoothStep, in LumenCycleController), but a
-    // hard `>=` compare here would still make every window sitting near
-    // the SAME threshold value pop in lockstep at that exact instant.
-    private const float ActivityGateBand = 0.08f;
+    // 2026-08 creator direction: "Always like a light switch NOT a
+    // dimmer" + "The window lights should NEVER flash on and off in
+    // short intervals." Used to smoothstep the on/off/activity gates
+    // across a short band (a ~2.4s fade -- "a person flipping a switch
+    // reads as a beat of motion, not a single-frame pop") and wobble
+    // lit windows with a sine flicker on top. Both removed: every gate
+    // below is now a hard, instant step, and there is no more per-window
+    // wobble while lit -- see OccupancyGate and the Window case above.
+    // The arrival/bedtime/activity-threshold SCHEDULE itself (still
+    // read against seed-derived per-window OnCycleFrac/OffCycleFrac/
+    // ActivityThreshold below) is exactly what makes the switch flip at
+    // a different moment for every window rather than all at once --
+    // that's the "motivated as a human being" part this direction asked
+    // to keep, not remove.
 
     private static readonly List<Entry> Animated = new List<Entry>();
 
@@ -256,19 +259,16 @@ public static class EmissiveAnimator
                 }
                 case LightBehaviorKind.Window:
                 {
-                    // Same wobble-while-lit as Flicker (a window that's
-                    // "occupied" still isn't perfectly steady), gated by
-                    // this window's OWN randomized on/off schedule on top
-                    // -- see OccupancyGate. Reads DayNightState.CycleProgress
+                    // 2026-08: no more wobble-while-lit -- a window is
+                    // either fully on or fully off, gated by its OWN
+                    // randomized arrival/bedtime schedule -- see
+                    // OccupancyGate. Reads DayNightState.CycleProgress
                     // rather than NeonBoost/NightAmount specifically
                     // because those hold flat through the whole night now
                     // (the "hold for the duration of the night" fix) and
                     // can't distinguish "just got dark" from "3am" the way
                     // a bedtime schedule needs to.
-                    var speed = Mathf.Lerp(profile.FlickerSpeedRange.x, profile.FlickerSpeedRange.y, Frac(e.Seed));
-                    var wave = 0.5f + 0.5f * Mathf.Sin(t * speed * Mathf.PI * 2f + e.Seed * 17.3f);
-                    var wobble = Mathf.Lerp(profile.FlickerFloor, 1f, wave * wave);
-                    mult = wobble * OccupancyGate(e, DayNightState.CycleProgress);
+                    mult = OccupancyGate(e, DayNightState.CycleProgress);
                     break;
                 }
             }
@@ -277,19 +277,17 @@ public static class EmissiveAnimator
     }
 
     /// <summary>1 while this window's cycle-relative "on" state is
-    /// active, 0 otherwise, with a short smoothstep transition at each
-    /// edge instead of an instant snap (a person flipping a switch reads
-    /// as a beat of motion, not a single-frame pop). AlwaysOn skips the
-    /// off half AND the activity gate below entirely -- "not all lights
-    /// go off," a fixed always-occupied subset unaffected by how quiet
-    /// the city gets.</summary>
+    /// active, 0 otherwise -- a hard, instant flip at each edge (2026-08
+    /// creator direction: "Always like a light switch NOT a dimmer"; used
+    /// to be a short smoothstep fade instead, see this file's history).
+    /// AlwaysOn skips the off half AND the activity gate below entirely
+    /// -- "not all lights go off," a fixed always-occupied subset
+    /// unaffected by how quiet the city gets.</summary>
     private static float OccupancyGate(Entry e, float cycleProgress)
     {
         if (!WindowScheduleEnabled || e.AlwaysOn) return 1f;
-        var onGate = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(
-            e.OnCycleFrac - OccupancyTransitionFrac, e.OnCycleFrac + OccupancyTransitionFrac, cycleProgress));
-        var offGate = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(
-            e.OffCycleFrac - OccupancyTransitionFrac, e.OffCycleFrac + OccupancyTransitionFrac, cycleProgress));
+        var onGate = cycleProgress >= e.OnCycleFrac ? 1f : 0f;
+        var offGate = cycleProgress < e.OffCycleFrac ? 1f : 0f;
         // 2026-08: on top of this window's OWN arrival/bedtime span above,
         // it also needs city-wide LightActivity to have climbed at least
         // to its own ActivityThreshold -- fewer windows clear a HIGH
@@ -297,11 +295,11 @@ public static class EmissiveAnimator
         // more do once activity ramps to its evening peak. Different
         // windows have different thresholds, so this produces a staggered
         // spread of on/off transitions across the building stock as
-        // activity rises and falls, not a single city-wide flip.
-        var activityGate = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(
-            e.ActivityThreshold - ActivityGateBand, e.ActivityThreshold + ActivityGateBand,
-            DayNightState.LightActivity));
-        return Mathf.Min(onGate, offGate, activityGate);
+        // activity rises and falls, not a single city-wide flip -- each
+        // individual window's own flip is still instant, only WHICH
+        // instant differs window to window.
+        var activityGate = DayNightState.LightActivity >= e.ActivityThreshold ? 1f : 0f;
+        return Mathf.Min(onGate, Mathf.Min(offGate, activityGate));
     }
 
     private static void Apply(Entry e, float mult)

@@ -15,10 +15,10 @@ using UnityEngine;
 /// Per-window IDENTITY and STATE split the same way <c>WindowGrid.shader</c>'s
 /// own header describes:
 ///  - Everything about a window's ambient behavior (its own randomized
-///    "someone's home"/"lights out" schedule, whether it flickers, its
-///    warm/cool tint, brightness variance, whether it can ever glow at
-///    all) is a deterministic function of a `seed` the CALLER already
-///    computes (same convention <c>EmissiveAnimator.Register</c> used --
+///    "someone's home"/"lights out" schedule, brightness variance,
+///    whether it can ever glow at all) is a deterministic function of a
+///    `seed` the CALLER already computes (same convention
+///    <c>EmissiveAnimator.Register</c> used --
 ///    a hash of the window's own hex/floor/slot) and gets baked into that
 ///    window's 4 vertices ONCE, at <see cref="AddWindow"/> time. It never
 ///    changes again and costs nothing at runtime beyond ordinary vertex
@@ -52,17 +52,14 @@ public class BuildingWindowGrid : MonoBehaviour
     internal const float OffRangeStart = 0.75f;
     internal const float OffRangeEnd = 0.98f;
     internal const float AlwaysOnProbability = 0.15f;
-    // 2026-08 (docs/33, Visual Requirements: "only a small percentage of
-    // windows should flicker"): EmissiveAnimator's old Window kind wobbled
-    // EVERY lit window; this is a deliberate, small behavior change from
-    // that (flagged here, not silently carried over) to match the task's
-    // explicit ask for flicker as a rare accent, not a universal wobble.
-    internal const float FlickerProbability = 0.12f;
-    // Shader-only tuning (Build() doesn't need these itself, but they're
-    // declared here too so the driver has exactly one place to read every
-    // window-schedule constant from).
-    internal const float OccupancyTransitionFrac = 0.01f;
-    internal const float ActivityGateBand = 0.08f;
+    // 2026-08 (creator direction: "The window lights should NEVER flash
+    // on and off in short intervals... Always like a light switch NOT a
+    // dimmer"): windows no longer flicker or fade at all -- removed the
+    // FlickerProbability roll this used to have (docs/33's original
+    // "flicker as a rare accent" ask) and the smoothstep transition
+    // band/width constants that used to live here for the driver to push
+    // to the shader. Every on/off/activity gate is now a hard, instant
+    // step -- see WindowGrid.shader's MadDrWindowMultiplier.
 
     private struct PendingWindow
     {
@@ -99,7 +96,9 @@ public class BuildingWindowGrid : MonoBehaviour
         var shader = Shader.Find("MadDr/WindowGrid");
         if (shader == null) return null;
         _sharedMaterial = new Material(shader) { enableInstancing = true };
-        _sharedMaterial.SetTexture("_BaseMap", PbrTextureAtlas.Glass);
+        // 2026-08 (creator direction: "Loose the glazing effect. Just
+        // solid colours."): no glass texture is assigned any more --
+        // WindowGrid.shader's ForwardLit pass doesn't sample _BaseMap.
         // 2026-08: every other material factory in this codebase pushes
         // CityLightingProfile.Active's live tuned value explicitly rather
         // than trusting the shader Properties block's own default (see
@@ -195,23 +194,27 @@ public class BuildingWindowGrid : MonoBehaviour
             var baseIdx = verts.Count;
             verts.Add(v0); verts.Add(v1); verts.Add(v2); verts.Add(v3);
             for (var k = 0; k < 4; k++) normals.Add(localNormal);
+            // 2026-08: no longer read by ForwardLit (solid colors, no
+            // glazing texture) -- kept only because the UsePass-reused
+            // stock ShadowCaster/DepthOnly/DepthNormals passes still
+            // declare a TEXCOORD0 input; leaving a real channel here is
+            // lower-risk than trusting Unity's zero-fill-for-missing-
+            // channel behavior with no Editor available to confirm it.
             uv0.Add(new Vector2(0, 0)); uv0.Add(new Vector2(1, 0));
             uv0.Add(new Vector2(1, 1)); uv0.Add(new Vector2(0, 1));
 
-            // Decorrelated draws off the same seed -- fresh multipliers
-            // (137.9/151.7/167.3) chosen not to collide with the
-            // On/Off/Activity multipliers below or with each other.
-            var tintT = Frac(w.Seed * 137.9f + 5f);
+            // Decorrelated draw off the same seed -- fresh multiplier
+            // (151.7) chosen not to collide with the On/Off/Activity
+            // multipliers below.
             var brightnessVar = Mathf.Lerp(0.8f, 1.2f, Frac(w.Seed * 151.7f + 11f));
-            var flickerOn = w.CanGlow && Frac(w.Seed * 167.3f + 23f) < FlickerProbability;
 
             var onFrac = Mathf.Lerp(OnRangeStart, OnRangeEnd, Frac(w.Seed * 41.3f));
             var offFrac = Mathf.Lerp(OffRangeStart, OffRangeEnd, Frac(w.Seed * 59.7f + 3f));
             var alwaysOn = w.CanGlow && Frac(w.Seed * 91.1f + 7f) < AlwaysOnProbability;
             var activityThreshold = Frac(w.Seed * 113.7f + 19f);
 
-            float flags = (w.CanGlow ? 1f : 0f) + (alwaysOn ? 2f : 0f) + (flickerOn ? 4f : 0f);
-            var p1 = new Vector4(w.Seed, tintT, brightnessVar, flags);
+            float flags = (w.CanGlow ? 1f : 0f) + (alwaysOn ? 2f : 0f);
+            var p1 = new Vector4(w.Seed, brightnessVar, flags, 0f);
             var p2 = new Vector4(onFrac, offFrac, activityThreshold, 0f);
             // Texel-center UV into the override texture, sized once the
             // final window count is known -- every one of this window's 4
@@ -300,41 +303,27 @@ public class BuildingWindowGrid : MonoBehaviour
 
 /// <summary>Pushes the handful of GLOBAL shader uniforms every
 /// `MadDr/WindowGrid` material instance reads (day/night cycle position,
-/// light activity, neon boost, the window-schedule toggle, and
-/// CityLightingProfile's flicker/occupancy tunables) once per frame --
-/// not per building, not per window. RuntimeCityBuilder adds exactly one
-/// of these per scene, same pattern as EmissiveAnimatorDriver.</summary>
+/// light activity, neon boost, the window-schedule toggle) once per
+/// frame -- not per building, not per window. RuntimeCityBuilder adds
+/// exactly one of these per scene, same pattern as EmissiveAnimatorDriver.
+/// 2026-08: used to also push CityLightingProfile's flicker-speed/floor
+/// and the smoothstep transition-width/activity-gate-band tunables --
+/// removed along with the shader-side wobble and fade they fed (creator
+/// direction: "Always like a light switch NOT a dimmer"), so there's
+/// nothing left here to tune at runtime, only to bake per-window at
+/// Build() time.</summary>
 public class BuildingWindowGridDriver : MonoBehaviour
 {
     private static readonly int CycleProgressId = Shader.PropertyToID("_MadDrWinCycleProgress");
     private static readonly int LightActivityId = Shader.PropertyToID("_MadDrWinLightActivity");
     private static readonly int NeonBoostId = Shader.PropertyToID("_MadDrWinNeonBoost");
     private static readonly int ScheduleEnabledId = Shader.PropertyToID("_MadDrWinScheduleEnabled");
-    // NOTE: onFrac/offFrac/activityThreshold are already fully computed
-    // per-window at Build() time and baked into vertex data (TEXCOORD2) --
-    // OnRangeStart/OnRangeEnd/OffRangeStart/OffRangeEnd are consumed
-    // ENTIRELY on the C# side and never needed again at runtime, so
-    // there's no matching shader global for them (would be dead/unused
-    // uniform plumbing). TransitionFrac/ActivityGateBand below ARE live
-    // shader-side knobs -- they shape the smoothstep transition and the
-    // activity gate band at runtime, not baked per-window.
-    private static readonly int TransitionFracId = Shader.PropertyToID("_MadDrWinTransitionFrac");
-    private static readonly int ActivityGateBandId = Shader.PropertyToID("_MadDrWinActivityGateBand");
-    private static readonly int FlickerSpeedMinId = Shader.PropertyToID("_MadDrWinFlickerSpeedMin");
-    private static readonly int FlickerSpeedMaxId = Shader.PropertyToID("_MadDrWinFlickerSpeedMax");
-    private static readonly int FlickerFloorId = Shader.PropertyToID("_MadDrWinFlickerFloor");
 
     private void Update()
     {
-        var profile = CityLightingProfile.Active;
         Shader.SetGlobalFloat(CycleProgressId, DayNightState.CycleProgress);
         Shader.SetGlobalFloat(LightActivityId, DayNightState.LightActivity);
         Shader.SetGlobalFloat(NeonBoostId, DayNightState.NeonBoost);
         Shader.SetGlobalFloat(ScheduleEnabledId, EmissiveAnimator.WindowScheduleEnabled ? 1f : 0f);
-        Shader.SetGlobalFloat(TransitionFracId, BuildingWindowGrid.OccupancyTransitionFrac);
-        Shader.SetGlobalFloat(ActivityGateBandId, BuildingWindowGrid.ActivityGateBand);
-        Shader.SetGlobalFloat(FlickerSpeedMinId, profile.FlickerSpeedRange.x);
-        Shader.SetGlobalFloat(FlickerSpeedMaxId, profile.FlickerSpeedRange.y);
-        Shader.SetGlobalFloat(FlickerFloorId, profile.FlickerFloor);
     }
 }

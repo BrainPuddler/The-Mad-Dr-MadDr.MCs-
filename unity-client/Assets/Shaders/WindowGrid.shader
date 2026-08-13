@@ -4,13 +4,12 @@
 // draw call per building, zero per-window GameObjects/Renderers/Lights.
 //
 // Per-window identity/state is split two ways:
-//  - STATIC per-window data (seed, warm/cool tint, brightness variance,
-//    the window's own randomized "someone's home"/"lights out" cycle
-//    fractions, whether it can ever glow at all, whether it flickers) is
-//    baked into vertex data at mesh-build time (TEXCOORD1/2) -- it never
-//    changes after the building is built, so it costs nothing at runtime
-//    beyond the interpolator bandwidth every other vertex attribute
-//    already costs.
+//  - STATIC per-window data (seed, brightness variance, the window's own
+//    randomized "someone's home"/"lights out" cycle fractions, whether it
+//    can ever glow at all) is baked into vertex data at mesh-build time
+//    (TEXCOORD1/2) -- it never changes after the building is built, so it
+//    costs nothing at runtime beyond the interpolator bandwidth every
+//    other vertex attribute already costs.
 //  - DYNAMIC per-window override state (the mandatory gameplay
 //    SetWindowOn/SetWindowOff API) lives in a small per-building
 //    "override texture" sampled via TEXCOORD3, set per-MaterialPropertyBlock
@@ -18,14 +17,15 @@
 //    override -- run the ambient day/night occupancy schedule below";
 //    0 forces off, 1 forces on.
 //
-// The ambient schedule itself (arrival/bedtime occupancy gate + subtle
-// flicker) is computed ENTIRELY in the fragment shader from a handful of
-// globals (_MadDrWin*, pushed once per frame by BuildingWindowGridDriver,
-// not per building/window) plus the static per-vertex data above -- this
-// is the same math EmissiveAnimator.cs's LightBehaviorKind.Window used to
-// run per-instance in C# every frame (see that file's history for the
-// original derivation), ported to the GPU so it costs nothing on the CPU
-// regardless of how many windows exist.
+// The ambient schedule itself (arrival/bedtime occupancy gate, a hard
+// on/off flip, never a fade or a wobble -- 2026-08 creator direction:
+// "Always like a light switch NOT a dimmer") is computed ENTIRELY in the
+// fragment shader from a handful of globals (_MadDrWin*, pushed once per
+// frame by BuildingWindowGridDriver, not per building/window) plus the
+// static per-vertex data above -- this is the same math EmissiveAnimator.cs's
+// LightBehaviorKind.Window used to run per-instance in C# every frame (see
+// that file's history for the original derivation), ported to the GPU so
+// it costs nothing on the CPU regardless of how many windows exist.
 //
 // Built on top of Unity's own stock "Universal Render Pipeline/Lit"
 // shadow/depth passes via UsePass (reused verbatim, not reimplemented) --
@@ -37,9 +37,22 @@ Shader "MadDr/WindowGrid"
 {
     Properties
     {
-        _BaseMap("Glass Base Map", 2D) = "white" {}
-        _WarmColor("Warm Lit Color", Color) = (1, 0.85, 0.55, 1)
-        _CoolColor("Cool Lit Color", Color) = (0.75, 0.85, 1, 1)
+        // 2026-08 (creator direction: "Loose the glazing effect. Just
+        // solid colours."): no texture is sampled by the ForwardLit pass
+        // below any more -- solid _WarmColor/_DarkGlassColor only.
+        // Declared (with a harmless "white" default) purely because the
+        // ShadowCaster/DepthOnly passes reused via UsePass below expect a
+        // _BaseMap to exist on the shader they came from; same reasoning
+        // as _Cutoff just below.
+        _BaseMap("Unused (kept for UsePass compatibility)", 2D) = "white" {}
+
+        // 2026-08 (creator direction: "the blue lights windows are too
+        // blue just stay to the original warm tones"): every lit window
+        // uses this ONE color now -- no per-window warm/cool split. Value
+        // matches BaseDresser.cs's own pre-existing faction-building
+        // window color (`new Color(1f, 0.85f, 0.55f)`), i.e. this
+        // restores the original tone rather than inventing a new one.
+        _WarmColor("Lit Window Color", Color) = (1, 0.85, 0.55, 1)
         _DarkGlassColor("Dark/Off Glass Color", Color) = (0.16, 0.2, 0.28, 1)
         _Smoothness("Smoothness", Range(0,1)) = 0.5
         _BulbEmissiveBase("Bulb Emissive Base", Float) = 0.25
@@ -116,16 +129,13 @@ Shader "MadDr/WindowGrid"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
-                float4 _BaseMap_ST;
                 half4 _WarmColor;
-                half4 _CoolColor;
                 half4 _DarkGlassColor;
                 half4 _BaseColor;
                 half _Smoothness;
                 half _BulbEmissiveBase;
             CBUFFER_END
 
-            TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
             TEXTURE2D(_OverrideStateTex); SAMPLER(sampler_OverrideStateTex);
 
             // Pushed once per frame by BuildingWindowGridDriver -- global,
@@ -139,20 +149,20 @@ Shader "MadDr/WindowGrid"
             // per-window in TEXCOORD2 (BuildingWindowGrid.Build()) -- the
             // On/OffRangeStart/End constants that PRODUCE those values are
             // consumed entirely on the C# side and have no shader-side
-            // counterpart. TransitionFrac/ActivityGateBand below are the
-            // only two of this family still evaluated live, per-pixel.
-            float _MadDrWinTransitionFrac;
-            float _MadDrWinActivityGateBand;
-            float _MadDrWinFlickerSpeedMin;
-            float _MadDrWinFlickerSpeedMax;
-            float _MadDrWinFlickerFloor;
+            // counterpart. 2026-08 (creator direction: "Always like a
+            // light switch NOT a dimmer" + "NEVER flash on and off in
+            // short intervals"): the on/off gates below used to be
+            // smoothstep-banded (a ~2.4s fade) and lit windows used to
+            // wobble with a sine flicker on top -- both removed. There is
+            // no shader-side transition-width/flicker-speed knob left at
+            // all; the switch is instant and binary by construction now,
+            // not a tunable that happens to be set narrow.
 
             struct Attributes
             {
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
-                float2 uv0        : TEXCOORD0;
-                // (seed, tintT, brightnessVar, flagsPacked)
+                // (seed, brightnessVar, flagsPacked, unused)
                 float4 packed1    : TEXCOORD1;
                 // (onFrac, offFrac, activityThreshold, unused)
                 float4 packed2    : TEXCOORD2;
@@ -163,7 +173,6 @@ Shader "MadDr/WindowGrid"
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
-                float2 uv0        : TEXCOORD0;
                 float4 packed1    : TEXCOORD1;
                 float4 packed2    : TEXCOORD2;
                 float2 overrideUV : TEXCOORD3;
@@ -182,7 +191,6 @@ Shader "MadDr/WindowGrid"
                 OUT.positionCS = posInputs.positionCS;
                 OUT.positionWS = posInputs.positionWS;
                 OUT.normalWS = normInputs.normalWS;
-                OUT.uv0 = TRANSFORM_TEX(IN.uv0, _BaseMap);
                 OUT.packed1 = IN.packed1;
                 OUT.packed2 = IN.packed2;
                 OUT.overrideUV = IN.overrideUV.xy;
@@ -192,14 +200,16 @@ Shader "MadDr/WindowGrid"
             }
 
             // Mirrors EmissiveAnimator.cs's LightBehaviorKind.Window case +
-            // OccupancyGate, moved to the GPU: same formulas, same
-            // constants (pushed as globals from CityLightingProfile.Active
-            // by BuildingWindowGridDriver), operating on the SAME kind of
-            // per-window seed/cycle-fraction data that used to be computed
-            // once at EmissiveAnimator.Register time and is now baked into
-            // the vertex stream once at mesh-build time instead.
-            half MadDrWindowMultiplier(float seed, float onFrac, float offFrac, float activityThreshold,
-                half canGlow, half alwaysOn, half flickerOn, half overrideVal, float time)
+            // OccupancyGate, moved to the GPU: same per-window
+            // seed/cycle-fraction data that used to be computed once at
+            // EmissiveAnimator.Register time and is now baked into the
+            // vertex stream once at mesh-build time instead. 2026-08:
+            // both sides dropped the sine wobble and switched every gate
+            // from a smoothstep band to a hard step -- see this file's
+            // header and EmissiveAnimator.OccupancyGate's own comment for
+            // the "light switch, not a dimmer" direction this implements.
+            half MadDrWindowMultiplier(float onFrac, float offFrac, float activityThreshold,
+                half canGlow, half alwaysOn, half overrideVal)
             {
                 // Gameplay override always wins, even over a window that
                 // ambiently never glows -- SetWindowOn/Off is meant to work
@@ -211,51 +221,32 @@ Shader "MadDr/WindowGrid"
                 if (overrideVal > 0.75h) return 1.0h;
 
                 if (canGlow < 0.5h) return 0.0h;
+                if (_MadDrWinScheduleEnabled < 0.5 || alwaysOn > 0.5h) return 1.0h;
 
-                half mult = 1.0h;
-                if (_MadDrWinScheduleEnabled > 0.5 && alwaysOn < 0.5h)
-                {
-                    float t = _MadDrWinCycleProgress;
-                    float onGate = smoothstep(onFrac - _MadDrWinTransitionFrac, onFrac + _MadDrWinTransitionFrac, t);
-                    float offGate = 1.0 - smoothstep(offFrac - _MadDrWinTransitionFrac, offFrac + _MadDrWinTransitionFrac, t);
-                    float activityGate = smoothstep(activityThreshold - _MadDrWinActivityGateBand,
-                        activityThreshold + _MadDrWinActivityGateBand, _MadDrWinLightActivity);
-                    mult = (half)min(onGate, min(offGate, activityGate));
-                }
-
-                if (flickerOn > 0.5h)
-                {
-                    float speed = lerp(_MadDrWinFlickerSpeedMin, _MadDrWinFlickerSpeedMax, frac(seed));
-                    float wave = 0.5 + 0.5 * sin(time * speed * 6.2831853 + seed * 17.3);
-                    half wobble = (half)lerp(_MadDrWinFlickerFloor, 1.0, wave * wave);
-                    mult *= wobble;
-                }
-
-                return mult;
+                float t = _MadDrWinCycleProgress;
+                half onGate = (half)step(onFrac, t);
+                half offGate = (half)(1.0 - step(offFrac, t));
+                half activityGate = (half)step(activityThreshold, _MadDrWinLightActivity);
+                return min(onGate, min(offGate, activityGate));
             }
 
             half4 WindowGridFragment(Varyings IN) : SV_Target
             {
-                float seed = IN.packed1.x;
-                float tintT = IN.packed1.y;
-                float brightnessVar = IN.packed1.z;
-                float flags = IN.packed1.w;
+                float brightnessVar = IN.packed1.y;
+                float flags = IN.packed1.z;
 
-                // flagsPacked = canGlow*1 + alwaysOn*2 + flickerEnabled*4
+                // flagsPacked = canGlow*1 + alwaysOn*2
                 half canGlow = (half)step(0.5, fmod(flags, 2.0));
                 float rest = floor(flags / 2.0);
                 half alwaysOn = (half)step(0.5, fmod(rest, 2.0));
-                rest = floor(rest / 2.0);
-                half flickerOn = (half)step(0.5, fmod(rest, 2.0));
 
                 half overrideVal = SAMPLE_TEXTURE2D(_OverrideStateTex, sampler_OverrideStateTex, IN.overrideUV).r;
 
-                half mult = MadDrWindowMultiplier(seed, IN.packed2.x, IN.packed2.y, IN.packed2.z,
-                    canGlow, alwaysOn, flickerOn, overrideVal, _Time.y);
+                half mult = MadDrWindowMultiplier(IN.packed2.x, IN.packed2.y, IN.packed2.z,
+                    canGlow, alwaysOn, overrideVal);
 
-                half4 glassTex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, IN.uv0);
-                half3 litColor = lerp(_WarmColor.rgb, _CoolColor.rgb, tintT) * _BaseColor.rgb;
-                half3 albedo = lerp(_DarkGlassColor.rgb, litColor, mult) * glassTex.rgb * _BaseColor.rgb;
+                half3 litColor = _WarmColor.rgb * _BaseColor.rgb;
+                half3 albedo = lerp(_DarkGlassColor.rgb, litColor, mult) * _BaseColor.rgb;
 
                 float3 normalWS = normalize(IN.normalWS);
                 Light mainLight = GetMainLight(IN.shadowCoord);

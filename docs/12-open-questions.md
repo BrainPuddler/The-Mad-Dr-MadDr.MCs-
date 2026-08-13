@@ -17219,3 +17219,27 @@ cause of what was reported. Noted here as a correction, not a
 retraction -- both diagnoses came from reading the code, not a render,
 and this is what that ceiling looks like when it's hit twice on the
 same bug before landing on the real cause.
+
+## 2026-08 same-day follow-up: solid colors, warm-only, no flicker, hard switch (docs/28 row 37, docs/33 §10)
+
+Once the culling fix above actually got windows rendering, the creator
+gave four more direct corrections in one message: drop the glass-sheen
+texture entirely ("Just solid colours"), drop the blue/cool tint
+variant the GPU port had introduced ("stay to the original warm
+tones"), drop the sine flicker/wobble while lit ("NEVER flash on and
+off in short intervals"), and replace every arrival/bedtime/activity
+smoothstep fade with a hard binary flip ("Always like a light switch
+NOT a dimmer"). That last one is an explicit reversal of a standing
+prior decision (row 13/docs/28's own comment: a fade was chosen
+DELIBERATELY over a hard snap, "reads as a beat of motion, not a
+single-frame pop") -- recorded here as the correction it is, not
+silently overwritten.
+
+Explicitly NOT touched: the per-window randomized arrival/bedtime
+schedule and the AlwaysOn held-out fraction (row 13's "motivated as a
+human being... moving room to room, coming home, going to bed" system)
+-- the creator pointed at this directly ("We have docs about that I'm
+sure. Adhere to that."), and it's the mechanism that already does
+exactly that. Only the SHAPE of each transition and the presence of a
+wobble changed; WHEN a given window's switch flips did not. Full
+diagnosis and the specific constants/globals removed: docs/33 §10.

@@ -338,3 +338,69 @@ top-of-file doc comment).
 **Not verified in a real render** (same standing caveat as §5/§7/§8) —
 reasoned from the pixel math and the texture's known sample footprint
 per window, not from seeing it rendered.
+
+## 10. Four-part follow-up: solid colors, warm-only, no flicker, hard switch (docs/28 row 37)
+
+Creator direction, verbatim: "Loose the glazing effect. Just solid
+colours. the blue lights windows are too blue just stay to the original
+warm tones. The window lights should NEVER flash on and off in short
+intervals. Lights always must be motivated as a human being, moving
+from room to room, coming home, going to bed. We have docs about that
+I'm sure. Adhere to that. Always like a light switch NOT a dimmer."
+Full row: docs/28 row 37. Four changes, one file family
+(`WindowGrid.shader`, `BuildingWindowGrid.cs`, `EmissiveAnimator.cs`):
+
+1. **No glazing.** §9's texture fix wasn't the ask — the whole idea of
+   a sampled glass texture was. `WindowGrid.shader`'s ForwardLit pass no
+   longer declares/samples `_BaseMap` for color at all; `SharedMaterial()`
+   no longer assigns `PbrTextureAtlas.Glass`. `_BaseMap` stays declared
+   in Properties (unused, "white" default) only because the UsePass-
+   reused stock ShadowCaster/DepthOnly/DepthNormals passes expect it to
+   exist — same reasoning this shader already applies to `_Cutoff`.
+2. **Warm only.** `_CoolColor` (0.75, 0.85, 1 — visibly blue) is gone.
+   This wasn't a revert to something that used to exist: the docs/33 GPU
+   port INTRODUCED the warm/cool split (a per-window `tintT` draw) as
+   new behavior. The pre-existing CPU path this replaced
+   (`EmissiveAnimator.LightBehaviorKind.Window`, still live for
+   `BaseDresser.cs`'s faction-building windows) only ever used one
+   color — confirmed by reading that call site:
+   `new Color(1f, 0.85f, 0.55f)`, which is exactly `_WarmColor`'s
+   existing default. So "stay to the original warm tones" is literal:
+   every lit window now uses `_WarmColor` alone, and its value already
+   matched what "original" means.
+3. **No flicker.** Both the shader's `MadDrWindowMultiplier` and
+   `EmissiveAnimator`'s CPU `Window` case had a continuous sine
+   "wobble" while lit, inherited from the unrelated `Flicker` kind (a
+   window that's occupied "still isn't perfectly steady" was the
+   original reasoning). Removed from both — a lit window is now flatly
+   lit, brightness-varied only by the STATIC per-window
+   `brightnessVar` baked once at build time (not a runtime dimmer, just
+   "not every bulb is identically bright"), never animated.
+4. **Hard switch, not a fade.** Every occupancy gate — arrival,
+   bedtime, activity-threshold — used to be `SmoothStep`/`InverseLerp`-
+   banded (`OccupancyTransitionFrac`, `ActivityGateBand`): a deliberate
+   PRIOR decision (docs/28 row 13, `EmissiveAnimator.OccupancyGate`'s
+   own comment: "a person flipping a switch reads as a beat of motion,
+   not a single-frame pop"). This creator direction explicitly reverses
+   that specific choice — flagged as a correction, not silently
+   overwritten. Every gate is now a hard `step`/`>=` comparison: a
+   window is at 0 or 1, never anything between. The `OccupancyTransitionFrac`/
+   `ActivityGateBand` constants (both files) and every shader global
+   that fed them (`_MadDrWinTransitionFrac`, `_MadDrWinActivityGateBand`,
+   `_MadDrWinFlickerSpeedMin/Max/Floor`) are removed, not just unused —
+   there's nothing left to tune at runtime for a binary switch.
+
+**What's deliberately UNCHANGED**: the per-window randomized arrival
+time (`OnCycleFrac`/`onFrac`, mid-Day through early-Night), bedtime
+(`OffCycleFrac`/`offFrac`, back half of night), the `AlwaysOn` held-out
+fraction ("not all lights go off"), and the city-wide `ActivityThreshold`
+staggering — this is docs/28 row 13's whole "motivated as a human
+being... moving room to room, coming home, going to bed" system, and
+the creator's own message points at it explicitly ("We have docs about
+that I'm sure. Adhere to that."). Nothing about WHEN a window's switch
+flips changed, only that the flip itself is now instant rather than a
+short fade, and there's no wobble riding on top of "on" any more.
+
+**Not verified in a real render** (same standing caveat as every prior
+section) — this is a straightforward code-level removal/simplification
+(fewer moving parts than before, not new logic), but still unseen.
