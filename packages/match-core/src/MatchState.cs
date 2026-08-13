@@ -962,6 +962,22 @@ namespace MadDr.MatchCore
             _players[cmd.PlayerIndex].Grant((ResourceKind)cmd.ArgB, cmd.ArgA);
         }
 
+        /// <summary>2026-08 (Collector Lab battalion training, docs/12):
+        /// debit twin of <see cref="ApplyBankHarvestLoad"/> -- see <see
+        /// cref="CommandKind.SpendResource"/>'s own doc comment for why
+        /// this exists (no existing command's Apply debits a wallet for a
+        /// non-SimUnit, Unity-only purchase like a Collector). Uses <see
+        /// cref="PlayerState.TrySpend"/> (gated, real purchase semantics --
+        /// unaffordable is a no-op, never a partial/negative debit), same
+        /// bad-input guards as ApplyBankHarvestLoad's own grant.</summary>
+        private void ApplySpendResource(Command cmd)
+        {
+            if (cmd.PlayerIndex < 0 || cmd.PlayerIndex >= _players.Length) return;
+            if (cmd.ArgA <= 0) return;
+            if (cmd.ArgB < 0 || cmd.ArgB >= Resources.Count) return;
+            _players[cmd.PlayerIndex].TrySpend((ResourceKind)cmd.ArgB, cmd.ArgA);
+        }
+
         /// <summary>2026-08 (docs/12 tech-wing epic, Phase 1): a Worker was
         /// possessed/spawned for `cmd.PlayerIndex` -- see <see
         /// cref="CommandKind.RegisterWorker"/>'s own doc comment for why
@@ -1273,6 +1289,9 @@ namespace MadDr.MatchCore
                     break;
                 case CommandKind.UnregisterWorker:
                     ApplyUnregisterWorker(cmd);
+                    break;
+                case CommandKind.SpendResource:
+                    ApplySpendResource(cmd);
                     break;
                 case CommandKind.None:
                 default:

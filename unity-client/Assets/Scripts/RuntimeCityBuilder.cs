@@ -3376,17 +3376,6 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return true;
     }
 
-    /// <summary>Bones twin of <see cref="TrySpendBlood"/>, same gated
-    /// contract -- <see cref="BeginCollectorBattalion"/>'s real purchase
-    /// needs it (a Collector battalion is bought outright up front, not
-    /// an unblockable economy sink like <see cref="SpendWalletForCast"/>).</summary>
-    public bool TrySpendBones(int amount)
-    {
-        if (amount < 0 || WalletBones < amount) return false;
-        WalletBones -= amount;
-        return true;
-    }
-
     public void OnCitizenEaten(Citizen citizen)
     {
         // docs/20 per-citizen yield: Blood 2 / Bones 1 / Brains 1
@@ -3565,16 +3554,32 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     }
 
     /// <summary>"Also add a way to do it in game" -- spends the class's
-    /// TotalBonesCost up front as a real, gated purchase (<see
-    /// cref="TrySpendBones"/>, never a partial/negative spend), then
-    /// trains the whole batch one unit at a time from the given
-    /// Complete, player-0-owned Big Brain building. One order per
-    /// building at a time, same single-in-progress-slot precedent
-    /// match-core's own <c>SimBuilding.TrainingKind</c> uses for the
-    /// real roster TrainUnit pipeline this mirrors client-side. Returns
-    /// false (wallet untouched) on any validation failure -- building
-    /// missing/not owned/not a Complete Big Brain, an order already
-    /// running there, or simply unaffordable.</summary>
+    /// TotalBonesCost up front as a real, gated purchase against the
+    /// REAL match-core wallet (<see cref="SimBridge.PlayerWallet"/>, the
+    /// same one <see cref="ResourceHud"/> displays), then trains the
+    /// whole batch one unit at a time from the given Complete,
+    /// player-0-owned Big Brain building. One order per building at a
+    /// time, same single-in-progress-slot precedent match-core's own
+    /// <c>SimBuilding.TrainingKind</c> uses for the real roster
+    /// TrainUnit pipeline this mirrors client-side. Returns false
+    /// (wallet untouched) on any validation failure -- building missing/
+    /// not owned/not a Complete Big Brain, an order already running
+    /// there, or simply unaffordable.
+    ///
+    /// 2026-08 fix (creator report: "I have 30 bones in inventory screen
+    /// but Train say I have 6"): this used to check/spend against
+    /// `RuntimeCityBuilder.WalletBones` -- a client-side counter that
+    /// ONLY ever moves via <see cref="OnCitizenEaten"/> (+1/citizen) and
+    /// this method's own old <c>TrySpendBones</c> call, completely
+    /// disconnected from the real match-core wallet every other Bones
+    /// SOURCE (harvester banking, scavenger salvage) and every other
+    /// Bones SINK (building construction) actually reads/writes. Now
+    /// reads <see cref="SimBridge.PlayerWallet"/> for the affordability
+    /// check and spends via the real <see
+    /// cref="SimBridge.QueueSpendResourceCommand"/> (new -- see <see
+    /// cref="CommandKind.SpendResource"/>'s own doc comment) instead of
+    /// a shadow counter, so "what Collector training can afford" and
+    /// "what the wallet HUD shows" are finally the same number.</summary>
     public bool BeginCollectorBattalion(uint bigBrainEntityId, CollectorClassDef def)
     {
         if (def == null || _simBridge == null || !_simBridge.HasMatch) return false;
@@ -3591,7 +3596,8 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
         var clampedBatch = Mathf.Clamp(def.BatchSize, CollectorClassDef.MinBatchSize, CollectorClassDef.MaxBatchSize);
         var cost = def.BonesCostPerUnit * clampedBatch;
-        if (!TrySpendBones(cost)) return false;
+        if (_simBridge.PlayerWallet(0, ResourceKind.Bones) < cost) return false;
+        _simBridge.QueueSpendResourceCommand(0, cost, ResourceKind.Bones);
 
         _collectorOrders[bigBrainEntityId] = new CollectorBattalionOrder
         {

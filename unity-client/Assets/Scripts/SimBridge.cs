@@ -344,6 +344,18 @@ public class SimBridge : MonoBehaviour
         _pending.Add(new Command(playerIndex, CommandKind.BankHarvestLoad, argA: amount, argB: (int)resource));
     }
 
+    /// <summary>2026-08 (Collector Lab battalion training, docs/12): debit
+    /// twin of <see cref="QueueBankHarvestLoadCommand"/> -- lets
+    /// <see cref="RuntimeCityBuilder.BeginCollectorBattalion"/> spend from
+    /// the REAL match-core wallet (the same one <see cref="PlayerWallet"/>
+    /// reports, which <see cref="ResourceHud"/> displays) instead of a
+    /// disconnected client-side counter -- see <see
+    /// cref="CommandKind.SpendResource"/>'s own doc comment.</summary>
+    public void QueueSpendResourceCommand(int playerIndex, int amount, ResourceKind resource)
+    {
+        _pending.Add(new Command(playerIndex, CommandKind.SpendResource, argA: amount, argB: (int)resource));
+    }
+
     /// <summary>2026-08 (docs/12 tech-wing epic, Phase 1): queue a
     /// RegisterWorker command for the NEXT tick boundary -- same "no
     /// source entity to validate" shape as <see

@@ -145,6 +145,17 @@ namespace MadDr.MatchCore
         /// <summary>Sibling of <see cref="RegisterWorker"/> for a Worker's
         /// death -- calls <see cref="PlayerState.RemoveWorker"/>.</summary>
         UnregisterWorker = 13,
+        /// <summary>2026-08 (Collector Lab battalion training, docs/12):
+        /// debit PlayerIndex's wallet ArgA of the resource ArgB names --
+        /// the spend twin of <see cref="BankHarvestLoad"/>'s own grant,
+        /// same "no source entity to validate against" shape (TargetEntity
+        /// unused) since Collector training is a Unity-only, non-SimUnit
+        /// purchase (Collector isn't a match-core unit at all, same as a
+        /// harvester monster isn't for BankHarvestLoad). A REAL, gated
+        /// spend (<see cref="PlayerState.TrySpend"/>) -- silently a no-op
+        /// if unaffordable, same bad-input contract as every other command
+        /// kind, never a partial/negative debit.</summary>
+        SpendResource = 14,
     }
 
     /// <summary>

@@ -16605,3 +16605,81 @@ after the edit; traced that `_builder.WalletBones` (a public property
 already read elsewhere, e.g. `TrySpendBones`) is the right live read
 for the affordability pre-check, not a stale/cached copy. Not seen in
 a real render -- same standing limitation as every entry in this log.
+
+## 2026-08 follow-up: "I have 30 bones in inventory screen but Train say I have 6" -- two disconnected wallets, Collector training now spends the real one
+
+**Root cause: two entirely separate Bones counters existed, and the
+Collector Lab work (both entries above) built on the wrong one.**
+`ResourceHud` (the top-right "inventory screen") reads `bridge.
+PlayerWallet(0, ResourceKind.Bones)` -- match-core's real, authoritative
+`PlayerState` wallet, the same one `BuildMenuHud`'s afford checks and
+`ApplyBuildStructure`'s real debits use. `RuntimeCityBuilder.
+WalletBones` (what `BeginCollectorBattalion` and `CollectorLabHud`'s
+Train check were both reading/spending, and what `HudStatus`'s "🩸 🦴
+🧠 (eaten citizens: N)" line displays) is a SEPARATE client-side int
+that only ever moves via `OnCitizenEaten` (+1/citizen eaten) and the
+Collector-training spend itself -- never touched by harvester banking,
+scavenger salvage, or anything else that credits the real wallet. Have
+30 real Bones (from harvesting, say) but only eaten 6 citizens, and the
+two numbers legitimately diverge exactly the way the creator reported:
+30 in the real wallet, 6 in the shadow one Collector Lab was checking.
+
+**Also confirmed, so a lazier fix wasn't attempted:** a negative-amount
+"spend via the existing BankHarvestLoad command" trick is NOT viable --
+`ApplyBankHarvestLoad` explicitly guards `if (cmd.ArgA <= 0) return;`,
+so it can only ever grant, never debit (checked by reading `MatchState.
+cs` directly before ruling this out, not assumed).
+
+**Real fix, not a display patch: Collector training now spends the
+actual match-core wallet.** New `CommandKind.SpendResource = 14`
+(`Command.cs`) + `MatchState.ApplySpendResource` (`PlayerState.
+TrySpend` -- gated, real purchase semantics, same bad-input-is-a-no-op
+guards as `ApplyBankHarvestLoad`'s own grant) -- the debit twin of the
+existing `BankHarvestLoad` credit command, same shape (no source
+entity, ArgA=amount, ArgB=ResourceKind). `SimBridge.
+QueueSpendResourceCommand` mirrors `QueueBankHarvestLoadCommand`
+exactly. `RuntimeCityBuilder.BeginCollectorBattalion` now checks
+`_simBridge.PlayerWallet(0, Bones)` (the real wallet) and queues the
+real spend command instead of calling the old `TrySpendBones` (deleted
+-- nothing else referenced it, confirmed by grep before removing).
+`CollectorLabHud.TryTrain`'s own affordability check and "Not enough
+Bones" message now read the same real wallet via `bridge.PlayerWallet`.
+Net effect: "what Collector training can afford," "what Train's error
+message says you have," and "what the top-right wallet panel shows"
+are now genuinely the same number, sourced from the same place.
+
+**What this does NOT fix, flagged rather than silently expanded into:**
+`OnCitizenEaten`'s own Blood/Bones/Brains yield STILL only credits the
+shadow `WalletBlood`/`WalletBones`/`WalletBrains` fields, never the
+real match-core wallet -- meaning eating citizens still doesn't
+actually buy anything a building or roster unit costs today (only
+harvester banking and scavenger salvage reach the real wallet). That's
+a real, separate, PRE-EXISTING gap (not introduced by the Collector Lab
+work, and not something the creator has reported yet) -- fixing it
+would mean deciding whether `OnCitizenEaten` should ALSO queue a
+`BankHarvestLoad` command per resource lane (the harvester-banking
+precedent) alongside its existing onboard-refill/tally bookkeeping, a
+real design question about what the "eaten citizens" HUD number is
+supposed to mean once it also drives the real wallet, better raised
+with the creator directly than guessed at here.
+
+**Verified manually** (no dotnet/.NET SDK or Unity Editor in this
+environment, same standing limitation as every match-core-touching
+entry in this log, including the two entries directly above): brace/
+paren balance confirmed across all five touched files (`Command.cs`,
+`MatchState.cs`, `SimBridge.cs`, `RuntimeCityBuilder.cs`,
+`CollectorLabHud.cs`) -- `RuntimeCityBuilder.cs`'s raw whole-file count
+initially showed a 1-paren mismatch (2028/2027), traced by stripping
+`///`/`//` comment-only lines and recounting (1618/1618, balanced) --
+the same recurring false-positive-from-prose-punctuation shape this
+log has hit repeatedly this session, not a real bug. Grepped for every
+remaining `TrySpendBones` reference after deleting it (one hit, inside
+a doc comment describing the OLD behavior, harmless). `PlayerState.
+TrySpend`'s exact gated ("false and unchanged if unaffordable")
+contract confirmed by reading `PlayerState.cs` directly before relying
+on it. Not seen in a real render or a real `dotnet test` run --
+`packages/match-core` has 255 existing xunit tests that exercise this
+exact command-dispatch switch; re-running them (impossible in this
+environment) is the natural first check the moment a real .NET SDK is
+available, before trusting `SpendResource` behaves correctly under
+anything but manual read-through.
