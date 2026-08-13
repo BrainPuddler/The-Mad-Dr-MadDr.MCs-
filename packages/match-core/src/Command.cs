@@ -156,6 +156,19 @@ namespace MadDr.MatchCore
         /// if unaffordable, same bad-input contract as every other command
         /// kind, never a partial/negative debit.</summary>
         SpendResource = 14,
+        /// <summary>2026-08 (Zombie/SCV-style construction, docs/12,
+        /// creator direction: "[zombies] build things" -- construction
+        /// should require a Worker physically present, not just tick down
+        /// on its own): toggles TargetEntity's <see
+        /// cref="SimBuilding.IsStaffed"/> (ArgA=0/1) -- Unity sends this
+        /// the instant a Worker/Zombie arrives at (true) or leaves/dies
+        /// away from (false) an UnderConstruction building it's staffing.
+        /// Silently a no-op for a missing building or one PlayerIndex
+        /// doesn't own, same bad-input contract as every other command
+        /// kind. No source entity to validate (a Worker isn't a <see
+        /// cref="SimUnit"/>, same shape as <see
+        /// cref="RegisterWorker"/>/<see cref="BankHarvestLoad"/>).</summary>
+        SetBuildingStaffed = 15,
     }
 
     /// <summary>

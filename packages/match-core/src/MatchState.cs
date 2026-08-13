@@ -978,6 +978,25 @@ namespace MadDr.MatchCore
             _players[cmd.PlayerIndex].TrySpend((ResourceKind)cmd.ArgB, cmd.ArgA);
         }
 
+        /// <summary>2026-08 (Zombie/SCV-style construction, docs/12): see
+        /// <see cref="CommandKind.SetBuildingStaffed"/>'s own doc comment.
+        /// Silently a no-op for a missing building or one `cmd.PlayerIndex`
+        /// doesn't own -- deliberately does NOT touch <see
+        /// cref="PlayerState.TryOccupyWorker"/>/<see
+        /// cref="PlayerState.ReleaseWorker"/> (a staffing Worker still
+        /// counts as "available" for the unrelated worker-gated-placement
+        /// check today) -- flagged as a known follow-up, not silently
+        /// assumed, since wiring that in needs its own failure-mode design
+        /// (what happens if TryOccupyWorker fails after a Worker already
+        /// told Unity it arrived and started staffing?).</summary>
+        private void ApplySetBuildingStaffed(Command cmd)
+        {
+            if (cmd.PlayerIndex < 0 || cmd.PlayerIndex >= _players.Length) return;
+            var building = FindBuilding(cmd.TargetEntity);
+            if (building == null || building.PlayerIndex != cmd.PlayerIndex) return;
+            building.SetStaffed(cmd.ArgA != 0);
+        }
+
         /// <summary>2026-08 (docs/12 tech-wing epic, Phase 1): a Worker was
         /// possessed/spawned for `cmd.PlayerIndex` -- see <see
         /// cref="CommandKind.RegisterWorker"/>'s own doc comment for why
@@ -1292,6 +1311,9 @@ namespace MadDr.MatchCore
                     break;
                 case CommandKind.SpendResource:
                     ApplySpendResource(cmd);
+                    break;
+                case CommandKind.SetBuildingStaffed:
+                    ApplySetBuildingStaffed(cmd);
                     break;
                 case CommandKind.None:
                 default:

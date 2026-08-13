@@ -61,6 +61,20 @@ namespace MadDr.RosterClient
         {
             return new WeaponProfile(WeaponKind.Flame, "flamethrower", 22, 11, 0.22, 0, 24, 255, 120, 30);
         }
+
+        /// <summary>2026-08 (Zombie/Worker cannon-fodder combat, docs/12,
+        /// creator direction: "could also inflict damage but a lot less
+        /// than full monsters"): deliberately the weakest concrete weapon
+        /// in the codebase -- short range, low damage, slow cadence, well
+        /// under even the weakest genome-driven melee hand family
+        /// (`pincer`, roughly 13 + girth*10 damage at 6m) and under <see
+        /// cref="TankFlamethrower"/>'s 11. Sickly green-grey tint, not a
+        /// faction color -- a Worker/Zombie's hull already carries its own
+        /// khaki identity (Worker.cs's own BuildModel).</summary>
+        public static WeaponProfile ZombieClaws()
+        {
+            return new WeaponProfile(WeaponKind.Melee, "zombie claws", 3, 7, 1.1, 0, 0, 140, 170, 110);
+        }
     }
 
     /// <summary>A combatant's fight stats derived from its genome: the

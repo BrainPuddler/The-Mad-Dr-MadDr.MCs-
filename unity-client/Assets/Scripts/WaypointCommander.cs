@@ -49,6 +49,19 @@ public class WaypointCommander : MonoBehaviour
     private RuntimeCityBuilder _builder;
     private readonly List<MonsterAgent> _selected = new List<MonsterAgent>();
 
+    // 2026-08 (Zombie/SCV-style "cannon fodder I choose," docs/12): a
+    // SEPARATE, parallel selection for Worker/Zombie units rather than
+    // widening `_selected` -- that list (and everything built on it:
+    // battalions, AssignFormation, SelectionHud, HudStatus's own detail
+    // lines) is deeply MonsterAgent-typed throughout this file, and
+    // Worker's real order vocabulary is intentionally much smaller (move
+    // only -- combat/scavenge/build are automatic, see Worker.cs's own
+    // header). Mutually exclusive with `_selected`: selecting a Worker
+    // clears any Monster selection and vice versa, enforced by
+    // `ClearMonsterSelection`/`ClearWorkerSelection` at the start of
+    // every selection-mutating method on both sides.
+    private readonly List<Worker> _selectedWorkers = new List<Worker>();
+
     // left-drag marquee state
     private bool _leftDown;
     private Vector2 _dragStart;
@@ -342,9 +355,21 @@ public class WaypointCommander : MonoBehaviour
 
         if ((up - _dragStart).sqrMagnitude > DragThresholdSq)
         {
-            // a drag: marquee box-select
-            var hits = UnitsInBox(cam, ScreenRect(_dragStart, up));
-            if (additive) AddToSelection(hits); else SetSelection(hits);
+            // a drag: marquee box-select. Monsters take priority over
+            // Workers when a box happens to catch both (the common case
+            // in practice is a box drawn for one or the other, not a mix)
+            // -- only checks for Workers when the box caught zero Monsters.
+            var box = ScreenRect(_dragStart, up);
+            var hits = UnitsInBox(cam, box);
+            if (hits.Count > 0)
+            {
+                if (additive) AddToSelection(hits); else SetSelection(hits);
+            }
+            else
+            {
+                var workerHits = WorkersInBox(cam, box);
+                if (additive) AddToWorkerSelection(workerHits); else SetSelectedWorkers(workerHits);
+            }
             return;
         }
 
@@ -359,6 +384,12 @@ public class WaypointCommander : MonoBehaviour
 
         if (agent == null)
         {
+            var worker = WorkerUnderCursor(cam, mouse);
+            if (worker != null)
+            {
+                if (additive) AddWorkerToSelection(worker); else SetSelectedWorkers(new List<Worker> { worker });
+                return;
+            }
             if (!additive) ClearSelection();   // Shift+click empty keeps the current group
             return;
         }
@@ -389,7 +420,16 @@ public class WaypointCommander : MonoBehaviour
             || (ctrlHeld && leftPressed) || attackMoveClick || patrolClick;
         if (!ordered) return;
         PruneSelection();
-        if (_selected.Count == 0) return;
+
+        // 2026-08 (Zombie/SCV-style "cannon fodder I choose," docs/12): no
+        // selected Monsters -- try the separate, much simpler Worker order
+        // path (ground = move, nothing else; combat/scavenge/build are
+        // automatic, see Worker.cs's own header) instead of just bailing.
+        if (_selected.Count == 0)
+        {
+            HandleWorkerOrders(cam, mouse);
+            return;
+        }
 
         var hit = RaycastCursor(cam, mouse);
         if (!hit.HasValue || hit.Value.collider == null) return;
@@ -687,26 +727,34 @@ public class WaypointCommander : MonoBehaviour
     /// per-type icons, to narrow the selection down to just that type.</summary>
     public void SetSelection(List<MonsterAgent> agents)
     {
-        foreach (var a in _selected) if (a != null) a.SetSelected(false);
-        _selected.Clear();
+        ClearWorkerSelection();
+        ClearMonsterSelection();
         foreach (var a in agents)
             if (a != null && !_selected.Contains(a)) { _selected.Add(a); a.SetSelected(true); }
     }
 
     private void AddToSelection(List<MonsterAgent> agents)
     {
+        ClearWorkerSelection();
         foreach (var a in agents)
             if (a != null && !_selected.Contains(a)) { _selected.Add(a); a.SetSelected(true); }
     }
 
     private void ToggleSelection(MonsterAgent agent)
     {
+        ClearWorkerSelection();
         if (_selected.Remove(agent)) { agent.SetSelected(false); return; }
         _selected.Add(agent);
         agent.SetSelected(true);
     }
 
     private void ClearSelection()
+    {
+        ClearMonsterSelection();
+        ClearWorkerSelection();
+    }
+
+    private void ClearMonsterSelection()
     {
         foreach (var a in _selected) if (a != null) a.SetSelected(false);
         _selected.Clear();
@@ -718,6 +766,61 @@ public class WaypointCommander : MonoBehaviour
     {
         for (var i = _selected.Count - 1; i >= 0; i--)
             if (_selected[i] == null) _selected.RemoveAt(i);
+    }
+
+    // ---- Worker/Zombie selection (2026-08, docs/12) -- parallel to the
+    // Monster set above, see the `_selectedWorkers` field's own header
+    // for why this stays separate rather than widening `_selected`. -----
+
+    public void SetSelectedWorkers(List<Worker> workers)
+    {
+        ClearMonsterSelection();
+        ClearWorkerSelection();
+        foreach (var w in workers)
+            if (w != null && !_selectedWorkers.Contains(w)) { _selectedWorkers.Add(w); w.SetSelected(true); }
+    }
+
+    private void AddToWorkerSelection(List<Worker> workers)
+    {
+        ClearMonsterSelection();
+        foreach (var w in workers)
+            if (w != null && !_selectedWorkers.Contains(w)) { _selectedWorkers.Add(w); w.SetSelected(true); }
+    }
+
+    private void AddWorkerToSelection(Worker worker)
+    {
+        ClearMonsterSelection();
+        if (worker != null && !_selectedWorkers.Contains(worker)) { _selectedWorkers.Add(worker); worker.SetSelected(true); }
+    }
+
+    private void ClearWorkerSelection()
+    {
+        foreach (var w in _selectedWorkers) if (w != null) w.SetSelected(false);
+        _selectedWorkers.Clear();
+    }
+
+    private void PruneWorkerSelection()
+    {
+        for (var i = _selectedWorkers.Count - 1; i >= 0; i--)
+            if (_selectedWorkers[i] == null) _selectedWorkers.RemoveAt(i);
+    }
+
+    /// <summary>Ground-only order path for a Worker/Zombie selection --
+    /// no attack-unit/citizen/building/scavenge routing, since those are
+    /// all automatic for a Worker (see Worker.cs's own header); a move
+    /// order is the one thing "cannon fodder I choose" actually needs a
+    /// player-issued command for.</summary>
+    private void HandleWorkerOrders(Camera cam, Mouse mouse)
+    {
+        PruneWorkerSelection();
+        if (_selectedWorkers.Count == 0) return;
+        var hit = RaycastCursor(cam, mouse);
+        if (!hit.HasValue || hit.Value.collider == null) return;
+        var hex = _builder.HexAt(hit.Value.point);
+        if (!_builder.City.Contains(hex)) return;
+        var dest = _builder.WorldOf(hex);
+        foreach (var w in _selectedWorkers) if (w != null) w.OrderMoveTo(dest);
+        _builder.SpawnWaypointMarker(dest);
     }
 
     // ---- picking helpers -----------------------------------------------------
@@ -753,6 +856,26 @@ public class WaypointCommander : MonoBehaviour
         var hit = RaycastCursor(cam, mouse);
         if (!hit.HasValue || hit.Value.collider == null) return null;
         return hit.Value.collider.GetComponentInParent<MonsterAgent>();
+    }
+
+    private List<Worker> WorkersInBox(Camera cam, Rect boxBottomLeft)
+    {
+        var hits = new List<Worker>();
+        foreach (var w in _builder.Workers)
+        {
+            if (w == null) continue;
+            var sp = cam.WorldToScreenPoint(w.transform.position);
+            if (sp.z <= 0f) continue;
+            if (boxBottomLeft.Contains(new Vector2(sp.x, sp.y))) hits.Add(w);
+        }
+        return hits;
+    }
+
+    private Worker WorkerUnderCursor(Camera cam, Mouse mouse)
+    {
+        var hit = RaycastCursor(cam, mouse);
+        if (!hit.HasValue || hit.Value.collider == null) return null;
+        return hit.Value.collider.GetComponentInParent<Worker>();
     }
 
     /// <summary>Normalized (positive width/height) rect from two screen

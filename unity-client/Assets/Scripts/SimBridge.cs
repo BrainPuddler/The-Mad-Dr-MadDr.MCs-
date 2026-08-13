@@ -356,6 +356,17 @@ public class SimBridge : MonoBehaviour
         _pending.Add(new Command(playerIndex, CommandKind.SpendResource, argA: amount, argB: (int)resource));
     }
 
+    /// <summary>2026-08 (Zombie/SCV-style construction, docs/12): toggles
+    /// `buildingEntityId`'s <see cref="SimBuilding.IsStaffed"/> -- see
+    /// <see cref="CommandKind.SetBuildingStaffed"/>'s own doc comment.
+    /// TargetEntity carries the building id (the "generic slots
+    /// reinterpreted per Kind" contract every command already uses);
+    /// ArgA is the staffed bool as 0/1.</summary>
+    public void QueueSetBuildingStaffedCommand(int playerIndex, uint buildingEntityId, bool staffed)
+    {
+        _pending.Add(new Command(playerIndex, CommandKind.SetBuildingStaffed, targetEntity: buildingEntityId, argA: staffed ? 1 : 0));
+    }
+
     /// <summary>2026-08 (docs/12 tech-wing epic, Phase 1): queue a
     /// RegisterWorker command for the NEXT tick boundary -- same "no
     /// source entity to validate" shape as <see

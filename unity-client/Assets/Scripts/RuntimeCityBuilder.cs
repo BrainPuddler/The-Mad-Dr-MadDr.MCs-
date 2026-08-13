@@ -311,6 +311,14 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     private readonly Dictionary<ResourceKind, int> _pendingSpend = new Dictionary<ResourceKind, int>();
     private int _pendingSpendFrame = -1;
 
+    // 2026-08 (Zombie/SCV-style construction, docs/12): every player-0
+    // building entity id this class has already sent an initial "pause,
+    // nobody's staffing you yet" command for -- same once-per-EntityId
+    // guard idiom as BaseDresser's own `_destroyedHandled` (match-core's
+    // building list only grows, so without this it would refire every
+    // frame forever).
+    private readonly HashSet<uint> _constructionPauseHandled = new HashSet<uint>();
+
     /// <summary>Every fighting unit -- monsters and tanks. The health-bar
     /// HUD, enemy targeting, and no-overlap separation all read this.</summary>
     public IReadOnlyList<UnitCombat> Combatants { get { return _combatants; } }
@@ -655,6 +663,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     private void Update()
     {
         TickCollectorProduction(Time.deltaTime);
+        TickConstructionStaffing();
 
         if (_trafficCars.Count > 0)
         {
@@ -2872,6 +2881,56 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 if (h == hex) return state.Building;
         }
         return null;
+    }
+
+    /// <summary>2026-08 (Zombie/SCV-style construction, docs/12): the
+    /// local human player's own nearest <c>UnderConstruction</c> RTS
+    /// building that ISN'T currently staffed by a Worker -- the
+    /// construction counterpart to <see
+    /// cref="NearestScavengeableBuildingTo"/> above, same nearest-of-
+    /// state-Y idiom <see cref="BaseDresser"/>'s own UnderConstruction
+    /// enumeration already establishes, just querying <see
+    /// cref="SimBridge.BuildingAt"/> (real match-core `SimBuilding`s)
+    /// instead of the procedural civilian `Building` list those two
+    /// query -- a genuinely different building type, not a typo.</summary>
+    public SimBuilding NearestUnstaffedConstructionSite(Vector3 position, float within)
+    {
+        if (_simBridge == null || !_simBridge.HasMatch) return null;
+        SimBuilding best = null;
+        var bestSq = within * within;
+        for (var i = 0; i < _simBridge.BuildingCount; i++)
+        {
+            var b = _simBridge.BuildingAt(i);
+            if (b.PlayerIndex != 0 || b.State != BuildingState.UnderConstruction || b.IsStaffed) continue;
+            var d = WorldOf(b.Hex) - position;
+            d.y = 0f;
+            if (d.sqrMagnitude < bestSq) { bestSq = d.sqrMagnitude; best = b; }
+        }
+        return best;
+    }
+
+    /// <summary>Ticked every <see cref="Update"/>: the instant a player-0
+    /// building enters <c>UnderConstruction</c>, queues one <see
+    /// cref="SimBridge.QueueSetBuildingStaffedCommand"/> pausing it
+    /// (`IsStaffed` defaults true match-core-side, exactly the pre-2026-08
+    /// behavior, so it has to be Unity that actively pauses a fresh
+    /// human build the instant it notices one -- see <see
+    /// cref="SimBuilding.IsStaffed"/>'s own header for why match-core
+    /// itself can't default this per-player). A Worker/Zombie's own AI
+    /// (<see cref="Worker.TickSeekBuild"/>) then un-pauses it once one
+    /// physically arrives. AI opponents (any other PlayerIndex) never
+    /// receive this command at all, so their construction is completely
+    /// unaffected.</summary>
+    private void TickConstructionStaffing()
+    {
+        if (_simBridge == null || !_simBridge.HasMatch) return;
+        for (var i = 0; i < _simBridge.BuildingCount; i++)
+        {
+            var b = _simBridge.BuildingAt(i);
+            if (b.PlayerIndex != 0 || b.State != BuildingState.UnderConstruction) continue;
+            if (!_constructionPauseHandled.Add(b.EntityId)) continue;
+            _simBridge.QueueSetBuildingStaffedCommand(0, b.EntityId, false);
+        }
     }
 
     /// <summary>docs/12 follow-up: the reclaim-eligibility gate for a

@@ -150,6 +150,24 @@ namespace MadDr.MatchCore
             return null;
         }
 
+        /// <summary>2026-08 (Zombie/SCV-style construction, docs/12,
+        /// creator direction: "[zombies] build things"): whether
+        /// construction is actively progressing THIS tick -- <see
+        /// cref="Tick"/> below now only advances <see
+        /// cref="_ticksUntilComplete"/> while this is true. Defaults to
+        /// `true` (construction ticks unconditionally, exactly the
+        /// pre-2026-08 behavior) so every existing building/test that
+        /// never calls <see cref="SetStaffed"/> is completely unaffected
+        /// -- only Unity's own Worker/Zombie AI (via the new <see
+        /// cref="CommandKind.SetBuildingStaffed"/> command) ever sets this
+        /// false, and only ever for the local human player's own
+        /// buildings. AI opponents and any other player index simply
+        /// never receive that command, so their construction is
+        /// unconditionally unaffected by this field's existence.</summary>
+        public bool IsStaffed { get; private set; } = true;
+
+        internal void SetStaffed(bool staffed) => IsStaffed = staffed;
+
         internal SimBuilding(uint entityId, int playerIndex, BuildingKind kind, HexCoord hex,
             int maxHp, int buildTimeTicks, bool completeImmediately)
         {
@@ -179,6 +197,7 @@ namespace MadDr.MatchCore
         internal void Tick()
         {
             if (State != BuildingState.UnderConstruction) return;
+            if (!IsStaffed) return;
             if (_ticksUntilComplete > 0) _ticksUntilComplete--;
             if (_ticksUntilComplete <= 0) State = BuildingState.Complete;
         }
@@ -228,6 +247,7 @@ namespace MadDr.MatchCore
             h.Add(TrainingKind.HasValue ? (int)TrainingKind.Value : -1);
             h.Add(TrainTicksRemaining);
             h.Add(ScavengeRemaining);
+            h.Add(IsStaffed ? 1 : 0);
         }
     }
 }

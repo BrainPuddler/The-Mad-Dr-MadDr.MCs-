@@ -16796,3 +16796,165 @@ reservation-ledger fix exists for. Not seen in a real render or a real
 `dotnet test` run -- worth confirming the reservation ledger's frame-
 boundary logic against `SimBridge.CurrentFrame`'s real tick cadence the
 moment either environment is available.
+
+## 2026-08: Zombie -- Worker upgraded into an SCV-style unit (auto-scavenge, real staffed construction, weak combat)
+
+Direct follow-up to "I was thinking that zombie could act like SCV
+(starcraft) used to automatically scavenge resources, build things and
+be cannon fodder I choose, could also inflict damage but a lot less
+than full monsters. Zombie hord sort of thing. Monsters would still
+collect resources" -- itself prompted by the creator discovering
+Collector (this session's own new feature) doesn't scavenge debris,
+which surfaced that the "zombie ghoul-ish units" an older 2026-08 entry
+("debris scavenging + hex reclaim") had explicitly deferred ("we will
+wire the zombies ghoul-ish units in later") were never actually built.
+
+**Three `AskUserQuestion` answers, all the recommended option, shaped
+the whole design:**
+
+1. **Same unit, upgraded** -- "Zombie" is a display-only fiction layer
+   over the EXISTING possessed-citizen `Worker` (class/field names stay
+   `Worker`/`Workers`/`WorkerCount` everywhere -- `BuildingDef.cs`'s own
+   "stats generic, names themed" convention), not a second unit type
+   needing its own spawn source.
+2. **Auto-gathers debris only, never citizens** -- "monsters would
+   still collect resources" is why a Worker's idle AI never searches
+   for a Citizen the way a harvester Monster does.
+3. **Real active construction** -- a Worker must be PHYSICALLY staffing
+   an `UnderConstruction` building for it to progress at all, not just
+   a placement-time gate like the pre-existing `RequiresWorker` check.
+
+**Match-core (`packages/match-core/src`), the riskiest piece, designed
+to be additive-only so it can't touch the 288 existing tests' own
+assumptions:**
+
+- `SimBuilding.IsStaffed` (new, defaults **`true`**) + `SetStaffed(bool)`.
+  `Tick()` gained one line (`if (!IsStaffed) return;`) right after the
+  existing state check. Defaulting true is the whole safety story: a
+  building that never receives the new command ticks down exactly as
+  it always has -- AI opponents (who never get a Worker/Zombie concept
+  at all) are completely unaffected, since nothing ever calls
+  `SetStaffed(false)` on their buildings. Only Unity's own Worker AI,
+  and only for the local human's (player 0's) own buildings, ever
+  flips this. Hashed into `WriteTo` (appended at the end -- confirmed
+  via direct read that match-core has NO pinned historical hash file
+  the way genome-core's `golden.txt` is; `DetHarness` only ever
+  compares two same-session runs to each other, so a new hashed field
+  can't break a stored value that doesn't exist).
+- `CommandKind.SetBuildingStaffed = 15` (`Command.cs`, next free value
+  after last session's `SpendResource = 14`, confirmed) + `MatchState.
+  ApplySetBuildingStaffed` (`Command.cs`/`MatchState.cs`) -- TargetEntity
+  = building id, ArgA = staffed 0/1, silent no-op for a missing
+  building or one `PlayerIndex` doesn't own, same "bad input is a
+  no-op" contract as every other command. Deliberately does NOT touch
+  `PlayerState.TryOccupyWorker`/`ReleaseWorker`/`BusyWorkers` (a
+  staffing Worker still counts as "available" for the unrelated
+  worker-gated-placement check today) -- flagged as a known follow-up
+  in the code itself, not silently assumed, since wiring that in needs
+  its own failure-mode design (a Worker that already told Unity it
+  arrived, only for `TryOccupyWorker` to fail server-side).
+- `SimBridge.QueueSetBuildingStaffedCommand` mirrors the existing
+  `QueueBankHarvestLoadCommand` pattern exactly.
+
+**Unity, `RuntimeCityBuilder.cs`:**
+
+- `NearestUnstaffedConstructionSite(Vector3, float)`: the local human's
+  own nearest unstaffed `UnderConstruction` `SimBuilding` -- the
+  construction counterpart to the existing `NearestScavengeableBuildingTo`
+  (which queries a totally different type, the PROCEDURAL civilian
+  `Building`/`BuildingRuntimeState` model city-combat destroys -- these
+  are two genuinely separate scavenge/building systems that happen to
+  share naming conventions, confirmed by reading both call chains
+  directly rather than assumed).
+- `TickConstructionStaffing()` (ticked every `Update()`, same
+  once-per-EntityId `HashSet` guard idiom `BaseDresser`'s own
+  `_destroyedHandled` already established): the instant a player-0
+  building is first seen `UnderConstruction`, queues one `SetStaffed
+  (false)` -- since match-core defaults `IsStaffed=true` for safety,
+  Unity has to be the one to actively pause a fresh HUMAN build; AI
+  opponents' buildings never receive this command at all, so they're
+  untouched.
+
+**Unity, `Worker.cs` (full rewrite):** gained a real state machine
+(`Idle`/`PlayerMove`/`SeekBuild`/`Staffing`/`SeekScavenge`) plus combat:
+
+- **Combat**: `WeaponProfile.ZombieClaws()` (new, `packages/roster-
+  client/src/Weapon.cs` -- range 3, damage 7, cadence 1.1, deliberately
+  the weakest concrete weapon stat block in the codebase, well under
+  even the weakest genome-driven melee hand family). Auto-aggro within
+  a short `AggroRadius` (25m, vs. `Tank`'s own 150m battlefield
+  awareness) using the EXACT same `NearestEnemyOf`/`TryFire` pattern
+  `Tank.cs` already established -- "cannon fodder I choose" is
+  satisfied by the unit being selectable/move-orderable (below), not by
+  attacks themselves being a separate player-issued order; zombie-horde
+  mindless violence overriding economic work the instant an enemy is
+  close fits the fiction better than a stance toggle would, and is
+  substantially simpler to implement correctly.
+- **Auto-build**: idle Workers seek the nearest unstaffed construction
+  site first (`TickSeekBuild`), and once in reach queue `SetStaffed
+  (true)` and stand there (`TickStaffing`) until it completes, gets
+  destroyed, or the Worker is reassigned/dies (unstaffing cleanly on
+  every exit, including `OnDied`, so a dead Worker never leaves a
+  building falsely marked staffed forever).
+- **Auto-scavenge**: falls back to the nearest scavengeable civilian
+  wreck (`TickSeekScavenge`) only when no construction needs staffing.
+  A Worker has no onboard tank the way a harvester Monster does, so
+  scavenging is a single instant gulp of the WHOLE remaining pile on
+  arrival, banked straight through the existing `BankHarvestLoad`
+  delivery path (this session's earlier real-wallet work) -- a
+  deliberate simplification over Monster's carry-it-home model, flagged
+  rather than silently matched.
+- **Player orders**: new `OrderMoveTo(Vector3)` -- the only order a
+  Worker takes, since combat/build/scavenge are all automatic.
+  Abandons/unstaffs whatever it was doing first.
+
+**Unity, `WaypointCommander.cs`:** Worker selection is a genuinely
+SEPARATE, parallel list (`_selectedWorkers`), not a widening of the
+existing `_selected` -- that list (and everything built on it:
+battalions, `AssignFormation`, `SelectionHud`, `HudStatus`'s own detail
+lines) is deeply `MonsterAgent`-typed throughout this file, and a
+Worker's real order vocabulary is intentionally much smaller (move
+only). Mutually exclusive with Monster selection in both directions
+(`ClearMonsterSelection`/`ClearWorkerSelection` called at the start of
+every selection-mutating method on both sides). Box-select/click-select
+check Workers only when the same action found zero Monsters; a new
+`HandleWorkerOrders` (ground = move, nothing else) runs only when
+`_selected.Count == 0`, so it can never fire alongside or interfere
+with the existing, untouched Monster order body.
+
+**What this deliberately does NOT do, flagged rather than gold-plated:**
+no multi-Worker speed bonus (staffing is a boolean, not a count -- two
+Workers at the same site do nothing a lone one doesn't); no HUD readout
+for the Worker selection (no "N Zombies selected" line anywhere yet);
+no player-issued attack-target order (auto-aggro only); `PlayerState.
+BusyWorkers`/`TryOccupyWorker` integration (noted above); a benign race
+where two idle Workers can both target the same unstaffed site in the
+same frame before either commits (redundant, not harmful -- the second
+one's command is a no-op once the first lands).
+
+**Verified manually** (no dotnet/.NET SDK or Unity Editor in this
+environment, same standing limitation as every match-core-touching
+entry in this log): brace/paren balance confirmed across all seven
+touched files (`Worker.cs`, `WaypointCommander.cs`, `RuntimeCityBuilder.cs`,
+`SimBridge.cs`, `SimBuilding.cs`, `Command.cs`, `MatchState.cs`,
+`Weapon.cs` -- `RuntimeCityBuilder.cs`'s raw whole-file paren count hit
+the same recurring comment-punctuation false-positive this log has hit
+repeatedly; stripped `///`/`//` lines and recounted, 1656/1656,
+balanced); every new symbol (`IsStaffed`, `SetBuildingStaffed`,
+`QueueSetBuildingStaffedCommand`, `NearestUnstaffedConstructionSite`,
+`ZombieClaws`) traced by grep across every file that declares or calls
+it to confirm names/signatures agree; `UnitCombat.Configure`'s exact
+parameter shape and `Tank.cs`'s own `NearestEnemyOf`/`TryFire`/
+`AimPoint`/`Weapon.Range`/`SpeedMultiplier` combat pattern read directly
+before mirroring it, not assumed from memory; confirmed `Building.
+Footprint`/`RuntimeCityBuilder.DrainBuildingScavenge`'s own doc comment
+("Parts now flows through the SAME onboard-tank/deliver-to-Factory loop
+every other harvested resource already uses... does NOT credit a wallet
+directly") before choosing to call `BankHarvestLoad` after draining,
+confirming that's the actually-intended pairing, not a guess. Not seen
+in a real render or a real `dotnet test`/Play-mode run -- the biggest
+untested surface in this entry is the match-core staffing gate's
+interaction with real gameplay timing (does a Worker reliably reach a
+freshly-placed building before the player notices construction stalled
+at 0%?) and the new parallel Worker-selection UX, both worth a first
+real look the moment either environment is available.
