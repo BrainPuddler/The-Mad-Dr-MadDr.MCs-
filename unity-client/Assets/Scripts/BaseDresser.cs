@@ -205,8 +205,10 @@ public class BaseDresser : MonoBehaviour
                 // this holds even if a future trim addition reaches a
                 // little further still.
                 var footprintRadius = fullScale.x * 0.8f;
-                DamageFx.AttachSmoke(root.transform, fullScale.y, footprintRadius, SmokeScaleFor(def));
-                DamageFx.AttachFireCluster(root.transform, fullScale.y, footprintRadius, FireCountFor(def));
+                // 2026-08 (SmokeCluster follow-up): fire attaches FIRST --
+                // see DamageFx.AttachFireCluster's own doc comment for why.
+                var fire = DamageFx.AttachFireCluster(root.transform, fullScale.y, footprintRadius, FireCountFor(def));
+                DamageFx.AttachSmoke(root.transform, fire, SmokeScaleFor(def));
             }
         }
     }

@@ -2618,12 +2618,23 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 // any renderer whose ancestor is a live FX root -- this
                 // loop was written before fire/smoke existed under this
                 // same hierarchy and was never audited against it.
+                //
+                // 2026-08 follow-up (SmokeCluster follow-up, see that
+                // class's own header): the damage-triggered smoke path's
+                // wrapper type changed from `SmokePlume` to `SmokeCluster`
+                // -- this skip-check is keyed off component TYPE, so it
+                // would otherwise silently stop protecting damage smoke
+                // (while still protecting `SmokePlume`'s one remaining
+                // caller, the standalone chimney) and reopen the exact
+                // "goes solid" bug this comment describes, just for the
+                // new class instead of the old one.
                 var damagedBlock = new MaterialPropertyBlock();
                 foreach (var cube in cubes)
                 {
                     foreach (var renderer in cube.GetComponentsInChildren<Renderer>())
                     {
                         if (renderer.GetComponentInParent<SmokePlume>() != null) continue;
+                        if (renderer.GetComponentInParent<SmokeCluster>() != null) continue;
                         if (renderer.GetComponentInParent<FireCluster>() != null) continue;
                         var c = renderer.sharedMaterial != null ? renderer.sharedMaterial.color : Color.gray;
                         var darkened = new Color(c.r * 0.6f, c.g * 0.6f, c.b * 0.6f);
@@ -2791,8 +2802,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // own doc comment for the full writeup; -height*0.5f is the
         // correction back to true ground level.
         var groundOffset = -height * 0.5f;
-        DamageFx.AttachSmoke(cube.transform, height, footprintRadius, BuildingStats.SmokeScale(building.Tier), groundOffset);
-        DamageFx.AttachFireCluster(cube.transform, height, footprintRadius, BuildingStats.FireCount(building.Tier), groundOffset);
+        // 2026-08 (SmokeCluster follow-up): fire attaches FIRST now --
+        // SmokeCluster reads the FireCluster it's given, so that
+        // FireCluster has to exist (and be Init'd) before AttachSmoke can
+        // wire it up. See DamageFx.AttachFireCluster's own doc comment.
+        var fire = DamageFx.AttachFireCluster(cube.transform, height, footprintRadius, BuildingStats.FireCount(building.Tier), groundOffset);
+        DamageFx.AttachSmoke(cube.transform, fire, BuildingStats.SmokeScale(building.Tier), groundOffset);
     }
 
     /// <summary>2026-08 (creator direction: "assign some salvage parts

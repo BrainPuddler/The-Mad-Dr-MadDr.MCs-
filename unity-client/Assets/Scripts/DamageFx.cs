@@ -82,28 +82,39 @@ public static class DamageFx
     /// <see cref="AttachFireCluster"/>'s own points sit at -- so a puff's
     /// own rise (<see cref="DamageFxProfile.Active"/>.SmokeRiseSpeed) has
     /// real distance to visibly climb THROUGH and past the structure
-    /// instead of starting already above it.</summary>
-    public static void AttachSmoke(Transform holder, float height, float footprintRadius, float scale, float holderGroundOffset = 0f)
+    /// instead of starting already above it.
+    ///
+    /// 2026-08 SUPERSEDED (creator report: smoke "no longer behaving
+    /// correctly or is not rendering at all" -- full root-cause writeup on
+    /// <see cref="SmokeCluster"/>'s own header): the single random-angle
+    /// `SmokePlume` this method used to attach is GONE from this call
+    /// site -- replaced by <see cref="SmokeCluster"/>, which reacts to
+    /// `fire`'s own real per-column heat instead of starting a flat,
+    /// unconditional loop the instant a building takes any damage.
+    /// `SmokePlume` itself is untouched and still lives on for the ONE
+    /// remaining caller that genuinely wants a flat, damage-independent
+    /// loop -- BaseDresser's standalone `ChimneySmoke` (ambient factory-
+    /// stack smoke, which was never routed through this method to begin
+    /// with, so it's unaffected by this change either way).</summary>
+    public static SmokeCluster AttachSmoke(Transform holder, FireCluster fire, float scale, float holderGroundOffset = 0f)
     {
-        var go = new GameObject("SmokePlume");
+        var go = new GameObject("SmokeCluster");
         go.transform.SetParent(holder, false);
         NormalizeScale(go.transform, holder);
-        var angle = ((holder.GetInstanceID() & 0xFFFF) % 360) * Mathf.Deg2Rad;
-        var groundY = holder.position.y + holderGroundOffset;
-        var pos = new Vector3(
-            holder.position.x + Mathf.Sin(angle) * footprintRadius,
-            groundY + height * 0.3f,
-            holder.position.z + Mathf.Cos(angle) * footprintRadius);
-        go.transform.position = pos;
-        go.AddComponent<SmokePlume>().Init(scale, angle);
+        var groundPos = new Vector3(holder.position.x, holder.position.y + holderGroundOffset, holder.position.z);
+        go.transform.position = groundPos;
+        var cluster = go.AddComponent<SmokeCluster>();
+        cluster.Init(fire, scale);
         // 2026-08 (creator direction: "figure out how to verify fire is
-        // being seen"): no Editor exists in the environment this was
-        // written in, so this is the best available diagnostic -- check
-        // the Console for this line to confirm a plume was actually
-        // created and see exactly where, rather than having to guess
-        // whether a reported "still not visible" is a spawn/wiring bug
-        // or a genuine render/camera issue.
-        Debug.Log("[DamageFx] Smoke started on " + holder.name + " at world " + pos + " (angle " + (angle * Mathf.Rad2Deg).ToString("F0") + " deg)");
+        // being seen"): see AttachFireCluster's own matching log line --
+        // confirms a SmokeCluster was actually created and how many
+        // possible vents it has to work with, so a "still don't see smoke"
+        // report can be checked against real numbers instead of guessed at
+        // blind (no Unity Editor exists in this environment to verify
+        // visually).
+        Debug.Log("[DamageFx] Smoke cluster attached to " + holder.name + " at ground " + groundPos +
+            " (" + (fire != null ? fire.VentColumnCount : 0) + " possible vents)");
+        return cluster;
     }
 
     /// <summary>2026-07 (creator direction: "Building need decent amount
@@ -147,14 +158,20 @@ public static class DamageFx
     /// level, so snapping that parent to the corrected ground Y here
     /// fixes every point this cluster ever spawns without touching
     /// `FireCluster`'s own logic at all.</summary>
-    public static void AttachFireCluster(Transform holder, float height, float footprintRadius, int targetCount, float holderGroundOffset = 0f)
+    /// <summary>Returns the created <see cref="FireCluster"/> (2026-08,
+    /// SmokeCluster follow-up) so a caller can hand it straight to <see
+    /// cref="AttachSmoke"/> -- fire must exist and be initialized before
+    /// smoke can read its heat state, so both call sites attach fire
+    /// FIRST, in this order, every time.</summary>
+    public static FireCluster AttachFireCluster(Transform holder, float height, float footprintRadius, int targetCount, float holderGroundOffset = 0f)
     {
         var go = new GameObject("FireCluster");
         go.transform.SetParent(holder, false);
         NormalizeScale(go.transform, holder);
         var groundPos = new Vector3(holder.position.x, holder.position.y + holderGroundOffset, holder.position.z);
         go.transform.position = groundPos;
-        go.AddComponent<FireCluster>().Init(height, footprintRadius, targetCount);
+        var cluster = go.AddComponent<FireCluster>();
+        cluster.Init(height, footprintRadius, targetCount);
         // 2026-08 (creator direction: "figure out how to verify fire is
         // being seen"): see AttachSmoke's own matching log line -- this
         // confirms AttachFireCluster actually ran and shows the corrected
@@ -162,6 +179,7 @@ public static class DamageFx
         // "still don't see it" report can be checked against the actual
         // numbers instead of guessed at blind.
         Debug.Log("[DamageFx] Fire cluster started on " + holder.name + " at ground " + groundPos + " (roofline will be " + (groundPos.y + height).ToString("F1") + ")");
+        return cluster;
     }
 
     /// <summary>2026-08 (creator report: "Finally found the fire debug
@@ -346,7 +364,14 @@ public class GroundStain : MonoBehaviour
 /// <summary>Spawns a soft gray puff every beat, for as long as the
 /// GameObject it's attached to lives (i.e. until the building is
 /// destroyed and its holder gets crushed/removed with the rest of the
-/// rubble pass).</summary>
+/// rubble pass).
+///
+/// 2026-08: `DamageFx.AttachSmoke`'s damage-triggered path no longer uses
+/// this class -- see <see cref="SmokeCluster"/>, which replaced it with a
+/// heat-reactive, multi-vent design. This class lives on unchanged for
+/// its one remaining caller, `BaseDresser`'s standalone `ChimneySmoke`
+/// (a flat, always-on ambient plume with no fire/damage state to react
+/// to, which is exactly what this class still does well).</summary>
 public class SmokePlume : MonoBehaviour
 {
     private float _timer;
@@ -1462,6 +1487,21 @@ public class FireCluster : MonoBehaviour
 
     private Vector3 PickSurfacePoint(int primaryJitterDeg, float heightFrac)
     {
+        Vector3 normal;
+        return PickSurfacePoint(primaryJitterDeg, heightFrac, out normal);
+    }
+
+    /// <summary>Same candidate search as the single-return overload above
+    /// (kept as the ONE real implementation -- that overload just discards
+    /// the normal) -- added so a caller that genuinely needs the real
+    /// surface direction (SmokeCluster's "travel away from the wall it
+    /// escaped" placement, see that class's own header) can have it
+    /// without a second raycast. `normal` is the fallback's own outward
+    /// radial direction (world-up-free, matching every other candidate's
+    /// real hit normal reasonably well for a roughly-vertical wall) on the
+    /// rare path where every candidate angle missed.</summary>
+    private Vector3 PickSurfacePoint(int primaryJitterDeg, float heightFrac, out Vector3 normal)
+    {
         var probeDist = _footprintRadius * 3f;
         var targetY = _height * heightFrac;
         var cam = Camera.main;
@@ -1479,12 +1519,370 @@ public class FireCluster : MonoBehaviour
                 var losProbe = hit.point + hit.normal * LosProbeOffset;
                 if (Physics.Linecast(losProbe, cam.transform.position)) continue;
             }
+            normal = hit.normal;
             return hit.point + hit.normal * SurfaceOffset;
         }
 
         var fallbackAngle = _baseAngle + primaryJitterDeg * Mathf.Deg2Rad;
         var fallbackDist = _footprintRadius * 1.6f;
+        normal = new Vector3(Mathf.Cos(fallbackAngle), 0f, Mathf.Sin(fallbackAngle));
         return transform.position + new Vector3(Mathf.Cos(fallbackAngle) * fallbackDist, targetY, Mathf.Sin(fallbackAngle) * fallbackDist);
+    }
+
+    // ==== read-only heat-network surface for SmokeCluster (see that
+    // class's own header for the full "decoupled, one-way read" contract)
+    // -- FireCluster never references SmokeCluster or knows it exists;
+    // these are plain accessors over state this class already maintains
+    // for itself, added without touching a single line of the actual
+    // ignition/diffusion/ember logic above. ====
+
+    /// <summary>How many angle columns this cluster's grid has (currently
+    /// always <see cref="GridAngleSegments"/>) -- exposed as a property
+    /// rather than a hardcoded "5" in SmokeCluster so the two classes never
+    /// drift out of sync if the grid size ever changes.</summary>
+    public int VentColumnCount { get { return GridAngleSegments; } }
+
+    /// <summary>The heat value a single cell needs to reach before
+    /// `IgniteCell` spawns a real flame there -- exposed so SmokeCluster
+    /// can express its own "start smoking at a MODERATE fraction of this,
+    /// keep building toward it" onset threshold directly off the real
+    /// ignition line instead of a second, potentially-drifting magic
+    /// number.</summary>
+    public float FlameIgnitionHeat { get { return IgnitionThreshold; } }
+
+    /// <summary>The single hottest band's heat in `column` (0 = stone
+    /// cold, `FlameIgnitionHeat` = about to ignite) -- a column can be
+    /// meaningfully warm well before any one band actually crosses that
+    /// line, which is exactly the window "smoke escapes before flames"
+    /// needs.</summary>
+    public float ColumnPeakHeat(int column)
+    {
+        if (_cells == null) return 0f;
+        var peak = 0f;
+        for (var b = 0; b < GridHeightBands; b++)
+            peak = Mathf.Max(peak, _cells[CellIndex(column, b)].Heat);
+        return peak;
+    }
+
+    /// <summary>Summed heat across all 3 bands of `column` -- unlike
+    /// `ColumnPeakHeat`, this keeps climbing well past first ignition as
+    /// more bands catch and already-ignited ones keep heating (`FireCell`
+    /// heat never cools, see that struct's own header), so a smoke
+    /// intensity curve built off this value keeps escalating through a
+    /// fully-involved column instead of capping the moment its first
+    /// flame appears.</summary>
+    public float ColumnTotalHeat(int column)
+    {
+        if (_cells == null) return 0f;
+        var sum = 0f;
+        for (var b = 0; b < GridHeightBands; b++)
+            sum += _cells[CellIndex(column, b)].Heat;
+        return sum;
+    }
+
+    /// <summary>True once ANY band of `column` has a real `FirePlume`
+    /// showing.</summary>
+    public bool ColumnHasFlame(int column)
+    {
+        if (_cells == null) return false;
+        for (var b = 0; b < GridHeightBands; b++)
+            if (_cells[CellIndex(column, b)].Ignited) return true;
+        return false;
+    }
+
+    /// <summary>0 at full health/no attack pressure, -> 1 as the building
+    /// nears destruction or takes sustained fire from several attackers at
+    /// once -- the SAME signal `RegisterHit` already computes for its own
+    /// ignition-pacing/fire-count-ceiling math (see that method's own doc
+    /// comment), reused here so smoke escalates ("large fires: thick
+    /// rolling smoke... stronger upward lift") on the identical real
+    /// combat-pressure reading fire itself already escalates on, instead
+    /// of a second, independently-tuned urgency knob that could disagree
+    /// with it.</summary>
+    public float Urgency01 { get { return _urgency; } }
+
+    /// <summary>The height fraction (matching `GridHeightFracs`) of
+    /// whichever band is CURRENTLY hottest in `column` -- lets a vent
+    /// point track wherever the heat actually is (low wall/window,
+    /// mid-wall, or up near the roofline) instead of a single fixed
+    /// height, so smoke reads as escaping from the specific damaged area,
+    /// not a building-wide constant.</summary>
+    public float ColumnHottestBandHeightFrac(int column)
+    {
+        if (_cells == null) return GridHeightFracs[0];
+        var best = 0;
+        var bestHeat = -1f;
+        for (var b = 0; b < GridHeightBands; b++)
+        {
+            var h = _cells[CellIndex(column, b)].Heat;
+            if (h > bestHeat) { bestHeat = h; best = b; }
+        }
+        return GridHeightFracs[best];
+    }
+
+    /// <summary>A real raycast-placed surface point + outward normal for
+    /// `column`, at a caller-chosen height fraction instead of always one
+    /// of the 3 fixed flame bands -- reuses the EXACT same collider
+    /// raycast flame placement (`PickSurfacePoint`) already does, so a
+    /// vent point is pinned to real geometry for every angle/footprint
+    /// shape exactly like a flame point is, just callable at whatever
+    /// height a vent (a window, a roof gap) plausibly sits at.</summary>
+    public Vector3 GetVentPoint(int column, float heightFrac01, out Vector3 normal)
+    {
+        var clampedColumn = Mathf.Clamp(column, 0, GridAngleSegments - 1);
+        return PickSurfacePoint(GridAngleOffsets[clampedColumn], heightFrac01, out normal);
+    }
+}
+
+/// <summary>
+/// Reactive smoke, decoupled from the fire renderer -- docs/29 §6's own
+/// "Smoke/fire heat tie-in" future idea, now implemented. One
+/// SmokeCluster per building, parented alongside (never inside) its
+/// FireCluster, reading a handful of PUBLIC read-only accessors off it
+/// (ColumnPeakHeat/ColumnTotalHeat/ColumnHasFlame/Urgency01/GetVentPoint)
+/// and nothing else -- never the other way around, and not one line of
+/// FireCluster's own ignition/diffusion/ember logic changed to make this
+/// possible. FireCluster has no idea this class exists; deleting
+/// SmokeCluster entirely would leave fire behaving exactly as before.
+///
+/// 2026-08 (creator report: smoke "no longer behaving correctly or is not
+/// rendering at all" -- investigated against the prior design, a single
+/// `SmokePlume` attached once per building by the old `AttachSmoke`).
+/// Root causes found -- none of them a shader/render-queue/culling/pool
+/// bug: `LabMeshBuilder.MakeTransparent` is the SAME transparency setup
+/// already confirmed working for the battlefield's water surfaces and the
+/// mastermind's glass dome, and this file has never used a real object
+/// pool for any puff kind anywhere -- every FX class here spawns and
+/// `Destroy()`s plain GameObjects, an established, consistent idiom, so
+/// there was never a pool to be malfunctioning in the first place.
+///
+/// 1. **One plume, total, per building, however big it is.** A single
+///    `SmokePlume` doesn't scale with a building's own fire-point count,
+///    so it read fine against a Small house and disappeared against a
+///    Landmark's much taller, multi-column blaze.
+/// 2. **A multi-round size-shrinking history left it too small to read.**
+///    `SmokeResizePct`'s own doc comment traces it: 0.7 -> (a since-
+///    reverted 1.6x) -> 0.2 -- each cut was a real, deliberate fix for a
+///    real "smoke is swallowing the fire" report at the time, but stacked
+///    with the single-plume limit above, the net effect reads as "no
+///    smoke" against a large structure.
+/// 3. **No connection to the fire simulation at all.** The old plume
+///    started the instant a building took ANY damage and puffed at one
+///    flat rate/size forever -- no "light smoke before flames," no growth
+///    with fire energy, nothing for this brief's sequence to hang off.
+///
+/// This class fixes visibility by scaling smoke SOURCES with the same
+/// grid FireCluster already uses (up to `FireCluster.VentColumnCount`
+/// potential vents, one per angle column -- never one per individual
+/// flame cell, so a column with all 3 bands ablaze after the fire-
+/// clustering pass still reads as ONE bigger, denser plume, "large flame
+/// clusters may share one larger emitter") instead of one fixed plume,
+/// and ties timing/density/colour to FireCluster's own real heat state
+/// instead of a flat always-on loop.
+///
+/// **No fuel-depletion "lightens again" stage.** `FireCell.Heat` never
+/// cools or depletes in this simulation (docs/29 §1's own deliberate
+/// simplification -- "nothing in this system ever needs a building to
+/// stop burning once lit") so there is no real signal here to drive a
+/// genuine "as fuel is consumed, smoke lightens" phase; faking one off a
+/// timer would contradict the fire sim it's supposed to be reacting to.
+/// Every other stage of the requested colour/volume progression is real.
+/// </summary>
+public class SmokeCluster : MonoBehaviour
+{
+    private FireCluster _fire;
+    private float _buildingScale = 1f;
+
+    private struct Vent
+    {
+        public int Column;
+        public bool Active;
+        public bool HasPoint;
+        public float Timer;
+        public float SmoothedIntensity;
+        public float LastHeightFrac;
+        public Vector3 Origin;
+        public Vector3 Direction; // normalized (surface normal + up) -- "surface normal + up vector," never purely sideways or purely vertical
+    }
+
+    private Vent[] _vents;
+    private float _clusterTimer;
+
+    // Deliberately slower than FireCluster's own sim tick (down to 0.12s
+    // under urgency) -- "update smoke simulation at a lower frequency than
+    // flame animation."
+    private const float ClusterTickInterval = 0.35f;
+
+    // Fraction of FireCluster.FlameIgnitionHeat a column's PEAK single-
+    // band heat needs to cross before ANY smoke shows -- well under the
+    // 1.0 flame-ignition line by design, so a column reliably smokes for a
+    // while before it can possibly show a flame. The one exception is a
+    // cluster's own very first hit: FireCluster.Init seeds its origin cell
+    // at InitialImpactHeat (1.2, already past ignition) so that cell
+    // ignites the SAME instant it's created ("starts with 1 immediately,"
+    // an existing fire contract this class doesn't touch) -- smoke can't
+    // out-race a flame that's already alight before this class's first
+    // tick ever runs. Every OTHER column this fire spreads to still gets
+    // the full smoke-before-flame lead time.
+    private const float SmokeOnsetFraction = 0.3f;
+
+    // ColumnTotalHeat value a column maps to "fully involved" (roughly
+    // every band at ignition heat and still climbing) -- intensity keeps
+    // climbing smoothly past this as heat keeps rising, this is a curve
+    // reference point, not a hard cap.
+    private const float SmokeSaturationHeat = 3.2f;
+
+    private const float MinPuffInterval = 0.6f;  // fastest one vent ever spawns -- a large, urgent, fully-involved column
+    private const float MaxPuffInterval = 2.4f;  // slowest -- a bare-onset wisp, "intermittent puffs"
+    private const float VentUpBias = 0.9f;       // weight of world-up blended into the surface normal for each vent's drift direction
+    private const float VentHeightAboveFlame = 0.05f; // a vent sits a touch above wherever a column's heat currently peaks -- "escaping from windows/gaps," not from the exact flame point
+    private const float MaxVentHeightFrac = 0.85f; // stays under the roofline -- same "not on roofs" constraint FireCluster's own grid already enforces
+    private const float SmokeBaseSize = 1.5f;    // baseline puff size before DamageFxProfile.SmokeResizePct/building-scale/intensity multipliers -- see this class's own header for why the old 1.1 baseline (SmokePlume's) read as too small once stacked with everything else
+
+    public void Init(FireCluster fire, float buildingScale)
+    {
+        _fire = fire;
+        _buildingScale = Mathf.Max(0.1f, buildingScale);
+        var count = fire != null ? fire.VentColumnCount : 1;
+        var id = GetInstanceID();
+        _vents = new Vent[count];
+        for (var i = 0; i < _vents.Length; i++)
+        {
+            _vents[i].Column = i;
+            // staggered first read, same "don't have every instance tick
+            // in lockstep" convention SmokePlume.Awake already uses
+            _vents[i].Timer = ((id + i * 977) & 7) * 0.1f;
+        }
+        _clusterTimer = ClusterTickInterval;
+    }
+
+    private void Update()
+    {
+        if (_fire == null || _vents == null) return;
+        _clusterTimer -= Time.deltaTime;
+        if (_clusterTimer <= 0f)
+        {
+            _clusterTimer = ClusterTickInterval;
+            RefreshVents();
+        }
+        SpawnDuePuffs(Time.deltaTime);
+    }
+
+    /// <summary>The only place this class reads FireCluster's state.
+    /// Recomputes each vent's smoothed intensity (continuous, not stepped
+    /// -- "should increase smoothly rather than in discrete steps") and,
+    /// for any vent that just became active or whose heat has visibly
+    /// moved to a different band, its real raycast-placed origin/
+    /// direction.</summary>
+    private void RefreshVents()
+    {
+        var ignitionHeat = _fire.FlameIgnitionHeat;
+        var onsetHeat = ignitionHeat * SmokeOnsetFraction;
+        for (var i = 0; i < _vents.Length; i++)
+        {
+            var column = _vents[i].Column;
+            var peak = _fire.ColumnPeakHeat(column);
+            var raw = peak > onsetHeat ? Mathf.Clamp01(_fire.ColumnTotalHeat(column) / SmokeSaturationHeat) : 0f;
+            _vents[i].SmoothedIntensity = Mathf.Lerp(_vents[i].SmoothedIntensity, raw, 0.5f);
+            var active = _vents[i].SmoothedIntensity > 0.02f || raw > 0f;
+            _vents[i].Active = active;
+            if (!active) continue;
+
+            var heightFrac = Mathf.Min(_fire.ColumnHottestBandHeightFrac(column) + VentHeightAboveFlame, MaxVentHeightFrac);
+            if (!_vents[i].HasPoint || Mathf.Abs(heightFrac - _vents[i].LastHeightFrac) > 0.05f)
+            {
+                Vector3 normal;
+                var point = _fire.GetVentPoint(column, heightFrac, out normal);
+                _vents[i].Origin = point;
+                var dir = normal + Vector3.up * VentUpBias;
+                _vents[i].Direction = dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector3.up;
+                _vents[i].LastHeightFrac = heightFrac;
+                _vents[i].HasPoint = true;
+            }
+        }
+    }
+
+    private void SpawnDuePuffs(float dt)
+    {
+        for (var i = 0; i < _vents.Length; i++)
+        {
+            if (!_vents[i].Active || !_vents[i].HasPoint) continue;
+            _vents[i].Timer -= dt;
+            if (_vents[i].Timer > 0f) continue;
+            var intensity = _vents[i].SmoothedIntensity;
+            _vents[i].Timer = Mathf.Lerp(MaxPuffInterval, MinPuffInterval, intensity);
+            SpawnPuffAt(i, intensity);
+        }
+    }
+
+    /// <summary>Smoke Before Flames + Smoke Growth + Smoke Motion + Smoke
+    /// Colour, all in one puff spawn: size/alpha/life/colour read straight
+    /// off the SAME continuous `intensity01` (no tiered snap), direction
+    /// is this vent's own (surface normal + up) so it peels off the wall
+    /// before rising, and a per-puff sway (`SmokePuff.SetTurbulence`) adds
+    /// the "curl/turbulence/random variation" layer on top of the
+    /// straight drift.</summary>
+    private void SpawnPuffAt(int ventIndex, float intensity01)
+    {
+        var column = _vents[ventIndex].Column;
+        var hasFlame = _fire.ColumnHasFlame(column);
+        var urgency = _fire.Urgency01;
+
+        var go = new GameObject("SmokeVentPuff");
+        go.transform.SetParent(transform, false);
+        go.transform.position = _vents[ventIndex].Origin;
+
+        var id = go.GetInstanceID();
+        var resizePct = DamageFxProfile.Active.SmokeResizePct;
+        var startSize = SmokeBaseSize * resizePct * _buildingScale * Mathf.Lerp(0.55f, 1.5f, intensity01);
+        go.transform.localScale = Vector3.one * startSize;
+
+        var meshFilter = go.AddComponent<MeshFilter>();
+        meshFilter.sharedMesh = ProceduralMeshKit.CloudShard(6, id * 0.013f);
+        var renderer = go.AddComponent<MeshRenderer>();
+
+        var baseAlpha = Mathf.Clamp01(Mathf.Lerp(0.32f, 0.85f, intensity01));
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = SmokeColorForIntensity(intensity01, hasFlame, urgency, baseAlpha);
+        LabMeshBuilder.MakeTransparent(mat);
+        renderer.sharedMaterial = mat;
+
+        var dir = _vents[ventIndex].Direction;
+        // both scale off the SAME creator-facing knobs every other smoke
+        // path already uses (their own defaults, 1.4/5, are the "1x" point)
+        // instead of a disconnected new set of constants
+        var rise = Mathf.Lerp(0.7f, 1.6f, intensity01) * (DamageFxProfile.Active.SmokeRiseSpeed / 1.4f);
+        var outward = Mathf.Lerp(0.6f, 1.3f, intensity01) * (DamageFxProfile.Active.SmokeWindSpeed / 5f);
+        var drift = dir * outward + Vector3.up * rise;
+
+        var life = Mathf.Lerp(2.6f, 4.2f, intensity01);
+        var growthMult = DamageFxProfile.Active.SmokeGrowthMultiplier;
+
+        var puff = go.AddComponent<SmokePuff>();
+        puff.InitVent(mat, life, startSize, baseAlpha, drift, growthMult);
+
+        // turbulence: a wide, slow sway perpendicular to this vent's own
+        // drift direction (never a hardcoded world axis -- a vent can face
+        // any compass direction) -- "curl noise/random velocity variation"
+        // via this file's own established deterministic-hash idiom, not
+        // UnityEngine.Random. Stronger and faster as urgency climbs --
+        // "large fires: turbulent motion."
+        var tangent = Vector3.Cross(dir, Vector3.up);
+        if (tangent.sqrMagnitude < 0.0001f) tangent = Vector3.right;
+        tangent.Normalize();
+        var swayAmp = Mathf.Lerp(0.15f, 0.55f, intensity01) * (1f + urgency * 0.6f);
+        var swayFreq = 0.5f + ((id >> 3) & 7) / 7f * 0.6f;
+        var swayPhase = (id & 255) * 0.13f;
+        puff.SetTurbulence(tangent, swayAmp, swayFreq, swayPhase);
+    }
+
+    private static Color SmokeColorForIntensity(float intensity01, bool hasFlame, float urgency01, float alpha)
+    {
+        var t = Mathf.Clamp01(intensity01 * 0.7f + (hasFlame ? 0.3f + urgency01 * 0.3f : 0f));
+        var light = new Color(0.8f, 0.81f, 0.82f);  // early: light grey
+        var dark = new Color(0.14f, 0.13f, 0.14f);  // fully involved: dark grey/near-black
+        var c = Color.Lerp(light, dark, t);
+        return new Color(c.r, c.g, c.b, alpha);
     }
 }
 
@@ -1530,6 +1928,23 @@ public class SmokePuff : MonoBehaviour
     private float _swayAmp;
     private float _swayFreq;
     private float _swayPhase;
+
+    // 2026-08 (SmokeCluster follow-up, see that class's own header):
+    // FirePlume's own sway always swung along world Vector3.right, fine
+    // for a flame licking upward in place but wrong for a smoke vent that
+    // can face any compass direction -- defaults to Vector3.right so
+    // InitFlame's existing sway (which never touches this) stays byte-
+    // identical; only SetTurbulence below (SmokeCluster-only) sets it to
+    // something else.
+    private Vector3 _swayAxis = Vector3.right;
+
+    public void SetTurbulence(Vector3 axis, float amp, float freq, float phase)
+    {
+        _swayAxis = axis.sqrMagnitude > 0.0001f ? axis.normalized : Vector3.right;
+        _swayAmp = amp;
+        _swayFreq = freq;
+        _swayPhase = phase;
+    }
 
     // 2026-08 (creator direction: "randomize independently: flame
     // height, width"): defaults to Vector3.one -- every EXISTING puff
@@ -1633,6 +2048,27 @@ public class SmokePuff : MonoBehaviour
         _easeFade = true;
     }
 
+    /// <summary>Full explicit drift (surface-normal + up + wind + rise,
+    /// already computed by the caller) plus a caller-chosen growth
+    /// multiplier -- used ONLY by <see cref="SmokeCluster"/>'s fire-
+    /// reactive vent puffs. Deliberately kept separate from <see
+    /// cref="InitPlume"/> (SmokePlume's own ambient/single-angle puffs,
+    /// including the standalone chimney case) rather than folded into it,
+    /// so neither path's tuning can drift the other's -- same
+    /// "decoupled, not just similar-looking" contract SmokeCluster's own
+    /// header describes for its relationship to FireCluster.</summary>
+    public void InitVent(Material mat, float life, float startSize, float baseAlpha, Vector3 drift, float growthMultiplier)
+    {
+        _mat = mat;
+        _life = life;
+        _baseAlpha = baseAlpha;
+        _baseScale = startSize;
+        _drift = drift;
+        _useGrowthMultiplier = true;
+        _growthMultiplier = Mathf.Clamp(growthMultiplier, 1f, 2f);
+        _easeFade = true;
+    }
+
     /// <summary>Same shape as <see cref="InitBurst"/> (a fire puff is
     /// still a short-lived rising burst, not a lazy plume) but with a
     /// real side-to-side sway layered on top instead of a straight
@@ -1674,7 +2110,7 @@ public class SmokePuff : MonoBehaviour
             // sway grows WITH the puff's own age -- a flame licks wider
             // the higher it climbs, not a fixed-amplitude wobble from
             // the moment it's born
-            transform.position += Vector3.right * (Mathf.Sin(_swayPhase) * _swayAmp * t * Time.deltaTime * 3f);
+            transform.position += _swayAxis * (Mathf.Sin(_swayPhase) * _swayAmp * t * Time.deltaTime * 3f);
         }
         // smoke (_useGrowthMultiplier) grows from its OWN starting size up
         // to at most `_growthMultiplier` times that (hard-capped to 2x --
