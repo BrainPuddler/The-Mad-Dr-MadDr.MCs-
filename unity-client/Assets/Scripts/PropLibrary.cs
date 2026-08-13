@@ -95,8 +95,11 @@ public static class PropLibrary
         //
         // The keys FacadeKit asks for, for whoever authors them:
         //   facade-shopfront, facade-entrance-recessed, facade-entrance-stoop,
-        //   facade-loading-dock, facade-window-bay, facade-oriel-bay,
+        //   facade-loading-dock, facade-oriel-bay,
         //   facade-fire-escape, facade-cornice, facade-parapet
+        // (facade-window-bay removed 2026-08, docs/33: a punched window
+        // pane is now a state-driven BuildingWindowGrid quad, not a
+        // swappable prop.)
         //
         // Registering a placeholder ProceduralMeshKit shape for each would
         // be worse than the primitive fallback, not better: a hand-authored

@@ -567,6 +567,13 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             gameObject.AddComponent<DynamicLightBudget>().ApplyProfile(lightingProfile);
         if (GetComponent<EmissiveAnimatorDriver>() == null)
             gameObject.AddComponent<EmissiveAnimatorDriver>();
+        // docs/33: pushes the handful of global shader uniforms every
+        // BuildingWindowGrid-dressed building's windows read (day/night
+        // cycle position, flicker tuning, the WindowScheduleEnabled
+        // toggle) once per frame -- same one-driver-per-scene pattern as
+        // EmissiveAnimatorDriver above.
+        if (GetComponent<BuildingWindowGridDriver>() == null)
+            gameObject.AddComponent<BuildingWindowGridDriver>();
 
         // camera: frame the spawn area so Play starts looking at the action
         var cam = Camera.main;

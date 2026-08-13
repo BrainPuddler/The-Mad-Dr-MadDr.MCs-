@@ -2341,8 +2341,11 @@ public class BaseDresser : MonoBehaviour
     /// glow via a MaterialPropertyBlock override; a shader with the
     /// emission keyword off simply ignores `_EmissionColor` regardless of
     /// what a property block sets it to. This is a SEPARATE material,
-    /// same split BuildingDresser.WindowBand/WindowGlow already uses for
-    /// the procedural city's own dark-vs-lit window strips -- only
+    /// the same dark-vs-lit split the procedural city's own windows used
+    /// before docs/33 moved them onto a GPU-driven shader -- that split
+    /// doesn't apply to THIS (faction HQ) window system, which is
+    /// deliberately unchanged by docs/33 (see that doc's §4) and still
+    /// picks its lit/dark material per window the original way. Only
     /// windows picked "lit" (see the per-window loops below) get this
     /// one; the rest stay on the existing dark void.</summary>
     private static Material _pedestalWindowGlowMat;

@@ -79,7 +79,10 @@ public static class FacadeKit
     public const string KeyRecessedEntrance = "facade-entrance-recessed";
     public const string KeyStoopEntrance = "facade-entrance-stoop";
     public const string KeyLoadingDock = "facade-loading-dock";
-    public const string KeyWindowBay = "facade-window-bay";
+    // 2026-08 (docs/33, window glow GPU system): KeyWindowBay removed --
+    // a punched window pane is now a state-driven quad on the shared
+    // BuildingWindowGrid (see RegisterWindowGlow below), not a swappable
+    // authored prop, so it no longer has a PropLibrary mesh-swap point.
     public const string KeyOrielBay = "facade-oriel-bay";
     public const string KeyFireEscape = "facade-fire-escape";
     public const string KeyCornice = "facade-cornice";
@@ -238,14 +241,19 @@ public static class FacadeKit
                 // constant's own comment for the clearance math), so the
                 // bays read as glass BETWEEN the piers instead of glass
                 // WITH a pier through it.
+                //
+                // docs/33: each bay is now a quad on the shared
+                // BuildingWindowGrid instead of its own PropLibrary'd Cube
+                // -- no separate glass GameObject/Renderer per window
+                // anymore, RegisterWindowGlow below queues it onto the
+                // grid, which BuildingDresser.Dress finalizes into ONE
+                // mesh for this whole hex once every face is built.
                 var spawned = 0;
                 for (var i = 0; i < WindowBayU.Length; i++)
                 {
                     var u = WindowBayU[i];
                     var pos = at + tan * u;
-                    var go = PropLibrary.Spawn(b, KeyWindowBay, PrimitiveType.Cube, pos,
-                        Along(tan, n, WindowBayWidth, floorH * 0.52f, Proud), mats.Glass, t);
-                    RegisterWindowGlow(go, mats, pos);
+                    RegisterWindowGlow(t, mats, pos, tan, n, WindowBayWidth, floorH * 0.52f);
                     spawned++;
                     // sill: the small horizontal that catches light and
                     // reads at distance far better than the window itself
@@ -264,11 +272,21 @@ public static class FacadeKit
                 // pilaster runs, so a projecting bay window would have been
                 // clipping straight through a solid pier. OrielU reuses one
                 // of WindowBay's two clear gap positions.
+                //
+                // docs/33: the projecting box itself stays a real prim
+                // (it's massing/silhouette, not "the window glow system" --
+                // preserving it is the "don't oversimplify" half of the
+                // task); only the glass PANE on its outward face moves onto
+                // the shared grid, so this oriel gets the same GPU-driven
+                // on/off/flicker as every WindowBay pane instead of the old
+                // per-instance MaterialPropertyBlock/real-Light path.
                 var oat = at + tan * OrielU;
-                var go = PropLibrary.Spawn(b, KeyOrielBay, PrimitiveType.Cube,
-                    oat + n * 0.75f, Along(tan, n, 4.2f, floorH * 0.66f, 1.7f), mats.Glass, t);
-                RegisterWindowGlow(go, mats, oat + n * 0.75f);
-                b.SpawnPrim(PrimitiveType.Cube, oat + n * 0.75f + Vector3.down * (floorH * 0.38f),
+                var boxDepth = 1.7f;
+                var boxCenter = oat + n * 0.75f;
+                PropLibrary.Spawn(b, KeyOrielBay, PrimitiveType.Cube, boxCenter,
+                    Along(tan, n, 4.2f, floorH * 0.66f, boxDepth), mats.Glass, t);
+                RegisterWindowGlow(t, mats, boxCenter + n * (boxDepth * 0.5f + 0.02f), tan, n, 4.0f, floorH * 0.6f);
+                b.SpawnPrim(PrimitiveType.Cube, boxCenter + Vector3.down * (floorH * 0.38f),
                     Along(tan, n, 4.6f, 0.28f, 2.0f), mats.Trim, t);
                 return 2;
             }
@@ -358,49 +376,35 @@ public static class FacadeKit
         return s;
     }
 
-    /// <summary>Hook a window into the city's existing two-tier lighting
-    /// model, but only when this window's own independent roll says so.
+    /// <summary>docs/33 (window glow GPU system): append one window pane
+    /// to `t`'s shared <see cref="BuildingWindowGrid"/> -- a state-driven
+    /// quad, not a GameObject, so there's no more per-window
+    /// Renderer/Material/EmissiveAnimator/GlowPointRegistry cost to gate
+    /// with a sampling budget. Every glow-eligible window IS still only a
+    /// FRACTION of the total (the `RollGlow` independent-per-window roll
+    /// below, same mechanism `BuildingDresser.SpawnWindowStrip` already
+    /// uses for Small-tier buildings) -- that fraction is about visual
+    /// density (how many windows in a building are ever occupied), not
+    /// about protecting a CPU/GameObject budget the way the pre-docs/33
+    /// version of this comment described. `AddWindow` queues the quad;
+    /// nothing renders until `BuildingWindowGrid.Build()` finalizes the
+    /// whole hex's merged mesh (`BuildingDresser.Dress`, after every face
+    /// is built).
     ///
-    /// docs/28's model is "unlimited free emissive, one shared budgeted
-    /// pool of real lights." That holds only while the number of
-    /// registered glow points stays sane -- and the existing per-floor
-    /// strip registration already produces tens of thousands of entries at
-    /// BigCity scale, each iterated every frame by EmissiveAnimator. This
-    /// grammar spawns MORE windows per face than the old single strip did,
-    /// so registering every one would make a known-strained system
-    /// materially worse. Instead the emissive material still renders on
-    /// every lit window (free), and only a sampled subset per building
-    /// registers for animation and the real-light budget.
-    ///
-    /// 2026-08 correction: that sample used to be the FIRST `GlowBudget`
-    /// windows encountered in build order (bottom floor upward, left to
-    /// right within a floor) -- a sequential counter that fills up and
-    /// stops, not a random pick. Since floors build bottom-up, this always
-    /// lit the SAME contiguous block (whichever floors got processed
-    /// before the budget ran out) and left every floor above it
-    /// permanently dark, every building, every night -- solid lit rows
-    /// stacked under solid dark rows, not the scattered "some windows on,
-    /// some off, mixed together" a real occupied building reads as
-    /// (creator, showing the exact wrong pattern with ASCII art: "XX XX
-    /// XX / OO OO OO" blocks, wanted "XX OO OX ... Random" instead). Fixed
-    /// by rolling each window independently against `GlowChance` -- same
-    /// mechanism `BuildingDresser.SpawnWindowStrip`'s per-strip roll
-    /// already uses for Small-tier buildings, which never had this
-    /// clumping bug because it was never budget/order-based to begin
-    /// with.</summary>
-    private static void RegisterWindowGlow(GameObject go, FacadeMaterials mats, Vector3 pos)
+    /// History: this used to gate a SAMPLED SUBSET of windows behind a
+    /// sequential `GlowBudget` counter (docs/28 row 34), which always lit
+    /// the SAME contiguous block in build order and left everything above
+    /// it permanently dark -- fixed (docs/28 row 35) by rolling each
+    /// window independently against `GlowChance` instead. That
+    /// independent-roll fix carries over unchanged here; only the
+    /// underlying rendering mechanism (per-window GameObject -> shared
+    /// grid quad) is new.</summary>
+    private static void RegisterWindowGlow(Transform t, FacadeMaterials mats, Vector3 pos,
+        Vector3 tan, Vector3 n, float width, float height)
     {
-        if (go == null || !mats.WindowsLit) return;
         var seed = mats.NextGlowSeed();
-        if (!mats.RollGlow(seed)) return;
-
-        var renderer = go.GetComponent<Renderer>();
-        if (renderer == null) return;
-
-        renderer.sharedMaterial = mats.GlassLit;
-        EmissiveAnimator.Register(renderer, mats.GlowColor * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
-            LightBehaviorKind.Window, seed);
-        GlowPointRegistry.Register(go.transform, mats.GlowColor);
+        var canGlow = mats.WindowsLit && mats.RollGlow(seed);
+        BuildingWindowGrid.For(t).AddWindow(pos, tan, n, width, height, seed, canGlow, mats.GlowColor);
     }
 }
 
@@ -415,7 +419,6 @@ public sealed class FacadeMaterials
     public Material Stone;
     public Material Trim;
     public Material Glass;
-    public Material GlassLit;
     public Material DarkRecess;
     public Material Iron;
     public Material Rust;

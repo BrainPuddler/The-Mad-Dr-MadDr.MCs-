@@ -112,15 +112,12 @@ public static class BuildingDresser
     private static Material Chrome() { return MTextured("chrome", 0.78f, 0.8f, 0.82f, PbrTextureAtlas.Chrome); }
     private static Material WindowBand() { return MTextured("glass", 0.16f, 0.2f, 0.28f, PbrTextureAtlas.Glass); }
 
-    // docs/28 (city lighting system): "house and apartment windows."
-    // ONE shared emissive material for every "this window is lit"
-    // instance (SRP-batcher friendly, same cache-and-reuse convention as
-    // every other material here) -- per-instance variation (which
-    // windows are lit, and their independent flicker) comes from
-    // EmissiveAnimator's MaterialPropertyBlock layer on top, not from
-    // minting a separate Material per window.
+    // docs/33 (window glow GPU system): the base warm tint every lit
+    // window's shader-side emission blends toward (see WindowGrid.shader's
+    // own _WarmColor, kept in sync with this value). No more per-lit-
+    // window Material -- glow is entirely GPU state now (BuildingWindowGrid),
+    // not a shared emissive Material swap the way it was pre-docs/33.
     private static readonly Color WindowGlowColor = new Color(1f, 0.85f, 0.55f);
-    private static Material WindowGlow() { return M(1f, 0.85f, 0.55f, CityLightingProfile.Active.BulbEmissiveBase * 0.9f); }
 
     // 2026-08 ("AAA upgrades" pass, creator direction: "Create texture
     // maps. Brick and lime stone, roof shingles that match the b-movie
@@ -252,7 +249,6 @@ public static class BuildingDresser
             Stone = Concrete(),
             Trim = (h / 5) % 2 == 0 ? Cream() : Mustard(),
             Glass = WindowBand(),
-            GlassLit = WindowGlow(),
             DarkRecess = DarkRecess(),
             Iron = IronDark(),
             Rust = RustRed(),
@@ -440,6 +436,17 @@ public static class BuildingDresser
                     else DressSmall(builder, hex, holder.transform, height, h, primary, suburb);
                     break;
             }
+
+            // docs/33: every window queued onto this hex's BuildingWindowGrid
+            // (by SpawnWindowStrip above, or by FacadeKit's WindowBay/
+            // OrielBay modules during DressFacadeGrammar) gets finalized
+            // into ONE merged mesh + renderer here, once, after everything
+            // that could add a window to this holder has run. A no-op if
+            // nothing ever called AddWindow on this holder (Small-tier
+            // suburbia, industrial re-skins, and Landmark archetypes don't
+            // spawn windows this way).
+            var grid = holder.GetComponent<BuildingWindowGrid>();
+            if (grid != null) grid.Build();
         }
     }
 
@@ -640,39 +647,26 @@ public static class BuildingDresser
         }
     }
 
-    /// <summary>docs/28: one window strip, deterministically "lit" or
-    /// dark based on (h, slot) -- roughly 2 in 5 lit, no actual
-    /// randomness (same seed always dresses the same city, same as every
-    /// other hash-keyed choice in this file). A lit strip gets the shared
-    /// WindowGlow() material plus its own independent EmissiveAnimator
-    /// Flicker registration and a GlowPointRegistry entry so it competes
-    /// fairly for DynamicLightBudget's shared real-light budget alongside
-    /// streetlamps/neon/marquee bulbs.</summary>
-    private static void SpawnWindowStrip(RuntimeCityBuilder b, Transform t, Vector3 pos, Vector3 scale, int h, int slot)
+    /// <summary>docs/33 (window glow GPU system, replacing docs/28's
+    /// per-window Cube prims): one window quad appended to this hex's
+    /// shared <see cref="BuildingWindowGrid"/> -- roughly 2 in 5 windows
+    /// eligible to ever glow, deterministically from (h, slot), same "no
+    /// actual randomness, same seed always dresses the same city" rule
+    /// every other hash-keyed choice in this file follows. Whether an
+    /// eligible window is actually lit AT ANY GIVEN MOMENT is now decided
+    /// entirely on the GPU (the ambient day/night occupancy schedule +
+    /// flicker `WindowGrid.shader` runs per-pixel) -- this call site no
+    /// longer needs its own EmissiveAnimator/GlowPointRegistry
+    /// registration; BuildingWindowGrid.AddWindow does the Tier-2
+    /// real-light registration internally for every glow-eligible
+    /// window.</summary>
+    private static void SpawnWindowStrip(RuntimeCityBuilder b, Transform t, Vector3 pos, Vector3 scale, Vector3 normal, int h, int slot)
     {
         int floorSeed;
         unchecked { floorSeed = (h * 397) ^ (slot * 8191 + 17); }
         var lit = (floorSeed & 0x7fffffff) % 5 < 2;
-        if (!lit)
-        {
-            b.SpawnPrim(PrimitiveType.Cube, pos, scale, WindowBand(), t);
-            return;
-        }
-
-        var go = b.SpawnPrim(PrimitiveType.Cube, pos, scale, WindowGlow(), t);
-        var renderer = go.GetComponent<Renderer>();
         var seed = ((floorSeed & 0x7fffffff) % 10007) / 10007f;
-        // 2026-07 creator direction: "the building can turn on randomly
-        // approaching night time, as if real humans were in the room...
-        // the same goes for late at night, imagine people going to bed
-        // and shutting off their house light... not all lights go off."
-        // Window (was Flicker) adds a per-instance randomized on/off
-        // occupancy schedule on top of the existing wobble -- purely an
-        // emissive/MaterialPropertyBlock effect, same mechanism as the
-        // bulb geometry, not a second real-light system.
-        EmissiveAnimator.Register(renderer, WindowGlowColor * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
-            LightBehaviorKind.Window, seed);
-        GlowPointRegistry.Register(go.transform, WindowGlowColor);
+        BuildingWindowGrid.For(t).AddWindow(pos, Vector3.right, normal, scale.x, scale.y, seed, lit, WindowGlowColor);
     }
 
     // ---- medium tier: brick walk-up apartments ---------------------------------
@@ -699,8 +693,8 @@ public static class BuildingDresser
             for (var f = 0; f < floors; f++)
             {
                 var y = (f + 0.55f) * (height / floors);
-                SpawnWindowStrip(b, t, basePos + new Vector3(0f, y, Half * 1.01f), new Vector3(15f, 1.5f, 0.35f), h, f * 2);
-                SpawnWindowStrip(b, t, basePos + new Vector3(0f, y, -Half * 1.01f), new Vector3(15f, 1.5f, 0.35f), h, f * 2 + 1);
+                SpawnWindowStrip(b, t, basePos + new Vector3(0f, y, Half * 1.01f), new Vector3(15f, 1.5f, 0.35f), Vector3.forward, h, f * 2);
+                SpawnWindowStrip(b, t, basePos + new Vector3(0f, y, -Half * 1.01f), new Vector3(15f, 1.5f, 0.35f), Vector3.back, h, f * 2 + 1);
             }
             // fire escape: zig-zag ladder strip down one face
             b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(Half * 1.04f, height * 0.5f, 0f),

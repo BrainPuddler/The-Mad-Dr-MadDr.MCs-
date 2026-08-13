@@ -19,6 +19,14 @@ public static class GlowPointRegistry
     private struct Point
     {
         public Transform Transform;
+        // 2026-08 (docs/33, window glow GPU system): a merged-mesh
+        // building's windows have no Transform of their own anymore (see
+        // BuildingWindowGrid) -- FixedPosition + HasFixedPosition let a
+        // glow point be registered from a plain world position instead,
+        // without disturbing every existing Transform-based caller
+        // (streetlamps, neon, marquee) at all.
+        public Vector3 FixedPosition;
+        public bool HasFixedPosition;
         public Color Color;
         public LightType LightType;
         public bool SpotAimsWithTransform;
@@ -74,8 +82,50 @@ public static class GlowPointRegistry
         });
     }
 
+    /// <summary>2026-08 (docs/33, window glow GPU system): register a glow
+    /// point that has no Transform of its own -- a window on a merged
+    /// <see cref="BuildingWindowGrid"/> mesh, which has world position but
+    /// no per-window GameObject anymore. Point-type only (nothing
+    /// window-shaped has ever asked for Spot/aimed behavior); `isEligible`
+    /// omitted for the same reason -- a static window is either
+    /// glow-capable or it isn't, decided once at registration, unlike a
+    /// car's headlight which needs a live per-refresh check.</summary>
+    public static void RegisterPosition(Vector3 worldPosition, Color color)
+    {
+        Points.Add(new Point
+        {
+            Transform = null,
+            FixedPosition = worldPosition,
+            HasFixedPosition = true,
+            Color = color,
+            LightType = LightType.Point,
+        });
+    }
+
     public static int Count { get { return Points.Count; } }
     public static Transform TransformAt(int i) { return Points[i].Transform; }
+
+    /// <summary>The point's live world position -- a fixed-position entry
+    /// never moves (a window doesn't), a Transform-based entry reads its
+    /// transform's current position exactly as before this existed.</summary>
+    public static Vector3 PositionAt(int i)
+    {
+        var p = Points[i];
+        return p.HasFixedPosition ? p.FixedPosition : (p.Transform != null ? p.Transform.position : Vector3.zero);
+    }
+
+    /// <summary>Whether this entry still refers to something real -- a
+    /// Transform-based entry drops out once its GameObject is destroyed
+    /// (the pre-existing self-prune behavior); a fixed-position entry is
+    /// always alive, since it was never tied to a GameObject's lifetime to
+    /// begin with (same known limitation as every other static building
+    /// prop registration -- see .claude/skills/maddr-lighting-system §6).</summary>
+    public static bool IsAliveAt(int i)
+    {
+        var p = Points[i];
+        return p.HasFixedPosition || p.Transform != null;
+    }
+
     public static Color ColorAt(int i) { return Points[i].Color; }
     public static LightType LightTypeAt(int i) { return Points[i].LightType; }
     public static bool SpotAimsWithTransformAt(int i) { return Points[i].SpotAimsWithTransform; }
@@ -284,10 +334,9 @@ public class DynamicLightBudget : MonoBehaviour
         var count = GlowPointRegistry.Count;
         for (var i = 0; i < count; i++)
         {
-            var t = GlowPointRegistry.TransformAt(i);
-            if (t == null) continue;   // a knocked-over/destroyed prop simply drops out
+            if (!GlowPointRegistry.IsAliveAt(i)) continue;   // a knocked-over/destroyed prop simply drops out
             if (!GlowPointRegistry.IsEligibleAt(i)) continue;   // e.g. a parked/daylight car's headlight
-            var d = (t.position - camPos).sqrMagnitude;
+            var d = (GlowPointRegistry.PositionAt(i) - camPos).sqrMagnitude;
             if (_picked.Count < activeBudget)
             {
                 _picked.Add(i);
@@ -367,7 +416,7 @@ public class DynamicLightBudget : MonoBehaviour
                 var idx = _picked[i];
                 var pooled = _pool[i];
                 pooled.gameObject.SetActive(true);
-                pooled.transform.position = GlowPointRegistry.TransformAt(idx).position;
+                pooled.transform.position = GlowPointRegistry.PositionAt(idx);
                 pooled.color = GlowPointRegistry.ColorAt(idx);
                 pooled.range = range;
                 // Which registered point lands on which pooled slot can
