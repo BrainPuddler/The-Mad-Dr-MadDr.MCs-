@@ -100,6 +100,14 @@ public class BuildingWindowGrid : MonoBehaviour
         if (shader == null) return null;
         _sharedMaterial = new Material(shader) { enableInstancing = true };
         _sharedMaterial.SetTexture("_BaseMap", PbrTextureAtlas.Glass);
+        // 2026-08: every other material factory in this codebase pushes
+        // CityLightingProfile.Active's live tuned value explicitly rather
+        // than trusting the shader Properties block's own default (see
+        // BuildingDresser.M(), RoadDresser.Bulb()) -- this one silently
+        // didn't, so a creator re-tune of BulbEmissiveBase would have had
+        // no effect on city windows specifically. Both currently default
+        // to 0.25, so this was latent, not (on its own) the "dots" report.
+        _sharedMaterial.SetFloat("_BulbEmissiveBase", CityLightingProfile.Active.BulbEmissiveBase);
         return _sharedMaterial;
     }
 

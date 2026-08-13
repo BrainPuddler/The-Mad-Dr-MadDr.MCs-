@@ -253,7 +253,21 @@ public static class FacadeKit
                 {
                     var u = WindowBayU[i];
                     var pos = at + tan * u;
-                    RegisterWindowGlow(t, mats, pos, tan, n, WindowBayWidth, floorH * 0.52f);
+                    // 2026-08 (creator report: "windows are dots NOT full
+                    // lit rectangle windows"): the old KeyWindowBay Cube
+                    // had real depth (Along(..., Proud)), so its OUTWARD
+                    // face naturally cleared the wall behind it by Proud;
+                    // converting to a flat quad at plain `pos` (this
+                    // Cube's CENTER, only Proud*0.5 proud of the wall
+                    // face) dropped that clearance and left the pane
+                    // z-fighting with the wall/recess geometry right
+                    // behind it -- a flat, coplanar-ish surface fighting
+                    // for the same depth-buffer pixels reads as a noisy
+                    // scatter of dots, not a clean rectangle. Move the
+                    // pane out to where the old Cube's OUTWARD face
+                    // actually sat, same fix OrielBay's own call site
+                    // below already applies (boxDepth*0.5f + 0.02f).
+                    RegisterWindowGlow(t, mats, pos + n * (Proud * 0.5f), tan, n, WindowBayWidth, floorH * 0.52f);
                     spawned++;
                     // sill: the small horizontal that catches light and
                     // reads at distance far better than the window itself

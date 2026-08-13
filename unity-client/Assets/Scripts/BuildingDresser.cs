@@ -666,7 +666,15 @@ public static class BuildingDresser
         unchecked { floorSeed = (h * 397) ^ (slot * 8191 + 17); }
         var lit = (floorSeed & 0x7fffffff) % 5 < 2;
         var seed = ((floorSeed & 0x7fffffff) % 10007) / 10007f;
-        BuildingWindowGrid.For(t).AddWindow(pos, Vector3.right, normal, scale.x, scale.y, seed, lit, WindowGlowColor);
+        // 2026-08 (creator report: "windows are dots NOT full lit
+        // rectangle windows"; see FacadeKit.RegisterWindowGlow's WindowBay
+        // call site for the full diagnosis, same bug here): the old Cube
+        // this replaced had real depth (`scale.z`, e.g. 0.35) centered at
+        // `pos`, so its OUTWARD face naturally cleared the wall behind it
+        // by half that depth. A flat quad at plain `pos` sits back at the
+        // Cube's CENTER instead, close enough to the wall to z-fight with
+        // it. Restore the old Cube's outward-face position.
+        BuildingWindowGrid.For(t).AddWindow(pos + normal * (scale.z * 0.5f), Vector3.right, normal, scale.x, scale.y, seed, lit, WindowGlowColor);
     }
 
     // ---- medium tier: brick walk-up apartments ---------------------------------

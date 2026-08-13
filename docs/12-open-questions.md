@@ -17148,3 +17148,39 @@ assumed from general Unity knowledge. Not seen in a real render -- the
 90s ember lifetime and 2-8 ember count are v0.1 placeholders, same
 standing policy as every other invented number in this codebase, worth
 a first look the moment a real Editor is available.
+
+## 2026-08 follow-up: window-glow GPU conversion regressed to "dots" instead of lit rectangles -- diagnosed and fixed
+
+Creator report after seeing the docs/33 GPU window-grid conversion in a
+real build: "Performance is better but now the windows are dots NOT
+full lit rectangle windows." Full diagnosis and fix live in docs/33 §7
+(the doc this belongs to); summary here per this log's own convention.
+
+Root cause: two of the three places a window pane got converted from a
+real-depth `Cube` to a flat quad (`FacadeKit.WindowBay`,
+`BuildingDresser.SpawnWindowStrip`) dropped the depth-derived outward
+offset that used to keep the pane clearly separated from the wall
+geometry behind it -- a flat, too-close-to-coincident surface z-fights
+per-pixel against the wall instead of rendering as a clean rectangle,
+which reads as a scatter of dots. The third call site (`OrielBay`)
+already computed its own explicit clearance and was unaffected -- which
+is why the report was about "windows" broadly rather than every window
+uniformly. Fixed by moving each pane out to where its old Cube's
+outward face actually sat, instead of the Cube's center (where the flat
+quad had been placed). Also pushed `CityLightingProfile.Active.
+BulbEmissiveBase` onto the shared material explicitly (it was silently
+riding the shader's own hardcoded Properties-block default before --
+same value right now, 0.25, so not itself the visible bug, but a
+latent instance of this log's own §4 "unset property, silent default"
+pattern from the lighting skill).
+
+Verified: brace/paren balance on all three touched files
+(`FacadeKit.cs`, `BuildingDresser.cs`, `BuildingWindowGrid.cs`).
+NOT verified in a real render -- this diagnosis is reasoned from the
+commit's own diff (comparing the old Cube's real-depth positioning
+against the new quad's dropped offset) and standard z-fighting behavior
+at typical BigCity view distances, not from actually seeing it. Flagged
+explicitly per docs/33 §5/§7 and docs/28 §5's own standing policy for
+exactly this situation -- if windows still don't read as full
+rectangles after this fix, docs/33 §7 names the next two things to
+check with an actual Editor.

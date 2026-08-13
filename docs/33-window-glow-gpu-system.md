@@ -194,3 +194,56 @@ Not performed, and not possible in this environment: an actual Play-mode
 run; the task's own requested before/after profiler comparison (draw
 calls, SetPass calls, GameObject count, CPU frame time) needs a live
 Editor/build to produce real numbers, not estimates.
+
+## 7. 2026-08 follow-up: WindowBay/apartment-strip panes z-fighting ("dots" regression), fixed
+
+Creator report after seeing this in a real build: "Performance is
+better but now the windows are dots NOT full lit rectangle windows."
+§5's "visually identical from outside a building" claim for the quad
+conversion (line ~173 above) turned out to be the unverified assumption
+that broke, specifically for two of the three `AddWindow` call sites:
+
+**Root cause**: converting a window from a thin `Cube` (real depth,
+e.g. `Proud`/0.35) to a flat quad dropped the depth-derived outward
+clearance those cubes got for free. `FacadeKit`'s `WindowBay` case used
+to spawn `Along(tan, n, WindowBayWidth, floorH*0.52f, Proud)` (a real
+box) centered at `pos`; its OUTWARD face sat `Proud*0.5` past `pos`,
+clearly separated from the wall/recess geometry right behind it. The
+docs/33 conversion passed plain `pos` (the old box's CENTER, not its
+outward face) straight to `RegisterWindowGlow`/`AddWindow` — a flat,
+zero-thickness quad now sitting too close to (in some cases functionally
+coincident with) the wall surface behind it, fighting for the same
+depth-buffer pixels. A flat surface losing that fight per-pixel, rather
+than as a whole, reads as a scatter of dots, not a dim or missing
+rectangle. Same root cause, same fix, in `BuildingDresser.SpawnWindowStrip`
+(the apartment "continuous window strip" case — arguably the more
+commonly-seen instance of this bug, since it's the Medium-tier default
+across most of the city) — its old Cube's `scale.z` (0.35) depth gave
+the same free clearance, silently dropped the same way.
+
+**Not affected, confirmed by re-reading the diff**: `OrielBay`'s pane —
+that call site already computed `boxCenter + n * (boxDepth * 0.5f +
+0.02f)` (the projecting bay's own outward face, +2cm) when converting,
+so it never lost its clearance to begin with. This is why the report
+was "windows" broadly and not universal — the two call sites that
+dropped the offset are the majority of windows in the city (every plain
+punched window + every apartment strip); the one call site that kept it
+was fine.
+
+**Fix**: restore each pane to its old Cube's OUTWARD face position —
+`pos + n * (Proud * 0.5f)` in `FacadeKit.WindowBay`, `pos + normal *
+(scale.z * 0.5f)` in `BuildingDresser.SpawnWindowStrip` — rather than
+inventing a new clearance constant, so the pane ends up exactly where
+the old, previously-working geometry put its visible face.
+
+**Verification discipline note (still no Editor here)**: this diagnosis
+is reasoned from the code diff and standard z-fighting behavior (two
+near-coincident opaque surfaces at typical BigCity view distances,
+where depth-buffer precision is already thin), not from a render — flag
+per docs/33 §5 and docs/28 §5's own standing policy for exactly this
+situation. If windows still don't read as full rectangles after this,
+the next thing to check with an actual Editor: `_BulbEmissiveBase`
+(shader default 0.25, never pushed from `CityLightingProfile.Active`'s
+own live value by `BuildingWindowGrid.SharedMaterial()`) and whether
+`Shader.Find("MadDr/WindowGrid")` resolves at all in a built player
+(untested runtime shader lookup, §5's own "shader compiles" caveat).
