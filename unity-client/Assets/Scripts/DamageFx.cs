@@ -844,6 +844,17 @@ public class FirePlume : MonoBehaviour
 ///    `_maxIgnitedCells` above its area-based floor (more points allowed)
 ///    as either climbs.
 ///
+/// 2026-08 follow-up (creator direction, with an ASCII diagram: fire
+/// should read as a few DENSE "islands" -- one obviously bigger cluster
+/// plus maybe 1-2 smaller ones -- not 3-4 evenly-scattered small fires):
+/// `PickColumnForHit` now spends most hits (`ClusterBiasChance`, 0.72)
+/// feeding whichever column is ALREADY hottest (`HottestColumn`) instead
+/// of always re-rolling `PickWeightedColumn`'s independent random pick --
+/// heat concentrates into one dominant, visibly-growing cluster instead
+/// of diluting evenly across the facade. The remaining hits still fall
+/// through to the old camera-weighted random column, which is what still
+/// lets a couple of genuine satellite fires start elsewhere.
+///
 /// Embers (`MaybeSpawnEmber`) are unchanged in spirit -- rare,
 /// grid-adjacent-only jumps -- but their chance now also scales with
 /// `_urgency`, so "allow some crawling" picks up along with everything
@@ -908,6 +919,26 @@ public class FireCluster : MonoBehaviour
     /// all of "keep it wide."</summary>
     private static readonly int[] AngleColumnWeights = { 2, 3, 4, 3, 2 };
     private const int AngleColumnWeightSum = 14;
+
+    /// <summary>2026-08 follow-up (creator direction, with an ASCII
+    /// diagram: fire should read as a few DENSE clusters -- "one bigger
+    /// fire... and maybe 1-2 smaller ones," not "3-4 small fires" spread
+    /// evenly across the facade -- "expanding islands," not a scatter of
+    /// independent pinpricks). `PickWeightedColumn` alone re-rolls a fresh
+    /// independent column on EVERY hit, with no memory of where heat
+    /// already is; over several hits that reliably seeds 3-4 separate
+    /// low-heat columns that each limp toward ignition on their own,
+    /// rather than one column's heat snowballing into an obviously bigger
+    /// fire. `PickColumnForHit` now spends most hits (`ClusterBiasChance`)
+    /// feeding the column that's ALREADY hottest (`HottestColumn`) --
+    /// heat concentrates instead of diluting, so one cluster reliably
+    /// outgrows the rest -- and only occasionally (the remaining chance)
+    /// falls through to the old camera-weighted random pick, which is what
+    /// still lets 1-2 genuinely separate satellite fires start elsewhere.
+    /// `RegisterHit`'s own neighbor-bleed (unchanged) then does the actual
+    /// "adjacent cells merge into one visibly bigger flame" work once a
+    /// column keeps winning the roll.</summary>
+    private const float ClusterBiasChance = 0.72f;
 
     /// <summary>2026-08 (creator direction: "Fire should spread as
     /// irregular islands connected by branching fingers, leaving
@@ -1250,13 +1281,56 @@ public class FireCluster : MonoBehaviour
         if (RandomFloat01(_hitCount * 733) > DamageFxProfile.Active.FireIgnitionChancePerHit) return;
 
         var heat = energy * ImpactHeatPerDamage;
-        var column = PickWeightedColumn(_hitCount);
+        var column = PickColumnForHit(_hitCount);
         var cellIndex = CellIndex(column, 0); // low/window band -- same band the very first flame always starts in
         _cells[cellIndex].Heat += heat;
         var bleed = heat * NeighborImpactBleedFrac;
         AddHeatIfValid(column - 1, 0, bleed);
         AddHeatIfValid(column + 1, 0, bleed);
         AddHeatIfValid(column, 1, bleed * UpwardBias);
+    }
+
+    /// <summary>Most hits (`ClusterBiasChance`) feed whichever column is
+    /// already the hottest, so heat concentrates into one dominant,
+    /// visibly-growing cluster instead of diluting across several
+    /// independently-seeded columns; the rest fall through to the old
+    /// camera-weighted random pick, which is what still lets 1-2 real
+    /// satellite fires start elsewhere. See `ClusterBiasChance`'s own doc
+    /// comment for the full "islands, not a scatter" reasoning. Its own
+    /// roll uses a distinct salt multiplier from `PickWeightedColumn`'s,
+    /// so the two decisions -- "cluster or not" and "which random column
+    /// if not" -- don't correlate off the same number.</summary>
+    private int PickColumnForHit(int salt)
+    {
+        if (_ignitedCount > 0 && RandomFloat01(salt * 1931) < ClusterBiasChance)
+        {
+            var hottest = HottestColumn();
+            if (hottest >= 0) return hottest;
+        }
+        return PickWeightedColumn(salt);
+    }
+
+    /// <summary>Sums each column's heat across all 3 height bands and
+    /// returns the column with the most, or -1 if every cell is still
+    /// stone cold (nothing to cluster onto yet -- `PickColumnForHit` falls
+    /// back to the random pick in that case, same as the very first hit
+    /// always has).</summary>
+    private int HottestColumn()
+    {
+        var best = -1;
+        var bestHeat = 0f;
+        for (var a = 0; a < GridAngleSegments; a++)
+        {
+            var heat = 0f;
+            for (var b = 0; b < GridHeightBands; b++)
+                heat += _cells[CellIndex(a, b)].Heat;
+            if (heat > bestHeat)
+            {
+                bestHeat = heat;
+                best = a;
+            }
+        }
+        return best;
     }
 
     private int PickWeightedColumn(int salt)

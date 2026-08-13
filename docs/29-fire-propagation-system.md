@@ -34,6 +34,7 @@ uses.
 | 10 | "Monsters should try to attack only the target building(s)... try not to shoot through other building" + "Based on monster aggression, monster could collaterally destroy other building if blocked... Player owned building are the only buildings immune" + "Non projectile equipped monsters should be able to damage buildings through weapon swings or melee attacks and building contact" | No obstruction check existed anywhere in the firing pipeline (`WeaponFx.Beam`/`ShotAtPoint` drew straight through anything); no per-creature aggression stat existed to gate a new collateral-attack decision; player-owned `SimBuilding` visuals are collider-less so a raycast can never detect them | `MonsterAgent.HasClearLineOfSight`/`TickAttackReposition` gate projectile weapons only (`isProjectile = armed && Weapon.Kind != Melee` — melee/unarmed always get a clear shot, no line-of-fire to obstruct); a civilian blocker rolls this creature's own genome `fury` (reused, no new schema) as aggression for a FULL retarget (`_originalTargetBuilding`, resumed once the blocker dies); a player-building blocker (detected via a `SimBridge` position scan, not the raycast) always forces reposition instead, no roll; `MonsterCombatProfile.MobMentalityBonus` adds an aggression bonus when a nearby monster is already mid collateral-attack | **Reasoned, not independently re-confirmed; melee/unarmed damage+ignition-eligibility confirmed unchanged by re-reading the actual gated code path** |
 | 11 | "randomize if projectile will cause a fire. Goal make the fire pattern look organic, NOT non procedural" | Every landed hit fed `RegisterHit`'s heat network unconditionally — a strict 1:1 relationship between damage numbers and fire growth, itself perfectly deterministic regardless of how organically the heat then diffused | New `DamageFxProfile.FireIgnitionChancePerHit` (default 0.6): a per-hit roll gates only the heat-injection portion of `RegisterHit`; hit-rate/urgency tracking still sees every real hit unconditionally (real attack pressure, not this hit's own visible response) | **Reasoned, not independently re-confirmed** |
 | 12 | "monsters should attack all buildings that will be destroyed in the attack. goal make it realistic that the building are logically destroyed" | HP is shared across a multi-hex building's WHOLE footprint (destruction was already structure-wide, `ApplyBuildingDamage`'s `Destroyed` branch already shatters every cube at once) but only the specifically-hit hex ever showed fire leading up to that — a whole footprint could suddenly turn to rubble while only one corner had ever visibly burned | `ApplyBuildingDamage` now progressively ignites more of a multi-hex building's OTHER footprint hexes as its HP fraction falls (`targetIgnitedHexes = Ceil(footprintCount * urgency)`), on top of the always-first-ignited hit hex — reuses the existing idempotent per-hex ignition guard entirely, no new fire mechanics | **Reasoned, not independently re-confirmed** |
+| 13 | ASCII-diagram brief: fire should read as "expanding islands of burning material" — a few DENSE clusters, "one bigger fire... and maybe 1-2 smaller ones in the same block of windows," not "3-4 small fires" scattered evenly | `PickWeightedColumn` re-rolled a fresh independent camera-weighted random column on EVERY hit, with no memory of where heat already was — over several hits that reliably seeded 3-4 separate low-heat columns each limping toward ignition on its own, instead of one column's heat snowballing into an obviously bigger fire | New `PickColumnForHit` spends most hits (`ClusterBiasChance`, 0.72) feeding whichever column is already hottest (`HottestColumn`, sums heat across all 3 bands per column); the rest still fall through to the old `PickWeightedColumn` random pick, which is what still lets 1-2 genuine satellite fires start elsewhere. No change to diffusion/ignition/embers — purely which column a landed hit's heat goes into | **Reasoned, not independently re-confirmed** |
 
 **Rows 1-6 are creator-confirmed against real reported symptoms in
 sequence** (each report describes what the previous fix actually
@@ -241,6 +242,22 @@ several lateral points across the visible facade, skewed toward — never
 exclusive to — the most directly camera-facing angle. This is what
 fixed the "burn line" (§0.5 row 8): combined with the strong upward
 bias, a single fixed origin reliably produced one vertical stack.
+
+**Cluster bias — islands, not a scatter.** §0.5 row 13: picking
+`PickWeightedColumn`'s independent random column on every single hit
+reliably seeded 3-4 separate low-heat columns that each limped toward
+ignition on their own — camera weighting controls WHICH angle hits land
+near, but says nothing about whether repeat hits reinforce the SAME
+column or keep re-seeding new ones. `PickColumnForHit` now sits in front
+of `PickWeightedColumn`: most hits (`ClusterBiasChance`, 0.72) instead
+feed whichever column is already hottest (`HottestColumn`, sums a
+column's heat across all 3 height bands), so heat concentrates into one
+dominant, visibly-growing cluster rather than diluting evenly. The
+remaining ~28% of hits still fall through to the old camera-weighted
+random pick — enough to let a couple of genuine satellite fires start
+elsewhere, matching "a bigger fire... and maybe 1-2 smaller ones," not
+zero variety. No change to diffusion, ignition, or embers — this only
+changes which column a landed hit's heat goes into.
 
 **Urgency and attack rate.** `RegisterHit(float energy, float
 hpFraction01)` receives the building's current HP fraction alongside
