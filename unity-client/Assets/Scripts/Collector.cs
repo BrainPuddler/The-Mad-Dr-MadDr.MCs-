@@ -18,17 +18,26 @@ using UnityEngine;
 /// v0.1 scope: no weapon, no combat -- pure gatherer, closest in spirit
 /// to the existing Ghoul's auto-scavenge role. Simple seek-and-capture,
 /// no road-preference steering like Tank's SteerTank (a lighter, less
-/// mechanically-constrained mover doesn't need it). Not yet wired into
-/// any match-start spawn flow -- see <see
-/// cref="RuntimeCityBuilder.SpawnCollector"/>'s own doc comment for why.
+/// mechanically-constrained mover doesn't need it).
+///
+/// 2026-08 (docs/12 "Collector Lab classes" entry, creator direction:
+/// "define them in the lab, as a class"): <see cref="Init"/> now takes
+/// an optional <see cref="CollectorClassDef"/> loadout -- a null/omitted
+/// loadout keeps every field at this class's own original hardcoded
+/// defaults (now instance fields, not consts), so every existing call
+/// site is unchanged. A real loadout overrides seek radius/move speed/
+/// pull speed and picks the funnel-scoop trim color; it never touches
+/// the base hull color (shape=kind, color=faction/state).
 /// </summary>
 public class Collector : MonoBehaviour
 {
     private const float Scale = 0.9f;
-    private const float SeekRadius = 45f;     // how far a Collector will notice a citizen worth chasing
     private const float CaptureRange = 3.5f;  // close enough to start reeling one in
-    private const float MoveSpeed = 5.5f;
-    private const float PullSpeed = 5f;
+
+    private float _seekRadius = 45f;   // how far a Collector will notice a citizen worth chasing
+    private float _moveSpeed = 5.5f;
+    private float _pullSpeed = 5f;
+    private CollectorTrim _trim = CollectorTrim.Standard;
 
     private RuntimeCityBuilder _builder;
     private UnitCombat _combat;
@@ -36,9 +45,16 @@ public class Collector : MonoBehaviour
 
     public UnitCombat Combat { get { return _combat; } }
 
-    public void Init(RuntimeCityBuilder builder)
+    public void Init(RuntimeCityBuilder builder, CollectorClassDef loadout = null)
     {
         _builder = builder;
+        if (loadout != null)
+        {
+            _seekRadius = loadout.SeekRadius;
+            _moveSpeed = loadout.SeekSpeed;
+            _pullSpeed = loadout.PullSpeed;
+            _trim = loadout.Trim;
+        }
         BuildModel();
         _combat = gameObject.AddComponent<UnitCombat>();
         _combat.Configure("monster", 90f, 1.1f * Scale, 1.3f * Scale, weapon: null, OnDied, mass: 3f);
@@ -67,12 +83,12 @@ public class Collector : MonoBehaviour
             var dist = to.magnitude;
             if (dist <= CaptureRange)
             {
-                _target.Capture(_combat, PullSpeed, possess: true);
+                _target.Capture(_combat, _pullSpeed, possess: true);
             }
             else
             {
                 var dir = to / Mathf.Max(dist, 0.0001f);
-                transform.position += dir * (MoveSpeed * dt);
+                transform.position += dir * (_moveSpeed * dt);
                 transform.rotation = Quaternion.Slerp(transform.rotation,
                     Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
             }
@@ -86,7 +102,7 @@ public class Collector : MonoBehaviour
     private Citizen FindNearestFreeCitizen()
     {
         Citizen best = null;
-        var bestSq = SeekRadius * SeekRadius;
+        var bestSq = _seekRadius * _seekRadius;
         foreach (var c in _builder.Citizens)
         {
             if (c == null || c.IsCaptured) continue;
@@ -107,10 +123,20 @@ public class Collector : MonoBehaviour
         // front -- distinct from Worker's humanoid capsule and from any
         // combat unit's shape (aesthetic-preferences skill §5: shape
         // reads kind).
-        var hull = new Color(0.32f, 0.28f, 0.38f);   // muted violet -- reads as Mad Doctor apparatus, not human/army hardware
+        var hull = new Color(0.32f, 0.28f, 0.38f);   // muted violet -- reads as Mad Doctor apparatus, not human/army hardware, unchanged by trim
         Prim(PrimitiveType.Cube, transform, new Vector3(0f, 0.5f, 0f), new Vector3(1.2f, 0.9f, 1.6f) * Scale, hull, keepCollider: true);
-        Prim(PrimitiveType.Cylinder, transform, new Vector3(0f, 0.7f, 0.9f) * Scale, new Vector3(0.7f, 0.5f, 0.7f) * Scale, new Color(0.5f, 0.45f, 0.55f))
+        Prim(PrimitiveType.Cylinder, transform, new Vector3(0f, 0.7f, 0.9f) * Scale, new Vector3(0.7f, 0.5f, 0.7f) * Scale, TrimColor())
             .localRotation = Quaternion.Euler(90f, 0f, 0f);
+    }
+
+    private Color TrimColor()
+    {
+        switch (_trim)
+        {
+            case CollectorTrim.Brass: return new Color(0.55f, 0.42f, 0.22f);
+            case CollectorTrim.Bone: return new Color(0.82f, 0.78f, 0.68f);
+            default: return new Color(0.5f, 0.45f, 0.55f);
+        }
     }
 
     private static Transform Prim(PrimitiveType type, Transform parent, Vector3 pos, Vector3 scale,

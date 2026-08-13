@@ -138,7 +138,7 @@ public class WaypointCommander : MonoBehaviour
         // docked above THAT (2026-08).
         if (Minimap.PointerOver || BuildingNavHud.PointerOver || SelectionHud.PointerOver
             || RecallHud.PointerOver || BattalionHud.PointerOver || ProductionQueueHud.PointerOver
-            || LabBattalionHud.PointerOver) return;
+            || LabBattalionHud.PointerOver || CollectorLabHud.PointerOver) return;
 
         var mouse = Mouse.current;
         if (mouse == null || _builder == null) return;

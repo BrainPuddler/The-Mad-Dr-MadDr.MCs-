@@ -16352,3 +16352,126 @@ entry, and worth re-running `dotnet test Tests~/CreatureMesh.Tests.csproj`
 from `packages/creature-mesh/` the moment a real .NET SDK is available,
 before trusting these four tests actually pass rather than just
 type-check by manual read-through.
+
+## 2026-08: Collector Lab classes + Big Brain battalion production -- closes the worker-economy epic's bootstrapping gap
+
+Direct follow-up to a creator question ("I see a problem with eating
+humans and harvesting them as workers. how to we get both?") answered
+earlier this session by reading the code: eat vs. possess-into-Worker
+is a fork on `Citizen.Capture`'s own `possess` flag, never a stack --
+whoever captures a citizen first decides its fate, so "getting both"
+is a per-population allocation, not a per-citizen one. That answer also
+surfaced the epic's one still-open thread: `RuntimeCityBuilder.
+SpawnCollector` had been a manual/dev-only entry point since the
+2026-07 Phase 2 entry above -- no live match had ANY way to actually
+field a Collector, so the "possess" half of the fork was theoretical
+in practice. Creator direction, verbatim: "let's fix that, create
+collectors. I wanted to define them in the lab, as a class. Like a
+battalion." -- then, mid-turn, "but also add a way to do it in game."
+
+**Resolved before implementing, via `AskUserQuestion` (both answered
+with the recommended option):**
+
+1. Is a Collector "class" genome-bred, or a fixed apparatus template?
+   -- **Fixed apparatus template.** Collector stays exactly what it
+   already was (Tank.cs's pattern, bespoke non-genome MonoBehaviour,
+   `Collector.cs`'s own header) -- no heart, no origin, nothing for
+   `packages/genome-core` to touch. This keeps `FactionRoster.cs`'s own
+   design law intact ("the Doctor's whole identity is fielding CUSTOM
+   BRED creatures... there is nothing for a roster table to enumerate
+   for that faction") -- a Collector is apparatus, not a creation, so
+   it was never covered by that law in the first place and doesn't
+   need to be.
+2. What does "battalion" mean? -- **A batch production count.**
+   Defining a class also sets how many Collectors one Big Brain
+   training order produces, not a persistent squad/formation and not
+   just flavor text on a normal one-at-a-time queue.
+
+**Shipped, all Unity-side (Collector/Worker/Citizen were already
+established as living entirely outside match-core's command/determinism
+system -- confirmed again this pass via the same "zero hits" grep for
+Capture/Possess/Collector/Worker across `packages/match-core/src/*.cs`
+the 2026-07 Phase 2 entry already ran -- so this needed no
+`CommandKind`, no `SimUnit`, and no lockstep-determinism concern; a
+direct client-side wallet debit is the same tier of shortcut
+`SpendWalletForCast` already established as precedent for this exact
+subsystem):**
+
+- `CollectorClassDef.cs` (new): the loadout data -- `Name`, three
+  cosmetic/stat tiers (`CollectorSpeedTier` Standard/Swift,
+  `CollectorRangeTier` Standard/Extended, `CollectorTrim`
+  Standard/Brass/Bone -- Trim is cosmetic-only, it never touches the
+  base muted-violet hull color that reads "Mad Doctor apparatus" at a
+  glance, only the funnel-scoop accent, per the aesthetic-preferences
+  skill's shape=kind/color=faction split), and `BatchSize` (clamped
+  1-5). Standard/Standard/Standard reproduces Collector's OWN original
+  hardcoded numbers exactly (45m seek, 5.5 move, 5 pull) -- picking a
+  tier up is a real upgrade, never a silent nerf of what already
+  shipped. Cost/time are honest v0.1 placeholders (10 Bones/unit +5 per
+  upgraded tier, 6s train time/unit), same standing policy as every
+  other number in this codebase. `[Serializable]` for `JsonUtility`
+  round-tripping -- deliberately NOT server-backed like a genome Lab
+  battalion template (`BattalionTemplateDto`, fetched via `GET
+  /battalions`): a Collector class has no genome id to fetch, so it's
+  pure local loadout data with nothing for the Mutator to store.
+- `Collector.cs`: `SeekRadius`/`MoveSpeed`/`PullSpeed` changed from
+  consts to instance fields; `Init(builder, loadout = null)` applies a
+  loadout's `SeekSpeed`/`PullSpeed`/`SeekRadius`/`Trim` when given one,
+  and is a no-op (identical behavior to before this entry) when not --
+  every existing manual/dev call site is unaffected.
+- `RuntimeCityBuilder.cs`: `TrySpendBones` (Bones twin of the existing
+  `TrySpendBlood`, same gated "false and unchanged if unaffordable"
+  contract). `CollectorClasses` (lazy-loaded from `PlayerPrefs`,
+  `DefineCollectorClass`/`DeleteCollectorClass` upsert-by-name-and-save)
+  -- the Lab half. `CollectorBattalionOrder` (`Def`/`BuildingHex`/
+  `Remaining`/`TimeToNextUnit`) + `_collectorOrders` (keyed by Big
+  Brain entity ID, one order per building at a time -- the Unity-side
+  twin of match-core's own `SimBuilding.TrainingKind` single-slot
+  contract) + `BeginCollectorBattalion` (validates the building is a
+  Complete, player-0-owned `BuildingKind.BigBrain`, spends
+  `BonesCostPerUnit * clampedBatchSize` up front via `TrySpendBones`,
+  wallet untouched on any failure) + `TickCollectorProduction` (ticked
+  every `Update()`, counts down each order's per-unit timer, spawns via
+  the SAME `SpawnCollector` manual calls already used -- now with an
+  optional `loadout` parameter -- near the training building's own hex
+  via the existing `NearestOpenHex` fallback `SpawnFleeingOccupant`
+  already uses) -- the in-game half.
+- `CollectorLabHud.cs` (new): the one panel that shows both halves --
+  define a class (name field, three tier-cycle buttons, a +/- batch
+  stepper, a live cost/time preview, Save) and, below it, a "Train" row
+  per saved class (picks the player's own nearest idle Complete Big
+  Brain and calls `BeginCollectorBattalion`) plus a live "training now"
+  readout reading `CollectorOrders`. Mad-Doctor-only (`SimBridge.
+  PlayerFaction(0) == FactionId.MadDoctor`, checked every `OnGUI`),
+  collapsed to a small top-left tab by default, toggled by the 'L' key
+  (checked against every other HUD's own key bindings first -- free)
+  or a click on the tab. Added to `WaypointCommander`'s existing
+  `PointerOver` aggregation (alongside `LabBattalionHud` and the rest)
+  so a click inside this panel can't also land as a world-space
+  move/attack order underneath it -- the same guard every other docked
+  HUD panel in this project already requires.
+
+**What this does NOT do, flagged rather than silently scoped down:**
+no way to rename or reorder a saved class beyond delete-and-resave; no
+UI feedback distinguishing "can't afford" from "no Big Brain built yet"
+on a failed Train click (both are the same silent no-op, matching this
+project's established "bad input is a no-op" command discipline, but a
+real error toast would be a nicer follow-up); Collector classes are
+local-only (`PlayerPrefs`), so they don't roam across devices the way a
+genome design does via the Mutator -- an intentional, flagged
+consequence of the "fixed apparatus template, no server" answer above,
+not an oversight.
+
+**Not seen in a real render, not compiled by a real compiler** -- same
+standing environment limitation as every other Unity-side entry in
+this log (no Editor, no `dotnet`, confirmed again this session).
+Verified manually: brace/paren balance checked by hand across all four
+touched/new files; every new public method's call sites traced by grep
+(`SpawnCollector`'s new optional second parameter confirmed to have no
+committed reflection-based call site anywhere in the repo that a
+default-parameter signature change could break -- the 2026-07 Phase 2
+flightcheck harness that reflection-drove `Collector`/`Worker` was
+never itself committed to the tree, per that entry's own description);
+`SimBuilding`'s `EntityId`/`PlayerIndex`/`Kind`/`Hex`/`State` field
+names confirmed against `packages/match-core/src/SimBuilding.cs`
+directly rather than assumed from memory.

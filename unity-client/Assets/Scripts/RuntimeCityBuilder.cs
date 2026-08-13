@@ -239,6 +239,9 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     // the same way _tanks/_combatants are.
     private readonly List<Collector> _collectors = new List<Collector>();
     private readonly List<Worker> _workers = new List<Worker>();
+    private readonly List<CollectorClassDef> _collectorClasses = new List<CollectorClassDef>();
+    private readonly Dictionary<uint, CollectorBattalionOrder> _collectorOrders = new Dictionary<uint, CollectorBattalionOrder>();
+    private bool _collectorClassesLoaded;
     private readonly List<TrafficCar> _trafficCars = new List<TrafficCar>();
 
     // 2026-07 (creator report: "driving through parked cars" -- realistic
@@ -601,6 +604,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (labBattalionHud == null) labBattalionHud = gameObject.AddComponent<LabBattalionHud>();
         labBattalionHud.Init(this, minimap, battalionHud, grabCursor);
 
+        var collectorLabHud = gameObject.GetComponent<CollectorLabHud>();
+        if (collectorLabHud == null) collectorLabHud = gameObject.AddComponent<CollectorLabHud>();
+        collectorLabHud.Init(this, playerIndex: 0);
+
         var productionQueueHud = gameObject.GetComponent<ProductionQueueHud>();
         if (productionQueueHud == null) productionQueueHud = gameObject.AddComponent<ProductionQueueHud>();
         productionQueueHud.Init(grabCursor);
@@ -645,6 +652,8 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// anywhere nearby).</summary>
     private void Update()
     {
+        TickCollectorProduction(Time.deltaTime);
+
         if (_trafficCars.Count > 0)
         {
             _trafficCheckTimer -= Time.deltaTime;
@@ -3367,6 +3376,17 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return true;
     }
 
+    /// <summary>Bones twin of <see cref="TrySpendBlood"/>, same gated
+    /// contract -- <see cref="BeginCollectorBattalion"/>'s real purchase
+    /// needs it (a Collector battalion is bought outright up front, not
+    /// an unblockable economy sink like <see cref="SpendWalletForCast"/>).</summary>
+    public bool TrySpendBones(int amount)
+    {
+        if (amount < 0 || WalletBones < amount) return false;
+        WalletBones -= amount;
+        return true;
+    }
+
     public void OnCitizenEaten(Citizen citizen)
     {
         // docs/20 per-citizen yield: Blood 2 / Bones 1 / Brains 1
@@ -3439,23 +3459,188 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (_simBridge != null) _simBridge.QueueUnregisterWorkerCommand(0);
     }
 
-    /// <summary>Manual test/dev entry point for spawning a Collector
-    /// (2026-07 epic) -- NOT yet wired into any match-start spawn flow.
-    /// The real way a player should field one ties into Phase 4's
-    /// Mad-Doctor production mechanic (the "Big Brain" control unit /
-    /// harvested-Brains cost), which doesn't exist yet -- flagged rather
-    /// than faked with an arbitrary auto-spawn count. Mirrors <see
-    /// cref="SpawnFleeingOccupant"/>'s own status as a real, tested,
-    /// not-yet-auto-triggered building block.</summary>
-    public Collector SpawnCollector(HexCoord hex)
+    /// <summary>Spawns a Collector -- either a manual test/dev call
+    /// (`loadout: null`, unchanged since the 2026-07 epic) or the real
+    /// output of a Big Brain battalion order (<see
+    /// cref="TickCollectorProduction"/>). Mirrors <see
+    /// cref="SpawnFleeingOccupant"/>'s own status as a real, tested
+    /// building block.</summary>
+    public Collector SpawnCollector(HexCoord hex, CollectorClassDef loadout = null)
     {
         var go = new GameObject("Collector_" + _collectors.Count);
         go.transform.position = WorldOf(hex);
         var collector = go.AddComponent<Collector>();
-        collector.Init(this);
+        collector.Init(this, loadout);
         _collectors.Add(collector);
         if (collector.Combat != null) _combatants.Add(collector.Combat);
         return collector;
+    }
+
+    // ---- Collector Lab classes ("define them in the lab, as a class.
+    // Like a battalion.") + Big Brain battalion production -- 2026-08,
+    // docs/12 decision log. Closes the worker-economy epic's last open
+    // thread: a player previously had no live way to ever field a
+    // Collector at all (SpawnCollector above was manual-only). -------
+
+    private const string CollectorClassesPrefsKey = "MadDr.CollectorClasses.v1";
+
+    [System.Serializable]
+    private class CollectorClassListWrapper
+    {
+        public System.Collections.Generic.List<CollectorClassDef> Items = new System.Collections.Generic.List<CollectorClassDef>();
+    }
+
+    /// <summary>One in-progress Big Brain training order -- the Unity-
+    /// side twin of match-core's <c>SimBuilding.TrainingKind</c>/
+    /// <c>TrainTicksRemaining</c> (same single-slot-per-building
+    /// contract), needed because Collector isn't a match-core
+    /// <c>SimUnit</c> (see Collector.cs's own header) so this can't just
+    /// be a real <c>CommandKind.TrainUnit</c>.</summary>
+    public class CollectorBattalionOrder
+    {
+        public CollectorClassDef Def;
+        public HexCoord BuildingHex;
+        public int Remaining;
+        public float TimeToNextUnit;
+    }
+
+    /// <summary>Every class the player has saved in the Lab -- lazily
+    /// loaded from <c>PlayerPrefs</c> on first access (no server round
+    /// trip; see <see cref="CollectorClassDef"/>'s own header for why).</summary>
+    public IReadOnlyList<CollectorClassDef> CollectorClasses
+    {
+        get
+        {
+            EnsureCollectorClassesLoaded();
+            return _collectorClasses;
+        }
+    }
+
+    /// <summary>Every Big Brain building currently mid-battalion, keyed
+    /// by that building's entity ID -- read by <see
+    /// cref="CollectorLabHud"/> to show live training progress.</summary>
+    public IReadOnlyDictionary<uint, CollectorBattalionOrder> CollectorOrders { get { return _collectorOrders; } }
+
+    private void EnsureCollectorClassesLoaded()
+    {
+        if (_collectorClassesLoaded) return;
+        _collectorClassesLoaded = true;
+        var json = PlayerPrefs.GetString(CollectorClassesPrefsKey, "");
+        if (string.IsNullOrEmpty(json)) return;
+        try
+        {
+            var wrapper = JsonUtility.FromJson<CollectorClassListWrapper>(json);
+            if (wrapper != null && wrapper.Items != null) _collectorClasses.AddRange(wrapper.Items);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("CollectorClasses: failed to load saved classes -- " + e.Message);
+        }
+    }
+
+    private void SaveCollectorClasses()
+    {
+        var wrapper = new CollectorClassListWrapper { Items = _collectorClasses };
+        PlayerPrefs.SetString(CollectorClassesPrefsKey, JsonUtility.ToJson(wrapper));
+    }
+
+    /// <summary>"Define them in the lab, as a class" -- the Lab half of
+    /// the feature. Upserts by name (case-insensitive), clamps
+    /// BatchSize into [MinBatchSize, MaxBatchSize], persists locally.</summary>
+    public void DefineCollectorClass(CollectorClassDef def)
+    {
+        if (def == null || string.IsNullOrWhiteSpace(def.Name)) return;
+        EnsureCollectorClassesLoaded();
+        def.BatchSize = Mathf.Clamp(def.BatchSize, CollectorClassDef.MinBatchSize, CollectorClassDef.MaxBatchSize);
+        var idx = _collectorClasses.FindIndex(c => string.Equals(c.Name, def.Name, System.StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0) _collectorClasses[idx] = def; else _collectorClasses.Add(def);
+        SaveCollectorClasses();
+    }
+
+    public void DeleteCollectorClass(string name)
+    {
+        EnsureCollectorClassesLoaded();
+        var removed = _collectorClasses.RemoveAll(c => string.Equals(c.Name, name, System.StringComparison.OrdinalIgnoreCase));
+        if (removed > 0) SaveCollectorClasses();
+    }
+
+    /// <summary>"Also add a way to do it in game" -- spends the class's
+    /// TotalBonesCost up front as a real, gated purchase (<see
+    /// cref="TrySpendBones"/>, never a partial/negative spend), then
+    /// trains the whole batch one unit at a time from the given
+    /// Complete, player-0-owned Big Brain building. One order per
+    /// building at a time, same single-in-progress-slot precedent
+    /// match-core's own <c>SimBuilding.TrainingKind</c> uses for the
+    /// real roster TrainUnit pipeline this mirrors client-side. Returns
+    /// false (wallet untouched) on any validation failure -- building
+    /// missing/not owned/not a Complete Big Brain, an order already
+    /// running there, or simply unaffordable.</summary>
+    public bool BeginCollectorBattalion(uint bigBrainEntityId, CollectorClassDef def)
+    {
+        if (def == null || _simBridge == null || !_simBridge.HasMatch) return false;
+        if (_collectorOrders.ContainsKey(bigBrainEntityId)) return false;
+
+        SimBuilding building = null;
+        for (var i = 0; i < _simBridge.BuildingCount; i++)
+        {
+            var b = _simBridge.BuildingAt(i);
+            if (b.EntityId == bigBrainEntityId) { building = b; break; }
+        }
+        if (building == null || building.PlayerIndex != 0 || building.Kind != BuildingKind.BigBrain
+            || building.State != BuildingState.Complete) return false;
+
+        var clampedBatch = Mathf.Clamp(def.BatchSize, CollectorClassDef.MinBatchSize, CollectorClassDef.MaxBatchSize);
+        var cost = def.BonesCostPerUnit * clampedBatch;
+        if (!TrySpendBones(cost)) return false;
+
+        _collectorOrders[bigBrainEntityId] = new CollectorBattalionOrder
+        {
+            Def = def,
+            BuildingHex = building.Hex,
+            Remaining = clampedBatch,
+            TimeToNextUnit = def.TrainSecondsPerUnit,
+        };
+        Debug.Log("Big Brain began training " + clampedBatch + " Collector(s) (\"" + def.Name + "\") for " + cost + " Bones.");
+        return true;
+    }
+
+    /// <summary>Ticked from <see cref="Update"/> every frame: counts down
+    /// each active order's per-unit timer and spawns one Collector (via
+    /// the same <see cref="SpawnCollector"/> real production goes
+    /// through) the instant it reaches zero, near the training
+    /// building's own hex -- same <see cref="NearestOpenHex"/> fallback
+    /// <see cref="SpawnFleeingOccupant"/> uses for "the building's own
+    /// hex might be blocked terrain." Clears the order once the whole
+    /// battalion has spawned, freeing that building's single slot.</summary>
+    private void TickCollectorProduction(float dt)
+    {
+        if (_collectorOrders.Count == 0) return;
+        List<uint> finished = null;
+        foreach (var kv in _collectorOrders)
+        {
+            var order = kv.Value;
+            order.TimeToNextUnit -= dt;
+            if (order.TimeToNextUnit > 0f) continue;
+
+            var blocked = BlockedFor(false);
+            var spawnHex = NearestOpenHex(order.BuildingHex, blocked);
+            SpawnCollector(spawnHex, order.Def);
+
+            order.Remaining--;
+            if (order.Remaining <= 0)
+            {
+                if (finished == null) finished = new List<uint>();
+                finished.Add(kv.Key);
+            }
+            else
+            {
+                order.TimeToNextUnit = order.Def.TrainSecondsPerUnit;
+            }
+        }
+        if (finished != null)
+        {
+            foreach (var id in finished) _collectorOrders.Remove(id);
+        }
     }
 
     public void SpawnWaypointMarker(Vector3 at)
