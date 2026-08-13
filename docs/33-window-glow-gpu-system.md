@@ -247,3 +247,56 @@ the next thing to check with an actual Editor: `_BulbEmissiveBase`
 own live value by `BuildingWindowGrid.SharedMaterial()`) and whether
 `Shader.Find("MadDr/WindowGrid")` resolves at all in a built player
 (untested runtime shader lookup, §5's own "shader compiles" caveat).
+
+## 8. §7's fix wasn't it — real cause was back-face culling, `Cull Off` added
+
+Creator confirmed (Editor Play mode, so §7's shader-stripping-adjacent
+theories are moot too — Play mode always has every project shader
+available) that §7's z-fighting fix made no difference: still "dots.
+Not rectangles." §7 wasn't wrong that the depth offset was lost (that
+part of the diagnosis still holds and the fix is still correct to keep)
+— it just wasn't the dominant cause.
+
+**Actual root cause**: `WindowGrid.shader` declared no `Cull` state, so
+the default `Cull Back` applies. `BuildingWindowGrid.Build()`'s quad
+winding is a fixed formula off `right x up` alone (`right` from the
+CALLER-supplied tangent) — it never checks that winding actually faces
+`w.Normal`, it just trusts the caller got tangent handedness right.
+Two call sites don't: `BuildingDresser.SpawnWindowStrip` passes the
+identical `Vector3.right` tangent for both its `Vector3.forward` AND
+`Vector3.back` calls (one building, two opposite walls, same tangent);
+`FacadeKit.Tangent(FacadeFace face)` does the same per axis (`PlusX`
+and `MinusX` both return `Vector3.forward`). Whichever of each opposite
+pair doesn't happen to match a consistent right-handed convention gets
+a reversed winding — back-face culled, completely invisible, not dim,
+not z-fighting-noisy, just gone. What's left visible across the city:
+the sparse `DynamicLightBudget`-promoted real lights, which are
+genuinely round point lights with their own bloom halo and were never
+part of this bug — exactly "dots, not rectangles," and exactly why the
+report used those words literally.
+
+**Why this wasn't diagnosed first**: it requires reasoning about actual
+triangle winding and Unity's CW/CCW front-face convention, which is
+much easier to get backwards blind than the z-fighting theory was —
+and getting it backwards would have culled the CURRENTLY-working side
+too, making things worse with no way to render-check the result.
+
+**Fix**: `Cull Off` on `WindowGrid.shader`'s `ForwardLit` pass, instead
+of hand-deriving and fixing the winding itself. Deliberately the
+lower-risk option: a window pane is never seen from its back side (no
+interior geometry exists to view it from), so double-siding it has no
+real downside, whereas a winding fix that guessed the wrong sign would
+have culled the opposite, currently-fine side instead — a strictly
+worse outcome, unrecoverable without another round-trip to the creator.
+The `UsePass`-reused ShadowCaster/DepthOnly/DepthNormals passes (stock
+URP/Lit, own header explains why they're reused rather than hand-
+rolled) still cull by whatever URP/Lit's own `_Cull` property defaults
+to — out of scope here, a shadow/depth-only miss on one side is a much
+smaller cosmetic gap than "the pane doesn't render at all."
+
+**Still not verified in a real render** (this fix, specifically) —
+flagged per this doc's own §5 and standing policy. If windows are
+still wrong after this, the report should look qualitatively different
+now: no longer "dots instead of rectangles" (that specific symptom
+should be gone), so whatever's next is very likely a different bug,
+not a third attempt at this same one.

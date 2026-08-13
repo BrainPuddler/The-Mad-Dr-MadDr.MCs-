@@ -17184,3 +17184,38 @@ explicitly per docs/33 §5/§7 and docs/28 §5's own standing policy for
 exactly this situation -- if windows still don't read as full
 rectangles after this fix, docs/33 §7 names the next two things to
 check with an actual Editor.
+
+## 2026-08 same-day correction: the z-fighting fix above wasn't it -- real cause was back-face culling
+
+Creator tested the fix above in Editor Play mode (ruling out shader-
+stripping theories too) and reported no change: still "dots. Not
+rectangles." Full diagnosis in docs/33 §8 (the doc this belongs to).
+
+Real cause: `WindowGrid.shader` never declared a `Cull` state (defaults
+to `Cull Back`), and two of the three window call sites hand
+`BuildingWindowGrid.Build()` a tangent whose handedness doesn't match
+their own `normal` for one side of a building (`BuildingDresser.
+SpawnWindowStrip` uses the same `Vector3.right` tangent for both its
+forward- and back-facing calls; `FacadeKit.Tangent(face)` returns the
+same vector for `PlusX`/`MinusX`). `Build()`'s quad winding never
+checks against `w.Normal` to self-correct -- so on whichever side gets
+the mismatched tangent, every window is back-face culled: not dim, not
+noisy, just entirely absent. What's left visible: the pre-existing,
+unrelated `DynamicLightBudget` real lights, which are genuinely round
+points -- matching the report exactly.
+
+Fix: `Cull Off` on the shader's ForwardLit pass, not a hand-derived
+winding correction -- deliberately the safer of the two options,
+since guessing Unity's CW/CCW convention wrong (no Editor here to
+check against) would have culled the currently-working side instead,
+a strictly worse and harder-to-detect outcome than the one being fixed.
+A window pane genuinely has no legitimate "back" viewing angle (nothing
+exists to view it from inside solid building geometry), so double-
+siding it costs nothing.
+
+The z-fighting fix from the entry above is kept (it's still a real,
+correct fix for a real, separate gap), it just wasn't the dominant
+cause of what was reported. Noted here as a correction, not a
+retraction -- both diagnoses came from reading the code, not a render,
+and this is what that ceiling looks like when it's hit twice on the
+same bug before landing on the real cause.

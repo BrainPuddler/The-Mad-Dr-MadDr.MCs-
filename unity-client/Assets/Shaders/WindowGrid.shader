@@ -76,6 +76,30 @@ Shader "MadDr/WindowGrid"
         {
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForward" }
+            // 2026-08 (creator report: "dots. Not rectangles" -- the GPU
+            // window-grid conversion, docs/33): no Cull state here means
+            // the default Cull Back applies. AddWindow's quad winding
+            // (BuildingWindowGrid.Build) comes from `right x up` alone --
+            // it does NOT look at `normal` to correct itself, and its
+            // CALLERS hand it inconsistent tangent handedness for
+            // opposite-facing walls -- e.g.
+            // BuildingDresser.SpawnWindowStrip passes the SAME
+            // Vector3.right tangent for both its Vector3.forward AND
+            // Vector3.back calls, and FacadeKit.Tangent(face) does the
+            // same per-axis (PlusX and MinusX both return Vector3.forward).
+            // That flips the resulting triangle winding on roughly half of
+            // every building's walls, back-face-culling those windows
+            // entirely -- leaving only the sparse DynamicLightBudget real
+            // lights (which are genuinely round point lights) visible, no
+            // rectangles at all on the culled side. Cull Off sidesteps
+            // needing to hand-derive and get right which specific callers
+            // have the wrong handedness (no Editor here to render-check
+            // against) -- a window pane is never seen from its "back" side
+            // anyway (there's no interior geometry to view it from), so
+            // double-siding it is a safe, no-downside fix rather than a
+            // guess at Unity's CW/CCW convention that could just as
+            // easily cull the WRONG side instead.
+            Cull Off
 
             HLSLPROGRAM
             #pragma vertex WindowGridVertex

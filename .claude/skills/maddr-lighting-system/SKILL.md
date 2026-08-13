@@ -290,6 +290,38 @@ again:
   `Object.Destroy` those renderers on collapse (same as massing cubes
   already get) or add a proper `Unregister` to both registries.
 
+## 7. Converting a real-depth Cube prop to a flat quad silently loses TWO things, not one (2026-08, docs/33)
+
+`BuildingWindowGrid`'s conversion of per-window Cube GameObjects to
+merged-mesh flat quads (docs/33) shipped with two silent regressions,
+found in two separate rounds because the first fix wasn't the real
+cause — worth knowing before converting any other Cube-based prop to a
+flat quad the same way:
+
+1. **The depth-derived outward clearance from the wall.** A Cube
+   centered at `pos` with real depth naturally clears whatever's behind
+   it by half that depth; a flat quad at the same `pos` doesn't, and can
+   z-fight with it. Two of three `AddWindow` call sites lost this.
+2. **Consistent triangle winding.** A Cube's culling doesn't care which
+   way you built it — SOME face always points outward correctly. A flat
+   quad's winding depends entirely on the caller's tangent handedness
+   matching its own normal, and two of the three call sites hand it a
+   tangent that's only correct for ONE of a pair of opposite-facing
+   walls (same `Vector3.right` for both `Vector3.forward` and
+   `Vector3.back`, etc.) — so on whichever side doesn't match, the quad
+   is back-face CULLED: not dim, not glitchy, entirely absent. This was
+   the actual cause of a creator-reported "dots, not rectangles" (what
+   remained visible was the pre-existing, unrelated real-light halos).
+   Fixed with `Cull Off` on the shader rather than a hand-derived
+   winding correction — deliberately the lower-risk choice with no
+   Editor here to render-check a CW/CCW guess against; a window pane
+   has no legitimate back-viewing-angle anyway.
+
+Full diagnosis of both rounds: docs/33 §7 (first fix, real but not the
+dominant cause) and §8 (the actual cause). If you're converting another
+Cube prop to a quad, check both of these up front instead of rediscovering
+them one at a time.
+
 ## When you're not sure
 
 Read `docs/28` §0.5 (the bug-history table) top to bottom before
