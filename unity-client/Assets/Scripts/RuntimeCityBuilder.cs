@@ -2534,6 +2534,13 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                 for (var c = 0; c < scatterHost.childCount; c++) debrisChunks.Add(scatterHost.GetChild(c).gameObject);
                 DamageFx.DustBurst(WorldOf(building.Footprint[0]), _buildingsHost);
                 _scorchDecalsByBuilding[building] = SpawnScorchDecal(building, _buildingsHost);
+                // 2026-08 (creator report: "destroyed collapsed building
+                // do not have lights"): rubble had zero emissive surfaces
+                // anywhere until now -- see DamageFx.CollapseEmbers' own
+                // header. Radius scales with footprint size, same "bigger
+                // building, bigger wreck" idea BuildingRubble already uses.
+                DamageFx.CollapseEmbers(WorldOf(building.Footprint[0]), _buildingsHost,
+                    Mathf.Max(3f, building.Footprint.Count * 3f));
             }
             _debrisChunksByBuilding[building] = debrisChunks;
             // 2026-08 (creator report: "I don't see people fleeing from

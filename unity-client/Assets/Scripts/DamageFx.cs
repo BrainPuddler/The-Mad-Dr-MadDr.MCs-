@@ -250,6 +250,33 @@ public static class DamageFx
         go.AddComponent<RubblePileFx>().Init(footprintScale);
     }
 
+    /// <summary>2026-08 (creator report: "destroyed collapsed building do
+    /// not have lights"): scatters a handful of small warm-orange glowing
+    /// embers across a just-collapsed footprint -- rubble's own two
+    /// materials (RuntimeCityBuilder's `rubbleMat`, and the scorch decal
+    /// material) both only ever set `.color`, never `_EmissionColor`, so
+    /// a destroyed lot went completely dark against an otherwise-lit
+    /// night city; this is a real omission (confirmed: nothing anywhere
+    /// in the destruction path was ever emissive), not a bug that turned
+    /// an existing light off. Each ember gently pulses out of phase with
+    /// the others (same "reads as alive, not static" idea <see
+    /// cref="EmissiveAnimator"/>'s Flicker kind uses for windows) and the
+    /// whole cluster fades out and self-destroys after <c>Life</c>
+    /// seconds -- "still smoldering," not a permanent light source (a
+    /// rubble pile shouldn't outlive every other fire effect in the
+    /// game). Self-contained "own Update(), own fade, self-destroy"
+    /// shape, same as <see cref="RubblePileFx"/> right above -- a
+    /// handful of embers per collapse is nowhere near the "hundreds of
+    /// windows" scale <see cref="EmissiveAnimator"/>'s batched system
+    /// exists for, so this deliberately does NOT route through it.</summary>
+    public static void CollapseEmbers(Vector3 at, Transform parent, float footprintScale)
+    {
+        var go = new GameObject("CollapseEmbers");
+        go.transform.SetParent(parent, false);
+        go.transform.position = at;
+        go.AddComponent<CollapseEmbersFx>().Init(footprintScale);
+    }
+
     /// <summary>A vertical water spout where a hydrant just got sheared
     /// off -- sprays for a few seconds, then peters out and cleans
     /// itself up (`WaterSpout`).</summary>
@@ -1733,6 +1760,81 @@ public class RubblePileFx : MonoBehaviour
                 var c = _mats[i].color;
                 _mats[i].color = new Color(c.r, c.g, c.b, 1f - t);
             }
+        }
+        if (_age >= Life) Object.Destroy(gameObject);
+    }
+}
+
+/// <summary>2026-08 (creator report: "destroyed collapsed building do
+/// not have lights") -- see <see cref="DamageFx.CollapseEmbers"/>'s own
+/// header for the full story. Emissive spheres set once at spawn (base
+/// color dim, `_EmissionColor` bright warm-orange, same `EnableKeyword
+/// ("_EMISSION")`/`SetColor("_EmissionColor", ...)` technique <see
+/// cref="BuildingDresser"/>'s own window materials already use), then
+/// each frame scaled by a per-ember phase-offset sine wobble times a
+/// shared cluster-wide fade that only kicks in during the final third of
+/// <see cref="Life"/> -- the embers hold roughly steady brightness for
+/// most of their life, then visibly die down together, rather than
+/// abruptly vanishing.</summary>
+public class CollapseEmbersFx : MonoBehaviour
+{
+    private const float Life = 90f;
+    private const float FadeStart = 60f;
+    private readonly List<Material> _mats = new List<Material>();
+    private readonly List<Color> _baseEmission = new List<Color>();
+    private readonly List<float> _phases = new List<float>();
+    private float _age;
+
+    /// <summary>radius: how far embers scatter from the spawn point --
+    /// reuses the SAME footprintScale a caller already computed for <see
+    /// cref="RubblePileFx.Init"/>, so a bigger collapse reads with more,
+    /// more widely-scattered embers, same as it does with more rubble
+    /// chunks.</summary>
+    public void Init(float radius)
+    {
+        var emberCount = Mathf.Clamp(Mathf.RoundToInt(2f + radius * 0.5f), 2, 8);
+        var id = GetInstanceID();
+
+        for (var i = 0; i < emberCount; i++)
+        {
+            var salt = id + i * 733;
+            var angle = ((salt & 0xFFFF) % 360) * Mathf.PI / 180f;
+            var dist = Mathf.Max(1f, radius) * (0.15f + ((salt >> 8) & 15) / 15f * 0.7f);
+            var dir = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+
+            var chunk = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            chunk.name = "Ember";
+            chunk.transform.SetParent(transform, false);
+            chunk.transform.localPosition = dir * dist + Vector3.up * 0.15f;
+            var s = 0.25f + ((salt >> 4) & 7) / 7f * 0.35f;
+            chunk.transform.localScale = new Vector3(s, s * 0.4f, s);
+            var collider = chunk.GetComponent<Collider>();
+            if (collider != null) Object.Destroy(collider);
+
+            var mat = new Material(ShaderUtil.FindRenderableShader());
+            var warm = new Color(1f, 0.45f + ((salt >> 12) & 7) / 7f * 0.2f, 0.12f);
+            mat.color = warm * 0.3f;
+            mat.EnableKeyword("_EMISSION");
+            var emission = warm * (2.2f + ((salt >> 16) & 7) / 7f * 1.3f);
+            mat.SetColor("_EmissionColor", emission);
+            var renderer = chunk.GetComponent<Renderer>();
+            if (renderer != null) renderer.sharedMaterial = mat;
+
+            _mats.Add(mat);
+            _baseEmission.Add(emission);
+            _phases.Add(((salt >> 20) & 0xFFFF) / 65536f * Mathf.PI * 2f);
+        }
+    }
+
+    private void Update()
+    {
+        _age += Time.deltaTime;
+        var fade = _age > FadeStart ? 1f - Mathf.Clamp01((_age - FadeStart) / (Life - FadeStart)) : 1f;
+        for (var i = 0; i < _mats.Count; i++)
+        {
+            if (_mats[i] == null) continue;
+            var wobble = 0.7f + 0.3f * Mathf.Sin(_age * 2.1f + _phases[i]);
+            _mats[i].SetColor("_EmissionColor", _baseEmission[i] * wobble * fade);
         }
         if (_age >= Life) Object.Destroy(gameObject);
     }

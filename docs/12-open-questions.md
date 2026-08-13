@@ -17074,3 +17074,77 @@ real render -- whether 10 Parts/sec/Worker actually FEELS right (too
 fast to notice progress, too slow to feel responsive) is exactly the
 kind of number this project's own v0.1-placeholder policy expects to
 get re-tuned once someone can actually watch it happen.
+
+## 2026-08 follow-up: destroyed buildings had zero light -- collapse embers added, a real latent orphaned-light bug found and flagged (not fixed)
+
+Creator report: "destroyed collapsed building do not have lights."
+Dispatched a research pass (Explore agent) before touching anything,
+since the report could have meant several different things (an actual
+bug turning off a real light, or simply no light ever existing on
+rubble) and this project's own discipline is "investigate, don't guess."
+
+**Confirmed: not a bug that turns anything off -- rubble simply never
+had ANY emissive surface, on either of its two systems this project
+runs.** Read `RuntimeCityBuilder.ApplyBuildingDamage`'s Destroyed
+branch directly: `rubbleMat` (the shattered-slab/scorch material) and
+the scorch-decal material (`SpawnScorchDecal`) both only ever set
+`.color`; neither calls `EnableKeyword("_EMISSION")`/`SetColor
+("_EmissionColor", ...)` anywhere. Combat fire on a Damaged building
+(`FireCluster`/`SmokePlume`, genuinely emissive) is simply destroyed
+outright the instant the building collapses, along with the massing
+cube it's attached to -- never converted into lingering embers. Net
+effect: a destroyed lot goes fully dark the instant it collapses, a
+stark, visible hole against an otherwise-lit night city. Streetlamps
+were also checked and ruled out as a cause -- `RoadDresser` parents them
+under its own "Roads" host, never under a building's own hierarchy, so
+destroying a building cannot collaterally kill a nearby streetlamp.
+
+**Fix: `DamageFx.CollapseEmbers` (new), called from the same Destroyed-
+branch site as the existing `DustBurst`/`SpawnScorchDecal`.** A handful
+of small warm-orange emissive spheres (2-8, scaled by footprint size,
+same "bigger building, bigger effect" idea `BuildingRubble`'s own
+chunk-count already uses) scattered across the collapse point, each
+pulsing out of phase with the others (a per-ember sine wobble, same
+"reads as alive, not static" idea `EmissiveAnimator`'s Flicker kind
+uses for windows) via the EXACT emission-setting technique
+`BuildingDresser`'s own window materials already use (confirmed by
+reading that file directly rather than guessing at the URP API). Fades
+out and self-destroys after 90s (`CollapseEmbersFx`, own `Update()`,
+own fade, self-destroy -- same shape as the neighboring `RubblePileFx`,
+NOT routed through `EmissiveAnimator`'s batched window-light system,
+since a handful of embers per collapse is nowhere near the "hundreds of
+windows" scale that system exists to batch for) -- "still smoldering,"
+not a permanent light source.
+
+**A real, separate, latent bug found during the investigation --
+flagged, not fixed this pass, since it's invisible and out of scope for
+the actual report:** a building's DRESSING-HOLDER cubes (the ones
+carrying `BuildingDresser`'s own window strips, each individually
+`EmissiveAnimator.Register`'d/`GlowPointRegistry.Register`'d) are never
+`Object.Destroy`'d on collapse -- only squished to 12% height and every
+child renderer's material force-overwritten with `rubbleMat`. Both
+registries' own self-prune logic only fires on `Renderer == null`
+(`EmissiveAnimator.cs`, `DynamicLightBudget.cs`), which never happens
+here since the renderer survives, just recolored -- so every former
+window on every destroyed building keeps ticking in
+`EmissiveAnimator.Tick()` and potentially occupying a
+`DynamicLightBudget` real-light slot, invisibly, for the rest of the
+match. Confirmed this never produces visible light (so it's NOT what
+the creator is seeing) -- a pure CPU/light-budget hygiene issue, real
+but low-impact, worth its own small fix (either `Object.Destroy` those
+renderers on collapse the same way massing cubes already are, or add a
+proper `Unregister` to both registries) the next time someone's
+touching this area, not bundled into an unrelated visual-report fix.
+
+**Verified manually** (no dotnet/Unity Editor in this environment, same
+standing limitation as every entry in this log): brace/paren balance
+confirmed on both touched files (`DamageFx.cs` exactly balanced;
+`RuntimeCityBuilder.cs`'s raw whole-file count hit the same recurring
+comment-punctuation false positive this log has hit repeatedly --
+stripped comment lines and recounted, 1669/1669, balanced); the
+`EnableKeyword`/`SetColor` emission technique cross-checked against
+`BuildingDresser.cs`'s own working window-light code before reuse, not
+assumed from general Unity knowledge. Not seen in a real render -- the
+90s ember lifetime and 2-8 ember count are v0.1 placeholders, same
+standing policy as every other invented number in this codebase, worth
+a first look the moment a real Editor is available.
