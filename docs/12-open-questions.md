@@ -17253,3 +17253,17 @@ field) and its mirror `CityLightingProfile.FogDensityNight`, same
 pairing every prior fog-default change in this log has kept in sync.
 `fogDensityScale` (0.41) untouched -- only asked to change the Night
 per-phase value this time.
+
+## 2026-08: starting Worker count raised 2 -> 30
+
+Creator: "The game needs to initialize with 30 works so player can
+build a new building." `RuntimeCityBuilder.StartingWorkerCount`
+(the tech-wing epic's bootstrap grant, see this doc's own "2 starting
+Workers, build menu gated for real" entry above) raised from 2 to 30 --
+same v0.1-placeholder status as before, still flagged as invented, not
+balanced. `SpawnStartingWorkers`'s hex search (`FindOpenHexWide`,
+radius 24 around the HQ, on the order of ~1800 hexes) comfortably fits
+30 distinct placements; nothing else in that path assumes a small
+count. Human player only (`SpawnStartingWorkers(p0Hq, ...)`'s only call
+site), same as the original 2 -- AI opponents are untouched by this
+constant.

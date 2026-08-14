@@ -3297,8 +3297,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// number, don't pretend it's balanced" policy) -- see <see
     /// cref="SpawnStartingBases"/>'s own call site for why this bootstrap
     /// exists at all. Not claimed balanced against anything; just enough
-    /// that the build menu is usable from turn one.</summary>
-    private const int StartingWorkerCount = 2;
+    /// that the build menu is usable from turn one. 2026-08 creator
+    /// direction: "The game needs to initialize with 30 works so player
+    /// can build a new building" -- raised from the original 2.</summary>
+    private const int StartingWorkerCount = 30;
 
     /// <summary>docs/12 tech-wing epic, Phase 1: spawn the human player's
     /// free starting Workers near their HQ, real Unity `Worker` units
