@@ -17267,3 +17267,33 @@ radius 24 around the HQ, on the order of ~1800 hexes) comfortably fits
 count. Human player only (`SpawnStartingWorkers(p0Hq, ...)`'s only call
 site), same as the original 2 -- AI opponents are untouched by this
 constant.
+
+## 2026-08 follow-up: Worker idle priority flipped -- gather by default, build only once there's nothing to gather
+
+Creator: "workers need to be searching for and gathering resources,
+unless called back to build a building." Asked to disambiguate two real
+decisions before touching code (AskUserQuestion), both resolved toward
+the smaller-scope option:
+
+1. **"Resources" stays debris-scavenging only**, not expanded to the
+   general resource nodes Monsters harvest -- the docs/12 "Zombie"
+   entry's "monsters would still collect resources" rule (itself from
+   three prior AskUserQuestion answers) stands, untouched.
+2. **"Called back" stays automatic**, not a new player-issued build
+   order -- `Worker`'s order vocabulary is still move-only
+   (`WaypointCommander`'s own standing comment). What changed is
+   priority, not mechanism.
+
+Concretely: `Worker.TickIdle()` used to check for an unstaffed
+construction site FIRST, scavengeable debris only as the fallback --
+meaning right after raising `StartingWorkerCount` to 30 (entry just
+above), a fresh match with no debris yet AND no fresh construction
+underway left every idle Worker simply standing still, since neither
+branch found anything. Flipped: debris-scavenging is now the default
+check, an unstaffed site is the fallback only once there's nothing
+left nearby to gather. A Worker already committed to scavenging or
+staffing is untouched either way (`Update()`'s state switch only calls
+back into `TickIdle` from the `Idle` state itself) -- this only changes
+what an otherwise-idle Worker picks first. Full reasoning: docs/22
+§11b, updated in place rather than appended, since it directly
+describes the priority order this changes.

@@ -32,9 +32,18 @@ using UnityEngine;
 ///    cref="SimBuilding.IsStaffed"/>, match-core) -- not just a
 ///    placement-time gate like the pre-existing `RequiresWorker` check.
 ///
-/// Idle priority: seek an unstaffed friendly construction site first,
-/// then scavengeable debris, then just stand there -- "monsters would
-/// still collect resources" is why citizens are never a Worker target.
+/// Idle priority (2026-08 creator direction: "workers need to be
+/// searching for and gathering resources, unless called back to build a
+/// building" -- reversed from the original order): scavengeable debris
+/// FIRST, an unstaffed friendly construction site only as the fallback
+/// when there's nothing left to gather, then just stand there --
+/// "monsters would still collect resources" is why citizens are never a
+/// Worker target. There's still no separate player-issued "go build"
+/// order (Worker's vocabulary stays move-only, see WaypointCommander's
+/// own comment) -- a construction site only ever gets auto-staffed once
+/// gathering runs dry, which is what "called back" means here: nothing
+/// pulls a Worker off scavenging early, it just naturally falls through
+/// to building once there's nothing nearby left to scavenge.
 /// Combat is auto-aggro within a short leash (<see cref="AggroRadius"/>,
 /// same `NearestEnemyOf`/`TryFire` pattern <see cref="Tank"/> already
 /// uses) -- zombie-horde mindless violence overrides economic work the
@@ -197,24 +206,27 @@ public class Worker : MonoBehaviour
         transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
     }
 
-    /// <summary>Idle-time decision: an unstaffed friendly construction
-    /// site first ("build things"), destroyed-building debris second
-    /// ("automatically scavenge resources") -- never a citizen search
-    /// ("monsters would still collect resources," creator direction).</summary>
+    /// <summary>Idle-time decision: destroyed-building debris first
+    /// ("automatically scavenge resources," now the default so a Worker
+    /// is always out searching for/gathering something rather than
+    /// standing still), an unstaffed friendly construction site second
+    /// ("build things," only once there's nothing left to gather) --
+    /// never a citizen search ("monsters would still collect resources,"
+    /// creator direction).</summary>
     private void TickIdle()
     {
-        var site = _builder.NearestUnstaffedConstructionSite(transform.position, SearchRadius);
-        if (site != null)
-        {
-            _stationedBuildingId = site.EntityId;
-            _state = ZombieState.SeekBuild;
-            return;
-        }
         var debris = _builder.NearestScavengeableBuildingTo(transform.position, SearchRadius);
         if (debris != null)
         {
             _scavengeTarget = debris;
             _state = ZombieState.SeekScavenge;
+            return;
+        }
+        var site = _builder.NearestUnstaffedConstructionSite(transform.position, SearchRadius);
+        if (site != null)
+        {
+            _stationedBuildingId = site.EntityId;
+            _state = ZombieState.SeekBuild;
         }
     }
 
