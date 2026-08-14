@@ -17884,3 +17884,76 @@ build times turned out to be exact multiples of `TicksPerSecond`, which
 would have coupled a naive test's assertions to the exact tick a
 building completes construction on -- caught before commit, worked
 around with an explicit one-tick buffer, not silently left fragile).
+
+## 2026-08 follow-up: Steel naming bug, a real bootstrap deadlock, and
+## a new Ore Mine building (Bones income)
+
+Creator report, direct: "the buildings requirement still say bone not
+steel." Traced to `BuildMenuHud.CostLabel` -- it `.Append`ed
+`def.Cost[i].Resource` (a bare `ResourceKind`) straight into the info-
+line string, calling the enum's own raw `.ToString()` regardless of who
+was looking. `BuildingFactionSkin.NameFor` already faction-skins the
+BUILDING half of that same info line ("Fuel Pump" -> "Fuel Depot" for
+Human Army); the COST half never got the same treatment when
+`ResourceFactionSkin` was added. Fixed: `CostLabel` now takes the local
+player's faction and runs each cost line through `ResourceFactionSkin.
+NameFor`, same skin `ResourceHud`'s wallet panel already uses.
+
+**While fixing that, found two more of the same bug SHAPE, both
+pre-existing since the Barracks pass**: `BuildingFactionSkin.NameFor`'s
+switch had no `case BuildingKind.Barracks` at all -- it silently fell
+through to whatever the LAST case in the switch happened to be
+(`default: // BigBrain`), so a Human Army Barracks was displaying as "C2
+Bunker" and a Mad Doctor's as "Big Brain." `BuildingIconKit.PixelOn` had
+the identical shape: Barracks was rendering BigBrain's three-lobe brain
+icon in the build menu. Both fixed (Barracks now has its own real name
+per faction and its own gable-hut pictogram, matching `BaseDresser.
+BuildBarracksShape`'s own silhouette) -- and both switches' `default`
+case was tightened from an implicit "whatever the last case is" to an
+explicit, correctly-labeled case plus a real generic fallback, so this
+exact bug class can't recur silently for the next new `BuildingKind`.
+
+**Creator follow-up, verbatim**: "if the player is playing human. We
+can't have them our monsters harvesting humans. So we need a resource
+equivalent. Something humans can mine or collect. Also the building."
+This is the ROOT cause of the whole "how do I get fuel" thread, laid
+bare: `BuildingKind.FuelPump`'s own cost (20 Bones + 10 Fuel + 30 Parts,
+at the time) required Bones AND Fuel to build the ONE building that
+produces Fuel -- and Bones had no source for Human Army either (the
+prior entry's own finding: Bones income was `MonsterAgent`-harvest-
+exclusive, unreachable for a fixed-roster faction). A fresh Human Army
+economy was a genuine deadlock: nothing buildable, in any order, could
+ever produce its own missing input. Parts was the ONE resource actually
+earnable from turn one (Workers scavenging pre-existing city building
+wrecks, no building required first) -- tracing every other building's
+own cost line confirmed this same "requires the resource it's supposed
+to unlock" trap would have hit ANY Bones-income building added the same
+way FuelPump originally was.
+
+**What shipped**:
+- `BuildingKind.OreMine` (new): +3 Bones/second per Complete building,
+  UNIVERSAL like `GrantHarvestPostIncome`'s Brains (Bones is a shared
+  currency, not one of docs/05's three faction-exclusive energy
+  currencies, so no faction gate). Costs 40 Parts ONLY -- deliberately
+  no Bones, no Fuel, nothing else that isn't earnable from turn one.
+  Real silhouette (`BaseDresser.BuildOreMineShape`: a mound with a dark
+  tunnel entrance and a simple steel headframe -- the one non-building-
+  envelope shape in the roster, matching its "mine," not "structure,"
+  fiction) and per-faction names (`BuildingFactionSkin`: "Bone Pit" /
+  "Scrap Mine" / "Chitin Quarry").
+- `FuelPump`'s own cost fixed too: dropped its 10 Fuel requirement
+  (the actual deadlock) -- now 20 Bones + 30 Parts. The real bootstrap
+  chain is now: scavenge Parts (turn one, free) -> Ore Mine -> Bones
+  income -> Fuel Pump (now affordable) -> Fuel income -> everything
+  else.
+- New tests: `BuildingDef.Get` resolves `OreMine` to itself (the
+  array-position invariant, guarded explicitly since this is now the
+  highest-numbered `BuildingKind`); `OreMine` grants Bones to all three
+  factions equally, once per simulated second.
+
+Same verification ceiling as every other entry here. The two silent-
+fallthrough bugs were caught by manually reading EVERY switch over
+`BuildingKind` in `BuildingFactionSkin.cs`/`BuildingIconKit.cs` end to
+end after the creator's report, not by a compiler or test catching them
+-- there is no dotnet/Editor here to have caught them automatically,
+which is exactly why they shipped silently in the first place.

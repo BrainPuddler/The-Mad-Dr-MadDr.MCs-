@@ -48,6 +48,25 @@ namespace MadDr.MatchCore
         /// now. A real, buildable, per-faction-basic-kit member exactly
         /// like <see cref="Factory"/> is, not a cosmetic prop.</summary>
         Barracks = 9,
+
+        /// <summary>2026-08 (creator direction: "we can't have our
+        /// monsters harvesting humans. So we need a resource equivalent.
+        /// Something humans can mine or collect. Also the building"):
+        /// real, dedicated Bones income -- <see cref="ResourceKind.Bones"/>
+        /// previously had the exact same "real cost, zero source" gap
+        /// Fuel/Ichor had before <see cref="MatchState.
+        /// GrantFuelPumpIncome"/>/<see cref="MatchState.
+        /// GrantAlienFactoryIchorIncome"/> closed theirs -- the ONLY
+        /// working Bones income anywhere was `MonsterAgent`'s own genome-
+        /// creature harvest, which neither Human Army nor Alien Hive can
+        /// ever trigger (fixed `RosterUnitKind` rosters, no `MonsterAgent`
+        /// units at all). UNIVERSAL, not faction-gated -- unlike Fuel/
+        /// Ichor (docs/05's faction-EXCLUSIVE energy currencies), Bones is
+        /// a SHARED currency every faction already spends some of, the
+        /// same "any owner benefits" shape <see
+        /// cref="MatchState.GrantHarvestPostIncome"/>'s own Brains trickle
+        /// already established for the other shared currency.</summary>
+        OreMine = 10,
     }
 
     /// <summary>Static per-building-kind data (docs/23 §2 Phase 2 tasks:
@@ -203,11 +222,17 @@ namespace MadDr.MatchCore
             // 2026-08 follow-up: this building's own income logic is real
             // now (MatchState.GrantFuelPumpIncome, HumanArmy/Mixed only,
             // once per second) -- closed the exact gap this comment used
-            // to flag. Cost itself is still a v0.1 placeholder, shaped
-            // like BloodStorage's as a reasonable starting guess, not a
-            // balance claim.
+            // to flag. 2026-08 bootstrap-chain fix (creator report chain:
+            // "how do I get fuel?" -> "something humans can mine or
+            // collect"): the cost used to include 10 Fuel -- a genuine
+            // deadlock, since this is the ONLY building that ever produces
+            // Fuel at all, so nothing could ever pay for the first one.
+            // Dropped; Bones is reachable via the new OreMine (Parts-only,
+            // no circularity of its own) before this is ever needed, so
+            // the remaining Bones+Parts cost is a real, buildable chain:
+            // scavenge Parts -> OreMine -> Bones -> Fuel Pump -> Fuel.
             new BuildingDef(BuildingKind.FuelPump, "Fuel Pump",
-                new[] { (ResourceKind.Bones, 20), (ResourceKind.Fuel, 10), (ResourceKind.Parts, 30) },
+                new[] { (ResourceKind.Bones, 20), (ResourceKind.Parts, 30) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
                 storageCapBonus: null, occupants: 2, scavengeValue: SmallScavenge),
 
@@ -277,6 +302,20 @@ namespace MadDr.MatchCore
                 new[] { (ResourceKind.Bones, 25), (ResourceKind.Fuel, 15), (ResourceKind.Parts, 50) },
                 buildTimeTicks: 140, maxHp: MediumHp, armor: MediumArmor,
                 storageCapBonus: null, occupants: 6, scavengeValue: MediumScavenge),
+
+            // 2026-08 ("something humans can mine or collect"): Parts-
+            // ONLY, deliberately -- see this file's own bootstrap-chain
+            // note near FuelPump/HarvestPost's cost lines below for why
+            // this is load-bearing, not a style choice: Parts is the one
+            // resource genuinely earnable from turn one with nothing but
+            // the free starting kit (Workers scavenging pre-existing city
+            // building wrecks, no other building required first), so this
+            // is the one building a fresh economy can ALWAYS actually
+            // afford. v0.1 placeholder amount.
+            new BuildingDef(BuildingKind.OreMine, "Ore Mine",
+                new[] { (ResourceKind.Parts, 40) },
+                buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
+                storageCapBonus: null, occupants: 2, scavengeValue: SmallScavenge),
         };
 
         public static BuildingDef Get(BuildingKind kind) => All[(int)kind];

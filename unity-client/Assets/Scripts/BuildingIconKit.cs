@@ -136,11 +136,38 @@ public static class BuildingIconKit
                 // Shield: flat top, tapering to a point at the bottom.
                 return dy <= 0f ? InRect(dx, dy, c * 0.72f, c * 0.72f) : InTaperDown(dx, dy, c * 1.05f, c * 0.72f);
 
-            default: // BigBrain
+            case BuildingKind.BigBrain:
                 // Three overlapping lobes -- a cell-cluster/brain read.
                 return InCircle(dx + c * 0.32f, dy - c * 0.2f, c * 0.48f)
                     || InCircle(dx - c * 0.32f, dy - c * 0.2f, c * 0.48f)
                     || InCircle(dx, dy + c * 0.32f, c * 0.5f);
+
+            // 2026-08 bugfix: same "silently fell through to whatever
+            // happened to be `default`" bug BuildingFactionSkin.NameFor
+            // had for this kind -- Barracks was showing BigBrain's own
+            // three-lobe icon. A simple gable-roofed hut silhouette
+            // (triangle roof over a low rect body), matching
+            // BaseDresser.BuildBarracksShape's own "long, low, gable-
+            // roofed hut" massing at pictogram scale. InTaperUp's own
+            // `distFromBase` is 0 AT the wide base and grows toward the
+            // apex -- the roof's base sits at the body's own top edge
+            // (dy = c*0.05, just above the body rect below), apex further
+            // up (more negative dy, "up" on screen).
+            case BuildingKind.Barracks:
+                if (InRect(dx, dy - c * 0.35f, c * 0.75f, c * 0.3f)) return true;   // low body
+                return InTaperUp(dx, c * 0.05f - dy, c * 0.55f, c * 0.5f);   // gable roof, apex up
+
+            // 2026-08 (creator direction: "something humans can mine or
+            // collect"): a mound with a dark tunnel-entrance cutout at
+            // its base -- same "punched hole" cutout trick FuelPump's own
+            // gauge-dot already established, reused here for the same
+            // reason (a solid shape drawn INSIDE an already-solid mound
+            // would be invisible otherwise). Mound's own base sits at
+            // dy = c*0.7 (low on screen), apex at dy = -c*0.3 (height
+            // c*1.0 above that).
+            default: // OreMine
+                if (InRect(dx, dy - c * 0.55f, c * 0.22f, c * 0.22f)) return false;   // tunnel entrance cutout
+                return InTaperUp(dx, c * 0.7f - dy, c * 1.0f, c * 0.9f);
         }
     }
 

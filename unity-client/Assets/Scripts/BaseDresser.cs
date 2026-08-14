@@ -335,6 +335,9 @@ public class BaseDresser : MonoBehaviour
             case BuildingKind.Barracks:
                 BuildBarracksShape(root, fullScale);
                 break;
+            case BuildingKind.OreMine:
+                BuildOreMineShape(root, fullScale);
+                break;
             case BuildingKind.Hq:
                 BuildHqShape(root, fullScale, playerIndex);
                 break;
@@ -637,6 +640,68 @@ public class BaseDresser : MonoBehaviour
         builder.SpawnPrim(PrimitiveType.Cube,
             origin + Vector3.forward * (bodyLength * 0.5f + fullScale.x * 0.12f) + Vector3.up * (bodyHeight * 0.85f),
             new Vector3(bodyWidth * 0.5f, bodyHeight * 0.08f, fullScale.x * 0.28f), HumanCarbon(), trim);
+    }
+
+    /// <summary>Ore Mine -- 2026-08 (creator direction: "something humans
+    /// can mine or collect. Also the building"). A squat mound with a
+    /// dark tunnel entrance and a simple mining headframe beside it --
+    /// deliberately the only silhouette in this roster that isn't a
+    /// building envelope at all (every other kind reads as a structure
+    /// you could walk into; this reads as excavated ground with equipment
+    /// bolted to it), matching how its own fiction ("mine," not
+    /// "factory") is genuinely different from everything else here. Body
+    /// uses `Placeholder()` (owner-tinted by `TintShape` afterward, same
+    /// "shape carries kind, color carries owner" split every other kind
+    /// follows) -- only the headframe/entrance trim is fixed-material.</summary>
+    private void BuildOreMineShape(GameObject root, Vector3 fullScale)
+    {
+        var origin = root.transform.position;
+        var moundHeight = fullScale.y * 0.4f;
+        var moundRadius = fullScale.x * 0.55f;
+
+        // A squashed sphere reads as a mound/spoil-heap far more than a
+        // cube would -- the ONE non-cube/non-mesh primary body in this
+        // roster, a deliberate silhouette break matching this kind's own
+        // "not a building" fiction (see this method's own header).
+        builder.SpawnPrim(PrimitiveType.Sphere, origin + Vector3.up * (moundHeight * 0.55f),
+            new Vector3(moundRadius * 2f, moundHeight, moundRadius * 2f), Placeholder(), root.transform);
+
+        var trim = new GameObject("OreMineTrim").transform;
+        trim.SetParent(root.transform, false);
+
+        // Tunnel entrance -- a dark recess punched into the mound's own
+        // base, same DarkRecess() void material every other kind's
+        // door/window recesses already use.
+        builder.SpawnPrim(PrimitiveType.Cube,
+            origin + Vector3.forward * (moundRadius * 0.75f) + Vector3.up * (moundHeight * 0.28f),
+            new Vector3(moundRadius * 0.42f, moundHeight * 0.5f, fullScale.x * 0.05f), DarkRecess(), trim);
+
+        // A simple A-frame mining headframe beside the entrance -- two
+        // angled steel legs meeting at a peak, plus a small pulley-wheel
+        // cylinder at the top. Reads as "mining equipment" at RTS camera
+        // distance without needing a real winch mechanism.
+        var legHeight = fullScale.y * 0.9f;
+        var legOffsetX = moundRadius * 0.55f;
+        var legBaseZ = moundRadius * 0.9f;
+        var peak = origin + Vector3.up * legHeight + Vector3.forward * (legBaseZ * 0.5f);
+        SpawnAngledLeg(origin + Vector3.right * legOffsetX + Vector3.forward * legBaseZ, peak, fullScale.x * 0.05f, trim);
+        SpawnAngledLeg(origin - Vector3.right * legOffsetX + Vector3.forward * legBaseZ, peak, fullScale.x * 0.05f, trim);
+        builder.SpawnPrim(PrimitiveType.Cylinder, peak, new Vector3(fullScale.x * 0.12f, fullScale.x * 0.03f, fullScale.x * 0.12f), Steel(), trim);
+    }
+
+    /// <summary>One straight steel beam from `basePos` to `topPos` --
+    /// the headframe leg primitive `BuildOreMineShape` places twice.
+    /// `Cylinder`'s own local Y axis is its length, so this rotates one
+    /// to point from base to top and scales its Y half-length to match
+    /// the real distance, the same "orient a primitive along an arbitrary
+    /// segment" idiom `SpawnRivets`' own ring placement already uses for
+    /// per-instance transforms elsewhere in this file.</summary>
+    private void SpawnAngledLeg(Vector3 basePos, Vector3 topPos, float radius, Transform parent)
+    {
+        var mid = (basePos + topPos) * 0.5f;
+        var length = Vector3.Distance(basePos, topPos);
+        var go = builder.SpawnPrim(PrimitiveType.Cylinder, mid, new Vector3(radius * 2f, length * 0.5f, radius * 2f), Steel(), parent);
+        go.transform.rotation = Quaternion.FromToRotation(Vector3.up, (topPos - basePos).normalized);
     }
 
     /// <summary>Hq -- a tall keep plus a smaller turret perched off-center

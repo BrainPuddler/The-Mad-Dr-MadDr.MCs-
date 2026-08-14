@@ -670,6 +670,36 @@ namespace MadDr.MatchCore
 
         private const int AlienFactoryIchorPerSecond = 3;
 
+        /// <summary>2026-08 (creator direction, verbatim: "we can't have
+        /// our monsters harvesting humans. So we need a resource
+        /// equivalent. Something humans can mine or collect. Also the
+        /// building"). Bones is a SHARED currency every faction already
+        /// spends some of (unlike Blood/Fuel/Ichor, docs/05's faction-
+        /// EXCLUSIVE energy trio) -- same reasoning <see
+        /// cref="GrantHarvestPostIncome"/>'s own Brains trickle already
+        /// established for the OTHER shared currency, so this is
+        /// deliberately NOT faction-gated the way <see
+        /// cref="GrantFuelPumpIncome"/>/<see
+        /// cref="GrantAlienFactoryIchorIncome"/> are -- any owner of a
+        /// Complete <see cref="BuildingKind.OreMine"/> benefits, Human
+        /// Army included (the actual point: a real, non-harvest,
+        /// non-circular Bones source finally exists for a faction that
+        /// can never field a `MonsterAgent`). Once-per-second, matching
+        /// Fuel/Ichor's "primary economy" cadence, not HarvestPost's
+        /// slower supplemental trickle -- Bones is a primary material
+        /// cost across every faction's own roster, not a bonus.</summary>
+        private void GrantOreMineIncome()
+        {
+            for (var i = 0; i < _buildingsInOrder.Count; i++)
+            {
+                var b = _buildingsInOrder[i];
+                if (b.Kind != BuildingKind.OreMine || b.State != BuildingState.Complete) continue;
+                _players[b.PlayerIndex].Grant(ResourceKind.Bones, OreMineBonesPerSecond);
+            }
+        }
+
+        private const int OreMineBonesPerSecond = 3;
+
         /// <summary>docs/03's "Emitter polarities &amp; output" table,
         /// verbatim: Solar peaks Day (5), Lunar peaks Night (5), Twilight
         /// peaks the transitions (6) and is otherwise flat (3) -- Solar/
@@ -1367,6 +1397,15 @@ namespace MadDr.MatchCore
                 // ordering comment) that had no real source at all.
                 GrantFuelPumpIncome();
                 GrantAlienFactoryIchorIncome();
+                // 2026-08 follow-up (creator direction: "we can't have our
+                // monsters harvesting humans... something humans can mine
+                // or collect"): Bones had the exact same "real cost, zero
+                // source" gap -- the only working Bones income anywhere was
+                // MonsterAgent's genome-creature harvest, unreachable for
+                // Human Army/Alien Hive (neither ever fields a MonsterAgent
+                // unit). Universal, not faction-gated -- see
+                // GrantOreMineIncome's own doc comment for why.
+                GrantOreMineIncome();
             }
 
             // 2026-08 (creator report: "where is my big brain base... I

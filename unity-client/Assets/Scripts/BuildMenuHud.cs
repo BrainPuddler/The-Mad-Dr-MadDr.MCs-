@@ -266,7 +266,7 @@ public class BuildMenuHud : MonoBehaviour
         {
             var infoAffordable = CanAfford(hovered, resource => bridge.PlayerWallet(localPlayerIndex, resource));
             var infoColor = infoAffordable ? new Color(0.85f, 0.85f, 0.85f, 1f) : new Color(0.9f, 0.4f, 0.35f, 1f);
-            DrawWrappedShadowedLabel(infoRect, BuildingFactionSkin.NameFor(hovered.Kind, faction) + " — " + CostLabel(hovered), infoColor);
+            DrawWrappedShadowedLabel(infoRect, BuildingFactionSkin.NameFor(hovered.Kind, faction) + " — " + CostLabel(hovered, faction), infoColor);
         }
 
         UiScale.End(prevMatrix);
@@ -289,7 +289,7 @@ public class BuildMenuHud : MonoBehaviour
         for (var i = 0; i < defs.Count; i++)
         {
             if (defs[i].Kind == BuildingKind.Hq) continue;
-            var text = BuildingFactionSkin.NameFor(defs[i].Kind, faction) + " — " + CostLabel(defs[i]);
+            var text = BuildingFactionSkin.NameFor(defs[i].Kind, faction) + " — " + CostLabel(defs[i], faction);
             var h = style.CalcHeight(new GUIContent(text), width);
             if (h > tallest) tallest = h;
         }
@@ -345,13 +345,22 @@ public class BuildMenuHud : MonoBehaviour
         DrawShadowedLabel(new Rect(rect.x + 3f, rect.y + 1f, rect.width, 14f), hotkey.ToString(), new Color(0.95f, 0.9f, 0.7f, 1f), TextAnchor.UpperLeft);
     }
 
-    private static string CostLabel(BuildingDef def)
+    /// <summary>2026-08 (creator report: "the buildings requirement
+    /// still say bone not steel"): used to `.Append(def.Cost[i].Resource)`
+    /// directly, printing the raw `ResourceKind` enum name regardless of
+    /// who was looking at it -- `BuildingFactionSkin.NameFor` already
+    /// faction-skins the BUILDING half of this exact info line at both
+    /// call sites, but the COST half never got the same treatment. Now
+    /// takes the faction and runs each cost line through <see
+    /// cref="ResourceFactionSkin.NameFor"/>, the same skin
+    /// `ResourceHud`'s own wallet display already uses.</summary>
+    private static string CostLabel(BuildingDef def, FactionId faction)
     {
         var parts = new System.Text.StringBuilder();
         for (var i = 0; i < def.Cost.Count; i++)
         {
             if (i > 0) parts.Append(", ");
-            parts.Append(def.Cost[i].Amount).Append(' ').Append(def.Cost[i].Resource);
+            parts.Append(def.Cost[i].Amount).Append(' ').Append(ResourceFactionSkin.NameFor(def.Cost[i].Resource, faction));
         }
         return parts.Length > 0 ? parts.ToString() : "free";
     }

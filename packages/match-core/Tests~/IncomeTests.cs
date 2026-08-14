@@ -123,6 +123,49 @@ public class IncomeTests
     }
 
     [Fact]
+    public void BuildingDef_Get_resolvesOreMineToItself()
+    {
+        // Guards the same Get(kind) => All[(int)kind] array-position
+        // invariant every other BuildingDef entry relies on -- OreMine is
+        // the newest, highest-numbered entry, so it's the one most likely
+        // to end up misplaced in the array if a future edit inserts
+        // something after it without updating this check.
+        Assert.Equal(BuildingKind.OreMine, BuildingDef.Get(BuildingKind.OreMine).Kind);
+    }
+
+    [Fact]
+    public void OreMine_grantsBones_toAnyFaction_onceEachSimulatedSecond()
+    {
+        // Bones is a SHARED currency (unlike Fuel/Ichor) -- unlike
+        // FuelPump/Factory's income, OreMine's is deliberately universal,
+        // same "any owner benefits" shape as GrantHarvestPostIncome's own
+        // Brains trickle. Covers all three factions in one test since
+        // there's no faction gate to distinguish.
+        var city = SmallCity();
+        var m = MatchState.Create(5u, AllThree(), city);
+        var doctor = m.Player(0);
+        var army = m.Player(1);
+        var hive = m.Player(2);
+
+        BuildComplete(m, city, 0, BuildingKind.OreMine, city.CenterHex);
+        BuildComplete(m, city, 1, BuildingKind.OreMine, new HexCoord(city.CenterHex.Q + 20, city.CenterHex.R + 20));
+        BuildComplete(m, city, 2, BuildingKind.OreMine, new HexCoord(city.CenterHex.Q - 20, city.CenterHex.R - 20));
+        // Same buffer-tick reasoning as FuelPump_grantsFuelForHumanArmy's
+        // own comment -- OreMine's BuildTimeTicks (100) is also an exact
+        // multiple of TicksPerSecond.
+        m.Tick(null);
+        var doctorBaseline = doctor.Wallet(ResourceKind.Bones);
+        var armyBaseline = army.Wallet(ResourceKind.Bones);
+        var hiveBaseline = hive.Wallet(ResourceKind.Bones);
+
+        for (var i = 0; i < MatchState.TicksPerSecond; i++) m.Tick(null);
+
+        Assert.Equal(doctorBaseline + 3, doctor.Wallet(ResourceKind.Bones));
+        Assert.Equal(armyBaseline + 3, army.Wallet(ResourceKind.Bones));
+        Assert.Equal(hiveBaseline + 3, hive.Wallet(ResourceKind.Bones));
+    }
+
+    [Fact]
     public void EveryPlayerFactoryGrant_isEmptyExceptAlienHiveAndMixed()
     {
         // 2026-08 (creator direction: "make sure this is equal economy

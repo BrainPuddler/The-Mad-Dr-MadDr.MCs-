@@ -118,7 +118,7 @@ public static class BuildingFactionSkin
                     default: return BuildingDef.Get(kind).Name;
                 }
 
-            default: // BigBrain
+            case BuildingKind.BigBrain:
                 switch (faction)
                 {
                     // "Big Brain" is the creator's own literal, canon term
@@ -136,6 +136,40 @@ public static class BuildingFactionSkin
                     case FactionId.AlienHive: return "Hive Mind Node";
                     default: return BuildingDef.Get(kind).Name;
                 }
+
+            // 2026-08 bugfix: BuildingKind.Barracks (added same session as
+            // this file's own header describes, later than every other
+            // case here) was never given a case at all -- it silently fell
+            // through to whatever case happened to be `default` (BigBrain,
+            // at the time), so a Human Army Barracks was showing as "C2
+            // Bunker" and a Mad Doctor's as "Big Brain." Caught while
+            // adding OreMine's own case below, same review pass as the
+            // creator's "buildings requirement still say bone not steel"
+            // report.
+            case BuildingKind.Barracks:
+                switch (faction)
+                {
+                    case FactionId.MadDoctor: return "Conscription Ward";
+                    case FactionId.HumanArmy: return "Barracks";
+                    case FactionId.AlienHive: return "Brood Hatchery";
+                    default: return BuildingDef.Get(kind).Name;
+                }
+
+            // 2026-08 (creator direction: "something humans can mine or
+            // collect. Also the building"): real Bones income building --
+            // see BuildingDef.cs's own OreMine entry and MatchState.
+            // GrantOreMineIncome for the mechanic this names.
+            case BuildingKind.OreMine:
+                switch (faction)
+                {
+                    case FactionId.MadDoctor: return "Bone Pit";
+                    case FactionId.HumanArmy: return "Scrap Mine";
+                    case FactionId.AlienHive: return "Chitin Quarry";
+                    default: return BuildingDef.Get(kind).Name;
+                }
+
+            default:
+                return BuildingDef.Get(kind).Name;
         }
     }
 
