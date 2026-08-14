@@ -208,6 +208,19 @@ on it. Concretely:
 - **Traffic/crowd realism**: vehicles keep lanes and following gaps and
   swerve around danger instead of driving through it; pedestrians favor
   sidewalks and cross at corners except when fleeing.
+- **Human-shaped units have a shared rig now — reuse it, don't
+  reinvent it.** 2026-08's character overhaul (docs/34) built
+  `HumanCharacterKit`/`HumanCharacterAnimator`: a modular cube-primitive
+  pivot rig + procedural animation library (walk/run/idle/build/harvest/
+  carry/death, all distance-synced per the "no skating" rule above) that
+  `Worker` (Human/Mad-Doctor/Alien Worker skins) and `HumanSoldier`
+  already share via `HumanCharacterProfile` presets. Any NEW human-shaped
+  unit — including the still-deferred Civilian Victims category the
+  original brief asked for — should get a new `HumanCharacterProfile`
+  preset and reuse this rig/animator, not a bespoke capsule-and-primitive
+  body the way `Worker`/`Citizen` used to build themselves. `Citizen.cs`
+  itself is the one remaining capsule holdout, left alone on purpose
+  (docs/34 §0) until that Civilian Victim work actually happens.
 
 ## 8. The self-check pattern (recurring mistakes to catch before they ship)
 

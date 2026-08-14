@@ -68,16 +68,35 @@ using UnityEngine;
 /// threaded `Update()` order means N Workers' independent per-frame
 /// drain requests against the SAME `BuildingRuntimeState` simply SUM
 /// (superposition), so N Workers drain at N times the rate for free.
+///
+/// 2026-08 (creator brief: "Character System Overhaul -- Replace Capsule
+/// Characters"): the old single-capsule-plus-hard-hat body is gone --
+/// <see cref="BuildModel"/> now builds a <see cref="HumanCharacterKit"/>
+/// rig and every movement/work/idle/death method below drives it via
+/// <see cref="HumanCharacterAnimator"/>, in ADDITION to the exact same
+/// `transform.position`/`transform.rotation` gameplay logic this class
+/// already had -- visuals only, nothing about state machine, AI
+/// priority, combat, or the economy above changed. This is also where
+/// the brief's "Human Workers... Human Soldiers... Mad Doctor Workers...
+/// Alien Workers" visual split actually lives for THIS unit: Worker is
+/// still the one class for every faction (see this header's own
+/// "AskUserQuestion answers" above), but <see cref="BuildModel"/> now
+/// picks a <see cref="HumanCharacterProfile"/> -- Human/Mad-Doctor/Alien
+/// -- from <see cref="RuntimeCityBuilder.chosenFaction"/> (Worker only
+/// ever belongs to the local human player, see <see
+/// cref="RuntimeCityBuilder.OnCitizenPossessed"/>'s own comment on why
+/// there's no per-instance owner to look up instead). "Human Soldier" is
+/// a distinct new unit, not a Worker skin -- see <see cref="HumanSoldier"/>.
 /// </summary>
 public class Worker : MonoBehaviour
 {
-    private const float Scale = 0.55f;   // a little smaller than a Citizen's own capsule -- reads as "person", not "monster"
     private const float MoveSpeed = 4f;
     private const float BuildReach = 3.5f;
     private const float ScavengeReach = 4f;
     private const float SearchRadius = 70f;
     private const float AggroRadius = 25f;   // short zombie leash -- Tank's own 150f is a patrolling combat unit's awareness, not cannon fodder's
     private const float ArriveThreshold = 1.5f;
+    private const float DeathDestroyDelay = 0.5f;   // must exceed HumanCharacterAnimator's own collapse duration (0.35s) so the pose finishes settling before the GameObject vanishes
 
     // 2026-08 (scavenging-site redesign): per-Worker continuous drain
     // rate -- Small (100)/Medium (200)/Large (400)/Landmark (800) wrecks
@@ -103,8 +122,19 @@ public class Worker : MonoBehaviour
 
     private RuntimeCityBuilder _builder;
     private UnitCombat _combat;
-    private Renderer _hullRenderer;
-    private Color _hullBaseColor;
+
+    // 2026-08 character-overhaul fields -- see this class's own header.
+    // `_groundOffset` replaces the old fixed capsule-center height: 0 for
+    // every walking profile (feet ON the ground, same as before), a real
+    // hover height for the Alien profile ("no visible footsteps" is a
+    // literal ground clearance here, not just an animation choice).
+    private HumanCharacterRig _rig;
+    private HumanCharacterAnimState _animState;
+    private float _groundOffset;
+    private bool _twitchyIdle;
+    private float _frameMoveDistance;
+    private bool _dying;
+    private float _deathTimer;
 
     public UnitCombat Combat { get { return _combat; } }
 
@@ -122,8 +152,25 @@ public class Worker : MonoBehaviour
 
     private void Update()
     {
-        if (_combat == null || !_combat.Alive || _builder == null) return;
+        if (_builder == null) return;
         var dt = Time.deltaTime;
+
+        // 2026-08: checked BEFORE the _combat.Alive guard below on
+        // purpose -- once UnitCombat marks this Worker dead, `!Alive`
+        // would hit that guard's early `return` every frame forever,
+        // which is exactly what used to happen when OnDied() destroyed
+        // the GameObject immediately. Now OnDied() defers destruction
+        // instead (see its own comment) so "quick collapse, no
+        // ragdolls" has time to actually play.
+        if (_dying)
+        {
+            _deathTimer -= dt;
+            HumanCharacterAnimator.TickDeath(_rig, _animState, dt);
+            if (_deathTimer <= 0f) Object.Destroy(gameObject);
+            return;
+        }
+
+        if (_combat == null || !_combat.Alive) return;
 
         if (_combat.IsCaptured)
         {
@@ -135,30 +182,57 @@ public class Worker : MonoBehaviour
         var enemy = _builder.NearestEnemyOf(_combat, AggroRadius);
         if (enemy != null)
         {
+            _frameMoveDistance = 0f;
             TickCombat(enemy, dt);
+            HumanCharacterAnimator.TickLocomotion(_rig, _animState, _frameMoveDistance, running: true, dt);
             _builder.ApplySeparation(_combat);
             SnapToGround();
             return;
         }
 
+        _frameMoveDistance = 0f;
         switch (_state)
         {
             case ZombieState.PlayerMove: TickPlayerMove(dt); break;
             case ZombieState.SeekBuild: TickSeekBuild(dt); break;
-            case ZombieState.Staffing: TickStaffing(); break;
+            case ZombieState.Staffing: TickStaffing(dt); break;
             case ZombieState.SeekScavenge: TickSeekScavenge(dt); break;
             case ZombieState.Scavenging: TickScavenging(dt); break;
             default: TickIdle(); break;
         }
+        DriveIdleOrMoveAnimation(dt);
 
         _builder.ApplySeparation(_combat);
         SnapToGround();
     }
 
+    /// <summary>Animates locomotion for every state that just walks
+    /// somewhere (PlayerMove/SeekBuild/SeekScavenge) or stands doing
+    /// nothing visual of its own (Idle) -- Staffing and Scavenging drive
+    /// their OWN Build/Harvest animation directly from
+    /// <see cref="TickStaffing"/>/<see cref="TickScavenging"/> instead,
+    /// since those are stationary work poses, not locomotion.</summary>
+    private void DriveIdleOrMoveAnimation(float dt)
+    {
+        switch (_state)
+        {
+            case ZombieState.PlayerMove:
+            case ZombieState.SeekBuild:
+            case ZombieState.SeekScavenge:
+                if (_rig.HasLegs) HumanCharacterAnimator.TickLocomotion(_rig, _animState, _frameMoveDistance, running: false, dt);
+                else HumanCharacterAnimator.TickHover(_rig, _animState, _frameMoveDistance / Mathf.Max(dt, 0.0001f), dt);
+                break;
+            default:
+                if (_rig.HasLegs) HumanCharacterAnimator.TickIdle(_rig, _animState, _twitchyIdle, dt);
+                else HumanCharacterAnimator.TickHover(_rig, _animState, 0f, dt);
+                break;
+        }
+    }
+
     private void SnapToGround()
     {
         var p = transform.position;
-        var gy = _builder.GroundHeightAt(p);
+        var gy = _builder.GroundHeightAt(p) + _groundOffset;
         if (!Mathf.Approximately(p.y, gy)) transform.position = new Vector3(p.x, gy, p.z);
     }
 
@@ -171,7 +245,9 @@ public class Worker : MonoBehaviour
         if (dist > range * 0.85f)
         {
             var dir = to / Mathf.Max(dist, 0.0001f);
-            transform.position += dir * (MoveSpeed * dt * _combat.SpeedMultiplier);
+            var step = dir * (MoveSpeed * dt * _combat.SpeedMultiplier);
+            transform.position += step;
+            _frameMoveDistance = step.magnitude;
             transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
         }
         else
@@ -202,7 +278,9 @@ public class Worker : MonoBehaviour
         var dist = to.magnitude;
         if (dist <= ArriveThreshold) { _state = ZombieState.Idle; return; }
         var dir = to / Mathf.Max(dist, 0.0001f);
-        transform.position += dir * (MoveSpeed * dt);
+        var step = dir * (MoveSpeed * dt);
+        transform.position += step;
+        _frameMoveDistance = step.magnitude;
         transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
     }
 
@@ -265,7 +343,9 @@ public class Worker : MonoBehaviour
             return;
         }
         var dir = to.normalized;
-        transform.position += dir * (MoveSpeed * dt);
+        var step = dir * (MoveSpeed * dt);
+        transform.position += step;
+        _frameMoveDistance = step.magnitude;
         transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
     }
 
@@ -273,9 +353,12 @@ public class Worker : MonoBehaviour
     /// own `SimBuilding.Tick()` is what actually advances construction
     /// while `IsStaffed` stays true; this method's only job is noticing
     /// when to stop (completed, destroyed, or this Worker got reassigned/
-    /// died elsewhere) and unstaffing cleanly.</summary>
-    private void TickStaffing()
+    /// died elsewhere) and unstaffing cleanly. Drives the "repetitive
+    /// hammering... lean into work" Build animation for as long as it
+    /// stays in this state.</summary>
+    private void TickStaffing(float dt)
     {
+        HumanCharacterAnimator.TickBuild(_rig, _animState, dt);
         var b = FindStationedBuilding();
         if (b == null || b.State != BuildingState.UnderConstruction)
         {
@@ -298,7 +381,9 @@ public class Worker : MonoBehaviour
             return;
         }
         var dir = flat.normalized;
-        transform.position += dir * (MoveSpeed * dt);
+        var step = dir * (MoveSpeed * dt);
+        transform.position += step;
+        _frameMoveDistance = step.magnitude;
         transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
     }
 
@@ -324,6 +409,8 @@ public class Worker : MonoBehaviour
             _state = ZombieState.SeekScavenge;
             return;
         }
+
+        HumanCharacterAnimator.TickHarvest(_rig, _animState, dt);
 
         _scavengeTickTimer += dt;
         if (_scavengeTickTimer < ScavengeTickInterval) return;
@@ -369,54 +456,34 @@ public class Worker : MonoBehaviour
         if (bridge != null) bridge.QueueSetBuildingStaffedCommand(0, _stationedBuildingId.Value, false);
     }
 
-    /// <summary>Selection highlight -- brightens the hull, same "shape
-    /// carries kind, color carries state" split every other selectable
-    /// unit in this project follows (aesthetic-preferences skill §5).</summary>
+    /// <summary>Selection highlight -- delegates to <see
+    /// cref="HumanCharacterKit.SetSelected"/>, shared with every other
+    /// rig-based unit.</summary>
     public void SetSelected(bool selected)
     {
-        if (_hullRenderer == null) return;
-        _hullRenderer.sharedMaterial.color = selected
-            ? Color.Lerp(_hullBaseColor, Color.white, 0.55f)
-            : _hullBaseColor;
+        HumanCharacterKit.SetSelected(_rig, selected);
     }
 
+    /// <summary>Picks the faction-appropriate visual profile -- Worker is
+    /// always the local human player's own unit (see this class's own
+    /// header), so `_builder.chosenFaction` is the right (and only)
+    /// faction to read, no per-instance owner lookup needed. `Mixed`
+    /// (no single origin) falls back to the plain Human Worker look,
+    /// same as every profile-less default elsewhere in this codebase.</summary>
     private void BuildModel()
     {
-        // dull industrial khaki -- distinct from a Citizen's random
-        // civilian hue and from either faction's own combat palette,
-        // reading as "reassigned labor" (aesthetic-preferences skill §5:
-        // shape carries kind -- the capsule-plus-hard-hat silhouette --
-        // this color carries owner/state, not kind, same split every
-        // other dresser in this project already follows).
-        var khaki = new Color(0.55f, 0.5f, 0.32f);
-        _hullBaseColor = khaki;
-        var hull = Prim(PrimitiveType.Capsule, transform, new Vector3(0f, 0.45f, 0f), new Vector3(0.5f, 0.45f, 0.5f), khaki, keepCollider: true);
-        _hullRenderer = hull.GetComponent<Renderer>();
-        // a small "hard hat" -- the one silhouette cue that reads as
-        // "worker" rather than "citizen" or "monster" at a glance.
-        Prim(PrimitiveType.Cylinder, transform, new Vector3(0f, 0.85f, 0f), new Vector3(0.3f, 0.06f, 0.3f), new Color(0.85f, 0.62f, 0.15f));
-    }
+        HumanCharacterProfile profile;
+        switch (_builder.chosenFaction)
+        {
+            case FactionId.AlienHive: profile = HumanCharacterProfile.AlienWorker(); break;
+            case FactionId.MadDoctor: profile = HumanCharacterProfile.MadDoctorWorker(); break;
+            default: profile = HumanCharacterProfile.HumanWorker(); break;
+        }
 
-    private static Transform Prim(PrimitiveType type, Transform parent, Vector3 pos, Vector3 scale,
-        Color color, bool keepCollider = false)
-    {
-        var go = GameObject.CreatePrimitive(type);
-        go.transform.SetParent(parent, false);
-        go.transform.localPosition = pos;
-        go.transform.localScale = scale;
-        if (!keepCollider)
-        {
-            var c = go.GetComponent<Collider>();
-            if (c != null) Object.Destroy(c);
-        }
-        var r = go.GetComponent<Renderer>();
-        if (r != null)
-        {
-            var m = new Material(ShaderUtil.FindRenderableShader());
-            m.color = color;
-            r.sharedMaterial = m;
-        }
-        return go.transform;
+        _rig = HumanCharacterKit.Build(transform, profile);
+        _twitchyIdle = profile.Twitchy;
+        _groundOffset = profile.HasLegs ? 0f : 1.05f;   // "Aliens should never walk... no visible footsteps" -- a real ground clearance, not just an animation choice
+        _animState = new HumanCharacterAnimState { Seed = (GetInstanceID() % 1000) / 1000f * 6.283f };
     }
 
     /// <summary>docs/12 tech-wing epic, Phase 1: previously a no-op --
@@ -428,11 +495,20 @@ public class Worker : MonoBehaviour
     /// 2026-08: also unstaffs whatever construction site this Worker was
     /// standing at, so a dead Worker doesn't leave a building falsely
     /// marked staffed (and therefore permanently progressing with nobody
-    /// actually there) forever.</summary>
+    /// actually there) forever.
+    ///
+    /// 2026-08 character-overhaul follow-up ("Death: quick collapse, no
+    /// ragdolls"): gameplay bookkeeping (unstaffing, dropping out of
+    /// `RuntimeCityBuilder.Workers`/`WorkerCount`) still happens
+    /// immediately, right here -- a dying Worker is already gone for
+    /// every economic purpose. Only the GameObject itself lingers, for
+    /// `DeathDestroyDelay` seconds of collapse animation (see Update()'s
+    /// own `_dying` branch), before actually being destroyed.</summary>
     private void OnDied()
     {
         UnstaffIfStaffing();
         if (_builder != null) _builder.OnWorkerDied(this);
-        Object.Destroy(gameObject);
+        _dying = true;
+        _deathTimer = DeathDestroyDelay;
     }
 }

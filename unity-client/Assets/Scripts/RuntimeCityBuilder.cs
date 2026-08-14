@@ -3274,6 +3274,13 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // here so that grant is actually usable.
         SpawnStartingWorkers(p0Hq, blocked, claimed);
 
+        // 2026-08 (creator brief: "Character System Overhaul," Human
+        // Soldiers section): purely cosmetic base dressing, so scoped to
+        // "the local human picked Human Army" only -- see
+        // SpawnStartingSoldiers's own doc comment for why AI-opponent
+        // Army bases don't get this too in this pass.
+        if (chosenFaction == FactionId.HumanArmy) SpawnStartingSoldiers(p0Hq, blocked, claimed);
+
         var opponentSeeds = AiOpponentSeedRing(center, opponents.Count, AiOpponentSeedRingRadius);
         for (var i = 0; i < opponents.Count; i++)
         {
@@ -3324,6 +3331,36 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             _workers.Add(worker);
             if (worker.Combat != null) _combatants.Add(worker.Combat);
             if (_simBridge != null) _simBridge.QueueRegisterWorkerCommand(0);
+        }
+    }
+
+    /// <summary>v0.1 placeholder (same "flag the invented number" status
+    /// as <see cref="StartingWorkerCount"/>) -- a small honor guard, not
+    /// a real garrison; <see cref="HumanSoldier"/> is purely cosmetic
+    /// base dressing (this class's own header explains why), so there's
+    /// no gameplay reason for this to be large.</summary>
+    private const int StartingSoldierCount = 4;
+
+    /// <summary>2026-08 (creator brief: "Character System Overhaul,"
+    /// Human Soldiers section) -- spawns cosmetic <see cref="HumanSoldier"/>
+    /// dressing around the local human player's own HQ. Scoped to the
+    /// human's own base only (never AI opponents', even when they're
+    /// also Human Army) -- Worker itself has this same "local human
+    /// only" scope today (see its own header), and giving every AI
+    /// opponent's base a garrison too is real additional per-match
+    /// GameObject cost for something that, being purely cosmetic, has no
+    /// gameplay payoff on an opponent's side the player rarely visits up
+    /// close. An easy follow-up if that turns out to matter, not a hard
+    /// constraint.</summary>
+    private void SpawnStartingSoldiers(HexCoord nearHex, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
+    {
+        for (var i = 0; i < StartingSoldierCount; i++)
+        {
+            var hex = FindOpenHexWide(nearHex, blocked, claimed, 24);
+            claimed.Add(hex);
+            var go = new GameObject("HumanSoldier_" + i);
+            var soldier = go.AddComponent<HumanSoldier>();
+            soldier.Init(this, WorldOf(hex));
         }
     }
 

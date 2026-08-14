@@ -17297,3 +17297,51 @@ back into `TickIdle` from the `Idle` state itself) -- this only changes
 what an otherwise-idle Worker picks first. Full reasoning: docs/22
 §11b, updated in place rather than appended, since it directly
 describes the priority order this changes.
+
+## 2026-08: Character System Overhaul -- scoped down before writing any code
+
+Creator brief: full "Character System Overhaul -- Replace Capsule
+Characters," a large, detailed multi-part spec (modular low-poly rig +
+shared animation library + Human Worker/Human Soldier/Mad Doctor Worker/
+Alien Worker visual identities + an entirely new Civilian Victim rescue-
+mechanic category). Recon first (a research-only Explore agent, not
+code): confirmed this environment's own "no Editor/DCC pipeline" ceiling
+means procedural transform animation over a cube-primitive rig
+(`MonsterBody`'s existing idiom) was the only viable approach, that
+`Citizen.cs` has flee/panic but nothing rescue/trapped/injured-adjacent
+exists anywhere yet, and that no distinct Human-Soldier/Alien-Worker
+class exists to reskin -- both would be new units, not reskins.
+
+Given the genuine multi-week scope and two real ambiguities that would
+otherwise have meant guessing at gameplay-shape decisions, asked before
+writing code (both AskUserQuestion rounds, both resolved to the smaller-
+scope/lower-risk option):
+
+1. **How much to build this pass**: "Foundation + all 4 unit reskins/
+   new units" -- the shared rig/animator, `Worker` reskinned (Human/Mad-
+   Doctor/Alien), plus `Human Soldier` as a real new unit. Civilian
+   Victims (the largest, most novel piece -- a wholly new rescue-
+   mechanic gameplay system, not a reskin) explicitly deferred to a
+   later session.
+2. **Alien Worker**: a faction-conditional visual variant of the SAME
+   `Worker` class (hover instead of walk), not a separate unit type --
+   matches how the Mad-Doctor "Zombie" skin already works.
+3. **Human Soldier**: the brief's aim/fire poses read as real ranged
+   combat nothing in this codebase has an infantry-unit slot for --
+   built as a new, purely cosmetic, client-side-only unit (`Citizen.cs`'s
+   pattern: no match-core sync, no real stats), not a real new
+   combatant. Aim/fire is flavor animation only.
+
+Implementation: `HumanCharacterKit.cs` (modular cube-primitive rig
+builder, shared Material + MaterialPropertyBlock tinting) +
+`HumanCharacterAnimator.cs` (procedural walk/run/build/harvest/carry/
+idle/hover/aim/death, distance-synced "no skating" per maddr-aesthetic-
+preferences skill §7) + `Worker.cs` reskinned onto it (state machine/AI/
+combat/economy untouched, visuals only) + new `HumanSoldier.cs`. One
+real bug caught and fixed during self-review before commit: the
+selection collider's height formula double-applied `HeightScale`. Full
+writeup: docs/34.
+
+**Not verified in a real render** -- same standing "no Editor exists
+here" caveat as every visual/shader change in this project; docs/34 §5
+has the full verified-vs-unverified breakdown.
