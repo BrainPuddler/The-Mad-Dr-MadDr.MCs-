@@ -17564,3 +17564,53 @@ duplicate that with a second logging subsystem, buffer, or overlay.
 
 Full writeup: docs/22 §11b (updated in place, old mechanism kept
 described for the record rather than silently removed from the doc).
+
+## 2026-08 same-day follow-up: single-Worker stall, a second mechanism
+
+Creator follow-up, direct: "have you addressed the single worker
+stopping after 30-40 seconds?" Honest answer at the time: not
+conclusively -- the herding redesign above fixes the *shared* root
+cause (peer-copying with no stable leader), which plausibly explains
+most freeze reports since Workers cluster once several are active, but
+that's a plausibility argument, not a ruled-out alternative. Checked
+for a mechanism that could stall a Worker with NO herd interaction at
+all.
+
+Found one, real and independent of the herding flaw: `Worker.
+PickIndependentWanderTarget`'s own legality check only asks "is the
+destination hex itself blocked" -- it never asks whether that hex is
+actually *reachable* by a real route from the Worker's current
+position (`HumanoidCombatant.TickGuard`'s patrol-point picker checks
+even less -- nothing at all). A point can pass that check and still be
+cut off, e.g. across a wall with the nearest opening well outside
+wander/patrol range. `GroundPathFollower.SetGoal` handed every caller,
+uniformly, straight to `HexPathfinder.FindPath`'s 40000-expansion
+default -- for an unreachable goal, `FindPath` can only conclude "no
+route" by exhausting the ENTIRE region connected to the Worker's own
+position, which for a unit standing in the open city graph can be
+thousands of hexes. One synchronous, main-thread A* search that
+expensive, for what was only ever a cosmetic 1-2 hex hop, reads exactly
+like "the worker stopped" for however many frames it takes -- and nothing
+in the existing recovery logic (`TickLeader`/`TickPatrol` already
+re-pick the same frame `Tick` reports the path failed) touches the cost
+of the search itself, only what happens after it returns.
+
+Fix: `GroundPathFollower.SetGoal` takes an optional `maxExpansions`
+(default unchanged at 40000, so purposeful long-range travel --
+PlayerMove, SeekBuild, SeekScavenge, SeekDeliver, and a HumanoidCombatant
+closing to attack -- is untouched). Worker's wander call sites
+(`TickFollower`, `TickLeader`) and HumanoidCombatant's patrol call site
+now pass `GroundPathFollower.LocalMoveMaxExpansions` (600) instead --
+generous for a route that has to weave around a few buildings within
+15-35m (wander) or a 10m patrol radius (20m-per-hex means that's a
+handful of hexes either way), but a small fraction of the worst case.
+Bounds the cost of any ONE bad pick to a small hitch rather than a
+visible stall; does not change *whether* a bad pick eventually recovers
+(it always did, the same tick) -- only how expensive discovering that
+takes.
+
+No Unity Editor in this environment to confirm the fix live -- this is
+a traced, reasoned mechanism with a proportionate fix, not a
+test-verified one. Flagged here rather than claimed as definitively
+"the" stall cause, since the herding redesign above may already have
+been sufficient on its own for what the creator actually observed.

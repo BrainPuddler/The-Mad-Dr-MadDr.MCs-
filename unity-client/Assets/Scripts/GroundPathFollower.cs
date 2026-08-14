@@ -67,6 +67,33 @@ public class GroundPathFollower
     /// calculation that no longer reflects what steering actually did.</summary>
     public float LastStepDistance { get; private set; }
 
+    /// <summary>2026-08 ("have you addressed the single worker stopping
+    /// after 30-40 seconds?"): a caller doing short, local, cosmetic
+    /// hops -- Worker's wander (15-35m) and HumanoidCombatant's patrol
+    /// (10m radius) -- should pass this to `SetGoal`'s `maxExpansions`
+    /// instead of the 40000 default. Neither picker verifies real
+    /// reachability before calling `SetGoal` (Worker's checks only
+    /// "is the destination hex itself blocked"; HumanoidCombatant's
+    /// checks nothing), so an unlucky pick lands on a hex that's legal
+    /// but cut off from the unit's own position -- e.g. across a wall
+    /// with no opening nearby. `FindPath` can't know that's true short
+    /// of exhausting the ENTIRE reachable region the unit is standing
+    /// in, which for a unit in the open city graph can be thousands of
+    /// hexes -- one multi-thousand-node A* search, run synchronously on
+    /// the main thread, for a 1-2 hex hop that was never going to
+    /// matter if it failed. `TickLeader`/`TickPatrol` already recover
+    /// the same frame `Tick` reports `pathDone` (re-pick and move on) --
+    /// this bound only caps how expensive any ONE failed search can be
+    /// before that recovery kicks in, so a bad pick reads as one small
+    /// hitch instead of a visible multi-frame stall. Well above what a
+    /// real route around a couple of buildings within wander/patrol
+    /// range ever needs (radius 15-35m / 20m-per-hex is a handful of
+    /// hexes; 600 expansions covers a route weaving around dozens).
+    /// Purposeful long-range travel (SeekBuild/SeekScavenge/SeekDeliver,
+    /// player move orders) keeps the full default -- those legitimately
+    /// need to path across the city.</summary>
+    public const int LocalMoveMaxExpansions = 600;
+
     /// <summary>(Re)computes a real A* route to `goalHex` if this
     /// follower doesn't already have a live one heading there -- cheap
     /// to call every frame from a Tick* method exactly like MonsterAgent's
@@ -79,7 +106,7 @@ public class GroundPathFollower
     /// `MonsterAgent.FindOwnFactoryApproachHex`-style code already uses,
     /// generalized here so every caller gets it for free instead of each
     /// one having to pre-sanitize its own goal.</summary>
-    public void SetGoal(RuntimeCityBuilder builder, Vector3 fromPos, HexCoord goalHex)
+    public void SetGoal(RuntimeCityBuilder builder, Vector3 fromPos, HexCoord goalHex, int maxExpansions = 40000)
     {
         if (_path != null && _pathGoalHex.Equals(goalHex) && _pathCityVersion == builder.CityVersion) return;
         if (_failedGoalHex.HasValue && _failedGoalHex.Value.Equals(goalHex) && _failedGoalCityVersion == builder.CityVersion) return;
@@ -100,7 +127,7 @@ public class GroundPathFollower
         }
 
         var start = builder.HexAt(fromPos);
-        var hexPath = HexPathfinder.FindPath(start, actualGoal, builder.City, blocked);
+        var hexPath = HexPathfinder.FindPath(start, actualGoal, builder.City, blocked, maxExpansions);
         _pathGoalHex = goalHex;   // the ORIGINAL goal, so "already routed there" checks match future callers regardless of the approach-hex substitution above
         _pathCityVersion = builder.CityVersion;
         if (hexPath == null)

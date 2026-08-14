@@ -499,7 +499,7 @@ public class Worker : MonoBehaviour
         }
 
         _moveTarget = leader.transform.position;
-        _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(_moveTarget));
+        _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(_moveTarget), GroundPathFollower.LocalMoveMaxExpansions);
         var pathDone = _pathFollower.Tick(_builder, transform, _combat, dt, MoveSpeed * WanderSpeedFraction);
         _frameMoveDistance = pathDone ? 0f : _pathFollower.LastStepDistance;
     }
@@ -526,7 +526,7 @@ public class Worker : MonoBehaviour
         // navigation system?"): real routing + local steering instead of
         // a raw straight-line step, same as every other Worker movement
         // state -- see GroundPathFollower's own header.
-        _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(_moveTarget));
+        _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(_moveTarget), GroundPathFollower.LocalMoveMaxExpansions);
         var pathDone = _pathFollower.Tick(_builder, transform, _combat, dt, MoveSpeed * WanderSpeedFraction);
         _frameMoveDistance = _pathFollower.LastStepDistance;
         // the target itself turned out unreachable (or the path finished

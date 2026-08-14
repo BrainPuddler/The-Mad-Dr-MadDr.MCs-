@@ -229,7 +229,7 @@ public class HumanoidCombatant : MonoBehaviour
 
         if (TurnInPlaceIfNeeded(to.normalized, dt)) { DriveMoveAnimation(0f, dt); return; }
 
-        _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(_patrolTarget));
+        _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(_patrolTarget), GroundPathFollower.LocalMoveMaxExpansions);
         var pathDone = _pathFollower.Tick(_builder, transform, _combat, dt, _profile.MoveSpeed);
         _frameMoveDistance = _pathFollower.LastStepDistance;
         DriveMoveAnimation(_frameMoveDistance, dt);
