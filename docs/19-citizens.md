@@ -59,9 +59,21 @@ engine has no separate Armor stat at its combat layer, unlike the
 Vitality/Armor pair this doc's own model assumes) and a wide aggro
 radius rather than pure reach, so she's dangerous from well outside her
 own weapon's range — a different balance than this section's original
-"dies in one or two hits" sketch, on purpose. She isn't wired to the
-per-Citizen weapon-roll table above yet (a fixed, always-present spawn
-instead) — see docs/35 §4 for that as a named, scoped-out follow-up.
+"dies in one or two hits" sketch, on purpose. **2026-08 follow-up: wired for real.** `RuntimeCityBuilder.SpawnHostileCivilians`
+now actually rolls §3's real table (85/10/4/1% unarmed/improvised/
+handgun/shotgun-tier) against a sampled Citizen population each match,
+replacing the old fixed "1 Grandma + 3 Armed Civilian" count this
+section used to flag as a stand-in. Shotgun-tier still maps to Grandma
+unconditionally (she's this section's own worked example for that exact
+roll); Handgun maps to Armed Civilian; Improvised melee maps to a new
+`MobRioterRock` variant (built for the Angry Civilian Mob, §7's own new
+row, but reused here too — "a citizen swinging something blunt" fits an
+ordinary improvised-melee roll outside a mob just as well). Only the
+Aggressive band (§2) acts on an armed roll proactively, matching §3's
+own "may attack proactively if armed" line exactly. Police/SWAT/Hunter/
+Militia (docs/35, a later creator-requested roster) stay OUTSIDE this
+roll on purpose — they're professional/specialist archetypes, not
+organic outcomes of an ordinary citizen's weapon-access roll.
 
 ## 5. Population density vs. the entity budget
 
@@ -94,6 +106,8 @@ At **Night**, Citizens shelter indoors: visible street density drops. This ties 
 | Calm→Alarmed promotion | server-rolled; proximity/noise/threat trigger (Q15) |
 | Community Hub density multiplier vs. standard block | **4×** baseline (160–320 Citizens per hub vs. the 40–80/block baseline, [18](18-city-battlefields.md)) |
 | Per-citizen harvest yield | Blood 2 / Bones 1 / Brains 1 ([05](05-component-economy.md), [20](20-harvest-and-repair.md)) |
+| Citizen roll sample size (§3/§4, per match) | 50 (v0.1 placeholder — a plausible neighborhood-sized sample, not a real city population claim) |
+| Angry Civilian Mob (2026-08, creator direction: "10-15 packed close together") | 12 rioters per match, one ~6m-radius cluster, ~70% rock / ~30% molotov (`RuntimeCityBuilder.SpawnAngryMob`) |
 
 ## Open questions
 

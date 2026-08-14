@@ -17614,3 +17614,177 @@ a traced, reasoned mechanism with a proportionate fix, not a
 test-verified one. Flagged here rather than claimed as definitively
 "the" stall cause, since the herding redesign above may already have
 been sufficient on its own for what the creator actually observed.
+
+## 2026-08: Barracks + real infantry roster, four Police/SWAT/Hunter/
+## Militia variants, Angry Civilian Mob, docs/19 weapon-roll wiring
+
+Creator direction, condensed across several rounds: "start building
+Citizen with guns, army etc. Let's add a flame thrower army person as
+well into the mix" -> "human Army is from army barracks -- part of the
+basic kit for Human army" -> (asked, confirmed) full production
+building, real match-core RosterUnitKind pipeline including the Unity
+visual bridge that's never existed for ANY roster unit -> "Police +
+SWAT" and "Hunter + Militia" for the deferred docs/35 §6 roster ->
+"a angry civilian mob, 10-15 packed close together. but weak citizen
+with rocks, molotov cocktails; area attack, but low damage. Visually
+appealing tho."
+
+**A real discovery mid-investigation, surfaced to the creator directly
+rather than assumed:** match-core's `RosterUnitKind`/`CommandKind.
+TrainUnit` pipeline (docs/23 Phase 6b/the worker-economy epic's Phase 4)
+was real and had been for a while -- `Rifleman`, `HalfTrack`, `Tank`,
+`ZeppelinGunship`, `Drone`, `Spitter`, `FloaterQueen` all trained, cost,
+and spawned correctly sim-side -- but had NEVER been connected to a
+Unity visual for any single one of them (`SimBridge.SpawnRosterUnit`'s
+own doc comment already said so plainly: "no mesh/prefab pipeline
+exists... invisible in the 3D scene"). A creator asking for "Human Army
+is from army barracks" on the FULL-production-building path would have
+gotten a real, working, completely INVISIBLE building. Flagged before
+building anything; the creator chose to close the gap for real
+("Build the real RosterUnitKind pipeline too") rather than fall back to
+the smaller cosmetic-only option.
+
+**match-core** (`packages/match-core/src/`):
+- `BuildingKind.Barracks` -- a real, costed, buildable production
+  building (`BuildingDef.cs`), reusing the EXISTING generic `CanTrainUnit`/
+  `TrainUnit` machinery (which was already building-kind-agnostic, it
+  just had nothing but Factory to point at until now).
+- `RosterUnitKind.FlamethrowerTrooper` -- new Human Army roster entry
+  (`FactionRoster.cs`), short Reach/high Ferocity stat shape (a
+  continuous stream reads as frequent small hits), Fuel-heavy cost (a
+  flavor tie-in to the weapon's own resource name).
+- `UnitRosterDef.Producer` -- which `BuildingKind` actually trains a
+  given roster kind (new field, defaults to `Factory` so every pre-
+  existing entry is unchanged); Rifleman/FlamethrowerTrooper are the
+  only two set to `Barracks`. `MatchState.CanTrainUnit` now enforces it
+  -- a Barracks can no longer "train" a Tank and vice versa. Two
+  existing `TrainUnitTests.cs` cases that trained Rifleman at a Factory
+  had to be updated to build a Barracks instead (a real, deliberate
+  behavior change, not a regression to paper over) plus new coverage
+  added for the producer gate itself and for `SimUnit.SourceRosterKind`.
+- `SimUnit.SourceRosterKind` -- a spawned unit now REMEMBERS which
+  roster kind it was trained/spawned as (previously flattened into raw
+  Speed/Radius/Combat numbers and thrown away the instant the unit
+  existed) -- hashed in `WriteTo` like every other identity stat. This
+  is the field that makes a real visual bridge possible at all.
+- `ProductionAdvisor.TryQueueTraining` treated `BuildingKind.Factory` as
+  the only valid idle producer (hardcoded, back when it was the only
+  one that existed) -- now checks a small `ProducerKinds` array
+  including Barracks, so AI Human Army opponents actually train from
+  their own starting Barracks instead of it sitting idle forever.
+- `MatchState.SpawnBarracksForPlayer` mirrors `SpawnFactoryForPlayer`'s
+  "one free starting building" bootstrap contract exactly.
+
+**Unity** (`unity-client/Assets/Scripts/`):
+- `RosterInfantryView` -- the first real bridge from match-core's own
+  unit simulation to a rendered GameObject, for the two INFANTRY roster
+  kinds Barracks trains. Deliberately a PURE VIEW: reads `SimUnit.X`/
+  `Z`/`Order`/`IsAlive` each frame and drives the existing
+  `HumanCharacterKit` rig; never moves a unit, never decides a target,
+  never applies damage (match-core already resolved all of that before
+  this class ever sees the result) -- no `UnitCombat`, no
+  `GroundPathFollower`, unlike `HumanoidCombatant`'s own local-AI kit.
+  This is CLAUDE.md's own standing direction for the unit-sim migration
+  ("MonsterAgent... becomes a pure interpolated view... do not add
+  gameplay decisions to Update()") applied from day one on a NEW class,
+  rather than retrofitted onto an old one later. Position is read
+  directly each frame, not tick-interpolated -- a real, honestly-
+  flagged, deferred polish item, not attempted this pass. Every other
+  `RosterUnitKind` (vehicles, Alien Hive) still has no humanoid visual
+  kit to build from and stays exactly as invisible as it always was --
+  a real, separate, much larger undertaking this pass doesn't attempt.
+- `HumanCharacterProfile.FlamethrowerTrooper()` + a bespoke twin-fuel-
+  tank weapon prop (not the generic single backpack, which would clip
+  with it -- `HasBackpack` explicitly false on this preset).
+- `BaseDresser.BuildBarracksShape` -- a long, low, gable-roofed hut,
+  deliberately the OPPOSITE massing from every other silhouette in the
+  roster (Factory's tall block+stack, Defense's low+dome, Hq's
+  keep+turret) -- per docs/31 §1's silhouette-before-color rule, and
+  reusing docs/31 §2's own "army-barracks utilitarian... painted wood,
+  simple trim" window language, written before this building existed to
+  use it.
+- `SpawnStartingBases` now places a real Barracks (not a cosmetic prop)
+  for EVERY Human Army player -- local human AND every Human Army AI
+  opponent, unlike the old Soldier spawn it supersedes, which was
+  local-human-only. Seeded with a few already-trained Rifleman via the
+  same bootstrap `SpawnRosterUnit` path `SpawnOpponentStartingArmy`
+  already used for an AI opponent's own opening force.
+- **`SpawnStartingSoldiers`/`HumanCombatProfile.Soldier()` deleted
+  outright**, not kept alongside the new system -- this project's
+  "correction, not retraction" convention means replacing a superseded
+  mechanism, not running two parallel "Human Army infantry" spawns side
+  by side. `WeaponProfile.ServiceRifle()` (Soldier's old weapon) was
+  orphaned by this but NOT deleted -- reused for Militia instead (see
+  below), a real second use rather than dead data.
+- `BarracksHud` -- a minimal but REAL training affordance (two Train
+  buttons, gated on owning a Complete Barracks), same "collapsed
+  corner tab" shape `CollectorLabHud` already established for the
+  identical "real production building, no way to use it" problem. Not
+  full production-UI polish (no queue depth, no multi-Barracks
+  selection) -- a real, working affordance, not the whole feature.
+- Four new `HumanCombatProfile` variants on the EXISTING non-synced
+  `HumanoidCombatant` kit (deliberately NOT match-core roster units --
+  see below): **Police** (fast proactive responder, Revolver reused),
+  **SWAT** (heaviest hostile_civilian health pool next to Grandma's own
+  "basically a tank," `TacticalCarbine`'s fast-cadence CQB fire),
+  **Hunter** (widest aggro radius of any hostile_civilian variant,
+  matched exactly to `HuntingRifle`'s own 34m range), **Militia**
+  (irregular/patchwork, reuses `ServiceRifle`). Two new weapons
+  (`TacticalCarbine`, `HuntingRifle`), tested.
+- **Angry Civilian Mob** (`SpawnAngryMob`): one tight ~6m-radius cluster
+  of 12 rioters per match (v0.1 placeholder count/frequency), ~70%
+  `MobRioterRock` / ~30% `MobRioterMolotov` -- the two weakest
+  hostile_civilian variants in the codebase on purpose, since the
+  mob's actual danger is numbers, not any one rioter. Two new weapons
+  (`ThrownRock`, `MolotovCocktail` -- Molotov reuses `WeaponKind.Spore`'s
+  existing lobbed-arc mechanic under fire coloring, no new WeaponFx
+  case). `HumanoidCombatant.BuildWeaponProp` now branches on
+  `WeaponKind` so Melee/Spore carriers get a rock/bottle prop instead of
+  every non-firearm variant defaulting to a gun-barrel silhouette. Each
+  rioter gets a small per-instance BodyColor jitter (maddr-aesthetic-
+  preferences skill's own "reads as individuals, not a clump"
+  principle, applied to color since these aren't herd-following the way
+  a Worker group is). **No real area-of-effect damage** -- `UnitCombat`
+  has no multi-target hit resolution to hook into; "area attack" is a
+  visual/fictional read only, flagged honestly rather than faked.
+- `SpawnHostileCivilians` REWRITTEN to actually use docs/19 §3's real
+  per-Citizen weapon-roll table (85/10/4/1% unarmed/improvised/handgun/
+  shotgun-tier, only the Aggressive band §2 acts on it proactively)
+  against a sampled population, replacing the old flat "1 Grandma + 3
+  Armed Civilian" fixed count every match -- docs/35 §4's own flagged
+  follow-up, finally done. Shotgun-tier maps to Grandma unconditionally
+  (she's docs/19 §4's own worked example for that exact roll); Handgun
+  maps to Armed Civilian; Improvised melee maps to `MobRioterRock`
+  reused outside the mob context (an ordinary citizen swinging
+  something blunt). Police/SWAT/Hunter/Militia deliberately stay OUT of
+  this roll -- professional/specialist archetypes, not organic citizen-
+  roll outcomes -- and keep their own small fixed-count scattered spawn
+  instead (`SpawnNamedThreats`).
+
+**A real, deliberate architecture split, stated plainly:** Barracks-
+trained infantry (Rifleman, FlamethrowerTrooper) are real, synced,
+match-core `SimUnit`s with no local AI of their own. Every
+hostile_civilian variant (Grandma, Armed Civilian, Police, SWAT, Hunter,
+Militia, the Mob) stays on the pre-existing NON-synced
+`HumanoidCombatant` local-AI kit (docs/35), unchanged in kind by this
+pass. These are civilian/city threats, not a player's own production --
+folding them into match-core sync was never asked for and would be a
+real, separate scope expansion, not something this pass silently
+assumed.
+
+**Verification ceiling, same as every other pass this project makes**:
+no Unity Editor, no dotnet SDK in this environment. Checked by hand:
+brace/paren balance file-by-file after every edit; every new/changed
+call site's argument count and order against its definition; the
+`Get(kind) => All[(int)kind]` array-position-must-match-enum-value
+invariant both `BuildingDef` and `UnitRosterDef` rely on, rechecked
+after every insertion; grepped for every deleted symbol's remaining
+references before deleting (`HumanCombatProfile.Soldier()`,
+`SpawnStartingSoldiers`) to confirm nothing else called it. Two real
+bugs were caught and fixed during this same review, before commit: a
+misordered `UnitRosterDef.All` array entry that would have silently
+broken the enum-index invariant, and a test helper (`BuildCompleteFactory`)
+that assumed only one building would ever be placed per match, which a
+new two-building test (Factory AND Barracks in the same match) broke
+until fixed to key off `BuildingCount - 1` instead of a hardcoded index
+0.

@@ -151,6 +151,23 @@ guaranteed fixed count every match) is the natural, more design-coherent
 follow-up — out of scope for this pass, which only needed these variants
 to exist and be encounterable at all.
 
+**2026-08 follow-up, this scope note closed**: `SpawnHostileCivilians`
+now actually rolls docs/19 §3's real table against a sampled Citizen
+population — see that doc's own §4 update for the full mapping.
+
+**2026-08 follow-up: `SpawnStartingSoldiers`/`HumanCombatProfile.
+Soldier()` deleted, superseded by a real Barracks.** Creator direction:
+"Human Army is from army barracks — part of the basic kit for Human
+army," confirmed as a real match-core production building, not a
+cosmetic prop. The old local-human-only Soldier garrison this section
+described is gone; a Human Army player's own infantry now comes from a
+real `BuildingKind.Barracks` training real `RosterUnitKind.Rifleman`/
+`FlamethrowerTrooper` (docs/12's dated Barracks entry has the full
+architecture — including the FIRST real Unity visual any match-core
+`RosterUnitKind` has ever had, `RosterInfantryView`). `WeaponProfile.
+ServiceRifle()` (Soldier's old weapon) wasn't deleted with it — reused
+for the new Militia variant instead (§6 below).
+
 ## 5. What's verified, what isn't
 
 **Verified by direct code inspection**: every new/changed call site's
@@ -175,14 +192,42 @@ real match, `WeaponFx` rendering the new `Bullet`-kind weapons correctly.
 
 ## 6. Explicitly deferred / not done this pass
 
-- The remaining 6 named variants (Police, SWAT, Hunter, Militia, Elderly
-  Survivor, Veteran) — the creator's own chosen scope was "Grandma + 2-3
-  more," not the full roster.
+- ~~The remaining 6 named variants~~ **2026-08 follow-up: Police, SWAT,
+  Hunter, Militia shipped** (creator direction, in two rounds: "start
+  building Citizen with guns, army etc" then "Police + SWAT" and
+  "Hunter + Militia" specifically) — four new `HumanCombatProfile`
+  presets on this SAME kit, no new infrastructure: **Police** (fast
+  proactive responder, reuses `Revolver`), **SWAT** (heaviest
+  hostile_civilian health pool next to Grandma's own "basically a
+  tank," a new `TacticalCarbine` weapon — fastest cadence of any
+  firearm here, CQB-short range), **Hunter** (widest aggro radius of
+  any hostile_civilian variant, matched exactly to a new `HuntingRifle`
+  weapon's own 34m range — the longest range and slowest cadence of
+  any firearm here), **Militia** (irregular/patchwork dress, reuses the
+  orphaned `ServiceRifle`, see §4's update above). **Elderly Survivor
+  and Veteran remain deferred** — not requested in either follow-up
+  round.
+- **2026-08 follow-up: Angry Civilian Mob shipped**, a genuinely new
+  request (creator direction: "a angry civilian mob, 10-15 packed
+  close together. but weak citizen with rocks, molotov cocktails; area
+  attack, but low damage. Visually appealing tho.") not in the original
+  6-variant list. Two new weakest-in-codebase variants (`MobRioterRock`,
+  `MobRioterMolotov`), two new weapons reusing existing `WeaponKind`
+  mechanics (`ThrownRock` = Melee, `MolotovCocktail` = Spore's lobbed
+  arc under fire coloring), `BuildWeaponProp` now branches on
+  `WeaponKind` for a genuinely different rock/bottle prop shape instead
+  of every non-firearm variant defaulting to a gun silhouette. **No
+  real area-of-effect damage** — `UnitCombat` has no multi-target hit
+  resolution; "area attack" is a visual/fictional read only, not a real
+  mechanic, flagged rather than faked. `RuntimeCityBuilder.SpawnAngryMob`:
+  one ~6m-radius cluster of 12 rioters per match (v0.1 placeholder),
+  full detail in docs/12's dated entry and docs/19 §7's tuning table.
 - A real `MonsterSpawner`-equivalent generic weighted spawner, object
   pooling, an LOD system, Burst, general GPU instancing — none of these
   exist in this codebase today (§0); building any of them for real is
   new infrastructure work, not something this pass silently assumed away.
-- docs/19's citizen-weapon-roll integration (§4's own scope note above).
+- ~~docs/19's citizen-weapon-roll integration~~ **2026-08 follow-up:
+  shipped** — see §4's update above and docs/19 §4's own update.
 - `HumanoidCombatant` selection/health-bar UI — these are hostile-to-
   the-player units; nothing in the brief asked for player-side selection
   UI, and Worker/HumanSoldier's own `SetSelected` convention wasn't
