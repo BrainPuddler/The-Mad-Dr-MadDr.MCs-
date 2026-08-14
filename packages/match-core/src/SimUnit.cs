@@ -107,6 +107,25 @@ namespace MadDr.MatchCore
         /// same as <see cref="Radius"/>.</summary>
         public FactionId? RaceOverride { get; }
 
+        /// <summary>2026-08 (Barracks/infantry roster pass): which <see
+        /// cref="RosterUnitKind"/> this unit was trained/spawned as, or
+        /// null for a unit that was never a roster spawn (every genome
+        /// creature, Tank.cs's own hand-placed defender, and every pre-
+        /// existing `SpawnUnit` call site -- same backward-compatible-
+        /// default pattern <see cref="RaceOverride"/>/<see cref="Radius"/>
+        /// already use). Before this field, <see cref="MatchState.
+        /// SpawnTrainedUnit"/>/<see cref="MatchState.SpawnRosterUnit"/>
+        /// flattened a roster kind into raw Speed/Radius/Combat numbers
+        /// and threw the KIND itself away the instant the unit existed --
+        /// fine while nothing downstream needed to know "which roster
+        /// kind is entity X" (it just needed the numbers), but that's
+        /// exactly the question a real Unity-side visual needs answered
+        /// for every unit it's asked to render (a Rifleman and a
+        /// Flamethrower Trooper look nothing alike). Set once at spawn,
+        /// never mutated -- same "identity stat, hashed anyway" lifetime
+        /// as RaceOverride.</summary>
+        public RosterUnitKind? SourceRosterKind { get; }
+
         /// <summary>docs/27 Phase C: body half-width for
         /// <see cref="Flocking.Separate"/> -- the sim-side twin of
         /// Unity's <c>UnitCombat.Radius</c>. Fixed for the unit's whole
@@ -482,7 +501,7 @@ namespace MadDr.MatchCore
         /// pathfound for `SetPath` either.</summary>
         private readonly Queue<HexCoord> _waypointQueue = new Queue<HexCoord>();
 
-        internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed, double radius, CombatStats? combat, int salvageValue = 0, bool hasRegenerationQuirk = false, FactionId? raceOverride = null)
+        internal SimUnit(uint entityId, int playerIndex, double x, double z, double speed, double radius, CombatStats? combat, int salvageValue = 0, bool hasRegenerationQuirk = false, FactionId? raceOverride = null, RosterUnitKind? sourceRosterKind = null)
         {
             EntityId = entityId;
             PlayerIndex = playerIndex;
@@ -495,6 +514,7 @@ namespace MadDr.MatchCore
             SalvageValue = salvageValue;
             HasRegenerationQuirk = hasRegenerationQuirk;
             RaceOverride = raceOverride;
+            SourceRosterKind = sourceRosterKind;
         }
 
         /// <summary>Begin walking a precomputed path (HexPathfinder output,
@@ -818,6 +838,15 @@ namespace MadDr.MatchCore
             // it changes real gameplay behavior (FactionLumenTable
             // lookups), so two clients must agree on it.
             h.Add(RaceOverride.HasValue ? (int)RaceOverride.Value : -1);
+
+            // 2026-08 (Barracks/infantry roster pass): another fixed
+            // identity stat, same "hashed anyway" reasoning as
+            // RaceOverride just above -- it doesn't drive any TICK
+            // behavior today (purely a Unity-side visual lookup), but
+            // two replaying clients must still agree on every field of a
+            // unit's own identity, the same standing rule every other
+            // field in this method already follows.
+            h.Add(SourceRosterKind.HasValue ? (int)SourceRosterKind.Value : -1);
 
             // 2026-07: building-attack target, same "real mutable state
             // two clients must agree on" reasoning as AttackAnomalyTargetId.

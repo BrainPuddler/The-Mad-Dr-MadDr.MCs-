@@ -27,9 +27,29 @@ public class FactionRosterTests
     [InlineData(RosterUnitKind.Drone, FactionId.AlienHive)]
     [InlineData(RosterUnitKind.Spitter, FactionId.AlienHive)]
     [InlineData(RosterUnitKind.FloaterQueen, FactionId.AlienHive)]
+    [InlineData(RosterUnitKind.FlamethrowerTrooper, FactionId.HumanArmy)]
     public void Every_roster_kind_belongs_to_its_documented_faction(RosterUnitKind kind, FactionId expectedFaction)
     {
         Assert.Equal(expectedFaction, UnitRosterDef.Get(kind).Faction);
+    }
+
+    [Theory]
+    [InlineData(RosterUnitKind.Rifleman, BuildingKind.Barracks)]
+    [InlineData(RosterUnitKind.FlamethrowerTrooper, BuildingKind.Barracks)]
+    [InlineData(RosterUnitKind.HalfTrack, BuildingKind.Factory)]
+    [InlineData(RosterUnitKind.Tank, BuildingKind.Factory)]
+    [InlineData(RosterUnitKind.ZeppelinGunship, BuildingKind.Factory)]
+    [InlineData(RosterUnitKind.Drone, BuildingKind.Factory)]
+    [InlineData(RosterUnitKind.Spitter, BuildingKind.Factory)]
+    [InlineData(RosterUnitKind.FloaterQueen, BuildingKind.Factory)]
+    public void Every_roster_kind_trains_from_its_documented_producer(RosterUnitKind kind, BuildingKind expectedProducer)
+    {
+        // 2026-08 (creator direction: "Human Army is from army barracks
+        // -- part of the basic kit for Human army"): real infantry
+        // trains from Barracks; everything else (vehicles, and every
+        // Alien Hive kind, which has no Barracks equivalent) keeps
+        // training from Factory, same as before Barracks existed.
+        Assert.Equal(expectedProducer, UnitRosterDef.Get(kind).Producer);
     }
 
     [Fact]

@@ -221,7 +221,7 @@ namespace MadDr.MatchCore
         /// faction as before; only a Mixed player's spawn call sites pass
         /// a real value (see <see cref="SimUnit.RaceOverride"/>). Returns
         /// the new unit's entity ID.</summary>
-        public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, double radius = DefaultUnitRadius, CombatStats? combat = null, int salvageValue = 0, bool hasRegenerationQuirk = false, FactionId? raceOverride = null)
+        public uint SpawnUnit(int playerIndex, HexCoord atHex, double speed, double radius = DefaultUnitRadius, CombatStats? combat = null, int salvageValue = 0, bool hasRegenerationQuirk = false, FactionId? raceOverride = null, RosterUnitKind? sourceRosterKind = null)
         {
             if (_city == null) throw new InvalidOperationException("MatchState has no city -- cannot spawn units");
             if (playerIndex < 0 || playerIndex >= _players.Length)
@@ -231,7 +231,7 @@ namespace MadDr.MatchCore
 
             var id = AllocateEntityId();
             var (x, z) = atHex.ToWorld();
-            var unit = new SimUnit(id, playerIndex, x, z, speed, radius, combat, salvageValue, hasRegenerationQuirk, raceOverride);
+            var unit = new SimUnit(id, playerIndex, x, z, speed, radius, combat, salvageValue, hasRegenerationQuirk, raceOverride, sourceRosterKind);
             _unitsInOrder.Add(unit);
             _unitsById[id] = unit;
             return id;
@@ -276,7 +276,7 @@ namespace MadDr.MatchCore
                 throw new InvalidOperationException($"{kind} belongs to {def.Faction}'s roster, not player {playerIndex}'s {ownerFaction}");
 
             var raceOverride = ownerFaction == FactionId.Mixed ? def.Faction : (FactionId?)null;
-            return SpawnUnit(playerIndex, atHex, def.Speed, def.Radius, def.Combat, def.SalvageValue, raceOverride: raceOverride);
+            return SpawnUnit(playerIndex, atHex, def.Speed, def.Radius, def.Combat, def.SalvageValue, raceOverride: raceOverride, sourceRosterKind: kind);
         }
 
         /// <summary>docs/23 §2: place a player's HQ, Complete immediately
@@ -327,6 +327,34 @@ namespace MadDr.MatchCore
             var def = BuildingDef.Get(BuildingKind.Factory);
             var id = AllocateEntityId();
             var building = new SimBuilding(id, playerIndex, BuildingKind.Factory, atHex, def.MaxHp, def.BuildTimeTicks, completeImmediately: true);
+            _buildingsInOrder.Add(building);
+            _buildingsById[id] = building;
+            _blockedToGround?.Add(atHex);
+            return id;
+        }
+
+        /// <summary>2026-08 (creator direction: "Human Army is from army
+        /// barracks -- part of the basic kit for Human army"): place a
+        /// Human Army player's starting Barracks, Complete immediately,
+        /// free -- same setup-time direct-call precedent and bootstrap-
+        /// grant contract as <see cref="SpawnFactoryForPlayer"/> (every
+        /// Barracks built AFTER this one goes through the normal
+        /// BuildStructure/cost/build-time path; this is only the ONE
+        /// starting building). The caller (Unity/CityGen) picks the
+        /// actual hex and is responsible for only calling this for
+        /// players whose faction is actually HumanArmy -- match-core
+        /// itself has no opinion on which factions get a Barracks in
+        /// their starting kit, same division of labor <see
+        /// cref="SpawnHqForPlayer"/> already has for hex selection.</summary>
+        public uint SpawnBarracksForPlayer(int playerIndex, HexCoord atHex)
+        {
+            if (_city == null) throw new InvalidOperationException("MatchState has no city -- cannot spawn buildings");
+            if (playerIndex < 0 || playerIndex >= _players.Length)
+                throw new ArgumentOutOfRangeException(nameof(playerIndex));
+
+            var def = BuildingDef.Get(BuildingKind.Barracks);
+            var id = AllocateEntityId();
+            var building = new SimBuilding(id, playerIndex, BuildingKind.Barracks, atHex, def.MaxHp, def.BuildTimeTicks, completeImmediately: true);
             _buildingsInOrder.Add(building);
             _buildingsById[id] = building;
             _blockedToGround?.Add(atHex);
@@ -1613,6 +1641,12 @@ namespace MadDr.MatchCore
             if (building.TrainingKind != null) return false;
 
             var def = UnitRosterDef.Get(kind);
+            // 2026-08 (Barracks/infantry roster pass): a building only
+            // trains its OWN roster kinds -- see UnitRosterDef.Producer's
+            // own doc comment for why this wasn't a real distinction
+            // before Barracks existed (a Factory training a Rifleman
+            // Squad reads fine; a Barracks training a Tank doesn't).
+            if (building.Kind != def.Producer) return false;
             var player = _players[playerIndex];
             if (player.Faction != def.Faction && player.Faction != FactionId.Mixed) return false;
             foreach (var (resource, amount) in def.Cost)
@@ -1661,7 +1695,7 @@ namespace MadDr.MatchCore
             if (spawnHex == null) return;
             var def = UnitRosterDef.Get(kind);
             var raceOverride = _players[building.PlayerIndex].Faction == FactionId.Mixed ? def.Faction : (FactionId?)null;
-            SpawnUnit(building.PlayerIndex, spawnHex.Value, def.Speed, def.Radius, def.Combat, def.SalvageValue, raceOverride: raceOverride);
+            SpawnUnit(building.PlayerIndex, spawnHex.Value, def.Speed, def.Radius, def.Combat, def.SalvageValue, raceOverride: raceOverride, sourceRosterKind: kind);
         }
 
         private HexCoord? FindOpenHexNear(HexCoord from)

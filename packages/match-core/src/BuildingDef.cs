@@ -35,6 +35,19 @@ namespace MadDr.MatchCore
         /// cref="PlayerState.RaiseSupplyCap"/> (existing, previously
         /// unused).</summary>
         BigBrain = 8,
+
+        /// <summary>2026-08 (creator direction: "Human Army is from army
+        /// barracks -- part of the basic kit for Human army"): the
+        /// production building <see cref="RosterUnitKind"/> infantry
+        /// (Rifleman, FlamethrowerTrooper) train from, via the existing
+        /// generic <see cref="MatchState.CanTrainUnit"/>/<see
+        /// cref="CommandKind.TrainUnit"/> machinery -- that pipeline was
+        /// already building-kind-agnostic (any Complete building the
+        /// training player owns, one open slot), it just had no second
+        /// producer kind to point at besides <see cref="Factory"/> until
+        /// now. A real, buildable, per-faction-basic-kit member exactly
+        /// like <see cref="Factory"/> is, not a cosmetic prop.</summary>
+        Barracks = 9,
     }
 
     /// <summary>Static per-building-kind data (docs/23 §2 Phase 2 tasks:
@@ -248,6 +261,19 @@ namespace MadDr.MatchCore
                 new[] { (ResourceKind.Brains, 20), (ResourceKind.Parts, 80) },
                 buildTimeTicks: 200, maxHp: LargeHp, armor: LargeArmor,
                 storageCapBonus: null, occupants: 0, supplyCapBonus: 100, scavengeValue: LargeScavenge),
+
+            // v0.1 placeholder cost, shaped like UnitRosterDef's own
+            // Human Army cost lines (Bones + Fuel -- "recruiting
+            // volunteers... drilled infantry needs matériel"), plus the
+            // same standing Parts line every buildable kind carries.
+            // Medium tier, matching Factory's own stakes (a real
+            // production building, not basic storage) -- see this kind's
+            // own enum doc comment for why it reuses Factory's existing
+            // CanTrainUnit/TrainUnit machinery rather than a new one.
+            new BuildingDef(BuildingKind.Barracks, "Barracks",
+                new[] { (ResourceKind.Bones, 25), (ResourceKind.Fuel, 15), (ResourceKind.Parts, 50) },
+                buildTimeTicks: 140, maxHp: MediumHp, armor: MediumArmor,
+                storageCapBonus: null, occupants: 6, scavengeValue: MediumScavenge),
         };
 
         public static BuildingDef Get(BuildingKind kind) => All[(int)kind];

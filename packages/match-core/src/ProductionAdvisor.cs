@@ -163,6 +163,21 @@ namespace MadDr.MatchCore
             return false;
         }
 
+        /// <summary>2026-08 (Barracks/infantry roster pass): which
+        /// BuildingKinds this advisor treats as valid TrainUnit producers
+        /// -- <see cref="MatchState.CanTrainUnit"/> itself is building-
+        /// kind-agnostic (any Complete, player-owned building with an
+        /// open slot), but this advisor's own idle-producer scan used to
+        /// hardcode <see cref="BuildingKind.Factory"/> as the only kind
+        /// worth checking, back when it was the only producer that
+        /// existed. Barracks added alongside it now that a second
+        /// producer kind is real -- an AI opponent's own starting
+        /// Barracks (see <see cref="MatchState.SpawnBarracksForPlayer"/>)
+        /// would otherwise sit idle forever under AI control, the exact
+        /// "built a building nobody uses" gap this array exists to
+        /// avoid.</summary>
+        private static readonly BuildingKind[] ProducerKinds = { BuildingKind.Factory, BuildingKind.Barracks };
+
         private void TryQueueTraining(MatchState state, PlayerState player, List<Command> commands)
         {
             List<uint>? idleProducers = null;
@@ -170,7 +185,7 @@ namespace MadDr.MatchCore
             {
                 var b = state.BuildingAt(i);
                 if (b.PlayerIndex != PlayerIndex || b.State != BuildingState.Complete) continue;
-                if (b.Kind != BuildingKind.Factory) continue;
+                if (Array.IndexOf(ProducerKinds, b.Kind) < 0) continue;
                 if (b.TrainingKind != null) continue;
                 (idleProducers ??= new List<uint>()).Add(b.EntityId);
             }

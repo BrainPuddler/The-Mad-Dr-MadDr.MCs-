@@ -30,16 +30,54 @@ public class TrainUnitTests
     }
 
     private static uint BuildCompleteFactory(MatchState m, CityModel city, int playerIndex)
+        => BuildCompleteBuilding(m, city, playerIndex, BuildingKind.Factory, city.CenterHex);
+
+    /// <summary>2026-08 (Barracks/infantry roster pass): same shape as
+    /// <see cref="BuildCompleteFactory"/>, for tests that specifically
+    /// need a real infantry producer -- Rifleman/FlamethrowerTrooper now
+    /// train from Barracks, not Factory (see
+    /// <see cref="UnitRosterDef.Producer"/>). <paramref name="searchCenter"/>
+    /// defaults to a point well away from <see cref="CityModel.CenterHex"/>
+    /// (FindOpenHex is purely city-derived -- it has no idea a Factory
+    /// might already sit at CenterHex from an earlier call in the SAME
+    /// match/test -- so a caller building BOTH a Factory and a Barracks
+    /// in one test must pick disjoint search areas itself, same as this
+    /// default already does).</summary>
+    private static uint BuildCompleteBarracks(MatchState m, CityModel city, int playerIndex, HexCoord? searchCenter = null)
+        => BuildCompleteBuilding(m, city, playerIndex, BuildingKind.Barracks, searchCenter ?? FarFromCenter(city));
+
+    /// <summary>A search-start point far enough from <see
+    /// cref="CityModel.CenterHex"/> (8 hex-rings out) that <see
+    /// cref="FindOpenHex"/>'s own outward ring search can never land on
+    /// the exact hex a Factory built at CenterHex already occupies --
+    /// simpler than teaching FindOpenHex about match-placed buildings
+    /// (which it deliberately knows nothing about -- see its own
+    /// city-only BlockedToGround comment) just for this one two-building
+    /// test scenario.</summary>
+    private static HexCoord FarFromCenter(CityModel city)
     {
-        var hex = FindOpenHex(city, city.CenterHex);
+        foreach (var h in city.CenterHex.Ring(8)) if (city.Contains(h)) return h;
+        return city.CenterHex;   // pathological tiny-map fallback -- never hit by CityPreset.Village()
+    }
+
+    private static uint BuildCompleteBuilding(MatchState m, CityModel city, int playerIndex, BuildingKind kind, HexCoord searchCenter)
+    {
+        var hex = FindOpenHex(city, searchCenter);
         var player = m.Player(playerIndex);
         player.AddWorker();   // 2026-08 tech-wing epic Phase 1: BuildStructure now requires one
         player.Grant(ResourceKind.Bones, 1000);
         player.Grant(ResourceKind.Blood, 1000);
+        player.Grant(ResourceKind.Fuel, 1000);
         player.Grant(ResourceKind.Parts, 1000);
-        m.Tick(new List<Command> { new Command(playerIndex, CommandKind.BuildStructure, targetEntity: (uint)BuildingKind.Factory, argA: hex.Q, argB: hex.R) });
-        var id = m.BuildingAt(0).EntityId;
-        var buildTime = BuildingDef.Get(BuildingKind.Factory).BuildTimeTicks;
+        m.Tick(new List<Command> { new Command(playerIndex, CommandKind.BuildStructure, targetEntity: (uint)kind, argA: hex.Q, argB: hex.R) });
+        // BuildingAt(BuildingCount - 1), not BuildingAt(0) -- this helper
+        // is now called more than once in a single match by tests that
+        // need both a Factory AND a Barracks present (see
+        // CanTrainUnit_falseAtFactory_trueAtBarracks_forRifleman), so
+        // "the first building ever placed" is no longer necessarily "the
+        // one this call just placed."
+        var id = m.BuildingAt(m.BuildingCount - 1).EntityId;
+        var buildTime = BuildingDef.Get(kind).BuildTimeTicks;
         for (var i = 0; i < buildTime; i++) m.Tick(null);
         Assert.Equal(BuildingState.Complete, m.FindBuilding(id)!.State);
         return id;
@@ -68,7 +106,7 @@ public class TrainUnitTests
     {
         var city = SmallCity();
         var m = MatchState.Create(2u, ArmyVsHive(), city);
-        var factoryId = BuildCompleteFactory(m, city, 0);
+        var barracksId = BuildCompleteBarracks(m, city, 0);
         var player = m.Player(0);
 
         var def = UnitRosterDef.Get(RosterUnitKind.Rifleman);
@@ -79,18 +117,18 @@ public class TrainUnitTests
             beforeTraining[resource] = player.Wallet(resource);
         }
 
-        Assert.True(m.CanTrainUnit(0, factoryId, RosterUnitKind.Rifleman));
+        Assert.True(m.CanTrainUnit(0, barracksId, RosterUnitKind.Rifleman));
         Assert.Equal(0, m.UnitCount);
 
-        m.Tick(new List<Command> { new Command(0, CommandKind.TrainUnit, targetEntity: factoryId, argA: (int)RosterUnitKind.Rifleman) });
+        m.Tick(new List<Command> { new Command(0, CommandKind.TrainUnit, targetEntity: barracksId, argA: (int)RosterUnitKind.Rifleman) });
 
         // paid in full immediately, before the unit itself exists -- check
-        // the DELTA, not an absolute 0 (BuildCompleteFactory's own Bones/
-        // Blood grant leaves leftover balance on those resource kinds).
+        // the DELTA, not an absolute 0 (BuildCompleteBarracks's own Bones/
+        // Fuel grant leaves leftover balance on those resource kinds).
         foreach (var (resource, amount) in def.Cost)
             Assert.Equal(beforeTraining[resource] - amount, player.Wallet(resource));
         Assert.Equal(0, m.UnitCount);   // still training, not spawned yet
-        Assert.Equal(RosterUnitKind.Rifleman, m.FindBuilding(factoryId)!.TrainingKind);
+        Assert.Equal(RosterUnitKind.Rifleman, m.FindBuilding(barracksId)!.TrainingKind);
 
         // the Tick() that issued TrainUnit already ran this building's own
         // TickTraining() once in that same call (ApplyCommand runs before
@@ -102,21 +140,47 @@ public class TrainUnitTests
 
         m.Tick(null);   // the exact tick training finishes
         Assert.Equal(1, m.UnitCount);
-        Assert.Null(m.FindBuilding(factoryId)!.TrainingKind);
+        Assert.Null(m.FindBuilding(barracksId)!.TrainingKind);
         Assert.Equal(0, m.UnitAt(0).PlayerIndex);
+        Assert.Equal(RosterUnitKind.Rifleman, m.UnitAt(0).SourceRosterKind);
+    }
+
+    [Fact]
+    public void CanTrainUnit_falseAtFactory_trueAtBarracks_forRifleman()
+    {
+        // 2026-08 (creator direction: "Human Army is from army barracks
+        // -- part of the basic kit for Human army"): a Factory can no
+        // longer train infantry, even fully funded and Complete -- see
+        // UnitRosterDef.Producer's own doc comment.
+        var city = SmallCity();
+        var m = MatchState.Create(11u, ArmyVsHive(), city);
+        var factoryId = BuildCompleteFactory(m, city, 0);
+        var player = m.Player(0);
+        foreach (var (resource, amount) in UnitRosterDef.Get(RosterUnitKind.Rifleman).Cost) player.Grant(resource, amount * 2);
+
+        Assert.False(m.CanTrainUnit(0, factoryId, RosterUnitKind.Rifleman));
+
+        var barracksId = BuildCompleteBarracks(m, city, 0);
+        Assert.True(m.CanTrainUnit(0, barracksId, RosterUnitKind.Rifleman));
     }
 
     [Fact]
     public void TrainUnit_silentNoOp_whenUnaffordable()
     {
+        // Barracks, not Factory -- isolates the affordability gate this
+        // test is actually named for. A Factory would ALSO reject
+        // Rifleman now, but for the producer mismatch (see
+        // CanTrainUnit_falseAtFactory_trueAtBarracks_forRifleman), which
+        // would make a False result here ambiguous about which check
+        // actually failed.
         var city = SmallCity();
         var m = MatchState.Create(3u, ArmyVsHive(), city);
-        var factoryId = BuildCompleteFactory(m, city, 0);
+        var barracksId = BuildCompleteBarracks(m, city, 0);
         // deliberately no Grant -- wallet stays at 0 for the roster's cost resources
 
-        Assert.False(m.CanTrainUnit(0, factoryId, RosterUnitKind.Rifleman));
-        m.Tick(new List<Command> { new Command(0, CommandKind.TrainUnit, targetEntity: factoryId, argA: (int)RosterUnitKind.Rifleman) });
-        Assert.Null(m.FindBuilding(factoryId)!.TrainingKind);
+        Assert.False(m.CanTrainUnit(0, barracksId, RosterUnitKind.Rifleman));
+        m.Tick(new List<Command> { new Command(0, CommandKind.TrainUnit, targetEntity: barracksId, argA: (int)RosterUnitKind.Rifleman) });
+        Assert.Null(m.FindBuilding(barracksId)!.TrainingKind);
         Assert.Equal(0, m.UnitCount);
     }
 
@@ -125,11 +189,11 @@ public class TrainUnitTests
     {
         var city = SmallCity();
         var m = MatchState.Create(4u, ArmyVsHive(), city);
-        var factoryId = BuildCompleteFactory(m, city, 0);
+        var barracksId = BuildCompleteBarracks(m, city, 0);
         var player = m.Player(0);
         var def = UnitRosterDef.Get(RosterUnitKind.Rifleman);
         // grant enough for two trains, on top of whatever leftover balance
-        // BuildCompleteFactory's own grant left behind
+        // BuildCompleteBarracks's own grant left behind
         var beforeGrant = new Dictionary<ResourceKind, int>();
         foreach (var (resource, amount) in def.Cost)
         {
@@ -137,13 +201,13 @@ public class TrainUnitTests
             player.Grant(resource, amount * 2);
         }
 
-        m.Tick(new List<Command> { new Command(0, CommandKind.TrainUnit, targetEntity: factoryId, argA: (int)RosterUnitKind.Rifleman) });
-        Assert.Equal(RosterUnitKind.Rifleman, m.FindBuilding(factoryId)!.TrainingKind);
+        m.Tick(new List<Command> { new Command(0, CommandKind.TrainUnit, targetEntity: barracksId, argA: (int)RosterUnitKind.Rifleman) });
+        Assert.Equal(RosterUnitKind.Rifleman, m.FindBuilding(barracksId)!.TrainingKind);
         // exactly one batch's worth was spent (beforeGrant + 2*amount - amount = beforeGrant + amount)
         foreach (var (resource, amount) in def.Cost) Assert.Equal(beforeGrant[resource] + amount, player.Wallet(resource));
 
         // second TrainUnit command while the slot is occupied -- silent no-op, no double-debit
-        m.Tick(new List<Command> { new Command(0, CommandKind.TrainUnit, targetEntity: factoryId, argA: (int)RosterUnitKind.Rifleman) });
+        m.Tick(new List<Command> { new Command(0, CommandKind.TrainUnit, targetEntity: barracksId, argA: (int)RosterUnitKind.Rifleman) });
         foreach (var (resource, amount) in def.Cost) Assert.Equal(beforeGrant[resource] + amount, player.Wallet(resource));   // still untouched -- not debited twice
     }
 

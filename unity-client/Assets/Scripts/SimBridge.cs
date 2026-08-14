@@ -126,6 +126,13 @@ public class SimBridge : MonoBehaviour
     public uint SpawnFactoryForPlayer(int playerIndex, HexCoord atHex)
         => _match?.SpawnFactoryForPlayer(playerIndex, atHex) ?? 0;
 
+    /// <summary>2026-08 (creator direction: "Human Army is from army
+    /// barracks -- part of the basic kit for Human army"): setup-time
+    /// pass-through to <see cref="MatchState.SpawnBarracksForPlayer"/>,
+    /// same contract as <see cref="SpawnFactoryForPlayer"/> above.</summary>
+    public uint SpawnBarracksForPlayer(int playerIndex, HexCoord atHex)
+        => _match?.SpawnBarracksForPlayer(playerIndex, atHex) ?? 0;
+
     /// <summary>2026-08 (creator direction: "Create a faction based army
     /// generator. To start making opponents for the game"): setup-time
     /// pass-through to <see cref="MatchState.SpawnRosterUnit"/> -- same

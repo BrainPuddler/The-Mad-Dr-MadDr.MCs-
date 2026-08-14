@@ -23,6 +23,21 @@ namespace MadDr.MatchCore
         Drone = 4,
         Spitter = 5,
         FloaterQueen = 6,
+
+        /// <summary>2026-08 (creator direction: "let's add a flame
+        /// thrower army person as well into the mix" -- confirmed
+        /// Human Army faction, trained from <see
+        /// cref="BuildingKind.Barracks"/> alongside <see
+        /// cref="Rifleman"/>). Short range, heavy close-in damage --
+        /// the roster-side twin of `packages/roster-client`'s own
+        /// Flame-kind Tank flamethrower ("exists purely because it is
+        /// cool"), ported to an infantry-scale roster unit. This
+        /// struct's own CombatStats are match-core's engine-agnostic
+        /// numbers only; the client-side cosmetic WeaponProfile/WeaponFx
+        /// flavor for rendering is a separate, Unity-side concern (see
+        /// HumanCombatProfile.cs's own header for why the two layers
+        /// stay split).</summary>
+        FlamethrowerTrooper = 7,
     }
 
     /// <summary>Static per-roster-unit data (docs/23 §13 amendment D's own
@@ -86,9 +101,22 @@ namespace MadDr.MatchCore
         /// this any more than for Cost above.</summary>
         public int TrainTimeTicks { get; }
 
+        /// <summary>2026-08 (Barracks/infantry roster pass): which
+        /// <see cref="BuildingKind"/> actually trains this unit -- see
+        /// <see cref="MatchState.CanTrainUnit"/>'s own updated doc
+        /// comment for why this exists (before Barracks, every roster
+        /// kind trained from the one and only producer, Factory, so
+        /// there was nothing to pick between). Defaults to <see
+        /// cref="BuildingKind.Factory"/> so every pre-Barracks entry
+        /// below keeps its unchanged behavior without having to name it
+        /// explicitly -- only Rifleman/FlamethrowerTrooper (real
+        /// infantry, "Human Army is from army barracks") override
+        /// it.</summary>
+        public BuildingKind Producer { get; }
+
         private UnitRosterDef(RosterUnitKind kind, FactionId faction, string name,
             double speed, double radius, CombatStats combat, int salvageValue,
-            (ResourceKind, int)[] cost, int trainTimeTicks)
+            (ResourceKind, int)[] cost, int trainTimeTicks, BuildingKind producer = BuildingKind.Factory)
         {
             Kind = kind;
             Faction = faction;
@@ -99,6 +127,7 @@ namespace MadDr.MatchCore
             SalvageValue = salvageValue;
             Cost = cost;
             TrainTimeTicks = trainTimeTicks;
+            Producer = producer;
         }
 
         // Tech and biotech units have no Lumen-cycle coupling of their
@@ -118,7 +147,8 @@ namespace MadDr.MatchCore
                 speed: 3.0, radius: 1.0,
                 combat: new CombatStats(maxVitality: 60, power: 8, armor: 1, reach: 3, ferocity: 1.0, cunningPercent: 5, affinity: NoLumenCoupling),
                 salvageValue: 20,
-                cost: new[] { (ResourceKind.Bones, 10), (ResourceKind.Fuel, 5) }, trainTimeTicks: 40),
+                cost: new[] { (ResourceKind.Bones, 10), (ResourceKind.Fuel, 5) }, trainTimeTicks: 40,
+                producer: BuildingKind.Barracks),
 
             new UnitRosterDef(RosterUnitKind.HalfTrack, FactionId.HumanArmy, "Half-Track",
                 speed: 5.0, radius: 2.0,
@@ -162,6 +192,27 @@ namespace MadDr.MatchCore
                 combat: new CombatStats(maxVitality: 800, power: 25, armor: 5, reach: 2, ferocity: 0.7, cunningPercent: 10, affinity: NoLumenCoupling),
                 salvageValue: 300,
                 cost: new[] { (ResourceKind.Ichor, 80) }, trainTimeTicks: 200),
+
+            // 2026-08 (creator direction: "let's add a flame thrower
+            // army person as well into the mix", trained from
+            // BuildingKind.Barracks alongside Rifleman). Short Reach (1,
+            // close-in only -- a real flamethrower's actual envelope,
+            // same "short range is the balancing cost" reasoning
+            // Grandma's own Shotgun got in HumanCombatProfile.cs) traded
+            // for the highest Ferocity in the Human Army roster (2.5 --
+            // a continuous stream reads as frequent small hits, not one
+            // slow heavy swing like Tank's). Fuel-heavy cost (this
+            // weapon's own resource, a deliberate flavor tie-in) rather
+            // than Rifleman's lighter Bones-leaning line. MUST stay the
+            // LAST entry in this array -- Get(kind) indexes directly by
+            // (int)kind, and FlamethrowerTrooper = 7 is the highest
+            // RosterUnitKind value.
+            new UnitRosterDef(RosterUnitKind.FlamethrowerTrooper, FactionId.HumanArmy, "Flamethrower Trooper",
+                speed: 2.8, radius: 1.0,
+                combat: new CombatStats(maxVitality: 70, power: 10, armor: 1, reach: 1, ferocity: 2.5, cunningPercent: 0, affinity: NoLumenCoupling),
+                salvageValue: 25,
+                cost: new[] { (ResourceKind.Bones, 15), (ResourceKind.Fuel, 20) }, trainTimeTicks: 50,
+                producer: BuildingKind.Barracks),
         };
 
         public static UnitRosterDef Get(RosterUnitKind kind) => All[(int)kind];
