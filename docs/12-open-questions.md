@@ -17957,3 +17957,91 @@ fallthrough bugs were caught by manually reading EVERY switch over
 end after the creator's report, not by a compiler or test catching them
 -- there is no dotnet/Editor here to have caught them automatically,
 which is exactly why they shipped silently in the first place.
+
+## 2026-08 follow-up: the REAL "buildings are not getting built" bug
+
+Creator report, direct: "do humans have workers? building are not
+getting built." First confirmed the easy half: yes -- Worker is not
+faction-gated, every faction (including Human Army) gets the same 30
+free starting Workers, `SpawnStartingWorkers` is called unconditionally
+for player 0 regardless of `chosenFaction`. That ruled out the obvious
+explanation, so a dedicated deep investigation (a fresh Explore-agent
+read of the whole construction-staffing pipeline end to end, not
+speculative) went looking for the real cause -- and found one, unrelated
+to any of the resource-cost fixes made earlier this session.
+
+**Root cause, plain**: `Worker.TickSeekBuild` (docs/12's own earlier
+"Zombie SCV" entry, `unity-client/Assets/Scripts/Worker.cs`) measured
+arrival against the construction site's raw hex CENTER
+(`_builder.WorldOf(target.Hex)`). But `RuntimeCityBuilder.BlockedFor`
+unions in every non-Destroyed building's own hex as blocked ground --
+UnderConstruction included -- so a Worker can never physically stand on
+that hex; `GroundPathFollower.SetGoal` already knows this and quietly
+routes the Worker to the nearest open NEIGHBOR hex instead.
+Adjacent hex centers are `HexCoord.HexMeters` (20m) apart, permanently
+outside `Worker.BuildReach`'s 3.5m threshold -- so a Worker correctly
+standing right next to a construction site could NEVER satisfy the
+`to.magnitude <= BuildReach` check, never reached the line that queues
+`SetBuildingStaffed(true)`, and the site (paused the instant it's
+placed by `TickConstructionStaffing`, which unstaffs every fresh human
+build so ONLY a physically-arrived Worker can ever resume it) sat
+permanently paused. Every single human-placed building, unconditionally
+-- not a Human-Army-specific bug, not a resource bug, a plain geometry
+bug in the arrival check.
+
+**The compounding second-order effect, which is likely the "no workers"
+half of the report**: the Worker sent to staff that unreachable site
+never actually reaches `TickStaffing` (where it would eventually get
+released), so its `PlayerState.BusyWorkers` occupancy from
+`TryOccupyWorker` never gets freed (`ReleaseWorker` only fires on the
+Complete transition, which could now never happen). Queue enough
+buildings and `AvailableWorkers` -> 0, at which point `CanPlaceBuilding`
+starts silently rejecting EVERY further placement for that player --
+reading exactly like "I have no workers" even though `WorkerCount`
+itself was never actually the problem.
+
+**Proof this predates this session's other changes**: the blocked-hex
+union landed in an earlier commit (`bd7c57e`, "root-cause redesign of
+Worker herding"); the SCV-staffing code landed after it
+(`ba1c989`, docs/12's own "Zombie" entry) and never accounted for it.
+Construction staffing has been unreachable since the day it was
+written -- an existing, load-bearing precedent for the SAME fix already
+existed one method away: `RuntimeCityBuilder.
+NearestOwnFactoryApproachPosition` (Worker's DELIVERY path) already
+does exactly this "approach the open neighbor, not the blocked center"
+substitution, which is why delivering scavenged Parts to a Factory has
+always worked while staffing a construction site never did.
+
+**Fix**: extracted that Factory-specific approach-position logic into a
+general `RuntimeCityBuilder.ApproachPositionFor(HexCoord, Vector3)` (a
+construction site can be ANY `BuildingKind`, not just Factory, so this
+couldn't stay Factory-only) and switched `TickSeekBuild` to measure
+against it instead of the raw blocked hex center.
+`NearestOwnFactoryApproachPosition` itself now calls the new shared
+helper rather than duplicating the neighbor-search loop.
+
+**A related, NOT-fixed latent issue, flagged rather than silently
+patched over**: `Worker.SearchRadius` (70m, ~3.5 hexes) is far smaller
+than `Worker.WanderLeashRadius` (2000m) -- an idle Worker can wander
+well outside its own discovery radius for scavengeable debris/
+construction sites, with nothing pulling it back except the leash
+itself, and no player-issued "go build here" order exists to recall a
+distant Worker on demand. Now that staffing can actually SUCCEED, a
+construction site placed more than ~3.5 hexes from every currently-idle
+Worker may still sit unstaffed simply because no Worker's search ever
+reaches it -- a real, separate tuning/design gap, not attempted in this
+fix (the creator's report was about builds never progressing AT ALL,
+which is now fixed; "sometimes slow to get staffed if built far away"
+is a different, smaller problem).
+
+**Verification**: `Worker.cs`/`RuntimeCityBuilder.cs` are Unity
+MonoBehaviours with no xunit coverage (match-core's C# test suite only
+covers `packages/match-core`, which this bug lives entirely outside of)
+-- no automated test exists for this fix, same standing gap every other
+Unity-only behavior change in this project has. Checked by hand:
+brace/paren balance (RuntimeCityBuilder.cs's own baseline has a single
+pre-existing, unrelated paren-count mismatch from before this edit --
+confirmed via `git show HEAD:...` diff, not introduced here); the fix
+reuses an already-established, already-relied-upon pattern
+(`NearestOwnFactoryApproachPosition`) rather than inventing new
+geometry logic from scratch.

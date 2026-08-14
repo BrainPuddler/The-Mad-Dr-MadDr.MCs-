@@ -632,7 +632,16 @@ public class Worker : MonoBehaviour
             return;
         }
 
-        var dest = _builder.WorldOf(target.Hex);
+        // 2026-08 bugfix (creator report: "buildings are not getting
+        // built" -- see RuntimeCityBuilder.ApproachPositionFor's own doc
+        // comment for the full root cause): a construction site's own hex
+        // is always blocked ground (BlockedFor's union includes every
+        // UnderConstruction building), so a Worker can only ever actually
+        // STAND on the nearest open NEIGHBOR hex -- comparing arrival
+        // against the raw (unreachable) hex center meant this branch
+        // could never be satisfied. Same fix shape TickSeekDeliver already
+        // gets for free via NearestOwnFactoryApproachPosition.
+        var dest = _builder.ApproachPositionFor(target.Hex, transform.position);
         var to = dest - transform.position;
         to.y = 0f;
         if (to.magnitude <= BuildReach)

@@ -3056,19 +3056,51 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             var d = (WorldOf(b.Hex) - from).sqrMagnitude;
             if (d < bestSq) { bestSq = d; factoryHex = b.Hex; }
         }
-        if (!factoryHex.HasValue) return NearestOwnBuildingPosition(from);
+        return factoryHex.HasValue ? ApproachPositionFor(factoryHex.Value, from) : NearestOwnBuildingPosition(from);
+    }
 
+    /// <summary>2026-08 bugfix (creator report: "do humans have workers?
+    /// building are not getting built" -- root-caused to exactly this gap):
+    /// a building's own hex is ALWAYS in <see cref="BlockedFor"/>'s ground
+    /// set from the instant it's placed (every non-Destroyed `SimBuilding`,
+    /// UnderConstruction included -- see <see cref="BlockedFor"/>'s own
+    /// union), so a Worker can never actually STAND on a construction
+    /// site's hex; <see cref="GroundPathFollower.SetGoal"/> already knows
+    /// this and silently substitutes the nearest open NEIGHBOR hex as the
+    /// real walkable destination. <see cref="Worker.TickSeekBuild"/> used
+    /// to compare its own position against the site's blocked hex CENTER
+    /// instead of that same substituted neighbor -- two adjacent hex
+    /// centers are `HexCoord.HexMeters` (20m) apart, permanently outside
+    /// `Worker.BuildReach` (3.5m), so a Worker parked on the correct
+    /// neighbor hex could NEVER satisfy the arrival check, never issued
+    /// `SetBuildingStaffed(true)`, and the site sat permanently paused
+    /// (Unity's own `TickConstructionStaffing` unstaffs every fresh human
+    /// build the instant it appears -- see that method's own comment) --
+    /// worse, the Worker itself stayed permanently `BusyWorkers`-occupied
+    /// (only released on the Complete transition, which could now never
+    /// happen), so enough queued buildings would eventually exhaust
+    /// `PlayerState.AvailableWorkers` and `CanPlaceBuilding` would start
+    /// rejecting EVERY further placement too -- the "buildings are not
+    /// getting built" report's other likely half. This is the SAME
+    /// "approach the rim, not the blocked center hex" fix <see
+    /// cref="NearestOwnFactoryApproachPosition"/> already had (extracted
+    /// here as a general helper -- construction sites can be ANY
+    /// `BuildingKind`, not just Factory, so this can't stay Factory-
+    /// specific), just never applied to the build-staffing path at
+    /// all.</summary>
+    public Vector3 ApproachPositionFor(HexCoord hex, Vector3 from)
+    {
         var blocked = BlockedFor(false);
-        if (!blocked.Contains(factoryHex.Value)) return WorldOf(factoryHex.Value);
+        if (!blocked.Contains(hex)) return WorldOf(hex);
         HexCoord? best = null;
         var bestNeighborSq = float.MaxValue;
-        foreach (var n in factoryHex.Value.Neighbors())
+        foreach (var n in hex.Neighbors())
         {
             if (!_city.Contains(n) || blocked.Contains(n)) continue;
             var d = (WorldOf(n) - from).sqrMagnitude;
             if (d < bestNeighborSq) { bestNeighborSq = d; best = n; }
         }
-        return WorldOf(best ?? factoryHex.Value);
+        return WorldOf(best ?? hex);
     }
 
     /// <summary>2026-08 root-cause redesign (creator debug report:
