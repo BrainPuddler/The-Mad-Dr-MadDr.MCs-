@@ -113,7 +113,24 @@ public class Worker : MonoBehaviour
     private const float ScavengeRatePerSecond = 10f;
     private const float ScavengeTickInterval = 0.15f;
 
-    private enum ZombieState { Idle, PlayerMove, SeekBuild, Staffing, SeekScavenge, Scavenging, Wander }
+    // 2026-08 (creator direction: "They also must deliver scavenged
+    // parts to factories or whatever we have for collections centres"):
+    // an onboard tank, same shape as MonsterAgent's harvester
+    // (_carriedBlood/_carriedBones/_carriedBrains/_carriedParts,
+    // capacity-gated, banked only on arrival at the Factory) -- a real
+    // reversal of the scavenging-site redesign's own "no onboard tank on
+    // a Worker... banks straight to the wallet" comment above, done
+    // deliberately: draining still sums concurrently across every
+    // Worker at a site exactly as before (this only changes what happens
+    // AFTER a slice is drained, not the drain itself), so "more Workers
+    // clear a site faster" still holds. `WorkerCarryCapacity` is a v0.1
+    // invented number (CLAUDE.md's standing policy) -- not claimed
+    // balanced, just enough that a delivery trip means something instead
+    // of banking one drain-tick's worth every single time.
+    private const float WorkerCarryCapacity = 50f;
+    private float _carriedParts;
+
+    private enum ZombieState { Idle, PlayerMove, SeekBuild, Staffing, SeekScavenge, Scavenging, Wander, SeekDeliver }
     private ZombieState _state = ZombieState.Idle;
     private Vector3 _moveTarget;
     private uint? _stationedBuildingId;
@@ -216,6 +233,7 @@ public class Worker : MonoBehaviour
             case ZombieState.SeekScavenge: TickSeekScavenge(dt); break;
             case ZombieState.Scavenging: TickScavenging(dt); break;
             case ZombieState.Wander: TickWander(dt); break;
+            case ZombieState.SeekDeliver: TickSeekDeliver(dt); break;
             default: TickIdle(); break;
         }
         DriveIdleOrMoveAnimation(dt);
@@ -233,7 +251,12 @@ public class Worker : MonoBehaviour
     /// slower pace (see its own comment) needs no special case here --
     /// TickLocomotion is driven by actual distance moved this frame, so
     /// a smaller `_frameMoveDistance` already reads as a slower gait on
-    /// its own.</summary>
+    /// its own. SeekDeliver gets its own branch -- "carry resources
+    /// visibly" (the brief's own Human Worker line) means the delivery
+    /// walk uses `TickCarry`'s raised-arms hold pose, not a plain
+    /// walk-cycle, on legged rigs; a legless (Alien) rig has no "carry"
+    /// pose of its own (nothing humanoid-armed to raise), so it keeps
+    /// hovering normally instead.</summary>
     private void DriveIdleOrMoveAnimation(float dt)
     {
         switch (_state)
@@ -243,6 +266,10 @@ public class Worker : MonoBehaviour
             case ZombieState.SeekScavenge:
             case ZombieState.Wander:
                 if (_rig.HasLegs) HumanCharacterAnimator.TickLocomotion(_rig, _animState, _frameMoveDistance, running: false, dt);
+                else HumanCharacterAnimator.TickHover(_rig, _animState, _frameMoveDistance / Mathf.Max(dt, 0.0001f), dt);
+                break;
+            case ZombieState.SeekDeliver:
+                if (_rig.HasLegs) HumanCharacterAnimator.TickCarry(_rig, _animState, _frameMoveDistance, dt);
                 else HumanCharacterAnimator.TickHover(_rig, _animState, _frameMoveDistance / Mathf.Max(dt, 0.0001f), dt);
                 break;
             default:
@@ -307,16 +334,23 @@ public class Worker : MonoBehaviour
         transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
     }
 
-    /// <summary>Idle-time decision: destroyed-building debris first
-    /// ("automatically scavenge resources," the default so a Worker is
-    /// always out searching for/gathering something rather than standing
-    /// still), an unstaffed friendly construction site second ("build
-    /// things," only once there's nothing left to gather), and if
-    /// NEITHER is found, wander instead of standing frozen (<see
-    /// cref="BeginWander"/>) -- never a citizen search ("monsters would
-    /// still collect resources," creator direction).</summary>
+    /// <summary>Idle-time decision: a carried load takes priority over
+    /// everything else (deliver it before picking up more work -- this
+    /// only fires if a player-issued move order interrupted a delivery
+    /// trip mid-route, since <see cref="TickScavenging"/> itself always
+    /// transitions straight to <see cref="ZombieState.SeekDeliver"/>,
+    /// never back through Idle, whenever it's carrying anything). Then
+    /// destroyed-building debris ("automatically scavenge resources,"
+    /// the default so a Worker is always out searching for/gathering
+    /// something rather than standing still), an unstaffed friendly
+    /// construction site ("build things," only once there's nothing left
+    /// to gather), and if NONE of those apply, wander instead of
+    /// standing frozen (<see cref="BeginWander"/>) -- never a citizen
+    /// search ("monsters would still collect resources," creator
+    /// direction).</summary>
     private void TickIdle()
     {
+        if (_carriedParts > 0.01f) { _state = ZombieState.SeekDeliver; return; }
         if (!TryFindRealWork()) BeginWander();
     }
 
@@ -394,6 +428,25 @@ public class Worker : MonoBehaviour
         transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
     }
 
+    // 2026-08 (creator report: "workers are not wandering. They wandered
+    // for a few seconds then stopped" + "movement is preferred over
+    // standing. Zombies wander."): the real bug -- a single random
+    // candidate that happened to land on illegal ground (a real
+    // likelihood in a dense BigCity block, buildDensity 0.65) made the
+    // OLD version of this method return `transform.position` itself.
+    // `TickWander` then set `_moveTarget` to that same point, so the
+    // VERY NEXT frame saw `arrived == true` (distance 0) and called this
+    // method again immediately -- not even waiting for the repick timer
+    // -- and if that retry ALSO landed on illegal ground, the cycle
+    // repeated every single frame, reading as "stopped" forever. Fixed
+    // two ways: try several candidates (varying salt each time) before
+    // giving up, and even the last-resort fallback always returns a
+    // point strictly different from the current position (a short step
+    // toward our own nearest building, which is guaranteed legal ground
+    // to walk toward) -- this method can no longer return
+    // `transform.position` itself under any circumstance.
+    private const int WanderPickAttempts = 8;
+
     /// <summary>Join an existing nearby herd if there's room, otherwise
     /// seed a fresh short step (<see cref="WanderStepMin"/>-<see
     /// cref="WanderStepMax"/> from here) in a pseudo-random direction --
@@ -403,33 +456,43 @@ public class Worker : MonoBehaviour
     /// `UnityEngine.Random`. A step that would cross the <see
     /// cref="WanderLeashRadius"/> (2 km) leash around our own buildings
     /// gets pulled back toward the nearest one instead of rejected
-    /// outright, so a Worker near the boundary doesn't stall retrying a
-    /// step it can never legally take. Falls back to holding position if
-    /// the candidate lands on illegal ground (water/blocked) -- the next
-    /// repick tries again rather than forcing a landing spot.</summary>
+    /// outright. See this method's own preceding comment for why it now
+    /// retries instead of ever standing still.</summary>
     private Vector3 PickWanderTarget()
     {
         if (_builder.TryFindJoinableHerd(transform.position, HerdJoinRadius, MaxHerdSize, out var herdTarget))
             return herdTarget;
 
-        _wanderPickSalt++;
         var seed = (GetInstanceID() % 1000) / 1000f;
-        var angle = Frac(seed * 53.1f + _wanderPickSalt * 8.3f) * Mathf.PI * 2f;
-        var step = Mathf.Lerp(WanderStepMin, WanderStepMax, Frac(seed * 71.7f + _wanderPickSalt * 4.1f));
-        var candidate = transform.position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * step;
-
-        if (!_builder.IsWithinRangeOfOwnBuildings(candidate, WanderLeashRadius))
+        for (var attempt = 0; attempt < WanderPickAttempts; attempt++)
         {
-            var pull = _builder.NearestOwnBuildingPosition(transform.position) - transform.position;
-            pull.y = 0f;
-            candidate = pull.sqrMagnitude > 0.01f ? transform.position + pull.normalized * step : transform.position;
+            _wanderPickSalt++;
+            var angle = Frac(seed * 53.1f + _wanderPickSalt * 8.3f) * Mathf.PI * 2f;
+            var step = Mathf.Lerp(WanderStepMin, WanderStepMax, Frac(seed * 71.7f + _wanderPickSalt * 4.1f));
+            var candidate = transform.position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * step;
+
+            if (!_builder.IsWithinRangeOfOwnBuildings(candidate, WanderLeashRadius))
+            {
+                var pull = _builder.NearestOwnBuildingPosition(transform.position) - transform.position;
+                pull.y = 0f;
+                if (pull.sqrMagnitude > 0.01f) candidate = transform.position + pull.normalized * step;
+            }
+
+            var hex = _builder.HexAt(candidate);
+            if (_builder.City.Contains(hex) && !_builder.BlockedFor(false).Contains(hex))
+                return candidate;
         }
 
-        var hex = _builder.HexAt(candidate);
-        if (!_builder.City.Contains(hex) || _builder.BlockedFor(false).Contains(hex))
-            return transform.position;
-
-        return candidate;
+        // every attempt landed on illegal ground -- step toward our own
+        // nearest building instead of giving up. That direction is
+        // always legal ground to head toward (a building's footprint is
+        // itself real, reachable ground), so this branch can't repeat
+        // the same failure, and it never returns transform.position.
+        var home = _builder.NearestOwnBuildingPosition(transform.position);
+        var toHome = home - transform.position;
+        toHome.y = 0f;
+        if (toHome.sqrMagnitude > 0.01f) return transform.position + toHome.normalized * WanderStepMin;
+        return transform.position + transform.forward * WanderStepMin;   // degenerate: already at our only building
     }
 
     private static float Frac(float v) { return v - Mathf.Floor(v); }
@@ -515,15 +578,16 @@ public class Worker : MonoBehaviour
 
     /// <summary>In reach, actively clearing -- continuously requests its
     /// own <see cref="ScavengeRatePerSecond"/> share every <see
-    /// cref="ScavengeTickInterval"/>, banking through the SAME onboard-
-    /// tank-free delivery path the old one-shot gulp used. Concurrent
-    /// Workers at the same site each run this independently; their
-    /// requests sum against the one shared `BuildingRuntimeState`, so
-    /// more Workers here genuinely clears faster with no coordination
-    /// needed (see this class's own header). Falls back to re-approaching
-    /// (<see cref="ZombieState.SeekScavenge"/>) if separation/collision
-    /// nudged this Worker out of reach, rather than draining from a
-    /// distance.</summary>
+    /// cref="ScavengeTickInterval"/>, same concurrent-drain math as
+    /// before (still sums across every Worker at the same site, "more
+    /// Workers here genuinely clears faster" is unchanged). 2026-08:
+    /// each slice now accumulates into <see cref="_carriedParts"/>
+    /// instead of banking instantly -- this Worker now hauls its load to
+    /// a Factory before it counts (<see cref="TickSeekDeliver"/>), the
+    /// same onboard-tank shape MonsterAgent's harvesters already use.
+    /// Falls back to re-approaching (<see cref="ZombieState.SeekScavenge"/>)
+    /// if separation/collision nudged this Worker out of reach, rather
+    /// than draining from a distance.</summary>
     private void TickScavenging(float dt)
     {
         if (_scavengeTarget == null) { _state = ZombieState.Idle; return; }
@@ -538,26 +602,64 @@ public class Worker : MonoBehaviour
 
         HumanCharacterAnimator.TickHarvest(_rig, _animState, dt);
 
+        var room = WorkerCarryCapacity - _carriedParts;
+        if (room <= 0.01f) { _scavengeTarget = null; _state = ZombieState.SeekDeliver; return; }
+
         _scavengeTickTimer += dt;
         if (_scavengeTickTimer < ScavengeTickInterval) return;
         var elapsed = _scavengeTickTimer;
         _scavengeTickTimer = 0f;
 
-        // no onboard tank on a Worker (unlike a harvester Monster) --
-        // each small slice banks straight to the real wallet via the
-        // SAME delivery path harvesters use, instead of accumulating
-        // toward one final instant credit.
-        var request = Mathf.Max(1, Mathf.RoundToInt(ScavengeRatePerSecond * elapsed));
+        var request = Mathf.Min(Mathf.CeilToInt(room), Mathf.Max(1, Mathf.RoundToInt(ScavengeRatePerSecond * elapsed)));
         var drained = _builder.DrainBuildingScavenge(_scavengeTarget, request);
-        if (drained > 0) _builder.BankHarvestLoad(0f, 0f, 0f, drained);
+        if (drained > 0) _carriedParts += drained;
+
+        if (_carriedParts >= WorkerCarryCapacity - 0.01f)
+        {
+            _scavengeTarget = null;
+            _state = ZombieState.SeekDeliver;
+            return;
+        }
         if (drained <= 0)
         {
             // pile's empty -- either this tick or an earlier one (by
             // this or another concurrently-scavenging Worker) finished
-            // it. Either way, nothing left here.
+            // it. Deliver whatever's carried so far rather than let it
+            // sit undelivered; go back to plain idle if this Worker
+            // never actually got a slice (e.g. lost the race to others).
             _scavengeTarget = null;
-            _state = ZombieState.Idle;
+            _state = _carriedParts > 0.01f ? ZombieState.SeekDeliver : ZombieState.Idle;
         }
+    }
+
+    /// <summary>2026-08 (creator direction: "They also must deliver
+    /// scavenged parts to factories or whatever we have for collections
+    /// centres"): walk the carried load to the nearest own Factory (<see
+    /// cref="RuntimeCityBuilder.NearestOwnFactoryApproachPosition"/>)
+    /// and bank it on arrival -- mirrors MonsterAgent's own harvester-
+    /// delivery shape. Re-targets every tick rather than caching the
+    /// destination once, so a newly-completed closer Factory (or the old
+    /// one's destruction) is picked up automatically mid-route, same
+    /// "recompute, don't cache" idiom <see cref="TickSeekBuild"/>/<see
+    /// cref="TickSeekScavenge"/> already use for their own targets.</summary>
+    private void TickSeekDeliver(float dt)
+    {
+        if (_carriedParts <= 0.01f) { _state = ZombieState.Idle; return; }
+        var dest = _builder.NearestOwnFactoryApproachPosition(transform.position);
+        var to = dest - transform.position;
+        to.y = 0f;
+        if (to.magnitude <= BuildReach)
+        {
+            _builder.BankHarvestLoad(0f, 0f, 0f, _carriedParts);
+            _carriedParts = 0f;
+            _state = ZombieState.Idle;
+            return;
+        }
+        var dir = to.normalized;
+        var step = dir * (MoveSpeed * dt);
+        transform.position += step;
+        _frameMoveDistance = step.magnitude;
+        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
     }
 
     private Vector3 NearestFootprintPoint(Building building)

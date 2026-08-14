@@ -17384,3 +17384,44 @@ Wandering is fully preemptable: it re-checks for real work every ~4s
 repick or on arrival, and combat/player move orders already interrupt
 every Worker state (including this one) via the same paths that
 already existed. Full writeup: docs/22 §11b.
+
+## 2026-08 same-day follow-up: wander freeze bug fixed, delivery-to-Factory added
+
+Creator report: "workers are not wandering. They wandered for a few
+seconds then stopped." Real bug in `Worker.PickWanderTarget` (the
+entry just above): a single random candidate that happened to land on
+illegal ground (a real likelihood -- BigCity's `buildDensity` is 0.65)
+made the old version return `transform.position` itself. `TickWander`
+then set `_moveTarget` to that same point, so the very next frame saw
+`arrived == true` (zero distance) and called the pick again
+immediately -- not waiting for the repick timer -- and if THAT retry
+also failed, the cycle repeated every single frame, reading as
+"stopped" forever, matching the report exactly. Fixed per the
+creator's own follow-up direction ("movement is preferred over
+standing. Zombies wander."): the picker now tries up to 8 candidates
+before giving up, and even its last-resort fallback (step toward our
+own nearest building) always returns a point strictly different from
+the Worker's current position -- this method can no longer return
+`transform.position` under any circumstance, so the self-reinforcing
+freeze is structurally impossible now, not just less likely.
+
+Second ask, same message: "They also must deliver scavenged parts to
+factories or whatever we have for collections centres." A real reversal
+of the scavenging-site redesign's own deliberate "no onboard tank on a
+Worker... banks straight to the wallet" choice (docs/22 §11b) -- done
+carefully so the property that redesign was protecting (N Workers
+draining the SAME site concurrently, summing for free) still holds:
+only what happens AFTER a slice is drained changed. `Worker` now has an
+onboard `_carriedParts` tank (`WorkerCarryCapacity`, v0.1 invented
+number) and a new `SeekDeliver` state that walks the load to the
+nearest complete player-0 Factory (new `RuntimeCityBuilder.
+NearestOwnFactoryApproachPosition`, mirroring MonsterAgent's own
+private `FindOwnFactory`/`FindOwnFactoryApproachHex` building-kind/
+state filter and blocked-hex-approach fallback, kept as a separate
+method rather than refactored/shared so the already-working Monster
+harvester path isn't touched) before it counts, banking only on
+arrival -- same onboard-tank shape harvester Monsters already use.
+Also finally wires up `HumanCharacterAnimator.TickCarry` (built during
+the character-system-overhaul pass, docs/34, but never actually used by
+any Worker state until now) for the delivery walk -- "carry resources
+visibly."

@@ -3019,6 +3019,46 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return false;
     }
 
+    /// <summary>2026-08 (creator direction: Workers "must deliver
+    /// scavenged parts to factories or whatever we have for collections
+    /// centres"): nearest COMPLETE player-0 Factory to deliver an
+    /// onboard load to -- same building-kind/state filter and "approach
+    /// the rim, not the blocked center hex" fallback <see
+    /// cref="MonsterAgent"/>'s own private `FindOwnFactory`/
+    /// `FindOwnFactoryApproachHex` already established for harvester
+    /// Monsters, mirrored here rather than shared/refactored so
+    /// `Worker`'s delivery trip reaches the same real destination
+    /// without touching that already-working Monster code path. Falls
+    /// back to the nearest own building of ANY kind if no Factory exists
+    /// yet (a fresh match, or one just got destroyed) -- deliver
+    /// SOMEWHERE rather than never deliver at all.</summary>
+    public Vector3 NearestOwnFactoryApproachPosition(Vector3 from)
+    {
+        if (_simBridge == null || !_simBridge.HasMatch) return NearestOwnBuildingPosition(from);
+        HexCoord? factoryHex = null;
+        var bestSq = float.MaxValue;
+        for (var i = 0; i < _simBridge.BuildingCount; i++)
+        {
+            var b = _simBridge.BuildingAt(i);
+            if (b.PlayerIndex != 0 || b.Kind != BuildingKind.Factory || b.State != BuildingState.Complete) continue;
+            var d = (WorldOf(b.Hex) - from).sqrMagnitude;
+            if (d < bestSq) { bestSq = d; factoryHex = b.Hex; }
+        }
+        if (!factoryHex.HasValue) return NearestOwnBuildingPosition(from);
+
+        var blocked = BlockedFor(false);
+        if (!blocked.Contains(factoryHex.Value)) return WorldOf(factoryHex.Value);
+        HexCoord? best = null;
+        var bestNeighborSq = float.MaxValue;
+        foreach (var n in factoryHex.Value.Neighbors())
+        {
+            if (!_city.Contains(n) || blocked.Contains(n)) continue;
+            var d = (WorldOf(n) - from).sqrMagnitude;
+            if (d < bestNeighborSq) { bestNeighborSq = d; best = n; }
+        }
+        return WorldOf(best ?? factoryHex.Value);
+    }
+
     /// <summary>2026-08 (creator direction: "herding behaviour... in
     /// groups of 3 to 10"): finds a nearby <see cref="Worker"/> already
     /// wandering with room in its local cluster, so a newly-idle Worker
