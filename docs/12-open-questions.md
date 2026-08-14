@@ -17345,3 +17345,42 @@ writeup: docs/34.
 **Not verified in a real render** -- same standing "no Editor exists
 here" caveat as every visual/shader change in this project; docs/34 §5
 has the full verified-vs-unverified breakdown.
+
+## 2026-08: Worker herding/wander behavior when there's nothing to do
+
+Creator: "Add a herding behaviour to the workers. in groups of 3 to 10
+and a wander toggle enabled if there is nothing to do radius around our
+buildings of 2 km." Confirmed `HexCoord.HexMeters = 20.0` first (world
+units ARE meters in this codebase), and that BigCity is 250x250 hexes =
+5 km x 5 km, so a 2 km leash is a real, meaningful constraint relative
+to map scale, not an oversized placeholder.
+
+Extended `Worker.TickIdle` (previously: nothing found -> stand frozen)
+with a new `Wander` state, entered only when `TryFindRealWork()` (the
+existing scavenge-then-build priority check, factored out so both
+`TickIdle` and the new wander loop can call it) finds nothing. A
+wandering Worker either joins a nearby herd (`RuntimeCityBuilder.
+TryFindJoinableHerd` -- counts other wandering Workers within a small
+join radius of a candidate, joins if under the 10-member cap) or seeds
+its own short casual-pace step, pulled back toward the nearest player-0
+building whenever a step would cross the 2 km leash
+(`IsWithinRangeOfOwnBuildings`/`NearestOwnBuildingPosition`, new on
+`RuntimeCityBuilder`, checking ALL player-0 buildings of any kind/state,
+not just the starting HQ).
+
+**Honesty flag on "groups of 3 to 10":** this is a decentralized,
+single-pass proximity approximation, not a real group-membership
+registry with reservations -- nothing HARD-guarantees a cluster lands
+in that exact range, the join-preference just nudges toward it (an idle
+Worker prefers joining a visible nearby herd over seeding a new one,
+and multiple Workers going idle in the same area independently converge
+on the same target). A real reservation system (explicit group
+objects, capacity locks) would be the natural follow-up if loose
+clustering doesn't read close enough to the ask. Flagged rather than
+overclaimed, same standing policy as every invented number in this
+project.
+
+Wandering is fully preemptable: it re-checks for real work every ~4s
+repick or on arrival, and combat/player move orders already interrupt
+every Worker state (including this one) via the same paths that
+already existed. Full writeup: docs/22 §11b.

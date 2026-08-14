@@ -113,12 +113,29 @@ public class Worker : MonoBehaviour
     private const float ScavengeRatePerSecond = 10f;
     private const float ScavengeTickInterval = 0.15f;
 
-    private enum ZombieState { Idle, PlayerMove, SeekBuild, Staffing, SeekScavenge, Scavenging }
+    private enum ZombieState { Idle, PlayerMove, SeekBuild, Staffing, SeekScavenge, Scavenging, Wander }
     private ZombieState _state = ZombieState.Idle;
     private Vector3 _moveTarget;
     private uint? _stationedBuildingId;
     private Building _scavengeTarget;
     private float _scavengeTickTimer;
+
+    // 2026-08 (creator direction: "Add a herding behaviour to the
+    // workers. in groups of 3 to 10 and a wander toggle enabled if there
+    // is nothing to do radius around our buildings of 2 km") -- see
+    // TickWander's own header for the full design. `WanderSpeedFraction`
+    // is a v0.1 invented number (CLAUDE.md's standing policy) -- casual
+    // wandering should read slower than purposeful walking, not claimed
+    // balanced against anything.
+    private const float WanderStepMin = 15f;
+    private const float WanderStepMax = 35f;
+    private const float WanderLeashRadius = 2000f;   // 2 km -- HexCoord.HexMeters confirms world units are meters
+    private const float HerdJoinRadius = 12f;
+    private const int MaxHerdSize = 10;
+    private const float WanderRepickInterval = 4f;
+    private const float WanderSpeedFraction = 0.55f;
+    private int _wanderPickSalt;
+    private float _wanderRepickTimer;
 
     private RuntimeCityBuilder _builder;
     private UnitCombat _combat;
@@ -198,6 +215,7 @@ public class Worker : MonoBehaviour
             case ZombieState.Staffing: TickStaffing(dt); break;
             case ZombieState.SeekScavenge: TickSeekScavenge(dt); break;
             case ZombieState.Scavenging: TickScavenging(dt); break;
+            case ZombieState.Wander: TickWander(dt); break;
             default: TickIdle(); break;
         }
         DriveIdleOrMoveAnimation(dt);
@@ -207,11 +225,15 @@ public class Worker : MonoBehaviour
     }
 
     /// <summary>Animates locomotion for every state that just walks
-    /// somewhere (PlayerMove/SeekBuild/SeekScavenge) or stands doing
-    /// nothing visual of its own (Idle) -- Staffing and Scavenging drive
-    /// their OWN Build/Harvest animation directly from
+    /// somewhere (PlayerMove/SeekBuild/SeekScavenge/Wander) or stands
+    /// doing nothing visual of its own (Idle) -- Staffing and Scavenging
+    /// drive their OWN Build/Harvest animation directly from
     /// <see cref="TickStaffing"/>/<see cref="TickScavenging"/> instead,
-    /// since those are stationary work poses, not locomotion.</summary>
+    /// since those are stationary work poses, not locomotion. Wander's
+    /// slower pace (see its own comment) needs no special case here --
+    /// TickLocomotion is driven by actual distance moved this frame, so
+    /// a smaller `_frameMoveDistance` already reads as a slower gait on
+    /// its own.</summary>
     private void DriveIdleOrMoveAnimation(float dt)
     {
         switch (_state)
@@ -219,6 +241,7 @@ public class Worker : MonoBehaviour
             case ZombieState.PlayerMove:
             case ZombieState.SeekBuild:
             case ZombieState.SeekScavenge:
+            case ZombieState.Wander:
                 if (_rig.HasLegs) HumanCharacterAnimator.TickLocomotion(_rig, _animState, _frameMoveDistance, running: false, dt);
                 else HumanCharacterAnimator.TickHover(_rig, _animState, _frameMoveDistance / Mathf.Max(dt, 0.0001f), dt);
                 break;
@@ -285,28 +308,131 @@ public class Worker : MonoBehaviour
     }
 
     /// <summary>Idle-time decision: destroyed-building debris first
-    /// ("automatically scavenge resources," now the default so a Worker
-    /// is always out searching for/gathering something rather than
-    /// standing still), an unstaffed friendly construction site second
-    /// ("build things," only once there's nothing left to gather) --
-    /// never a citizen search ("monsters would still collect resources,"
-    /// creator direction).</summary>
+    /// ("automatically scavenge resources," the default so a Worker is
+    /// always out searching for/gathering something rather than standing
+    /// still), an unstaffed friendly construction site second ("build
+    /// things," only once there's nothing left to gather), and if
+    /// NEITHER is found, wander instead of standing frozen (<see
+    /// cref="BeginWander"/>) -- never a citizen search ("monsters would
+    /// still collect resources," creator direction).</summary>
     private void TickIdle()
+    {
+        if (!TryFindRealWork()) BeginWander();
+    }
+
+    /// <summary>Shared by <see cref="TickIdle"/> (every frame while
+    /// genuinely idle) and <see cref="TickWander"/> (every repick
+    /// interval while wandering, so a herding Worker periodically "looks
+    /// around" and drops out of the herd the instant real work is nearby
+    /// -- "wander toggle enabled IF there is nothing to do" cuts both
+    /// ways: it turns off again the moment there's something to
+    /// do).</summary>
+    private bool TryFindRealWork()
     {
         var debris = _builder.NearestScavengeableBuildingTo(transform.position, SearchRadius);
         if (debris != null)
         {
             _scavengeTarget = debris;
             _state = ZombieState.SeekScavenge;
-            return;
+            return true;
         }
         var site = _builder.NearestUnstaffedConstructionSite(transform.position, SearchRadius);
         if (site != null)
         {
             _stationedBuildingId = site.EntityId;
             _state = ZombieState.SeekBuild;
+            return true;
         }
+        return false;
     }
+
+    /// <summary>2026-08 (creator direction: "Add a herding behaviour to
+    /// the workers. in groups of 3 to 10 and a wander toggle enabled if
+    /// there is nothing to do radius around our buildings of 2 km"):
+    /// nothing to scavenge or build -- rather than stand frozen, this
+    /// Worker either joins a nearby herd already wandering (<see
+    /// cref="RuntimeCityBuilder.TryFindJoinableHerd"/> -- a decentralized,
+    /// single-pass approximation; "3 to 10" is a SOFT target this nudges
+    /// toward, not a hard-guaranteed range, see that method's own
+    /// comment for why a real reservation system would be needed for
+    /// more than that) or seeds a fresh wander point of its own within
+    /// <see cref="WanderLeashRadius"/> of our own buildings.</summary>
+    private void BeginWander()
+    {
+        _moveTarget = PickWanderTarget();
+        _wanderRepickTimer = WanderRepickInterval;
+        _state = ZombieState.Wander;
+    }
+
+    public bool IsWandering { get { return _state == ZombieState.Wander; } }
+    public Vector3 WanderTarget { get { return _moveTarget; } }
+
+    /// <summary>Walks the shared/seeded wander destination at a slower,
+    /// casual pace (<see cref="WanderSpeedFraction"/>) than purposeful
+    /// work-seeking. Re-checks for real work and re-picks (join-or-seed)
+    /// every <see cref="WanderRepickInterval"/> or on arrival, rather
+    /// than every frame -- cheap enough at hundreds of Workers, and a
+    /// herd that re-evaluates every frame would never settle into a
+    /// visually coherent group in the first place.</summary>
+    private void TickWander(float dt)
+    {
+        _wanderRepickTimer -= dt;
+        var to = _moveTarget - transform.position;
+        to.y = 0f;
+        var arrived = to.magnitude <= ArriveThreshold;
+        if (arrived || _wanderRepickTimer <= 0f)
+        {
+            if (TryFindRealWork()) return;   // real work appeared nearby -- drop the herd, go do it
+            _moveTarget = PickWanderTarget();
+            _wanderRepickTimer = WanderRepickInterval;
+            return;
+        }
+        var dir = to.normalized;
+        var step = dir * (MoveSpeed * WanderSpeedFraction * dt);
+        transform.position += step;
+        _frameMoveDistance = step.magnitude;
+        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
+    }
+
+    /// <summary>Join an existing nearby herd if there's room, otherwise
+    /// seed a fresh short step (<see cref="WanderStepMin"/>-<see
+    /// cref="WanderStepMax"/> from here) in a pseudo-random direction --
+    /// deterministic per-instance hashing (same convention as every
+    /// other cosmetic-ish AI pick in this codebase: Citizen's own
+    /// destination re-picks, HumanSoldier's patrol angle), not
+    /// `UnityEngine.Random`. A step that would cross the <see
+    /// cref="WanderLeashRadius"/> (2 km) leash around our own buildings
+    /// gets pulled back toward the nearest one instead of rejected
+    /// outright, so a Worker near the boundary doesn't stall retrying a
+    /// step it can never legally take. Falls back to holding position if
+    /// the candidate lands on illegal ground (water/blocked) -- the next
+    /// repick tries again rather than forcing a landing spot.</summary>
+    private Vector3 PickWanderTarget()
+    {
+        if (_builder.TryFindJoinableHerd(transform.position, HerdJoinRadius, MaxHerdSize, out var herdTarget))
+            return herdTarget;
+
+        _wanderPickSalt++;
+        var seed = (GetInstanceID() % 1000) / 1000f;
+        var angle = Frac(seed * 53.1f + _wanderPickSalt * 8.3f) * Mathf.PI * 2f;
+        var step = Mathf.Lerp(WanderStepMin, WanderStepMax, Frac(seed * 71.7f + _wanderPickSalt * 4.1f));
+        var candidate = transform.position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * step;
+
+        if (!_builder.IsWithinRangeOfOwnBuildings(candidate, WanderLeashRadius))
+        {
+            var pull = _builder.NearestOwnBuildingPosition(transform.position) - transform.position;
+            pull.y = 0f;
+            candidate = pull.sqrMagnitude > 0.01f ? transform.position + pull.normalized * step : transform.position;
+        }
+
+        var hex = _builder.HexAt(candidate);
+        if (!_builder.City.Contains(hex) || _builder.BlockedFor(false).Contains(hex))
+            return transform.position;
+
+        return candidate;
+    }
+
+    private static float Frac(float v) { return v - Mathf.Floor(v); }
 
     private SimBuilding FindStationedBuilding()
     {

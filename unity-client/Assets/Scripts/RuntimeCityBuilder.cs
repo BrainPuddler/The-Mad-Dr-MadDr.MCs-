@@ -2975,6 +2975,86 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return best;
     }
 
+    /// <summary>2026-08 (creator direction: "wander... radius around our
+    /// buildings of 2 km" -- <see cref="Worker.TickWander"/>'s leash):
+    /// nearest PLAYER-0 building of any kind/state -- HQ, Factory, mid-
+    /// construction, everything -- unlike <see
+    /// cref="NearestUnstaffedConstructionSite"/> above, which only counts
+    /// unstaffed sites. Returns `position` itself (distance 0) if this
+    /// player somehow owns no buildings at all, so callers never need a
+    /// null case.</summary>
+    public Vector3 NearestOwnBuildingPosition(Vector3 position)
+    {
+        if (_simBridge == null || !_simBridge.HasMatch) return position;
+        var best = position;
+        var bestSq = float.MaxValue;
+        for (var i = 0; i < _simBridge.BuildingCount; i++)
+        {
+            var b = _simBridge.BuildingAt(i);
+            if (b.PlayerIndex != 0) continue;
+            var w = WorldOf(b.Hex);
+            var d = w - position;
+            d.y = 0f;
+            if (d.sqrMagnitude < bestSq) { bestSq = d.sqrMagnitude; best = w; }
+        }
+        return best;
+    }
+
+    /// <summary>True if `position` is within `radius` of ANY player-0
+    /// building -- the wander leash check. A player with multiple bases
+    /// (expanded past their starting HQ/Factory) gets a leash around
+    /// each one, not just the original spawn point.</summary>
+    public bool IsWithinRangeOfOwnBuildings(Vector3 position, float radius)
+    {
+        if (_simBridge == null || !_simBridge.HasMatch) return false;
+        var radiusSq = radius * radius;
+        for (var i = 0; i < _simBridge.BuildingCount; i++)
+        {
+            var b = _simBridge.BuildingAt(i);
+            if (b.PlayerIndex != 0) continue;
+            var d = WorldOf(b.Hex) - position;
+            d.y = 0f;
+            if (d.sqrMagnitude <= radiusSq) return true;
+        }
+        return false;
+    }
+
+    /// <summary>2026-08 (creator direction: "herding behaviour... in
+    /// groups of 3 to 10"): finds a nearby <see cref="Worker"/> already
+    /// wandering with room in its local cluster, so a newly-idle Worker
+    /// joins an existing herd instead of always seeding a new one. This
+    /// is a decentralized, single-pass approximation, not a real
+    /// registry with reservations -- "3 to 10" is therefore a SOFT
+    /// target this join-preference nudges toward (multiple idle Workers
+    /// independently detecting and adopting the same nearby target tends
+    /// to converge into clusters in that range), not a hard guarantee
+    /// the way a real group-membership system would enforce. Flagged as
+    /// the v0.1 approximation it is, same as every other invented number
+    /// in this codebase -- a real reservation system is the natural
+    /// follow-up if loose clustering turns out not to be good enough.</summary>
+    public bool TryFindJoinableHerd(Vector3 near, float joinRadius, int maxHerdSize, out Vector3 herdTarget)
+    {
+        herdTarget = Vector3.zero;
+        var joinRadiusSq = joinRadius * joinRadius;
+        var count = 0;
+        Worker candidate = null;
+        foreach (var w in _workers)
+        {
+            if (w == null || !w.IsWandering) continue;
+            var d = w.transform.position - near;
+            d.y = 0f;
+            if (d.sqrMagnitude > joinRadiusSq) continue;
+            count++;
+            if (candidate == null) candidate = w;
+        }
+        if (candidate != null && count < maxHerdSize)
+        {
+            herdTarget = candidate.WanderTarget;
+            return true;
+        }
+        return false;
+    }
+
     /// <summary>Ticked every <see cref="Update"/>: the instant a player-0
     /// building enters <c>UnderConstruction</c>, queues one <see
     /// cref="SimBridge.QueueSetBuildingStaffedCommand"/> pausing it
