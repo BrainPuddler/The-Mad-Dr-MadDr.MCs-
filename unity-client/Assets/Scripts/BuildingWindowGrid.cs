@@ -70,11 +70,31 @@ public class BuildingWindowGrid : MonoBehaviour
         public Color GlowColor;
     }
 
+    // 2026-08: the same per-window schedule numbers baked into vertex data
+    // for the shader (see Build()), kept a second time here on the CPU so
+    // GlowPointRegistry's real-light candidacy (IsWindowOnNow below) can
+    // mirror WindowGrid.shader's MadDrWindowMultiplier gate exactly,
+    // instead of a real light being eligible regardless of whether this
+    // window is actually rendering lit right now.
+    private struct WindowSchedule
+    {
+        public bool CanGlow, AlwaysOn;
+        public float OnFrac, OffFrac, ActivityThreshold;
+    }
+
     private readonly List<PendingWindow> _pending = new List<PendingWindow>();
     private bool _built;
     private int _texSize;
     private Texture2D _overrideTex;
     private MaterialPropertyBlock _mpb;
+    private WindowSchedule[] _schedules;
+    // 2026-08: most windows are never individually toggled by gameplay
+    // (SetWindowOn/Off's own doc comment) -- IsWindowOnNow below is
+    // called from DynamicLightBudget's refresh loop for every glow-
+    // capable window citywide, so skipping the (cheap, but non-zero)
+    // _overrideTex.GetPixel call entirely for a grid that's never had a
+    // single override written is worth doing at this call frequency.
+    private bool _hasOverride;
 
     private static Material _sharedMaterial;
 
@@ -162,6 +182,7 @@ public class BuildingWindowGrid : MonoBehaviour
 
         var count = _pending.Count;
         _texSize = Mathf.Max(2, Mathf.CeilToInt(Mathf.Sqrt(count)));
+        _schedules = new WindowSchedule[count];
 
         var verts = new List<Vector3>(count * 4);
         var normals = new List<Vector3>(count * 4);
@@ -215,6 +236,14 @@ public class BuildingWindowGrid : MonoBehaviour
             float flags = (w.CanGlow ? 1f : 0f) + (alwaysOn ? 2f : 0f);
             var p1 = new Vector4(w.Seed, brightnessVar, flags, 0f);
             var p2 = new Vector4(onFrac, offFrac, activityThreshold, 0f);
+            _schedules[i] = new WindowSchedule
+            {
+                CanGlow = w.CanGlow,
+                AlwaysOn = alwaysOn,
+                OnFrac = onFrac,
+                OffFrac = offFrac,
+                ActivityThreshold = activityThreshold,
+            };
             // Texel-center UV into the override texture, sized once the
             // final window count is known -- every one of this window's 4
             // verts shares the same texel.
@@ -234,7 +263,12 @@ public class BuildingWindowGrid : MonoBehaviour
             // windows no longer have one of their own (see
             // GlowPointRegistry.RegisterPosition's own doc comment for why
             // that's a real, deliberate extension, not a workaround).
-            if (w.CanGlow) GlowPointRegistry.RegisterPosition(w.Center, w.GlowColor);
+            // `windowId` copied out of the loop variable -- `i` itself is
+            // shared across every iteration of a C# `for` loop, so a
+            // closure over `i` directly would see whatever `i` ends up as
+            // AFTER the loop finishes, not this window's own index.
+            var windowId = i;
+            if (w.CanGlow) GlowPointRegistry.RegisterPosition(w.Center, w.GlowColor, () => IsWindowOnNow(windowId));
         }
         _pending.Clear();
 
@@ -297,6 +331,38 @@ public class BuildingWindowGrid : MonoBehaviour
         if (y >= _texSize) return;
         _overrideTex.SetPixel(x, y, new Color32(value, value, value, value));
         _overrideTex.Apply(false, false);
+        _hasOverride = true;
+    }
+
+    /// <summary>2026-08 (creator report: a real light visibly lit a
+    /// window's sill while the window's own pane rendered dark -- "are
+    /// these rim lights without the full window light on purpose or a
+    /// bug"): GlowPointRegistry's isEligible callback for this window,
+    /// evaluated live by DynamicLightBudget's refresh loop. Mirrors
+    /// WindowGrid.shader's MadDrWindowMultiplier gate exactly (override
+    /// texture first, then canGlow, then the arrival/bedtime/activity
+    /// schedule) so a real Tier-2 light is only ever a candidate at a
+    /// window position while that window is ACTUALLY rendering lit, not
+    /// merely glow-CAPABLE.</summary>
+    private bool IsWindowOnNow(int windowId)
+    {
+        var s = _schedules[windowId];
+        if (!s.CanGlow) return false;
+
+        if (_hasOverride && _overrideTex != null)
+        {
+            var x = windowId % _texSize;
+            var y = windowId / _texSize;
+            var overrideVal = _overrideTex.GetPixel(x, y).r;
+            if (overrideVal < 0.25f) return false;
+            if (overrideVal > 0.75f) return true;
+        }
+
+        if (!EmissiveAnimator.WindowScheduleEnabled || s.AlwaysOn) return true;
+
+        var t = DayNightState.CycleProgress;
+        if (t < s.OnFrac || t >= s.OffFrac) return false;
+        return DayNightState.LightActivity >= s.ActivityThreshold;
     }
 }
 

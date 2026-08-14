@@ -86,11 +86,25 @@ public static class GlowPointRegistry
     /// point that has no Transform of its own -- a window on a merged
     /// <see cref="BuildingWindowGrid"/> mesh, which has world position but
     /// no per-window GameObject anymore. Point-type only (nothing
-    /// window-shaped has ever asked for Spot/aimed behavior); `isEligible`
-    /// omitted for the same reason -- a static window is either
-    /// glow-capable or it isn't, decided once at registration, unlike a
-    /// car's headlight which needs a live per-refresh check.</summary>
-    public static void RegisterPosition(Vector3 worldPosition, Color color)
+    /// window-shaped has ever asked for Spot/aimed behavior).
+    ///
+    /// `isEligible` (2026-08, creator report: a real light visibly lit a
+    /// window's sill while that window's OWN pane rendered dark -- "are
+    /// these rim lights without the full window light on purpose or a
+    /// bug"): this parameter used to be omitted here on the reasoning
+    /// that "a static window is either glow-capable or it isn't, decided
+    /// once at registration" -- true for CAN-glow, but wrong for
+    /// CURRENTLY-glowing: a window's actual on/off state is computed
+    /// per-pixel in WindowGrid.shader (arrival/bedtime/activity schedule
+    /// + the SetWindowOn/Off override texture), entirely on the GPU, and
+    /// was never checked here at all -- so a real Tier-2 light could be
+    /// (and, once the on/off transition became a hard instant switch
+    /// instead of a soft fade, visibly WAS) promoted and shining at a
+    /// window position while that exact window's pane sat OFF. Pass a
+    /// live predicate (same mechanism the headlight case below already
+    /// uses) so the budget selection loop skips a currently-dark window
+    /// exactly like it already skips a parked car's headlight.</summary>
+    public static void RegisterPosition(Vector3 worldPosition, Color color, System.Func<bool> isEligible = null)
     {
         Points.Add(new Point
         {
@@ -99,6 +113,7 @@ public static class GlowPointRegistry
             HasFixedPosition = true,
             Color = color,
             LightType = LightType.Point,
+            IsEligible = isEligible,
         });
     }
 

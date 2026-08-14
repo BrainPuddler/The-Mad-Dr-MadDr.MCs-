@@ -439,3 +439,55 @@ any more; now `WindowGridFragment` reads it again, genuinely.
 
 **Not verified in a real render** (same standing caveat as §5 and every
 section since) — reasoned from the UV/edge-distance math, not seen.
+
+## 12. Real, pre-existing bug found from a screenshot: Tier-2 lights not synced to a window's own on/off state
+
+Creator screenshot + question (not a direction this time — asked
+whether it was intentional): warm rim/sill light clearly visible next
+to several windows whose own panes rendered fully dark. Answer: a real
+bug, not a design choice — nothing in docs/28's design ever called for
+a lit sill next to a dark pane, and `FacadeKit.WindowBay`'s sill prop
+was originally written specifically to complement a LIT window ("the
+small horizontal that catches light and reads at distance far better
+than the window itself"), not to glow independently of one.
+
+**Root cause, found by reading `GlowPointRegistry`/`DynamicLightBudget`
+directly**: a window's actual per-pixel on/off state has been entirely
+GPU-side since docs/33 shipped (`WindowGrid.shader`'s
+`MadDrWindowMultiplier`) — but `BuildingWindowGrid.Build()` registers
+every glow-CAPABLE window with `GlowPointRegistry.RegisterPosition`
+unconditionally, with no `isEligible` predicate. `RegisterPosition`'s
+own doc comment even said so explicitly: "a static window is either
+glow-capable or it isn't, decided once at registration" — true for
+CAN-glow, but silently wrong for CURRENTLY-glowing, which the CPU side
+never checked at all. `DynamicLightBudget`'s nearest-N selection loop
+(`IsEligibleAt`, already the exact mechanism traffic headlights use
+for "only eligible while driving at night") happily promotes a real
+Tier-2 light at ANY registered window position regardless of whether
+that window is rendering lit at that instant. This bug has existed
+since docs/33 originally shipped, not something today's changes
+introduced — but §10's switch from a ~2.4s smoothstep fade to an
+instant hard flip (docs/28 row 37) made the mismatch far more jarring:
+under the old fade, a real light and a fading pane drifted in and out
+of sync gradually; under a hard switch, a lit sill next to a flatly
+dark pane is an obvious, static contradiction every time it happens to
+land that way.
+
+**Fix**: `GlowPointRegistry.RegisterPosition` gained the same
+`isEligible` parameter `Register` (the Transform-based overload) has
+had all along. `BuildingWindowGrid` now keeps a small per-window
+`WindowSchedule` array (the same `onFrac`/`offFrac`/`alwaysOn`/
+`activityThreshold`/`canGlow` values already computed for the vertex
+bake, just not discarded this time) and passes a live closure,
+`IsWindowOnNow`, that mirrors `MadDrWindowMultiplier`'s gate exactly —
+override texture first (skipped entirely unless this building has EVER
+had `SetWindowOn`/`Off` called, via a `_hasOverride` flag, since
+`Texture2D.GetPixel` isn't free and this runs from a per-refresh loop
+across every registered window citywide), then `canGlow`, then the
+arrival/bedtime/activity schedule against live `DayNightState`. A
+window is now a Tier-2 candidate only while it is ACTUALLY rendering
+lit, matching the shader exactly rather than being decoupled from it.
+
+**Not verified in a real render** — reasoned from re-deriving the exact
+same gate logic already proven (by earlier sections' own reasoning) to
+match the shader, applied to a second call site.
