@@ -200,9 +200,12 @@ namespace MadDr.MatchCore
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,
                 storageCapBonus: (ResourceKind.Blood, 100), occupants: 2, scavengeValue: SmallScavenge),
 
-            // v0.1 placeholder: no real number exists yet for the income
-            // building; shaped like BloodStorage's cost as a reasonable
-            // starting guess, not a balance claim.
+            // 2026-08 follow-up: this building's own income logic is real
+            // now (MatchState.GrantFuelPumpIncome, HumanArmy/Mixed only,
+            // once per second) -- closed the exact gap this comment used
+            // to flag. Cost itself is still a v0.1 placeholder, shaped
+            // like BloodStorage's as a reasonable starting guess, not a
+            // balance claim.
             new BuildingDef(BuildingKind.FuelPump, "Fuel Pump",
                 new[] { (ResourceKind.Bones, 20), (ResourceKind.Fuel, 10), (ResourceKind.Parts, 30) },
                 buildTimeTicks: 100, maxHp: SmallHp, armor: SmallArmor,

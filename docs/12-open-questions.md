@@ -17788,3 +17788,99 @@ that assumed only one building would ever be placed per match, which a
 new two-building test (Factory AND Barracks in the same match) broke
 until fixed to key off `BuildingCount - 1` instead of a hardcoded index
 0.
+
+## 2026-08: real Fuel/Ichor income, closing "how do I get fuel?"
+
+Creator report, direct: "how do I get fuel?" Traced to a real, total gap
+-- `ResourceKind.Fuel` had NO working income source anywhere in the
+codebase. `BuildingKind.FuelPump` existed and was buildable, but its own
+`BuildingDef` entry had said, verbatim, "no real number exists yet for
+the income building" since the day it was added; nothing in `MatchState.
+Tick` ever granted Fuel. The harvest pipeline (`BankHarvestLoad`) only
+ever banks Blood/Bones/Brains/Parts, and its one real call site
+(`MonsterAgent`'s own creature-harvest credit) is exclusive to genome
+creatures, which neither Human Army nor Alien Hive ever fields (both are
+fixed `RosterUnitKind` rosters, no `MonsterAgent` units at all) -- so a
+Human Army player's Fuel wallet sat at exactly 0 for an entire match,
+with no code path that could ever change that.
+
+Creator follow-up, condensed: "build me a fuel income mechanic. It
+should replace blood but only when player is human army. Steel is Bone,
+Brains are brains and requires humans to volunteer[, from the recruiting
+centres]." Then: "look at player and race balances to make sure this is
+equal economy amongst all the races."
+
+**Investigation surfaced a second, identical gap already flagged in the
+code**: `FactionRoster.cs`'s own header comment for Alien Hive's cost
+table already said, verbatim, "the captured-citizen-energy SOURCE itself
+is explicitly deferred... only the Ichor SINK is real here" -- Alien
+Hive's Ichor had the EXACT same "real cost, zero income" shape as Fuel.
+Brains, by contrast, already had a real, working, faction-agnostic
+source (`GrantHarvestPostIncome`, added in an earlier pass after a
+similar "I don't see my units" report) -- so "Brains are brains" turned
+out to already be true and needed no new code; only Fuel and Ichor
+(docs/05's own two faction-EXCLUSIVE energy currencies, alongside Blood)
+were actually missing a source.
+
+**What shipped** (`packages/match-core/src/MatchState.cs`):
+- `GrantFuelPumpIncome()`: +2 Fuel/second per Complete `FuelPump`,
+  gated to `FactionId.HumanArmy`/`Mixed` owners only (a MadDoctor or
+  AlienHive player building one would otherwise accumulate a currency
+  with no sink). Once-per-second cadence, matching
+  `GrantEmitterManaIncome`'s existing "real, primary, always-flowing"
+  pattern -- deliberately NOT `GrantHarvestPostIncome`'s slower 20-second
+  trickle cadence, since Fuel is Human Army's primary resource, not a
+  supplement.
+- `GrantAlienFactoryIchorIncome()`: +3 Ichor/second per Complete
+  `Factory`, gated to `AlienHive`/`Mixed` only. Reuses `Factory` (already
+  faction-skinned "Spawning Vat," already Alien Hive's sole roster
+  producer, matching docs/17's "the Queen is the Vat" framing) rather
+  than inventing a new `BuildingKind` -- every player gets a free
+  starting Factory (`SpawnFactoryForPlayer`) regardless of faction, so
+  this had to be faction-gated the same way FuelPump's was, or a
+  MadDoctor/HumanArmy player's own starting Factory would leak Ichor
+  they never spend.
+- Both rates are v0.1 placeholders (CLAUDE.md's standing policy),
+  calibrated so ONE Complete source building alone gets close to
+  sustaining that faction's own cheapest continuously-trained unit
+  (Fuel Pump vs. Rifleman's 5 Fuel/4s; Factory vs. Drone's 15 Ichor/3s)
+  -- not a precision balance claim, same ceiling as every other economy
+  number in this project (a real Phase-2 sandbox pass is the documented
+  next step for actual tuning).
+- Bones (MadDoctor's own equivalent gap -- also MonsterAgent-harvest-
+  exclusive, same class of problem) was deliberately NOT given a new
+  income building this pass -- the creator's own "Steel is Bone" request
+  read as a NAMING/flavor instruction (Bones already works identically
+  for every faction, all of them via active harvest, so there was
+  nothing broken to fix there), not a request for a new dedicated
+  building. Flagged as a real, same-shape follow-up if wanted later, not
+  silently assumed out of scope.
+
+**Unity** (`unity-client/Assets/Scripts/`):
+- `ResourceFactionSkin.NameFor(kind, faction)` -- the resource-kind twin
+  of the existing `BuildingFactionSkin`, same "sim only knows the
+  generic kind, only names are themed" split. Only Bones/Steel actually
+  renames; every other kind already reads faction-correctly by
+  construction (a Human Army player simply never accumulates Blood/
+  Ichor at all, so there's nothing to rename there).
+- `ResourceHud` now shows each resource's actual NAME next to its icon
+  (previously icon+number only, no text at all) -- a Human Army player
+  now sees "🦴 Steel 40" where a Mad Doctor sees "🦴 Bones 40" for the
+  identical wallet.
+
+**Tests**: new `IncomeTests.cs` -- FuelPump grants Fuel only for
+HumanArmy/Mixed, once per simulated second, not accelerating; Factory
+grants Ichor only for AlienHive/Mixed; every player's OWN free starting
+Factory (regardless of faction) leaks nothing to a faction that doesn't
+spend Ichor. `BuildingDef.cs`/`FactionRoster.cs`'s own stale "not
+implemented yet" comments updated in place rather than left to
+contradict the new code next to them.
+
+Same verification ceiling as every other pass: no dotnet SDK, no Unity
+Editor in this environment. Checked by hand: brace/paren balance;
+every new test's tick-cadence math re-derived against the actual
+`BuildTimeTicks` values involved (both `FuelPump` and `Factory`'s own
+build times turned out to be exact multiples of `TicksPerSecond`, which
+would have coupled a naive test's assertions to the exact tick a
+building completes construction on -- caught before commit, worked
+around with an explicit one-tick buffer, not silently left fragile).

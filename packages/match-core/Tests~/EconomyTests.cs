@@ -7,10 +7,13 @@ using Xunit;
 namespace MadDr.MatchCore.Tests;
 
 /// <summary>docs/23 §3 Phase 3 slice: wallet caps raised by completed
-/// storage buildings. Income ticks, upkeep drains, and onboard per-unit
-/// pools are NOT covered here -- they're gated on prerequisites that
-/// haven't landed yet (see BuildingDef.cs/PlayerState.cs's own header
-/// comments and docs/12's Phase 3 entry), not silently skipped.</summary>
+/// storage buildings. Upkeep drains and onboard per-unit pools are NOT
+/// covered here -- they're gated on prerequisites that haven't landed yet
+/// (see PlayerState.cs's own header comments and docs/12's Phase 3
+/// entry), not silently skipped. Income ticks DO have real coverage now,
+/// just not in this file -- see IncomeTests.cs (Fuel/Ichor) and
+/// TrainUnitTests.cs/FactionRosterTests.cs (everything spawn/training-
+/// related).</summary>
 public class EconomyTests
 {
     private static List<FactionId> TwoPlayers() => new() { FactionId.MadDoctor, FactionId.HumanArmy };

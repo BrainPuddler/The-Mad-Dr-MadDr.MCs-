@@ -80,12 +80,20 @@ public class ResourceHud : MonoBehaviour
         var supplyCap = bridge.PlayerSupplyCap(localPlayerIndex);
         var supplyText = "Supply " + supplyUsed + "/" + supplyCap;
 
+        // 2026-08 (creator direction: "Steel is Bone"): the local
+        // player's own faction-themed name per kind (ResourceFactionSkin,
+        // same skin-layer split BuildingFactionSkin already established
+        // for building names) -- a Human Army player reads "Steel" where
+        // a Mad Doctor reads "Bones" for the identical underlying
+        // ResourceKind.Bones wallet.
+        var faction = bridge.PlayerFaction(localPlayerIndex);
         var lines = new string[Kinds.Length];
         for (var i = 0; i < Kinds.Length; i++)
         {
             var amount = bridge.PlayerWallet(localPlayerIndex, Kinds[i]);
             var cap = bridge.PlayerWalletCap(localPlayerIndex, Kinds[i]);
-            lines[i] = Icons[i] + " " + amount + (cap < int.MaxValue ? "/" + cap : "");
+            var name = ResourceFactionSkin.NameFor(Kinds[i], faction);
+            lines[i] = Icons[i] + " " + name + " " + amount + (cap < int.MaxValue ? "/" + cap : "");
         }
 
         // 2026-08 (creator direction: "make sure the resource text is

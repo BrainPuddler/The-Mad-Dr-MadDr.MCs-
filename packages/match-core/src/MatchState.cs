@@ -592,6 +592,84 @@ namespace MadDr.MatchCore
         private const int HarvestPostBrainsPerGrant = 1;
         private const int HarvestPostIncomeIntervalTicks = 20 * TicksPerSecond;
 
+        /// <summary>2026-08 (creator report: "how do I get fuel?" -- root-
+        /// caused to <see cref="BuildingKind.FuelPump"/> never having had
+        /// real income logic behind it; its own <see cref="BuildingDef"/>
+        /// entry has said "no real number exists yet for the income
+        /// building" since the day it was added). Fuel is docs/05's
+        /// faction-EXCLUSIVE energy currency for Human Army (CLAUDE.md's
+        /// own invariant: "Energy follows origin: organic->blood,
+        /// tech->fuel, biotech->ichor") -- unlike <see
+        /// cref="GrantHarvestPostIncome"/>'s Brains trickle (a shared,
+        /// every-faction currency, deliberately universal), this is gated
+        /// to the one faction that actually spends Fuel (plus <see
+        /// cref="FactionId.Mixed"/>, which can field any roster and so can
+        /// genuinely use it) -- a MadDoctor or AlienHive player building a
+        /// Fuel Pump would otherwise accumulate a currency with no sink at
+        /// all, same as it does today with zero income. Once-per-second,
+        /// same cadence <see cref="GrantEmitterManaIncome"/> already uses
+        /// for its own "real, primary, always-flowing" income (Fuel is
+        /// Human Army's PRIMARY resource, not a slow supplement the way
+        /// HarvestPost's Brains trickle deliberately is) -- v0.1 placeholder
+        /// rate (<see cref="FuelPumpFuelPerSecond"/>), calibrated so ONE
+        /// Complete Fuel Pump alone can just about sustain continuous
+        /// Rifleman training (5 Fuel every 4s = 1.25 Fuel/s) from a single
+        /// Barracks, with headroom for occasional Factory vehicles once a
+        /// player has built a couple -- not a balance claim, same standing
+        /// policy as every other v0.1 economy number in this
+        /// project.</summary>
+        private void GrantFuelPumpIncome()
+        {
+            for (var i = 0; i < _buildingsInOrder.Count; i++)
+            {
+                var b = _buildingsInOrder[i];
+                if (b.Kind != BuildingKind.FuelPump || b.State != BuildingState.Complete) continue;
+                var faction = _players[b.PlayerIndex].Faction;
+                if (faction != FactionId.HumanArmy && faction != FactionId.Mixed) continue;
+                _players[b.PlayerIndex].Grant(ResourceKind.Fuel, FuelPumpFuelPerSecond);
+            }
+        }
+
+        private const int FuelPumpFuelPerSecond = 2;
+
+        /// <summary>2026-08 (creator direction: "look at player and race
+        /// balances to make sure this is equal economy amongst all the
+        /// races"): Alien Hive had the EXACT same class of gap as Fuel --
+        /// <see cref="FactionRoster.UnitRosterDef"/>'s own file header
+        /// already flagged it explicitly ("only the Ichor SINK is real
+        /// here" -- the capture-energy SOURCE was deferred, docs/12 Phase
+        /// 4). No dedicated Ichor building exists (unlike Human Army's
+        /// Fuel Pump) -- reuses <see cref="BuildingKind.Factory"/>
+        /// instead, Alien Hive's own sole roster producer, already
+        /// faction-skinned "Spawning Vat" (<see
+        /// cref="BuildingFactionSkin.NameFor"/>) and thematically their
+        /// economic anchor per docs/17 ("the Queen is the Vat"). Same
+        /// once-per-second/faction-gated shape as <see
+        /// cref="GrantFuelPumpIncome"/> -- a MadDoctor or HumanArmy
+        /// player's own Factory (every player gets one on startup, <see
+        /// cref="SpawnFactoryForPlayer"/>) grants nothing under this
+        /// method, since neither faction spends Ichor. Rate set higher
+        /// than Fuel's per-source rate (<see
+        /// cref="AlienFactoryIchorPerSecond"/>) because Alien Hive's own
+        /// roster costs more Ichor per unit on average (15-80 vs Human
+        /// Army's 5-30 Fuel) -- calibrated so one Complete Factory alone
+        /// gets close to sustaining continuous Drone training (15 Ichor
+        /// every 3s = 5 Ichor/s), same "not a balance claim" v0.1 status
+        /// as every number here.</summary>
+        private void GrantAlienFactoryIchorIncome()
+        {
+            for (var i = 0; i < _buildingsInOrder.Count; i++)
+            {
+                var b = _buildingsInOrder[i];
+                if (b.Kind != BuildingKind.Factory || b.State != BuildingState.Complete) continue;
+                var faction = _players[b.PlayerIndex].Faction;
+                if (faction != FactionId.AlienHive && faction != FactionId.Mixed) continue;
+                _players[b.PlayerIndex].Grant(ResourceKind.Ichor, AlienFactoryIchorPerSecond);
+            }
+        }
+
+        private const int AlienFactoryIchorPerSecond = 3;
+
         /// <summary>docs/03's "Emitter polarities &amp; output" table,
         /// verbatim: Solar peaks Day (5), Lunar peaks Night (5), Twilight
         /// peaks the transitions (6) and is otherwise flat (3) -- Solar/
@@ -1280,6 +1358,15 @@ namespace MadDr.MatchCore
                 ApplyAnomalyBuffRegen();
                 // docs/23 Phase 7 / docs/06: the regeneration quirk, same idiom.
                 ApplyRegenerationQuirk();
+                // 2026-08 (creator report: "how do I get fuel?" -- traced to
+                // FuelPump/BuildingKind's own placeholder cost never having
+                // real income logic behind it, same class of gap
+                // GrantHarvestPostIncome's own header already root-caused for
+                // Brains): the two faction-exclusive ENERGY currencies
+                // (docs/05's own category split -- see ResourceHud.cs's
+                // ordering comment) that had no real source at all.
+                GrantFuelPumpIncome();
+                GrantAlienFactoryIchorIncome();
             }
 
             // 2026-08 (creator report: "where is my big brain base... I

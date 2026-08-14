@@ -89,10 +89,14 @@ namespace MadDr.MatchCore
         /// volunteers" is cheaper per line but spans MORE resource kinds
         /// (Bones + Fuel, drilled infantry needs matériel, not genetics);
         /// Alien Hive "mind control... energy from captured" is a single,
-        /// heavier Ichor cost (their one native energy currency) -- the
-        /// captured-citizen-energy SOURCE itself is explicitly deferred
-        /// (see docs/12's Phase 4 entry), only the Ichor SINK is real
-        /// here.</summary>
+        /// heavier Ichor cost (their one native energy currency). 2026-08
+        /// follow-up: the SOURCE side of this is real now too --
+        /// <see cref="MatchState.GrantAlienFactoryIchorIncome"/> (a
+        /// Spawning Vat / Factory income, not literally "captured citizen"
+        /// yet -- that specific fictional mechanism is still docs/12's own
+        /// Phase 4 entry, a real, separate follow-up; this closes the
+        /// "the resource simply cannot be earned at all" half of the
+        /// gap).</summary>
         public IReadOnlyList<(ResourceKind Resource, int Amount)> Cost { get; }
 
         /// <summary>Ticks to train, v0.1 placeholder scaled roughly with
