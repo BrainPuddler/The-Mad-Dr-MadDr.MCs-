@@ -404,3 +404,38 @@ short fade, and there's no wobble riding on top of "on" any more.
 **Not verified in a real render** (same standing caveat as every prior
 section) — this is a straightforward code-level removal/simplification
 (fewer moving parts than before, not new logic), but still unseen.
+
+## 11. §10's solid colors read as "flat and pasted on" — added a frame/sash inset
+
+Creator report, immediately following §10: "The yellow window lights,
+panels look too flat and pasted on." Expected consequence of §10, not
+a bug in it — a flat, single-normal quad with a plain solid color and
+no texture has genuinely zero shading variation of its own; there was
+nothing left to distinguish "a window" from "a rectangle of that color
+glued to the wall." §9's texture would have provided *some* variation,
+but re-adding a texture isn't on the table (§10's "just solid colours"
+was explicit and immediately prior).
+
+**Fix, still within "solid colours"**: real windows aren't only glass,
+they're glass inset into a frame/sash — a separate, plain-colored
+material around the pane's edge (`_FrameColor`, default a near-black
+warm brown, distinct from `_DarkGlassColor`'s navy so the two read as
+different MATERIALS, not just different shades of the same one). The
+frame is a solid color too (no texture, no gradient blur — a crisp
+`step` edge to match this project's flat-color aesthetic per
+`maddr-aesthetic-preferences`), computed from each window's own 0..1
+UV distance-to-edge (`_FrameWidth`, default 0.12 of the pane per side)
+— the UV channel §10 stopped sampling for a texture is reused here for
+geometry, not color. The frame is lit like ordinary wall geometry
+(ambient + main light diffuse) but is NEVER emissive and NEVER subject
+to the on/off occupancy schedule — a sash doesn't light up, only the
+glass does, which is itself an additional depth cue (the frame stays
+constant while the pane's brightness changes with occupancy, exactly
+like a real building).
+
+Also gives an actual purpose back to `uv0` — §10 kept baking it into
+the mesh only for UsePass-reused-pass safety since nothing sampled it
+any more; now `WindowGridFragment` reads it again, genuinely.
+
+**Not verified in a real render** (same standing caveat as §5 and every
+section since) — reasoned from the UV/edge-distance math, not seen.

@@ -39,11 +39,12 @@ Shader "MadDr/WindowGrid"
     {
         // 2026-08 (creator direction: "Loose the glazing effect. Just
         // solid colours."): no texture is sampled by the ForwardLit pass
-        // below any more -- solid _WarmColor/_DarkGlassColor only.
-        // Declared (with a harmless "white" default) purely because the
-        // ShadowCaster/DepthOnly passes reused via UsePass below expect a
-        // _BaseMap to exist on the shader they came from; same reasoning
-        // as _Cutoff just below.
+        // below any more -- solid _WarmColor/_DarkGlassColor/_FrameColor
+        // only (the pane-vs-frame split below is a per-window UV distance
+        // check, not a texture). Declared (with a harmless "white"
+        // default) purely because the ShadowCaster/DepthOnly passes
+        // reused via UsePass below expect a _BaseMap to exist on the
+        // shader they came from; same reasoning as _Cutoff just below.
         _BaseMap("Unused (kept for UsePass compatibility)", 2D) = "white" {}
 
         // 2026-08 (creator direction: "the blue lights windows are too
@@ -54,6 +55,19 @@ Shader "MadDr/WindowGrid"
         // restores the original tone rather than inventing a new one.
         _WarmColor("Lit Window Color", Color) = (1, 0.85, 0.55, 1)
         _DarkGlassColor("Dark/Off Glass Color", Color) = (0.16, 0.2, 0.28, 1)
+
+        // 2026-08 (creator report: "look too flat and pasted on"): a flat
+        // single-normal quad has zero shading variation of its own, so
+        // with no texture (per the prior "just solid colours" direction)
+        // there was nothing left to distinguish "a window" from "a
+        // rectangle of color stuck on the wall." Real windows aren't
+        // just glass, they're glass INSET into a frame/sash -- a plain
+        // solid color, ordinarily lit (never emissive, never subject to
+        // the on/off schedule below), around the pane's edge. That's the
+        // depth cue being restored here, without reintroducing a texture.
+        _FrameColor("Window Frame/Sash Color", Color) = (0.08, 0.07, 0.06, 1)
+        _FrameWidth("Frame Width (fraction of pane, per edge)", Range(0, 0.4)) = 0.12
+
         _Smoothness("Smoothness", Range(0,1)) = 0.5
         _BulbEmissiveBase("Bulb Emissive Base", Float) = 0.25
 
@@ -131,7 +145,9 @@ Shader "MadDr/WindowGrid"
             CBUFFER_START(UnityPerMaterial)
                 half4 _WarmColor;
                 half4 _DarkGlassColor;
+                half4 _FrameColor;
                 half4 _BaseColor;
+                half _FrameWidth;
                 half _Smoothness;
                 half _BulbEmissiveBase;
             CBUFFER_END
@@ -162,6 +178,11 @@ Shader "MadDr/WindowGrid"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
+                // Per-window 0..1 corner UV (BuildingWindowGrid.Build()) --
+                // no longer used to sample a texture (2026-08, "just solid
+                // colours"), but used below to find each pixel's distance
+                // to the pane's own edge for the frame/sash inset.
+                float2 uv0        : TEXCOORD0;
                 // (seed, brightnessVar, flagsPacked, unused)
                 float4 packed1    : TEXCOORD1;
                 // (onFrac, offFrac, activityThreshold, unused)
@@ -173,6 +194,7 @@ Shader "MadDr/WindowGrid"
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
+                float2 uv0        : TEXCOORD0;
                 float4 packed1    : TEXCOORD1;
                 float4 packed2    : TEXCOORD2;
                 float2 overrideUV : TEXCOORD3;
@@ -191,6 +213,7 @@ Shader "MadDr/WindowGrid"
                 OUT.positionCS = posInputs.positionCS;
                 OUT.positionWS = posInputs.positionWS;
                 OUT.normalWS = normInputs.normalWS;
+                OUT.uv0 = IN.uv0;
                 OUT.packed1 = IN.packed1;
                 OUT.packed2 = IN.packed2;
                 OUT.overrideUV = IN.overrideUV.xy;
@@ -245,8 +268,16 @@ Shader "MadDr/WindowGrid"
                 half mult = MadDrWindowMultiplier(IN.packed2.x, IN.packed2.y, IN.packed2.z,
                     canGlow, alwaysOn, overrideVal);
 
+                // Frame/sash inset: crisp-edged (not a soft vignette, to
+                // match this project's flat-color aesthetic), a fixed
+                // fraction of the pane's own UV size on every edge, so it
+                // scales with each window's own dimensions automatically.
+                float edgeDist = min(min(IN.uv0.x, 1.0 - IN.uv0.x), min(IN.uv0.y, 1.0 - IN.uv0.y));
+                half isFrame = (half)step(edgeDist, (float)_FrameWidth);
+
                 half3 litColor = _WarmColor.rgb * _BaseColor.rgb;
-                half3 albedo = lerp(_DarkGlassColor.rgb, litColor, mult) * _BaseColor.rgb;
+                half3 paneAlbedo = lerp(_DarkGlassColor.rgb, litColor, mult) * _BaseColor.rgb;
+                half3 albedo = lerp(paneAlbedo, _FrameColor.rgb * _BaseColor.rgb, isFrame);
 
                 float3 normalWS = normalize(IN.normalWS);
                 Light mainLight = GetMainLight(IN.shadowCoord);
@@ -254,7 +285,12 @@ Shader "MadDr/WindowGrid"
                 half ndotl = saturate(dot(normalWS, mainLight.direction));
                 half3 diffuse = albedo * (ambient + mainLight.color * (ndotl * mainLight.shadowAttenuation * mainLight.distanceAttenuation));
 
-                half3 emission = litColor * _BulbEmissiveBase * brightnessVar * mult * _MadDrWinNeonBoost;
+                // The frame is wood/metal, not glass -- ordinarily lit
+                // (the `diffuse` term above already covers it) but never
+                // emissive and never gated by the occupancy schedule,
+                // same as the wall around it.
+                half3 emission = lerp(litColor * _BulbEmissiveBase * brightnessVar * mult * _MadDrWinNeonBoost,
+                    half3(0, 0, 0), isFrame);
 
                 half3 color = diffuse + emission;
                 color = MixFog(color, IN.fogFactor);

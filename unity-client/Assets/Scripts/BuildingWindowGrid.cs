@@ -194,12 +194,11 @@ public class BuildingWindowGrid : MonoBehaviour
             var baseIdx = verts.Count;
             verts.Add(v0); verts.Add(v1); verts.Add(v2); verts.Add(v3);
             for (var k = 0; k < 4; k++) normals.Add(localNormal);
-            // 2026-08: no longer read by ForwardLit (solid colors, no
-            // glazing texture) -- kept only because the UsePass-reused
-            // stock ShadowCaster/DepthOnly/DepthNormals passes still
-            // declare a TEXCOORD0 input; leaving a real channel here is
-            // lower-risk than trusting Unity's zero-fill-for-missing-
-            // channel behavior with no Editor available to confirm it.
+            // 2026-08: no longer used to sample a texture (solid colors,
+            // no glazing texture), but ForwardLit reads it again as of
+            // the frame/sash inset fix -- each pixel's distance to this
+            // 0..1 square's own edge is what draws the frame border
+            // ("look too flat and pasted on" -- see WindowGrid.shader).
             uv0.Add(new Vector2(0, 0)); uv0.Add(new Vector2(1, 0));
             uv0.Add(new Vector2(1, 1)); uv0.Add(new Vector2(0, 1));
 
