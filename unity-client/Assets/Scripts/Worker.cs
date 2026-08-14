@@ -86,7 +86,7 @@ using UnityEngine;
 /// ever belongs to the local human player, see <see
 /// cref="RuntimeCityBuilder.OnCitizenPossessed"/>'s own comment on why
 /// there's no per-instance owner to look up instead). "Human Soldier" is
-/// a distinct new unit, not a Worker skin -- see <see cref="HumanSoldier"/>.
+/// a distinct new unit, not a Worker skin -- see <see cref="HumanoidCombatant"/>.
 /// </summary>
 public class Worker : MonoBehaviour
 {
@@ -481,7 +481,7 @@ public class Worker : MonoBehaviour
     /// cref="WanderStepMax"/> from here) in a pseudo-random direction --
     /// deterministic per-instance hashing (same convention as every
     /// other cosmetic-ish AI pick in this codebase: Citizen's own
-    /// destination re-picks, HumanSoldier's patrol angle), not
+    /// destination re-picks, HumanoidCombatant's patrol angle), not
     /// `UnityEngine.Random`. A step that would cross the <see
     /// cref="WanderLeashRadius"/> (2 km) leash around our own buildings
     /// gets pulled back toward the nearest one instead of rejected

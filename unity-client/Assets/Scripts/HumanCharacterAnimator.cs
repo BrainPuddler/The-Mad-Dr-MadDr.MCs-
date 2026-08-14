@@ -374,10 +374,40 @@ public static class HumanCharacterAnimator
         rig.Torso.localRotation = Quaternion.Euler(rig.TorsoRestPitchDeg + extraPitchDeg, yawDeg, rollDeg);
     }
 
+    // 2026-08 (Grandma-in-a-wheelchair, "Refactor Human Soldiers & Armed
+    // Citizens" brief, "Drive a manual wheelchair" -- creator direction
+    // verbatim): a SEATED legless rig (HumanCharacterProfile.SeatedHeight
+    // > 0) rolls along the GROUND, unlike the Alien Worker's legless
+    // HOVER rig -- TickHover's vertical bob/side-drift/forward-lean-when-
+    // moving would read as levitating, wrong for something with wheels.
+    private const float WheelchairStrideRadPerUnit = 3.2f;
+
+    /// <summary>Distance-synced (same "no skating" rule as
+    /// TickLocomotion), no vertical bob or drift at all -- a wheelchair
+    /// stays on the ground plane. Arms cycle through a push-the-rim-then-
+    /// recover motion instead of a natural walking swing, with a small
+    /// forward-back torso rock from the effort, synced to the SAME phase
+    /// so the rock and the push always agree with each other.</summary>
+    public static void TickWheelchair(HumanCharacterRig rig, HumanCharacterAnimState state, float distanceMoved, float dt)
+    {
+        if (rig == null || state == null) return;
+        state.GaitPhase = Mathf.Repeat(state.GaitPhase + distanceMoved * WheelchairStrideRadPerUnit, TwoPi);
+
+        var push = 35f * Mathf.Clamp01(Mathf.Sin(state.GaitPhase));
+        var recover = 20f * Mathf.Clamp01(-Mathf.Sin(state.GaitPhase));
+        SetShoulder(rig.LeftShoulder, -10f - push + recover);
+        SetShoulder(rig.RightShoulder, -10f - push + recover);
+        SetElbowBend(rig.LeftElbow, 30f + 15f * Mathf.Clamp01(Mathf.Sin(state.GaitPhase + 0.8f)));
+        SetElbowBend(rig.RightElbow, 30f + 15f * Mathf.Clamp01(Mathf.Sin(state.GaitPhase + 0.8f)));
+
+        var rock = 3f * Mathf.Sin(state.GaitPhase * 2f);   // double frequency: one rock per push-recover half-cycle, same reasoning TickLocomotion's torso bounce uses
+        SetTorso(rig, 0f, rock, 0f, 0f);
+    }
+
     // Pivot rotation sign convention throughout this file: positive X
     // rotation swings a limb FORWARD (in the character's own facing
     // direction, since the root's own rotation already points local +Z
-    // that way -- Worker/Citizen/HumanSoldier all set the root's
+    // that way -- Worker/Citizen/HumanoidCombatant all set the root's
     // rotation via Quaternion.LookRotation exactly like before this
     // system existed).
     private static void SetShoulder(Transform t, float pitchDeg) { if (t != null) t.localRotation = Quaternion.Euler(pitchDeg, 0f, 0f); }

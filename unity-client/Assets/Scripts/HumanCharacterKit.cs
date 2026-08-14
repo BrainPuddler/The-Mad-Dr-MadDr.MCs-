@@ -7,8 +7,8 @@ using UnityEngine;
 /// replaces the ad hoc single-capsule-plus-cylinder bodies <see
 /// cref="Worker"/> and <see cref="Citizen"/> built for themselves. One
 /// rig serves every human-shaped unit in the game (Worker's three
-/// faction skins -- Human/Mad-Doctor/Alien -- and the new <see
-/// cref="HumanSoldier"/>) via <see cref="HumanCharacterProfile"/>
+/// faction skins -- Human/Mad-Doctor/Alien -- and every <see
+/// cref="HumanoidCombatant"/> variant) via <see cref="HumanCharacterProfile"/>
 /// parameters, not four separate builders -- exactly the brief's own
 /// "interchangeable body parts... shared meshes whenever possible" ask.
 ///
@@ -99,7 +99,15 @@ public static class HumanCharacterKit
         // directly instead, so torso lean never drags the legs along --
         // real people don't tip their hips over when they crane their
         // neck to work.
-        var hipY = (profile.HasLegs ? 0.92f : 1.02f) * s;   // hover variant sits a little higher, no legs to stand the torso on
+        // 2026-08 (Grandma-in-a-wheelchair, "Refactor Human Soldiers &
+        // Armed Citizens" brief): a SEATED legless profile (a wheelchair)
+        // needs to sit LOWER than a standing torso, the opposite of the
+        // Alien's hover variant, which sits HIGHER with nothing to stand
+        // on. `SeatedHeight` (0 = "use the old hover default," so the
+        // Alien preset is byte-for-byte unaffected by this addition) lets
+        // a profile override the legless case explicitly instead of this
+        // method guessing which kind of legless it is.
+        var hipY = (profile.HasLegs ? 0.92f : (profile.SeatedHeight > 0f ? profile.SeatedHeight : 1.02f)) * s;
         var torsoH = 0.6f * s;
         var torsoRestPos = new Vector3(0f, hipY + torsoH * 0.5f, 0f);
         var torso = Pivot(parent, torsoRestPos);
@@ -228,7 +236,7 @@ public static class HumanCharacterKit
     }
 
     /// <summary>Selection highlight, shared by every rig-based unit
-    /// (<see cref="Worker"/>, <see cref="HumanSoldier"/>) -- brightens
+    /// (<see cref="Worker"/>, <see cref="HumanoidCombatant"/>) -- brightens
     /// each part toward white relative to ITS OWN base color via a
     /// per-renderer MaterialPropertyBlock, same "shape carries kind,
     /// color carries state" split every other selectable unit in this
@@ -332,6 +340,13 @@ public struct HumanCharacterProfile
     public float HunchDegrees;
     public bool Asymmetric;
     public bool HasLegs;
+    // 2026-08: only meaningful when HasLegs is false. 0 (the default
+    // every existing preset gets for free) keeps the original hardcoded
+    // hover-height behavior (see HumanCharacterKit.Build's own comment);
+    // a positive value overrides it for a SEATED legless profile
+    // (Grandma's wheelchair) instead, which needs to sit lower than a
+    // standing torso, not higher.
+    public float SeatedHeight;
     public bool HasHands;
     public bool OversizedHands;
     public bool HasBackpack;
@@ -428,9 +443,9 @@ public struct HumanCharacterProfile
 
     /// <summary>"Helmet, backpack, simple rifle silhouette, boots,
     /// broader shoulders... disciplined... confident... military
-    /// posture" -- the brief's own Human Soldier section. Rifle itself
-    /// is built by the caller (<see cref="HumanSoldier"/>), not this
-    /// generic kit -- a weapon prop isn't a body part every profile
+    /// posture" -- the brief's own Human Soldier section. The weapon
+    /// prop itself is built by the caller (<see cref="HumanoidCombatant"/>),
+    /// not this generic kit -- a weapon isn't a body part every profile
     /// needs.</summary>
     public static HumanCharacterProfile HumanSoldier()
     {

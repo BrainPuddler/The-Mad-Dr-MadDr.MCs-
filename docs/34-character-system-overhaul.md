@@ -6,6 +6,18 @@ a shared, modular, low-poly humanoid rig + procedural animation library,
 and adds `HumanSoldier`, a new cosmetic Army-faction dressing unit built
 on the same system.
 
+**2026-08 update: `HumanSoldier` (the class) is gone, superseded, not
+silently deleted.** docs/35 upgraded Human Soldier from this doc's
+cosmetic-only flavor unit to a real combatant on a new shared kit
+(`HumanCombatProfile`/`HumanoidCombatant`) built specifically for armed-
+human variants, and folded the old `HumanSoldier.cs` into it rather than
+keeping two parallel implementations. Everything below this notice about
+the RIG/ANIMATION system (`HumanCharacterKit`, `HumanCharacterAnimator`)
+is still current and still exactly what `HumanoidCombatant` uses — only
+the old cosmetic-only BEHAVIOR class is retired. See docs/35 for the
+full story, including why this pass reused the visual/animation half of
+this doc's own work rather than starting over.
+
 ## 0. Why (creator brief, condensed)
 
 A full "Character System Overhaul" brief: replace every capsule-based

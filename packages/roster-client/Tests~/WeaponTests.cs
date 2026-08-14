@@ -108,6 +108,40 @@ public class WeaponTests
     }
 
     [Fact]
+    public void HumanoidCombatantWeaponsAreDistinctArchetypes()
+    {
+        var shotgun = WeaponProfile.Shotgun();
+        var revolver = WeaponProfile.Revolver();
+        var rifle = WeaponProfile.ServiceRifle();
+
+        Assert.Equal(WeaponKind.Bullet, shotgun.Kind);
+        Assert.Equal(WeaponKind.Bullet, revolver.Kind);
+        Assert.Equal(WeaponKind.Bullet, rifle.Kind);
+
+        // shotgun: short range, hardest single hit, slowest cadence --
+        // "a powerful shotgun blast," not sustained fire
+        Assert.True(shotgun.Range < revolver.Range);
+        Assert.True(shotgun.Range < rifle.Range);
+        Assert.True(shotgun.Damage > revolver.Damage);
+        Assert.True(shotgun.Damage > rifle.Damage);
+        Assert.True(shotgun.Cadence > revolver.Cadence);
+        Assert.True(shotgun.Cadence > rifle.Cadence);
+
+        // rifle: longest range, fastest cadence -- a trained combatant's
+        // aimed, sustained fire beats a civilian's sidearm at range
+        Assert.True(rifle.Range > revolver.Range);
+        Assert.True(rifle.Cadence < revolver.Cadence);
+
+        // heavier per-shot than the weakest concrete weapon in the
+        // codebase (ZombieClaws) -- these are real firearms, not cannon
+        // fodder claws
+        var claws = WeaponProfile.ZombieClaws();
+        Assert.True(shotgun.Damage > claws.Damage);
+        Assert.True(revolver.Damage > claws.Damage);
+        Assert.True(rifle.Damage > claws.Damage);
+    }
+
+    [Fact]
     public void HealthScalesWithBulkAndHeart()
     {
         var lean = Combat.Profile(Genome(bodyParams: new[] { 0.5, 0.1, 0.5, 0.5 }, heartTier: "faint")).MaxHealth;

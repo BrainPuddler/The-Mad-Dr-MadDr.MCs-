@@ -3394,11 +3394,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // here so that grant is actually usable.
         SpawnStartingWorkers(p0Hq, blocked, claimed);
 
-        // 2026-08 (creator brief: "Character System Overhaul," Human
-        // Soldiers section): purely cosmetic base dressing, so scoped to
-        // "the local human picked Human Army" only -- see
-        // SpawnStartingSoldiers's own doc comment for why AI-opponent
-        // Army bases don't get this too in this pass.
+        // 2026-08: scoped to "the local human picked Human Army" only --
+        // see SpawnStartingSoldiers's own doc comment for why AI-opponent
+        // Army bases don't get this too in this pass. Soldier is a real
+        // combatant now (HumanoidCombatant), not purely cosmetic dressing
+        // the way it started (docs/34) -- the scope cut itself is
+        // unchanged, only what it's a garrison OF changed.
         if (chosenFaction == FactionId.HumanArmy) SpawnStartingSoldiers(p0Hq, blocked, claimed);
 
         var opponentSeeds = AiOpponentSeedRing(center, opponents.Count, AiOpponentSeedRingRadius);
@@ -3418,6 +3419,8 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             if (faction == FactionId.HumanArmy || faction == FactionId.AlienHive)
                 SpawnOpponentStartingArmy(playerIndex, faction, opponents[i].Personality, hq, blocked, claimed);
         }
+
+        SpawnHostileCivilians(center, blocked, claimed);
     }
 
     /// <summary>v0.1 placeholder (CLAUDE.md's standing "flag the invented
@@ -3456,33 +3459,90 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
     /// <summary>v0.1 placeholder (same "flag the invented number" status
     /// as <see cref="StartingWorkerCount"/>) -- a small honor guard, not
-    /// a real garrison; <see cref="HumanSoldier"/> is purely cosmetic
-    /// base dressing (this class's own header explains why), so there's
-    /// no gameplay reason for this to be large.</summary>
+    /// a real garrison. 2026-08: Soldier is now a real combatant (see
+    /// <see cref="HumanoidCombatant"/>), not the purely-cosmetic docs/34
+    /// dressing unit it started as, so this count staying small is a
+    /// balance choice now, not just a GameObject-cost one.</summary>
     private const int StartingSoldierCount = 4;
 
-    /// <summary>2026-08 (creator brief: "Character System Overhaul,"
-    /// Human Soldiers section) -- spawns cosmetic <see cref="HumanSoldier"/>
-    /// dressing around the local human player's own HQ. Scoped to the
-    /// human's own base only (never AI opponents', even when they're
-    /// also Human Army) -- Worker itself has this same "local human
-    /// only" scope today (see its own header), and giving every AI
-    /// opponent's base a garrison too is real additional per-match
-    /// GameObject cost for something that, being purely cosmetic, has no
-    /// gameplay payoff on an opponent's side the player rarely visits up
-    /// close. An easy follow-up if that turns out to matter, not a hard
-    /// constraint.</summary>
+    /// <summary>2026-08 (creator brief: "Refactor Human Soldiers & Armed
+    /// Citizens into Monster Variants"): Soldier upgraded from docs/34's
+    /// cosmetic-only `HumanSoldier` (deleted, fully superseded -- no
+    /// duplicate implementation left behind) to a real combatant on the
+    /// shared <see cref="HumanoidCombatant"/> kit, via <see
+    /// cref="HumanCombatProfile.Soldier"/>. Scoped to the human's own
+    /// base only (never AI opponents', even when they're also Human
+    /// Army) -- Worker itself has this same "local human only" scope
+    /// today (see its own header); giving every AI opponent's base a
+    /// garrison too is a real, separate scope expansion, not something
+    /// this pass silently assumed.</summary>
     private void SpawnStartingSoldiers(HexCoord nearHex, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
     {
         for (var i = 0; i < StartingSoldierCount; i++)
         {
             var hex = FindOpenHexWide(nearHex, blocked, claimed, 24);
             claimed.Add(hex);
-            var go = new GameObject("HumanSoldier_" + i);
-            var soldier = go.AddComponent<HumanSoldier>();
-            soldier.Init(this, WorldOf(hex));
+            var go = new GameObject("Soldier_" + i);
+            var soldier = go.AddComponent<HumanoidCombatant>();
+            soldier.Init(this, HumanCombatProfile.Soldier(), WorldOf(hex));
         }
     }
+
+    // 2026-08 (creator brief: "Refactor Human Soldiers & Armed Citizens
+    // into Monster Variants" -- Grandma-in-a-wheelchair and Armed
+    // Civilian): v0.1 placeholder counts (CLAUDE.md's standing "flag the
+    // invented number" policy), same status as every other spawn-count
+    // constant in this file. Neutral to every player -- these are city
+    // threats, not aligned with whichever faction the human or any AI
+    // opponent picked, so this spawns once per match regardless of
+    // faction choice, unlike SpawnStartingWorkers/SpawnStartingSoldiers.
+    private const int GrandmaCount = 1;
+    private const int ArmedCivilianCount = 3;
+
+    /// <summary>Scatters Grandma + Armed Civilians across the whole city
+    /// (not clustered near any one base, unlike every other spawn method
+    /// in this file) -- deterministic golden-ratio angle/radius spacing
+    /// off each civilian's own index (same "no UnityEngine.Random"
+    /// convention this codebase uses throughout, e.g. Citizen's own
+    /// per-instance hashing) so they decorrelate without clumping the
+    /// way evenly-divided angles would for a small count. `AiOpponentSeedRing`'s
+    /// own R-axis 0.6 correction for this hex grid's axial-to-square
+    /// aspect is reused here for the same reason.
+    ///
+    /// v0.1 scope note: docs/19 §3/§4 already designed a richer, more
+    /// coherent version of this exact idea -- ordinary Citizens randomly
+    /// rolling weapon access and aggression independently of age/body
+    /// type, with an armed+aggressive+elderly+wheelchair roll being
+    /// EXACTLY Grandma. Wiring THAT system to spawn `HumanoidCombatant`
+    /// variants instead of this flat, always-present spawn is the
+    /// natural, more design-coherent follow-up (Citizens becoming
+    /// genuinely dangerous some of the time, not a guaranteed fixed
+    /// count every match) -- out of scope for this pass, which just
+    /// needed these variants to exist and be encounterable at all.</summary>
+    private void SpawnHostileCivilians(HexCoord center, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
+    {
+        if (_simBridge == null) return;
+        var total = GrandmaCount + ArmedCivilianCount;
+        for (var i = 0; i < total; i++)
+        {
+            var angle = Frac(i * 0.618034f + 0.13f) * Mathf.PI * 2f;
+            var dist = Mathf.Lerp(25f, 90f, Frac(i * 0.381966f + 0.37f));
+            var q = center.Q + Mathf.RoundToInt(dist * Mathf.Cos(angle));
+            var r = center.R + Mathf.RoundToInt(dist * Mathf.Sin(angle) * 0.6f);
+            var seedHex = new HexCoord(q, r);
+            if (!_city.Contains(seedHex)) seedHex = center;
+
+            var hex = FindOpenHexWide(seedHex, blocked, claimed, 24);
+            claimed.Add(hex);
+            var profile = i < GrandmaCount ? HumanCombatProfile.Grandma() : HumanCombatProfile.ArmedCivilian();
+            var name = i < GrandmaCount ? "Grandma_" + i : "ArmedCivilian_" + (i - GrandmaCount);
+            var go = new GameObject(name);
+            var combatant = go.AddComponent<HumanoidCombatant>();
+            combatant.Init(this, profile, WorldOf(hex));
+        }
+    }
+
+    private static float Frac(float v) { return v - Mathf.Floor(v); }
 
     /// <summary>v0.1 placeholder starting budget (CLAUDE.md's standing
     /// "flag the invented number, don't pretend it's balanced" policy,
@@ -4332,6 +4392,20 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     public void OnCombatantDied(UnitCombat c)
     {
         if (c != null) _combatants.Remove(c);
+    }
+
+    /// <summary>2026-08 (`HumanoidCombatant`, the shared armed-human kit):
+    /// every existing spawner (Worker/Tank/MonsterAgent/Collector) adds
+    /// itself to `_combatants` inline, from within this class's own
+    /// spawn methods, since they already have direct field access there.
+    /// `HumanoidCombatant` is a genuinely different class registering
+    /// several variants from several call sites, so a small public
+    /// counterpart to the already-public `OnCombatantDied` (registration
+    /// in, not just death out) is worth having rather than requiring
+    /// every future spawn call site to remember the one-liner itself.</summary>
+    public void RegisterCombatant(UnitCombat c)
+    {
+        if (c != null && !_combatants.Contains(c)) _combatants.Add(c);
     }
 
     /// <summary>FollowPath's steering entry point (docs/25 Phase B,

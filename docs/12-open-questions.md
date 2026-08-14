@@ -17464,3 +17464,58 @@ already-working combat movement), and `Citizen`/`HumanSoldier` (out of
 scope -- this was a Worker-specific report; both are candidates for
 the same treatment if/when they get their own version of this
 complaint).
+
+## 2026-08: "Refactor Human Soldiers & Armed Citizens into Monster Variants" -- scoped down, Grandma built
+
+Creator brief: fold `HumanSoldier` and future armed-human NPCs (police,
+SWAT, militia, "Grandma in a wheelchair with a shotgun," etc.) into
+"the existing Monster system" -- data-driven variants via
+ScriptableObjects, a generic weighted `MonsterSpawner`, object pooling,
+"the existing LOD system," Burst, general GPU instancing.
+
+Researched first (an Explore agent, read-only), same discipline as the
+character-overhaul brief. Found the brief's central premise doesn't
+hold: `MonsterAgent` requires a bred genome as load-bearing input, not
+an optional layer a non-genome variant could plug into -- and both
+`Worker` and `HumanSoldier` already explicitly, deliberately reject the
+genome pattern (HumanSoldier's own header cites confirming this with
+the creator directly). `MonsterSpawner`, object pooling, and an LOD
+system don't exist in this codebase -- LOD is a documented gap, not
+hidden infrastructure. No Burst/DOTS. ScriptableObject exists but only
+via in-code `CreateInstance`, never an authored `.asset` (no Editor
+here). Reported all of this plainly before proposing anything.
+
+Two AskUserQuestion rounds, both toward the smaller/lower-risk option:
+
+1. **Architecture**: a shared NON-genome kit, extending docs/34's
+   already-existing `HumanCharacterKit` pattern, rather than forcing
+   armed humans through `MonsterAgent` with a faked genome.
+   `MonsterAgent.cs` untouched.
+2. **Scope**: "Grandma + 2-3 more variants," not the full 9-variant
+   roster plus new spawner/pooling/LOD infrastructure. Shipped: Grandma
+   (new), Armed Civilian (new), Human Soldier (upgraded from docs/34's
+   cosmetic-only flavor to real combat -- `HumanSoldier.cs` deleted,
+   folded into the shared kit rather than kept as a second
+   implementation).
+
+Mid-build creator follow-ups, both incorporated: "Grandma... should
+have a high Armour class basically a tank" (this engine has no armor-
+reduction stat at the UnitCombat layer, confirmed before choosing an
+approach -- expressed as a 190 health pool instead, above Tank's own
+150-210) and "and scary" (a 32m aggro radius wider than her own 9m
+shotgun range -- she notices and closes from well outside weapon range,
+which is the actual source of dread, not raw speed).
+
+One real design mismatch caught and fixed during self-review, before
+commit: Grandma's wheelchair was initially routed through the SAME
+`TickHover` animation the Alien Worker profile uses for its legless
+hover -- vertical bob and side-drift, which would read as levitating on
+something with wheels. New `HumanCharacterAnimator.TickWheelchair`
+(grounded, distance-synced, a push-the-rim arm cycle) replaces it for
+any seated (not hovering) legless profile.
+
+Full writeup, including the Grandma-vs-brief point-by-point table and
+everything explicitly deferred: docs/35. `HumanCharacterKit`/
+`HumanCharacterAnimator` (docs/34) are unchanged in spirit, only
+extended (one new additive `SeatedHeight` field, default 0 = every
+existing preset including Alien's hover is byte-for-byte unaffected).

@@ -75,6 +75,56 @@ namespace MadDr.RosterClient
         {
             return new WeaponProfile(WeaponKind.Melee, "zombie claws", 3, 7, 1.1, 0, 0, 140, 170, 110);
         }
+
+        // ---- humanoid-combatant weapons (2026-08, "Refactor Human
+        // Soldiers & Armed Citizens into Monster Variants" -- not genome-
+        // driven, not tank hardware: hand-carried firearms for
+        // HumanoidCombatant, the shared non-genome behavior kit armed
+        // human variants (Soldier, Armed Civilian, Grandma) use. See
+        // HumanCombatProfile.cs's own header for why this is a SEPARATE
+        // system from MonsterAgent's genome-driven combat, not a genome
+        // variant. WeaponKind.Bullet throughout (a real fast projectile,
+        // not Melee's instant reach) -- these are all firearms, not
+        // claws, and Bullet already has working WeaponFx rendering with
+        // no new case to add. ----
+
+        /// <summary>2026-08 (creator direction: Grandma-in-a-wheelchair
+        /// "should have a high Armour class basically a tank... and
+        /// scary... fire a powerful shotgun blast... feel dangerous
+        /// despite her slow speed"). This engine has no separate damage-
+        /// reduction "Armor" stat at the UnitCombat layer (only
+        /// MaxHealth) -- her "basically a tank" toughness is expressed as
+        /// a large health pool on HumanCombatProfile.Grandma, not here;
+        /// this weapon is the OTHER half of "dangerous": short range (a
+        /// real shotgun's actual envelope, and it doubles as the reason
+        /// her slow wheelchair speed doesn't make her harmless -- she
+        /// only needs you to get close), high single-shot damage (heavier
+        /// than TankCannon's 34), and a slow cadence (a real shotgun's
+        /// own pump/reload beat, not sustained fire).</summary>
+        public static WeaponProfile Shotgun()
+        {
+            return new WeaponProfile(WeaponKind.Bullet, "shotgun blast", 9, 44, 2.0, 110, 0, 255, 200, 80);
+        }
+
+        /// <summary>A civilian sidearm -- "Armed Civilian" variant.
+        /// Modest range/damage/cadence, deliberately unremarkable: this is
+        /// someone who happened to be carrying a handgun, not a trained
+        /// combatant.</summary>
+        public static WeaponProfile Revolver()
+        {
+            return new WeaponProfile(WeaponKind.Bullet, "revolver", 16, 14, 1.0, 90, 0, 255, 230, 150);
+        }
+
+        /// <summary>2026-08: "Human Soldier" upgraded from flavor-only
+        /// aim/fire (docs/34) to a real weapon on the shared
+        /// HumanoidCombatant kit -- a trained infantry rifle: longer
+        /// range and faster cadence than Revolver/Shotgun (sustained,
+        /// aimed fire), lower per-shot damage than Shotgun (a rifle wins
+        /// at range through rate of fire, not one devastating hit).</summary>
+        public static WeaponProfile ServiceRifle()
+        {
+            return new WeaponProfile(WeaponKind.Bullet, "service rifle", 26, 12, 0.35, 140, 0, 255, 220, 140);
+        }
     }
 
     /// <summary>A combatant's fight stats derived from its genome: the

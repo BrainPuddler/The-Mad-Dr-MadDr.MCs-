@@ -49,6 +49,20 @@ Matching [04](04-combat-model.md)'s own convention of a worked numeric example:
 
 > An elderly Citizen in a wheelchair (mobility-limited body type, Speed ≈0.2 hex/s) rolls aggression 0.9 (Aggressive band — a high roll, independent of the frail archetype) and, on the 1% weapon roll, a shotgun-tier weapon: Power 30, Reach 2. Her own stat block is low — Vitality 40, Armor 0, Speed 0.2. Run through [04](04-combat-model.md)'s unchanged damage formula, she front-loads serious damage against a low-Vitality target at close range (30 × posMod × emitterMod × luckRoll, easily 25+ per hit before Armor) but dies in one or two hits herself once anything turns to face her — a glass-cannon environmental hazard, using zero new combat math.
 
+**2026-08: this stopped being a hypothetical.** [35](35-humanoid-combatant-kit.md)
+built a real, encounterable "Grandma in a wheelchair with a shotgun" —
+requested directly by the creator, who separately confirmed she should
+read as the OPPOSITE of this worked example's own glass-cannon framing
+("high Armour class basically a tank... and scary"), not a match for it.
+The real build uses a large health pool rather than a low one (this
+engine has no separate Armor stat at its combat layer, unlike the
+Vitality/Armor pair this doc's own model assumes) and a wide aggro
+radius rather than pure reach, so she's dangerous from well outside her
+own weapon's range — a different balance than this section's original
+"dies in one or two hits" sketch, on purpose. She isn't wired to the
+per-Citizen weapon-roll table above yet (a fixed, always-present spawn
+instead) — see docs/35 §4 for that as a named, scoped-out follow-up.
+
 ## 5. Population density vs. the entity budget
 
 [09-multiplayer-architecture.md](09-multiplayer-architecture.md) budgets ~60 synced entities for an entire match. A Big City preset at naive density (40–80 Citizens per city block) would blow that on its own — this is the system's hard constraint, not a detail.
