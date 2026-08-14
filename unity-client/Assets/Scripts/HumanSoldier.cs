@@ -50,6 +50,23 @@ public class HumanSoldier : MonoBehaviour
     private HumanCharacterRig _rig;
     private HumanCharacterAnimState _animState;
 
+    // 2026-08 (docs/25 Phase F, creator report on Worker's own version of
+    // this same complaint: "why can't you use the monster navigation
+    // system?"): real HexPathfinder A* routing for the patrol walk,
+    // same GroundPathFollower every Worker movement state now uses --
+    // see that class's own header. Passed a null `fighter` throughout
+    // (HumanSoldier deliberately has no UnitCombat, see this class's own
+    // header on why it's cosmetic-only) -- GroundPathFollower's local
+    // steering/separation layer needs a real UnitCombat to query
+    // neighbours against and is a no-op without one, so this Soldier
+    // gets the ROUTING half (patrols go around buildings, not through
+    // them) but not the local-avoidance half. Judged an acceptable v0.1
+    // gap rather than adding real combat-stat plumbing just to unlock
+    // it: only 4 Soldiers exist per match, patrolling a 10m loop around
+    // their own post, nowhere near Worker's 30-unit herding scale where
+    // unit-on-unit collision was the actual reported problem.
+    private readonly GroundPathFollower _pathFollower = new GroundPathFollower();
+
     public void Init(RuntimeCityBuilder builder, Vector3 post)
     {
         _builder = builder;
@@ -139,19 +156,33 @@ public class HumanSoldier : MonoBehaviour
     {
         var to = _patrolTarget - transform.position;
         to.y = 0f;
-        var dist = to.magnitude;
-        if (dist <= ArriveThreshold)
+        if (to.magnitude <= ArriveThreshold)
         {
+            _pathFollower.Clear();
             _state = SoldierState.Guard;
             _pickSalt++;
             _stateTimer = NextGuardDuration();
             return;
         }
-        var dir = to / Mathf.Max(dist, 0.0001f);
-        var step = dir * (MarchSpeed * dt);
-        transform.position += step;
-        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
-        HumanCharacterAnimator.TickLocomotion(_rig, _animState, step.magnitude, running: false, dt);
+
+        _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(_patrolTarget));
+        var pathDone = _pathFollower.Tick(_builder, transform, null, dt, MarchSpeed);
+        HumanCharacterAnimator.TickLocomotion(_rig, _animState, _pathFollower.LastStepDistance, running: false, dt);
+        // patrolTarget turned out genuinely unreachable -- don't just
+        // stand there for the rest of the guard cycle (same "movement
+        // preferred over standing" reasoning Worker's own wander fix
+        // applied), pick a fresh loop point immediately. Gated on still
+        // being clearly far away (not just outside this method's own
+        // tight ArriveThreshold) so a normal successful arrival -- the
+        // path follower's own body-scaled arrival test can legitimately
+        // finish a beat before/after this method's plain distance check
+        // does -- doesn't get misread as "stuck" and skip straight past
+        // the Guard state's idle beat.
+        if (pathDone && to.magnitude > ArriveThreshold * 2f)
+        {
+            var angle = Frac(_seed * 41.3f + (++_pickSalt) * 7.9f) * Mathf.PI * 2f;
+            _patrolTarget = _post + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * PatrolRadius;
+        }
     }
 
     /// <summary>A monster is within <see cref="AlertRadius"/> -- turn to

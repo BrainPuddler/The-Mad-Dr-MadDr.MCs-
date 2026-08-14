@@ -307,6 +307,25 @@ TickAttackUnit` doesn't route a moving-target chase through `FollowPath`
 either. `Citizen`/`HumanSoldier` are NOT wired to it in this pass --
 out of scope, this was a Worker-specific report.
 
+**Follow-up, same day: `HumanSoldier` given the routing half too.**
+`HumanSoldier.TickPatrol` now routes its short patrol-loop walk through
+the same `GroundPathFollower`, called with a `null` fighter throughout --
+`HumanSoldier` deliberately has no `UnitCombat` (cosmetic-only unit, no
+combat stats, see its own header), and `GroundPathFollower`/
+`SteerFollowPath`'s local separation/avoidance layer needs a real
+`UnitCombat` to query neighbours against, so it's a no-op without one.
+This Soldier gets real A*-routed patrols (around buildings, not through
+them) but not local unit-on-unit avoidance -- judged an acceptable v0.1
+gap rather than adding real combat-stat plumbing just to unlock
+avoidance for 4 Soldiers patrolling a 10 m loop each, nowhere near
+Worker's herding scale where unit-on-unit collision was the actual
+reported problem. `Citizen` remains untouched -- its sidewalk-only
+movement rule (docs/19) is a real, deliberate constraint `HexPathfinder`
+doesn't know how to honor as written (it would route straight through
+the street, not around it along the sidewalk), so wiring it in isn't a
+drop-in swap the way Worker/HumanSoldier's plain "walk to a point" logic
+was; a real design decision, not something to guess at unprompted.
+
 ## v0.1 tuning appendix
 
 To be filled in as each phase lands: separation force gain, avoidance
