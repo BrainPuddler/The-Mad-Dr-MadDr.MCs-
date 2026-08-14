@@ -158,6 +158,44 @@ namespace MadDr.RosterClient
         {
             return new WeaponProfile(WeaponKind.Bullet, "hunting rifle", 34, 20, 1.3, 150, 0, 230, 190, 120);
         }
+
+        // ---- Angry Civilian Mob (2026-08, creator direction: "a angry
+        // civilian mob, 10-15 packed close together, weak citizen with
+        // rocks, molotov cocktails, area attack but low damage") ----
+
+        /// <summary>A thrown rock -- the mob's baseline, majority weapon.
+        /// `Melee` kind (instant, very short reach), same rendering
+        /// precedent every other Melee weapon here already established
+        /// (no new WeaponFx case needed). Deliberately even weaker than
+        /// <see cref="ZombieClaws"/>, the previous weakest concrete
+        /// weapon in the codebase -- "weak citizen," the whole point of
+        /// this variant is numbers, not individual threat.</summary>
+        public static WeaponProfile ThrownRock()
+        {
+            return new WeaponProfile(WeaponKind.Melee, "thrown rock", 4, 4, 1.4, 0, 0, 150, 140, 130);
+        }
+
+        /// <summary>A molotov cocktail -- the mob's minority, more
+        /// dangerous role. `Spore` kind reused for its existing "a lobbed
+        /// round" arc mechanic (a thrown bottle, not a hitscan weapon),
+        /// same "reuse an existing WeaponKind's mechanic under different
+        /// flavor coloring" precedent Grandma's Shotgun/Militia's
+        /// ServiceRifle already established for this codebase -- fire-
+        /// orange tint (matching <see cref="TankFlamethrower"/>'s own
+        /// palette) rather than Spore's native biotech green, since shape/
+        /// mechanic carries "thrown," color carries "on fire." Short
+        /// range (has to get close enough to throw), slow cadence
+        /// (improvised, no rapid follow-up), and real per-hit damage
+        /// heavier than ThrownRock's -- but still single-target: this
+        /// engine's combat resolution (UnitCombat) has no multi-target
+        /// AOE mechanic to hook into, so "area attack" here is a visual/
+        /// fictional flourish (a fire splash at the impact point, not a
+        /// second damage application to nearby units) -- flagged
+        /// honestly, not silently faked as real AOE.</summary>
+        public static WeaponProfile MolotovCocktail()
+        {
+            return new WeaponProfile(WeaponKind.Spore, "molotov cocktail", 8, 9, 1.8, 26, 0, 255, 120, 30);
+        }
     }
 
     /// <summary>A combatant's fight stats derived from its genome: the

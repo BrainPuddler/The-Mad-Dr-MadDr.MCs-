@@ -362,4 +362,91 @@ public struct HumanCombatProfile
             TurnBeforeMove = false,
         };
     }
+
+    /// <summary>Angry Civilian Mob (2026-08, creator direction: "a angry
+    /// civilian mob, 10-15 packed close together, weak citizen with
+    /// rocks... low damage. Visually appealing tho."). The MAJORITY
+    /// role in a mob spawn -- deliberately the weakest hostile_civilian
+    /// variant in the codebase (lower MaxHealth than even Armed
+    /// Civilian), individually a non-threat; the mob's actual danger is
+    /// numbers, not any one rioter. Reused across many instances by
+    /// <see cref="RuntimeCityBuilder.SpawnAngryMob"/> with a per-instance
+    /// color jitter applied on top (see that method's own comment) so a
+    /// mob reads as a crowd of individuals, not identical clones.</summary>
+    public static HumanCombatProfile MobRioterRock()
+    {
+        return new HumanCombatProfile
+        {
+            Visual = new HumanCharacterProfile
+            {
+                BodyColor = new Color(0.42f, 0.36f, 0.3f),      // plain street clothes -- overridden per-instance, see SpawnAngryMob
+                AccentColor = new Color(0.3f, 0.24f, 0.2f),
+                HeightScale = 0.98f,
+                LimbThicknessScale = 0.95f,
+                ArmLengthScale = 1f,
+                ShoulderWidthScale = 0.95f,
+                HunchDegrees = 0f,
+                Asymmetric = false,
+                HasLegs = true,
+                HasHands = true,
+                OversizedHands = false,
+                HasBackpack = false,
+                Headgear = HeadgearKind.None,
+                Twitchy = false,
+            },
+            Faction = "hostile_civilian",
+            MaxHealth = 35f,
+            Radius = 0.45f,
+            AimHeight = 1.25f,
+            Mass = 0.9f,
+            MoveSpeed = 3.4f,
+            Weapon = WeaponProfile.ThrownRock(),
+            AggroRadius = 18f,
+            Aggressive = true,
+            TurnBeforeMove = false,
+        };
+    }
+
+    /// <summary>Angry Civilian Mob -- the MINORITY role (a smaller
+    /// fraction of any one mob spawn, see <see
+    /// cref="RuntimeCityBuilder.SpawnAngryMob"/>'s own mix ratio): the
+    /// more dangerous rioter, carrying a molotov instead of a rock.
+    /// Slightly tougher than <see cref="MobRioterRock"/> (still weak
+    /// overall -- this is still "weak citizen," not a real combatant)
+    /// with a visibly different silhouette accent (a lit rag/bottle
+    /// read via a warmer accent tone) so the two roles are tellable
+    /// apart in a crowd, not just numerically different.</summary>
+    public static HumanCombatProfile MobRioterMolotov()
+    {
+        return new HumanCombatProfile
+        {
+            Visual = new HumanCharacterProfile
+            {
+                BodyColor = new Color(0.42f, 0.36f, 0.3f),
+                AccentColor = new Color(0.55f, 0.28f, 0.12f),   // warmer, fire-adjacent accent -- the "carries the dangerous one" tell
+                HeightScale = 0.98f,
+                LimbThicknessScale = 0.95f,
+                ArmLengthScale = 1f,
+                ShoulderWidthScale = 0.95f,
+                HunchDegrees = 0f,
+                Asymmetric = false,
+                HasLegs = true,
+                HasHands = true,
+                OversizedHands = false,
+                HasBackpack = false,
+                Headgear = HeadgearKind.None,
+                Twitchy = false,
+            },
+            Faction = "hostile_civilian",
+            MaxHealth = 42f,
+            Radius = 0.45f,
+            AimHeight = 1.25f,
+            Mass = 0.95f,
+            MoveSpeed = 3.2f,
+            Weapon = WeaponProfile.MolotovCocktail(),
+            AggroRadius = 20f,
+            Aggressive = true,
+            TurnBeforeMove = false,
+        };
+    }
 }

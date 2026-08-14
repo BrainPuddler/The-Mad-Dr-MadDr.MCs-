@@ -1,3 +1,4 @@
+using MadDr.RosterClient;
 using UnityEngine;
 
 /// <summary>
@@ -98,21 +99,47 @@ public class HumanoidCombatant : MonoBehaviour
     /// little larger/shorter than a rifle when this variant's weapon
     /// reads as a shotgun (`WeaponKind.Bullet` doesn't itself distinguish
     /// "rifle" from "shotgun" -- this is a silhouette cue only, not a
-    /// gameplay one).</summary>
+    /// gameplay one).
+    ///
+    /// 2026-08 (Angry Civilian Mob, creator direction: "Visually
+    /// appealing tho"): `WeaponKind.Melee`/`Spore` variants (ThrownRock/
+    /// MolotovCocktail) get a genuinely different prop shape here --
+    /// a small fist-sized rock, or a bottle with a lit rag tint -- rather
+    /// than falling through to the gun-barrel silhouette every Bullet-
+    /// kind variant uses, which would read wrong for something that's
+    /// explicitly not a firearm.</summary>
     private void BuildWeaponProp()
     {
         if (_rig.RightElbow == null || _profile.Weapon == null || !_profile.Weapon.CanAttack) return;
+
+        if (_profile.Weapon.Kind == WeaponKind.Melee)
+        {
+            SpawnWeaponPropCube(new Vector3(0.06f, -0.3f, 0.1f), new Vector3(0.12f, 0.1f, 0.11f), new Color(0.42f, 0.4f, 0.38f));
+            return;
+        }
+        if (_profile.Weapon.Kind == WeaponKind.Spore)
+        {
+            SpawnWeaponPropCube(new Vector3(0.06f, -0.3f, 0.12f), new Vector3(0.08f, 0.22f, 0.08f), new Color(0.16f, 0.32f, 0.14f));
+            SpawnWeaponPropCube(new Vector3(0.06f, -0.17f, 0.12f), new Vector3(0.05f, 0.06f, 0.05f), new Color(0.9f, 0.55f, 0.1f));   // the lit rag, poking out the top
+            return;
+        }
+
         var isShotgun = _profile.Weapon.Range <= 10f;   // Shotgun() is the only short-range firearm profile today
+        var scale = isShotgun ? new Vector3(0.08f, 0.08f, 0.4f) : new Vector3(0.05f, 0.05f, 0.55f);
+        SpawnWeaponPropCube(new Vector3(0.05f, -0.32f, 0.16f), scale, new Color(0.15f, 0.13f, 0.11f));
+    }
+
+    private void SpawnWeaponPropCube(Vector3 localPos, Vector3 scale, Color color)
+    {
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
         go.transform.SetParent(_rig.RightElbow, false);
-        go.transform.localPosition = new Vector3(0.05f, -0.32f, 0.16f);
-        go.transform.localScale = isShotgun ? new Vector3(0.08f, 0.08f, 0.4f) : new Vector3(0.05f, 0.05f, 0.55f);
+        go.transform.localPosition = localPos;
+        go.transform.localScale = scale;
         var collider = go.GetComponent<Collider>();
         if (collider != null) Object.Destroy(collider);
         var renderer = go.GetComponent<Renderer>();
         renderer.sharedMaterial = HumanCharacterKit.SharedMaterial();
         var mpb = new MaterialPropertyBlock();
-        var color = new Color(0.15f, 0.13f, 0.11f);
         mpb.SetColor("_BaseColor", color);
         mpb.SetColor("_Color", color);
         renderer.SetPropertyBlock(mpb);

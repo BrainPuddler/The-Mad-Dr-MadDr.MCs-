@@ -3494,6 +3494,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         }
 
         SpawnHostileCivilians(center, blocked, claimed);
+        SpawnAngryMob(center, blocked, claimed);
     }
 
     /// <summary>v0.1 placeholder (CLAUDE.md's standing "flag the invented
@@ -3582,48 +3583,202 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     // constant in this file. Neutral to every player -- these are city
     // threats, not aligned with whichever faction the human or any AI
     // opponent picked, so this spawns once per match regardless of
-    // faction choice, unlike SpawnStartingWorkers/SpawnStartingSoldiers.
-    private const int GrandmaCount = 1;
-    private const int ArmedCivilianCount = 3;
+    // faction choice, unlike SpawnStartingWorkers/SpawnStartingBarracks.
 
-    /// <summary>Scatters Grandma + Armed Civilians across the whole city
-    /// (not clustered near any one base, unlike every other spawn method
-    /// in this file) -- deterministic golden-ratio angle/radius spacing
-    /// off each civilian's own index (same "no UnityEngine.Random"
-    /// convention this codebase uses throughout, e.g. Citizen's own
-    /// per-instance hashing) so they decorrelate without clumping the
-    /// way evenly-divided angles would for a small count. `AiOpponentSeedRing`'s
-    /// own R-axis 0.6 correction for this hex grid's axial-to-square
-    /// aspect is reused here for the same reason.
+    /// <summary>2026-08 (creator direction: "start building Citizen with
+    /// guns, army etc"): how many hypothetical Citizens this roll
+    /// actually samples per match -- a plausible neighborhood-sized
+    /// population, not the whole city's real Citizen count (which this
+    /// method doesn't touch at all; `Citizen.cs`'s own harmless
+    /// background population is untouched, same docs/34 §0 scope cut as
+    /// always). v0.1 placeholder, sized so the EXPECTED number of real
+    /// armed-and-aggressive spawns lands in roughly the same range the
+    /// old fixed "1 Grandma + 3 Armed Civilian" count did (docs/19 §3's
+    /// 15% total armed rate x the 40% Aggressive-band fraction below x
+    /// this sample size ≈ 3), not a claim about a real city's actual
+    /// armed-citizen rate.</summary>
+    private const int CitizenRollSampleSize = 50;
+
+    // docs/19 §2's own aggression bands: Aggressive is 0.6-1.0. Only
+    // this band "may attack proactively if armed" (§3) -- Defensive
+    // civilians "fight only if cornered or attacked first," which isn't
+    // a real spawned THREAT in the sense this method cares about (no
+    // proactive HumanoidCombatant to place), and Passive "always flees."
+    // A v0.1 simplification: only Aggressive-band armed rolls produce a
+    // real spawn here; Defensive/Passive rolls are silently absorbed
+    // back into the ordinary, unarmed-reading Citizen population this
+    // method never touches.
+    private const float AggressiveBandThreshold = 0.6f;
+
+    // docs/19 §3's real weight table, as cumulative thresholds against a
+    // single 0..1 roll: Unarmed 85%, Improvised melee +10% (=0.95),
+    // Handgun +4% (=0.99), Shotgun/rifle-tier +1% (=1.0).
+    private const float ImprovisedMeleeCumulative = 0.85f;
+    private const float HandgunCumulative = 0.95f;
+    private const float ShotgunTierCumulative = 0.99f;
+
+    /// <summary>docs/19 §3/§4's own real weapon-roll table, wired to an
+    /// actual spawn for the first time -- supersedes the old flat,
+    /// always-present "1 Grandma + 3 Armed Civilian" count (docs/35 §4's
+    /// own scope note flagged this as the natural follow-up). Each of
+    /// <see cref="CitizenRollSampleSize"/> hypothetical Citizens rolls a
+    /// weapon tier AND an independent aggression value (same "no
+    /// UnityEngine.Random, deterministic per-index Frac hashing"
+    /// convention this codebase uses throughout); only a roll that lands
+    /// BOTH armed and Aggressive-band (§3: "may attack proactively if
+    /// armed") becomes a real spawn -- Grandma is literally docs/19 §4's
+    /// own worked example for the shotgun-tier roll, so that tier maps
+    /// to her unconditionally; Handgun maps to Armed Civilian (the
+    /// existing generic "ordinary armed civilian" profile); Improvised
+    /// melee maps to <see cref="HumanCombatProfile.MobRioterRock"/>
+    /// (built for the Angry Civilian Mob below, but its "citizen swinging
+    /// something blunt" read fits an ordinary improvised-melee roll just
+    /// as well outside a mob context). Scattered across the whole city,
+    /// same golden-ratio angle/radius spacing the old fixed-count version
+    /// already established.
     ///
-    /// v0.1 scope note: docs/19 §3/§4 already designed a richer, more
-    /// coherent version of this exact idea -- ordinary Citizens randomly
-    /// rolling weapon access and aggression independently of age/body
-    /// type, with an armed+aggressive+elderly+wheelchair roll being
-    /// EXACTLY Grandma. Wiring THAT system to spawn `HumanoidCombatant`
-    /// variants instead of this flat, always-present spawn is the
-    /// natural, more design-coherent follow-up (Citizens becoming
-    /// genuinely dangerous some of the time, not a guaranteed fixed
-    /// count every match) -- out of scope for this pass, which just
-    /// needed these variants to exist and be encounterable at all.</summary>
+    /// Police/SWAT/Hunter/Militia are deliberately NOT part of this roll
+    /// -- they're professional/specialist archetypes (docs/35's own
+    /// "Refactor Human Soldiers & Armed Citizens" roster), not organic
+    /// outcomes of an ordinary citizen's weapon-access roll, so they get
+    /// their own small fixed-count scattered spawn instead (same shape
+    /// this whole method used before this rewrite), not folded into
+    /// docs/19's table.</summary>
     private void SpawnHostileCivilians(HexCoord center, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
     {
         if (_simBridge == null) return;
-        var total = GrandmaCount + ArmedCivilianCount;
-        for (var i = 0; i < total; i++)
-        {
-            var angle = Frac(i * 0.618034f + 0.13f) * Mathf.PI * 2f;
-            var dist = Mathf.Lerp(25f, 90f, Frac(i * 0.381966f + 0.37f));
-            var q = center.Q + Mathf.RoundToInt(dist * Mathf.Cos(angle));
-            var r = center.R + Mathf.RoundToInt(dist * Mathf.Sin(angle) * 0.6f);
-            var seedHex = new HexCoord(q, r);
-            if (!_city.Contains(seedHex)) seedHex = center;
 
-            var hex = FindOpenHexWide(seedHex, blocked, claimed, 24);
+        var spawnIndex = 0;
+        for (var i = 0; i < CitizenRollSampleSize; i++)
+        {
+            var weaponRoll = Frac(i * 0.618034f + 0.05f);
+            var aggressionRoll = Frac(i * 0.415236f + 0.71f);
+            if (aggressionRoll < AggressiveBandThreshold) continue;   // Defensive/Passive -- no proactive threat, absorbed back into the ordinary population
+
+            HumanCombatProfile profile;
+            string label;
+            if (weaponRoll < ImprovisedMeleeCumulative) continue;   // Unarmed (85%) -- nothing to spawn
+            if (weaponRoll < HandgunCumulative) { profile = HumanCombatProfile.MobRioterRock(); label = "RowdyCitizen"; }
+            else if (weaponRoll < ShotgunTierCumulative) { profile = HumanCombatProfile.ArmedCivilian(); label = "ArmedCivilian"; }
+            else { profile = HumanCombatProfile.Grandma(); label = "Grandma"; }
+
+            SpawnScatteredThreat(center, blocked, claimed, profile, label, spawnIndex);
+            spawnIndex++;
+        }
+
+        SpawnNamedThreats(center, blocked, claimed, spawnIndex);
+    }
+
+    // v0.1 placeholder counts (CLAUDE.md's standing policy) -- specialist
+    // archetypes, deliberately small and fixed rather than rolled (see
+    // SpawnHostileCivilians's own doc comment for why).
+    private const int PoliceCount = 2;
+    private const int SwatCount = 1;
+    private const int HunterCount = 2;
+    private const int MilitiaCount = 2;
+
+    private void SpawnNamedThreats(HexCoord center, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed, int startIndex)
+    {
+        var i = startIndex;
+        for (var n = 0; n < PoliceCount; n++) SpawnScatteredThreat(center, blocked, claimed, HumanCombatProfile.Police(), "Police", i++);
+        for (var n = 0; n < SwatCount; n++) SpawnScatteredThreat(center, blocked, claimed, HumanCombatProfile.Swat(), "Swat", i++);
+        for (var n = 0; n < HunterCount; n++) SpawnScatteredThreat(center, blocked, claimed, HumanCombatProfile.Hunter(), "Hunter", i++);
+        for (var n = 0; n < MilitiaCount; n++) SpawnScatteredThreat(center, blocked, claimed, HumanCombatProfile.Militia(), "Militia", i++);
+    }
+
+    /// <summary>Places one hostile_civilian-track threat, scattered
+    /// across the whole city off its own `index` -- the exact golden-
+    /// ratio angle/radius formula the old fixed-count SpawnHostileCivilians
+    /// used, generalized to any index/count rather than a hardcoded small
+    /// total. `AiOpponentSeedRing`'s own R-axis 0.6 correction for this
+    /// hex grid's axial-to-square aspect is reused here for the same
+    /// reason it always was.</summary>
+    private void SpawnScatteredThreat(HexCoord center, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed,
+        HumanCombatProfile profile, string label, int index)
+    {
+        var angle = Frac(index * 0.618034f + 0.13f) * Mathf.PI * 2f;
+        var dist = Mathf.Lerp(25f, 90f, Frac(index * 0.381966f + 0.37f));
+        var q = center.Q + Mathf.RoundToInt(dist * Mathf.Cos(angle));
+        var r = center.R + Mathf.RoundToInt(dist * Mathf.Sin(angle) * 0.6f);
+        var seedHex = new HexCoord(q, r);
+        if (!_city.Contains(seedHex)) seedHex = center;
+
+        var hex = FindOpenHexWide(seedHex, blocked, claimed, 24);
+        claimed.Add(hex);
+        var go = new GameObject(label + "_" + index);
+        var combatant = go.AddComponent<HumanoidCombatant>();
+        combatant.Init(this, profile, WorldOf(hex));
+    }
+
+    // v0.1 placeholder (CLAUDE.md's standing policy) -- "10-15 packed
+    // close together" (creator direction, verbatim); mid-range of that.
+    private const int AngryMobSize = 12;
+    // ~30% carry a molotov instead of a rock -- the mob's own minority,
+    // more-dangerous role (HumanCombatProfile.MobRioterMolotov's own doc
+    // comment).
+    private const float MolotovFraction = 0.3f;
+    // "packed close together" -- a tight scatter radius, genuinely
+    // different from SpawnScatteredThreat's 25-90m whole-city spread
+    // (a single rioter is a city-wide threat; a MOB is one dense crowd
+    // at one place).
+    private const float AngryMobRadius = 6f;
+
+    /// <summary>2026-08 (creator direction: "a angry civilian mob, 10-15
+    /// packed close together. but weak citizen with rocks, molotov
+    /// cocktails; area attack, but low damage. Visually appealing
+    /// tho."). ONE cluster per match (a rare, distinct city event,
+    /// unlike the whole-city-scattered singles <see
+    /// cref="SpawnHostileCivilians"/> places) -- deterministic offset
+    /// from `center`, then every rioter placed by real per-instance
+    /// jitter within <see cref="AngryMobRadius"/> so they read as
+    /// "packed close together" without literally stacking on one hex.
+    /// Each rioter also gets a small per-instance BodyColor jitter (the
+    /// maddr-aesthetic-preferences skill's own "group movement should
+    /// read as a group of individuals, not a clump" principle, applied
+    /// to color since these aren't independently pathed the way a
+    /// Worker herd is) so a dozen rioters don't read as identical
+    /// clones. No real area-of-effect damage mechanic (see
+    /// <see cref="WeaponProfile.MolotovCocktail"/>'s own doc comment for
+    /// why, honestly) -- "area attack" is a visual/fictional read here,
+    /// not a second damage application to nearby units.</summary>
+    private void SpawnAngryMob(HexCoord center, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
+    {
+        if (_simBridge == null) return;
+
+        // A single deterministic offset from center, distinct from any
+        // SpawnScatteredThreat index range so the two spawn systems'
+        // golden-ratio streams don't accidentally correlate.
+        var mobAngle = Frac(0.9017f) * Mathf.PI * 2f;
+        var mobDist = Mathf.Lerp(40f, 100f, Frac(0.2601f));
+        var mobQ = center.Q + Mathf.RoundToInt(mobDist * Mathf.Cos(mobAngle));
+        var mobR = center.R + Mathf.RoundToInt(mobDist * Mathf.Sin(mobAngle) * 0.6f);
+        var mobSeedHex = new HexCoord(mobQ, mobR);
+        if (!_city.Contains(mobSeedHex)) mobSeedHex = center;
+        var mobCenterHex = FindOpenHexWide(mobSeedHex, blocked, claimed, 24);
+
+        for (var i = 0; i < AngryMobSize; i++)
+        {
+            var jitterAngle = Frac(i * 0.618034f + 0.41f) * Mathf.PI * 2f;
+            var jitterDist = Mathf.Lerp(0f, AngryMobRadius, Frac(i * 0.381966f + 0.59f));
+            var q = mobCenterHex.Q + Mathf.RoundToInt(jitterDist * Mathf.Cos(jitterAngle) * 0.35f);
+            var r = mobCenterHex.R + Mathf.RoundToInt(jitterDist * Mathf.Sin(jitterAngle) * 0.35f * 0.6f);
+            var seedHex = new HexCoord(q, r);
+            if (!_city.Contains(seedHex)) seedHex = mobCenterHex;
+            var hex = FindOpenHexWide(seedHex, blocked, claimed, 6);
             claimed.Add(hex);
-            var profile = i < GrandmaCount ? HumanCombatProfile.Grandma() : HumanCombatProfile.ArmedCivilian();
-            var name = i < GrandmaCount ? "Grandma_" + i : "ArmedCivilian_" + (i - GrandmaCount);
-            var go = new GameObject(name);
+
+            var isMolotov = Frac(i * 0.246f + 0.83f) < MolotovFraction;
+            var profile = isMolotov ? HumanCombatProfile.MobRioterMolotov() : HumanCombatProfile.MobRioterRock();
+            // per-instance color jitter -- a crowd of individuals, not
+            // identical clones (struct copy, mutating the local copy
+            // only, the shared preset is unaffected).
+            var jitter = Frac(i * 0.539f + 0.17f) * 0.18f - 0.09f;
+            profile.Visual.BodyColor = new Color(
+                Mathf.Clamp01(profile.Visual.BodyColor.r + jitter),
+                Mathf.Clamp01(profile.Visual.BodyColor.g + jitter * 0.8f),
+                Mathf.Clamp01(profile.Visual.BodyColor.b + jitter * 0.6f));
+
+            var go = new GameObject((isMolotov ? "MobMolotov_" : "MobRock_") + i);
             var combatant = go.AddComponent<HumanoidCombatant>();
             combatant.Init(this, profile, WorldOf(hex));
         }

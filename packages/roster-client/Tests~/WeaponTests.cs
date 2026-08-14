@@ -173,6 +173,35 @@ public class WeaponTests
     }
 
     [Fact]
+    public void MobWeaponsAreWeakAndReuseExistingKinds()
+    {
+        // 2026-08 (Angry Civilian Mob): "weak citizen... low damage" --
+        // verify the actual numbers back that up, not just the flavor
+        // text. Both reuse an EXISTING WeaponKind (Melee/Spore) rather
+        // than inventing new rendering paths -- see each factory's own
+        // doc comment for why.
+        var rock = WeaponProfile.ThrownRock();
+        var molotov = WeaponProfile.MolotovCocktail();
+        var claws = WeaponProfile.ZombieClaws();
+
+        Assert.Equal(WeaponKind.Melee, rock.Kind);
+        Assert.Equal(WeaponKind.Spore, molotov.Kind);
+
+        // "even weaker than ZombieClaws" -- the previous weakest concrete
+        // weapon in the codebase (a thrown rock's actual reach can
+        // reasonably beat a claw swing's -- throwing something IS the
+        // point of reach -- so only damage is the claimed comparison
+        // here, not range).
+        Assert.True(rock.Damage < claws.Damage);
+
+        // molotov is the more dangerous of the two mob weapons, but still
+        // well below any trained-combatant firearm's damage.
+        Assert.True(molotov.Damage > rock.Damage);
+        var rifle = WeaponProfile.ServiceRifle();
+        Assert.True(molotov.Damage < rifle.Damage);
+    }
+
+    [Fact]
     public void HealthScalesWithBulkAndHeart()
     {
         var lean = Combat.Profile(Genome(bodyParams: new[] { 0.5, 0.1, 0.5, 0.5 }, heartTier: "faint")).MaxHealth;
