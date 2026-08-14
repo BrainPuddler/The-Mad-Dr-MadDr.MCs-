@@ -276,6 +276,37 @@ a docs/12 decision-log entry, per repo convention.
   corridor-jam cases; final docs/12 entry closing this plan out.
   **Status: not started.**
 
+## Phase F (2026-08, not part of the original plan) — a second consumer
+
+Creator report on `Worker`'s new herding/wander behavior: "same problem as
+the monsters, walking directly toward each other and not wandering. Why
+can't you use the monster navigation system? advantages cost or is there a
+reason?" There was no real cost/architecture reason — `Worker` (and every
+other non-`MonsterAgent` unit in this codebase: `Citizen`, `HumanSoldier`)
+simply predates this system and was never wired to it, straight-line-
+seek-plus-hard-separation exactly like monsters were before Phase A-D
+landed.
+
+New `GroundPathFollower.cs`: a standalone, ground-only, reusable wrapper
+around the SAME two building blocks `MonsterAgent.FollowPath` uses --
+`HexPathfinder.FindPath` for the global route, `RuntimeCityBuilder.
+SteerFollowPath`/`MonsterSteeringController` for local blended separation
+and predictive avoidance, including `DeadlockManager`'s yield mechanism
+for free (`SteerFollowPath` already reads any `UnitCombat`'s `YieldUntil`/
+`YieldTarget`, and Worker's own `UnitCombat` is already in the same
+`RuntimeCityBuilder.Combatants` pool `DeadlockManager` scans). Deliberately
+NOT a refactor of `MonsterAgent`'s own private `FollowPath`/`ComputePath`/
+`RecomputeIfCityChanged` into a shared utility both classes call through --
+that method is combat-critical, already tuned across real engineering
+against real bugs (this doc's own Phase D section above), and carries
+flying-unit branches a ground-only consumer has no use for. `Worker`'s
+every movement Tick* method (PlayerMove/SeekBuild/SeekScavenge/Wander/
+SeekDeliver) now routes through it; `Worker`'s close-range combat chase
+deliberately still steps directly, same reasoning `MonsterAgent.
+TickAttackUnit` doesn't route a moving-target chase through `FollowPath`
+either. `Citizen`/`HumanSoldier` are NOT wired to it in this pass --
+out of scope, this was a Worker-specific report.
+
 ## v0.1 tuning appendix
 
 To be filled in as each phase lands: separation force gain, avoidance

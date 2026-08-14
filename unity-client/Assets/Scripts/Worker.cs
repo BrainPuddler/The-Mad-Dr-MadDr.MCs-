@@ -170,6 +170,21 @@ public class Worker : MonoBehaviour
     private bool _dying;
     private float _deathTimer;
 
+    // 2026-08 (creator report: "same problem as the monsters, walking
+    // directly toward each other and not wandering. Why can't you use
+    // the monster navigation system?"): a Worker never had a real
+    // reason not to -- see GroundPathFollower's own header. Every
+    // movement Tick* method below (PlayerMove/SeekBuild/SeekScavenge/
+    // Wander/SeekDeliver) now routes through this instead of a raw
+    // straight-line step -- real HexPathfinder A* routing plus
+    // MonsterAgent-grade local steering, not a new invention. TickCombat
+    // (chasing a MOVING enemy at close range) deliberately still steps
+    // directly -- full-repathing against a target that changes position
+    // every frame would be wasted work for no benefit, the same reason
+    // MonsterAgent's own combat-chase logic doesn't route through
+    // FollowPath either.
+    private readonly GroundPathFollower _pathFollower = new GroundPathFollower();
+
     public UnitCombat Combat { get { return _combat; } }
 
     public void Init(RuntimeCityBuilder builder)
@@ -325,13 +340,11 @@ public class Worker : MonoBehaviour
     {
         var to = _moveTarget - transform.position;
         to.y = 0f;
-        var dist = to.magnitude;
-        if (dist <= ArriveThreshold) { _state = ZombieState.Idle; return; }
-        var dir = to / Mathf.Max(dist, 0.0001f);
-        var step = dir * (MoveSpeed * dt);
-        transform.position += step;
-        _frameMoveDistance = step.magnitude;
-        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
+        if (to.magnitude <= ArriveThreshold) { _pathFollower.Clear(); _state = ZombieState.Idle; return; }
+
+        _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(_moveTarget));
+        _pathFollower.Tick(_builder, transform, _combat, dt, MoveSpeed);
+        _frameMoveDistance = _pathFollower.LastStepDistance;
     }
 
     /// <summary>Idle-time decision: a carried load takes priority over
@@ -416,16 +429,32 @@ public class Worker : MonoBehaviour
         var arrived = to.magnitude <= ArriveThreshold;
         if (arrived || _wanderRepickTimer <= 0f)
         {
-            if (TryFindRealWork()) return;   // real work appeared nearby -- drop the herd, go do it
+            if (TryFindRealWork()) { _pathFollower.Clear(); return; }   // real work appeared nearby -- drop the herd, go do it
             _moveTarget = PickWanderTarget();
             _wanderRepickTimer = WanderRepickInterval;
             return;
         }
-        var dir = to.normalized;
-        var step = dir * (MoveSpeed * WanderSpeedFraction * dt);
-        transform.position += step;
-        _frameMoveDistance = step.magnitude;
-        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
+
+        // 2026-08 (creator report: "same problem as the monsters, walking
+        // directly toward each other... why can't you use the monster
+        // navigation system?"): real routing + local steering instead of
+        // a raw straight-line step, same as every other Worker movement
+        // state -- see GroundPathFollower's own header.
+        _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(_moveTarget));
+        var pathDone = _pathFollower.Tick(_builder, transform, _combat, dt, MoveSpeed * WanderSpeedFraction);
+        _frameMoveDistance = _pathFollower.LastStepDistance;
+        // the wander target itself turned out unreachable (or the path
+        // finished but left us short of ArriveThreshold, e.g. the goal-
+        // substitution landed on a building's neighbour rather than the
+        // exact point) -- re-pick immediately rather than sit doing
+        // nothing for up to WanderRepickInterval. "Movement is preferred
+        // over standing" (creator direction) applies here just as much
+        // as it does to PickWanderTarget's own retry loop.
+        if (pathDone && !arrived)
+        {
+            _moveTarget = PickWanderTarget();
+            _wanderRepickTimer = WanderRepickInterval;
+        }
     }
 
     // 2026-08 (creator report: "workers are not wandering. They wandered
@@ -518,6 +547,7 @@ public class Worker : MonoBehaviour
             // gone, completed, destroyed, or already claimed by another
             // Worker -- give up and let TickIdle re-decide next frame.
             _stationedBuildingId = null;
+            _pathFollower.Clear();
             _state = ZombieState.Idle;
             return;
         }
@@ -528,14 +558,14 @@ public class Worker : MonoBehaviour
         if (to.magnitude <= BuildReach)
         {
             _builder.SimBridge.QueueSetBuildingStaffedCommand(0, target.EntityId, true);
+            _pathFollower.Clear();
             _state = ZombieState.Staffing;
             return;
         }
-        var dir = to.normalized;
-        var step = dir * (MoveSpeed * dt);
-        transform.position += step;
-        _frameMoveDistance = step.magnitude;
-        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
+
+        _pathFollower.SetGoal(_builder, transform.position, target.Hex);
+        _pathFollower.Tick(_builder, transform, _combat, dt, MoveSpeed);
+        _frameMoveDistance = _pathFollower.LastStepDistance;
     }
 
     /// <summary>Stand still and keep this building staffed -- match-core's
@@ -559,21 +589,21 @@ public class Worker : MonoBehaviour
 
     private void TickSeekScavenge(float dt)
     {
-        if (_scavengeTarget == null) { _state = ZombieState.Idle; return; }
+        if (_scavengeTarget == null) { _pathFollower.Clear(); _state = ZombieState.Idle; return; }
         var bp = NearestFootprintPoint(_scavengeTarget);
         var flat = bp - transform.position;
         flat.y = 0f;
         if (flat.magnitude <= ScavengeReach)
         {
             _scavengeTickTimer = 0f;
+            _pathFollower.Clear();
             _state = ZombieState.Scavenging;
             return;
         }
-        var dir = flat.normalized;
-        var step = dir * (MoveSpeed * dt);
-        transform.position += step;
-        _frameMoveDistance = step.magnitude;
-        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
+
+        _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(bp));
+        _pathFollower.Tick(_builder, transform, _combat, dt, MoveSpeed);
+        _frameMoveDistance = _pathFollower.LastStepDistance;
     }
 
     /// <summary>In reach, actively clearing -- continuously requests its
@@ -644,7 +674,7 @@ public class Worker : MonoBehaviour
     /// cref="TickSeekScavenge"/> already use for their own targets.</summary>
     private void TickSeekDeliver(float dt)
     {
-        if (_carriedParts <= 0.01f) { _state = ZombieState.Idle; return; }
+        if (_carriedParts <= 0.01f) { _pathFollower.Clear(); _state = ZombieState.Idle; return; }
         var dest = _builder.NearestOwnFactoryApproachPosition(transform.position);
         var to = dest - transform.position;
         to.y = 0f;
@@ -652,14 +682,14 @@ public class Worker : MonoBehaviour
         {
             _builder.BankHarvestLoad(0f, 0f, 0f, _carriedParts);
             _carriedParts = 0f;
+            _pathFollower.Clear();
             _state = ZombieState.Idle;
             return;
         }
-        var dir = to.normalized;
-        var step = dir * (MoveSpeed * dt);
-        transform.position += step;
-        _frameMoveDistance = step.magnitude;
-        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir, Vector3.up), dt * 5f);
+
+        _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(dest));
+        _pathFollower.Tick(_builder, transform, _combat, dt, MoveSpeed);
+        _frameMoveDistance = _pathFollower.LastStepDistance;
     }
 
     private Vector3 NearestFootprintPoint(Building building)

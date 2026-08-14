@@ -17425,3 +17425,42 @@ Also finally wires up `HumanCharacterAnimator.TickCarry` (built during
 the character-system-overhaul pass, docs/34, but never actually used by
 any Worker state until now) for the delivery walk -- "carry resources
 visibly."
+
+## 2026-08 same-day follow-up: Worker given real navigation (docs/25 Phase F)
+
+Creator: "same problem as the monsters, walking directly toward each
+other and not wandering. Why can't you use the monster navigation
+system? advantages cost or is there a reason?" Researched before
+touching code (an Explore agent, read-only): confirmed there was no
+real cost or architectural reason -- `Worker` was still doing straight-
+line seek plus an after-the-fact hard separation push, literally the
+pre-Phase-B/C `MonsterAgent` architecture docs/25 replaced for monsters
+back in 2026-07. `Worker` just never got the same upgrade.
+
+New `GroundPathFollower.cs` (docs/25's own Phase F addendum has the
+full design): a standalone ground-only wrapper around the exact same
+`HexPathfinder` A* + `MonsterSteeringController`/`RuntimeCityBuilder.
+SteerFollowPath` local-avoidance stack `MonsterAgent.FollowPath`
+already uses -- not a refactor of that combat-critical, already-tuned
+method, a parallel consumer of the same underlying systems. Every
+Worker movement state (PlayerMove/SeekBuild/SeekScavenge/Wander/
+SeekDeliver) now routes through it instead of a raw straight-line
+step; TickCombat's close-range chase deliberately still doesn't, same
+reasoning MonsterAgent's own moving-target combat chase skips
+full-repathing too.
+
+Also closes out the wander-freeze fix from earlier today with a
+second layer: if `PickWanderTarget`'s own (already-legal) candidate
+still turns out unreachable by real pathfinding, or the route finishes
+short of arrival, `TickWander` now re-picks immediately instead of
+waiting out the full repick interval -- "movement is preferred over
+standing" applied one level deeper. `GroundPathFollower` also caches a
+known-unreachable goal (cleared the moment the goal or the city's
+blocked-hex set changes) so a persistently-bad target doesn't force a
+full A* search every single frame.
+
+Explicitly NOT touched: `MonsterAgent.cs` itself (zero risk to
+already-working combat movement), and `Citizen`/`HumanSoldier` (out of
+scope -- this was a Worker-specific report; both are candidates for
+the same treatment if/when they get their own version of this
+complaint).
