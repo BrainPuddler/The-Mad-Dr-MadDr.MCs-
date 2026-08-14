@@ -17243,3 +17243,13 @@ sure. Adhere to that."), and it's the mechanism that already does
 exactly that. Only the SHAPE of each transition and the presence of a
 wobble changed; WHEN a given window's switch flips did not. Full
 diagnosis and the specific constants/globals removed: docs/33 §10.
+
+## 2026-08: fog density night default retuned again
+
+Creator: "set fog density night default to: 0.01842." Supersedes the
+2026-07 round just above this one (0.034) -- roughly half the density.
+Set on both `LumenCycleController.fogDensityNight` (the live-consumed
+field) and its mirror `CityLightingProfile.FogDensityNight`, same
+pairing every prior fog-default change in this log has kept in sync.
+`fogDensityScale` (0.41) untouched -- only asked to change the Night
+per-phase value this time.

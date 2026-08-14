@@ -150,7 +150,7 @@ public class CityLightingProfile : ScriptableObject
 
     [Tooltip("Fog density at full Night. See LumenCycleController.fogDensityNight.")]
     [Range(0f, 0.1f)]
-    public float FogDensityNight = 0.034f;
+    public float FogDensityNight = 0.01842f;
 
     [Tooltip("Multiplies the blended fog density curve at EVERY time of day, live. See LumenCycleController.fogDensityScale.")]
     [Range(0f, 3f)]
