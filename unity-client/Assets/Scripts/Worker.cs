@@ -154,6 +154,34 @@ public class Worker : MonoBehaviour
     private int _wanderPickSalt;
     private float _wanderRepickTimer;
 
+    // 2026-08 root-cause redesign (creator debug report on circular
+    // following/stalling) -- see RuntimeCityBuilder.TryFindHerdLeader's
+    // own header for the full proof. null = this Worker is a LEADER
+    // (independent -- picks its own fresh wander targets, never follows
+    // anyone); non-null = a FOLLOWER continuously tracking that other
+    // Worker's live position. The single invariant enforced in
+    // BeginWander (a Worker with existing followers can never itself
+    // become a follower) is what makes chains/cycles structurally
+    // impossible, not this field alone -- see that method's own comment.
+    private int? _herdLeaderId;
+    public bool IsHerdLeader { get { return _herdLeaderId == null; } }
+    public int? HerdLeaderId { get { return _herdLeaderId; } }
+
+    // 2026-08 (creator debug brief: "Instrument the worker AI with
+    // detailed debug logging... Detect and report: Circular follow
+    // chains, Workers following themselves, Dead leaders, Leaderless
+    // followers..."). Off by default (hundreds of Workers logging every
+    // transition would be its own performance/noise problem) -- flip on
+    // in the Inspector (or from anywhere, it's a public static) to watch
+    // every herd leadership transition in the Console. Deliberately NOT
+    // a bigger logging subsystem (no log buffer, no on-screen overlay,
+    // no per-Worker history) -- Unity's own Console already gives
+    // timestamps, per-object context (the `this` passed to Debug.Log
+    // below lets you click a log line to select the exact Worker), and
+    // filtering; building a second one of those would be duplicated,
+    // not new, functionality.
+    public static bool DebugHerdLogging = false;
+
     private RuntimeCityBuilder _builder;
     private UnitCombat _combat;
 
@@ -332,6 +360,15 @@ public class Worker : MonoBehaviour
         _stationedBuildingId = null;
         _scavengeTarget = null;
         _scavengeTickTimer = 0f;
+        // 2026-08: a FOLLOWER pulled off wandering by a player order must
+        // drop its leadership link explicitly -- HasHerdFollowers checks
+        // HerdLeaderId regardless of _state, so a stale (non-null) value
+        // here would keep counting this Worker as a follower long after
+        // it stopped actually following anyone, incorrectly blocking its
+        // former leader from ever becoming a follower itself later. A
+        // LEADER's own HerdLeaderId is already null, so this is a no-op
+        // for leaders -- safe to set unconditionally.
+        _herdLeaderId = null;
         _moveTarget = destination;
         _state = ZombieState.PlayerMove;
     }
@@ -393,35 +430,85 @@ public class Worker : MonoBehaviour
         return false;
     }
 
-    /// <summary>2026-08 (creator direction: "Add a herding behaviour to
-    /// the workers. in groups of 3 to 10 and a wander toggle enabled if
-    /// there is nothing to do radius around our buildings of 2 km"):
-    /// nothing to scavenge or build -- rather than stand frozen, this
-    /// Worker either joins a nearby herd already wandering (<see
-    /// cref="RuntimeCityBuilder.TryFindJoinableHerd"/> -- a decentralized,
-    /// single-pass approximation; "3 to 10" is a SOFT target this nudges
-    /// toward, not a hard-guaranteed range, see that method's own
-    /// comment for why a real reservation system would be needed for
-    /// more than that) or seeds a fresh wander point of its own within
-    /// <see cref="WanderLeashRadius"/> of our own buildings.</summary>
+    /// <summary>2026-08 root-cause redesign (creator debug report:
+    /// circular following + stalling after 30-40s -- see
+    /// RuntimeCityBuilder.TryFindHerdLeader's own header for the full
+    /// diagnosis and proof). Decides this Worker's herd ROLE, not just a
+    /// destination: if it currently has followers of its own, it MUST
+    /// stay a leader (the one rule that makes cycles structurally
+    /// impossible -- see TryFindHerdLeader's comment); otherwise it
+    /// looks for a nearby leaderless leader to follow, and only seeds
+    /// its own fresh independent target if none is found or all are
+    /// full.</summary>
     private void BeginWander()
     {
-        _moveTarget = PickWanderTarget();
+        var hasFollowers = _builder.HasHerdFollowers(GetInstanceID(), 1);
+        if (!hasFollowers && _builder.TryFindHerdLeader(transform.position, GetInstanceID(), HerdJoinRadius, MaxHerdSize, out var leader))
+        {
+            _herdLeaderId = leader.GetInstanceID();
+            _wanderRepickTimer = WanderRepickInterval;
+            _state = ZombieState.Wander;
+            if (DebugHerdLogging) Debug.Log("Worker " + name + " -> follows leader " + leader.name, this);
+            return;
+        }
+
+        _herdLeaderId = null;
+        _moveTarget = PickIndependentWanderTarget();
         _wanderRepickTimer = WanderRepickInterval;
         _state = ZombieState.Wander;
+        if (DebugHerdLogging) Debug.Log("Worker " + name + " -> becomes independent leader, target " + _moveTarget, this);
     }
 
     public bool IsWandering { get { return _state == ZombieState.Wander; } }
-    public Vector3 WanderTarget { get { return _moveTarget; } }
 
-    /// <summary>Walks the shared/seeded wander destination at a slower,
-    /// casual pace (<see cref="WanderSpeedFraction"/>) than purposeful
-    /// work-seeking. Re-checks for real work and re-picks (join-or-seed)
-    /// every <see cref="WanderRepickInterval"/> or on arrival, rather
-    /// than every frame -- cheap enough at hundreds of Workers, and a
-    /// herd that re-evaluates every frame would never settle into a
-    /// visually coherent group in the first place.</summary>
     private void TickWander(float dt)
+    {
+        if (_herdLeaderId.HasValue) TickFollower(dt);
+        else TickLeader(dt);
+    }
+
+    /// <summary>Continuously tracks the leader's LIVE position every
+    /// tick -- never a stale snapshot, which is the specific defect that
+    /// let the old mechanism's copied targets go stale and drift
+    /// backward (see TryFindHerdLeader's header). Re-validated by
+    /// identity, not a cached reference, every <see
+    /// cref="WanderRepickInterval"/> (not every frame -- cheap enough at
+    /// hundreds of Workers, and re-validating every frame buys nothing a
+    /// live position lookup doesn't already give for free). If the
+    /// leader died or stopped wandering (found real work, got a player
+    /// move order, entered combat resolution, etc.), this Worker becomes
+    /// leaderless and re-decides IMMEDIATELY, same frame -- "movement is
+    /// preferred over standing" applies to leadership loss exactly like
+    /// it does to an unreachable point.</summary>
+    private void TickFollower(float dt)
+    {
+        var leader = _builder.FindWorkerByInstanceId(_herdLeaderId.Value);
+        if (leader == null || !leader.IsWandering)
+        {
+            if (DebugHerdLogging) Debug.Log("Worker " + name + ": leader lost, re-deciding", this);
+            _herdLeaderId = null;
+            BeginWander();
+            return;
+        }
+
+        _wanderRepickTimer -= dt;
+        if (_wanderRepickTimer <= 0f)
+        {
+            _wanderRepickTimer = WanderRepickInterval;
+            if (TryFindRealWork()) { _pathFollower.Clear(); _herdLeaderId = null; return; }   // real work appeared nearby -- drop the herd, go do it
+        }
+
+        _moveTarget = leader.transform.position;
+        _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(_moveTarget));
+        var pathDone = _pathFollower.Tick(_builder, transform, _combat, dt, MoveSpeed * WanderSpeedFraction);
+        _frameMoveDistance = pathDone ? 0f : _pathFollower.LastStepDistance;
+    }
+
+    /// <summary>Walks its OWN independently-picked wander destination at
+    /// a slower, casual pace (<see cref="WanderSpeedFraction"/>) than
+    /// purposeful work-seeking -- re-checks for real work and re-picks
+    /// every <see cref="WanderRepickInterval"/> or on arrival.</summary>
+    private void TickLeader(float dt)
     {
         _wanderRepickTimer -= dt;
         var to = _moveTarget - transform.position;
@@ -430,8 +517,7 @@ public class Worker : MonoBehaviour
         if (arrived || _wanderRepickTimer <= 0f)
         {
             if (TryFindRealWork()) { _pathFollower.Clear(); return; }   // real work appeared nearby -- drop the herd, go do it
-            _moveTarget = PickWanderTarget();
-            _wanderRepickTimer = WanderRepickInterval;
+            BeginWander();   // re-decide role AND target -- a leader that just arrived is also free to join someone else's herd now, if one's nearby (see BeginWander's own hasFollowers guard)
             return;
         }
 
@@ -443,18 +529,14 @@ public class Worker : MonoBehaviour
         _pathFollower.SetGoal(_builder, transform.position, _builder.HexAt(_moveTarget));
         var pathDone = _pathFollower.Tick(_builder, transform, _combat, dt, MoveSpeed * WanderSpeedFraction);
         _frameMoveDistance = _pathFollower.LastStepDistance;
-        // the wander target itself turned out unreachable (or the path
-        // finished but left us short of ArriveThreshold, e.g. the goal-
+        // the target itself turned out unreachable (or the path finished
+        // but left us short of ArriveThreshold, e.g. the goal-
         // substitution landed on a building's neighbour rather than the
         // exact point) -- re-pick immediately rather than sit doing
         // nothing for up to WanderRepickInterval. "Movement is preferred
         // over standing" (creator direction) applies here just as much
-        // as it does to PickWanderTarget's own retry loop.
-        if (pathDone && !arrived)
-        {
-            _moveTarget = PickWanderTarget();
-            _wanderRepickTimer = WanderRepickInterval;
-        }
+        // as it does to PickIndependentWanderTarget's own retry loop.
+        if (pathDone && !arrived) BeginWander();
     }
 
     // 2026-08 (creator report: "workers are not wandering. They wandered
@@ -476,22 +558,20 @@ public class Worker : MonoBehaviour
     // `transform.position` itself under any circumstance.
     private const int WanderPickAttempts = 8;
 
-    /// <summary>Join an existing nearby herd if there's room, otherwise
-    /// seed a fresh short step (<see cref="WanderStepMin"/>-<see
-    /// cref="WanderStepMax"/> from here) in a pseudo-random direction --
-    /// deterministic per-instance hashing (same convention as every
-    /// other cosmetic-ish AI pick in this codebase: Citizen's own
-    /// destination re-picks, HumanoidCombatant's patrol angle), not
-    /// `UnityEngine.Random`. A step that would cross the <see
+    /// <summary>A LEADER's own fresh short step (<see
+    /// cref="WanderStepMin"/>-<see cref="WanderStepMax"/> from here) in a
+    /// pseudo-random direction -- deterministic per-instance hashing
+    /// (same convention as every other cosmetic-ish AI pick in this
+    /// codebase: Citizen's own destination re-picks, HumanoidCombatant's
+    /// patrol angle), not `UnityEngine.Random`. Never called for a
+    /// follower (see BeginWander/TickFollower) -- only a leader ever
+    /// invents a genuinely new point. A step that would cross the <see
     /// cref="WanderLeashRadius"/> (2 km) leash around our own buildings
     /// gets pulled back toward the nearest one instead of rejected
     /// outright. See this method's own preceding comment for why it now
     /// retries instead of ever standing still.</summary>
-    private Vector3 PickWanderTarget()
+    private Vector3 PickIndependentWanderTarget()
     {
-        if (_builder.TryFindJoinableHerd(transform.position, HerdJoinRadius, MaxHerdSize, out var herdTarget))
-            return herdTarget;
-
         var seed = (GetInstanceID() % 1000) / 1000f;
         for (var attempt = 0; attempt < WanderPickAttempts; attempt++)
         {

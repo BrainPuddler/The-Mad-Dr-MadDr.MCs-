@@ -3059,40 +3059,94 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return WorldOf(best ?? factoryHex.Value);
     }
 
-    /// <summary>2026-08 (creator direction: "herding behaviour... in
-    /// groups of 3 to 10"): finds a nearby <see cref="Worker"/> already
-    /// wandering with room in its local cluster, so a newly-idle Worker
-    /// joins an existing herd instead of always seeding a new one. This
-    /// is a decentralized, single-pass approximation, not a real
-    /// registry with reservations -- "3 to 10" is therefore a SOFT
-    /// target this join-preference nudges toward (multiple idle Workers
-    /// independently detecting and adopting the same nearby target tends
-    /// to converge into clusters in that range), not a hard guarantee
-    /// the way a real group-membership system would enforce. Flagged as
-    /// the v0.1 approximation it is, same as every other invented number
-    /// in this codebase -- a real reservation system is the natural
-    /// follow-up if loose clustering turns out not to be good enough.</summary>
-    public bool TryFindJoinableHerd(Vector3 near, float joinRadius, int maxHerdSize, out Vector3 herdTarget)
+    /// <summary>2026-08 root-cause redesign (creator debug report:
+    /// "Circular Following... Workers continuously attempt to follow one
+    /// another, eventually forming circles... walking toward each other
+    /// forever"; "Workers Stop After 30-40 Seconds"). This REPLACES the
+    /// original herding mechanism (`TryFindJoinableHerd`, git history),
+    /// which had no concept of a stable leader: every wandering Worker,
+    /// on every re-pick, just copied a SNAPSHOT of whichever nearby
+    /// wandering peer's CURRENT target it happened to see. Once two or
+    /// more Workers clustered, there was no Worker left that was ever
+    /// guaranteed to pick a genuinely fresh, independent point again --
+    /// they just kept re-deriving targets from each other indefinitely,
+    /// with no anchor. Depending on timing, a copied target could drift
+    /// BACKWARD toward wherever the group had just come from, which is
+    /// exactly what reads as circling/oscillating; in a tight cluster
+    /// this degenerates toward near-zero net movement, which is what
+    /// "stops after 30-40 seconds" looks like from outside. Provable
+    /// from the old code as written, not something that needed a debug
+    /// harness to find.
+    ///
+    /// The fix: a real two-role hierarchy, LEADER (picks its own
+    /// independent wander targets, never follows anyone) and FOLLOWER
+    /// (continuously tracks its leader's LIVE position every tick, never
+    /// leads anyone) -- see <see cref="Worker.HerdLeaderId"/>/<see
+    /// cref="Worker.IsHerdLeader"/>. The single invariant that makes
+    /// A-follows-B-follows-C chains and A-follows-B/B-follows-A cycles
+    /// STRUCTURALLY IMPOSSIBLE, not just unlikely: a Worker that
+    /// currently HAS FOLLOWERS (<see cref="HasHerdFollowers"/>) must
+    /// never itself become a follower (enforced entirely in
+    /// `Worker.BeginWander`, this method only ever returns LEADERLESS
+    /// candidates). Proof: define a directed edge X-&gt;Y whenever X
+    /// follows Y. Every node with an in-edge (a leader, has a follower)
+    /// has no out-edge (never follows anyone) by that one rule -- a
+    /// graph where every node is EITHER a pure source (followers: one
+    /// out-edge, never an in-edge) OR a pure sink (leaders: only
+    /// in-edges, never an out-edge) cannot contain a cycle, because a
+    /// cycle requires at least one node with both in-degree &gt; 0 and
+    /// out-degree &gt; 0, which this rule forbids outright.</summary>
+    public bool TryFindHerdLeader(Vector3 near, int excludeInstanceId, float joinRadius, int maxFollowers, out Worker leader)
     {
-        herdTarget = Vector3.zero;
+        leader = null;
         var joinRadiusSq = joinRadius * joinRadius;
-        var count = 0;
-        Worker candidate = null;
         foreach (var w in _workers)
         {
-            if (w == null || !w.IsWandering) continue;
+            if (w == null || !w.IsWandering || !w.IsHerdLeader) continue;
+            if (w.GetInstanceID() == excludeInstanceId) continue;
             var d = w.transform.position - near;
             d.y = 0f;
             if (d.sqrMagnitude > joinRadiusSq) continue;
-            count++;
-            if (candidate == null) candidate = w;
-        }
-        if (candidate != null && count < maxHerdSize)
-        {
-            herdTarget = candidate.WanderTarget;
+            if (HasHerdFollowers(w.GetInstanceID(), maxFollowers)) continue;
+            leader = w;
             return true;
         }
         return false;
+    }
+
+    /// <summary>True once `leaderInstanceId` already has `cap` or more
+    /// followers -- keeps a herd bounded (the brief's own "groups of 3
+    /// to 10," now an actual enforced cap on a real, stable leader,
+    /// rather than the old mechanism's soft, no-anchor approximation of
+    /// one). Also doubles as the "does this Worker currently have ANY
+    /// followers at all" check `Worker.BeginWander` uses to decide
+    /// whether it's allowed to become a follower itself -- call with
+    /// `cap = 1` for that (true the instant there's at least one).</summary>
+    public bool HasHerdFollowers(int leaderInstanceId, int cap = int.MaxValue)
+    {
+        var count = 0;
+        foreach (var w in _workers)
+        {
+            if (w == null || w.HerdLeaderId != leaderInstanceId) continue;
+            count++;
+            if (count >= cap) return true;
+        }
+        return false;
+    }
+
+    /// <summary>A follower re-validates its leader by identity every
+    /// tick (never a stale snapshot) -- looks it up by Unity's own
+    /// per-instance ID rather than keeping a direct `Worker` reference,
+    /// so a destroyed leader naturally resolves to "not found" (Unity's
+    /// `==null` override on a destroyed MonoBehaviour would already
+    /// catch a stale reference too, but going through <see
+    /// cref="Workers"/> by ID also self-heals if the SAME instance ID
+    /// were ever reused, which a raw cached reference could not).</summary>
+    public Worker FindWorkerByInstanceId(int id)
+    {
+        foreach (var w in _workers)
+            if (w != null && w.GetInstanceID() == id) return w;
+        return null;
     }
 
     /// <summary>Ticked every <see cref="Update"/>: the instant a player-0

@@ -17519,3 +17519,48 @@ everything explicitly deferred: docs/35. `HumanCharacterKit`/
 `HumanCharacterAnimator` (docs/34) are unchanged in spirit, only
 extended (one new additive `SeatedHeight` field, default 0 = every
 existing preset including Alien's hover is byte-for-byte unaffected).
+
+## 2026-08 same-day: Worker herding root-caused and redesigned (not patched)
+
+Creator debug brief: workers circling/following each other forever and
+stalling after 30-40 seconds, with explicit instructions not to apply a
+quick fix -- find and eliminate the underlying architectural flaw, and
+make circular follow chains structurally impossible, not just detected.
+
+Traced the ACTUAL herding code (added a session-earlier this same day)
+rather than assuming the brief's own vocabulary ("Leader ID,"
+"reservation," "NavAgent," "coroutine," "object pool") mapped onto it --
+none of that infrastructure exists in this implementation. Found a
+real, provable flaw anyway, just a different shape than the brief's own
+terminology suggested: the original `TryFindJoinableHerd` had every
+wandering Worker copy a SNAPSHOT of whichever nearby wandering peer's
+CURRENT target it happened to see, on every single re-pick, with no
+stable notion of a leader. Once Workers clustered, there was no Worker
+ever guaranteed to pick a genuinely fresh, independent point again --
+copied targets could drift backward toward wherever the group just
+came from (reads as circling) and, in a tight cluster, degenerate
+toward near-zero net movement (reads as stalling after tens of
+seconds, an emergent timescale, not a hardcoded one). Provable from the
+code as written, no debug harness needed to find it.
+
+Redesigned rather than patched: a real two-role hierarchy (`Worker.
+IsHerdLeader`/`HerdLeaderId`) -- leaders pick their own independent
+targets and never follow; followers continuously track their leader's
+LIVE position every tick, never a stale snapshot, and never lead
+anyone. The single invariant that makes chains/cycles STRUCTURALLY
+impossible rather than just unlikely: a Worker with existing followers
+can never itself become a follower (enforced in `Worker.BeginWander`;
+`RuntimeCityBuilder.TryFindHerdLeader` only ever returns leaderless
+candidates in the first place). Graph-theoretic proof in
+`TryFindHerdLeader`'s own doc comment: every edge (follower -> leader)
+goes from a pure source to a pure sink, and a graph where sinks never
+have out-edges cannot contain a cycle by definition.
+
+Added optional per-transition debug logging (`Worker.DebugHerdLogging`,
+off by default) satisfying the brief's own instrumentation ask at an
+appropriately modest scope -- Unity's own Console already provides
+timestamps, click-to-select context, and filtering, so this doesn't
+duplicate that with a second logging subsystem, buffer, or overlay.
+
+Full writeup: docs/22 §11b (updated in place, old mechanism kept
+described for the record rather than silently removed from the doc).
