@@ -263,6 +263,20 @@ public class SimBridge : MonoBehaviour
     /// contract as <see cref="EmitterAt"/>.</summary>
     public SimBuilding BuildingAt(int index) => _match.BuildingAt(index);
 
+    /// <summary>2026-08 (Barracks/infantry roster pass): the unit-side
+    /// twin of <see cref="BuildingCount"/>/<see cref="BuildingAt"/> --
+    /// same "iterate for a view layer to sync visuals" contract, now that
+    /// <see cref="RosterInfantryView"/> is the first real consumer (every
+    /// prior reader of <see cref="MatchState.UnitAt"/> stayed sim-internal
+    /// -- see that method's own doc comment on why no Unity visual has
+    /// ever existed for a <see cref="RosterUnitKind"/> before this).</summary>
+    public int UnitCount => _match?.UnitCount ?? 0;
+
+    /// <summary>Live unit state by index. Only valid when <paramref
+    /// name="index"/> &lt; <see cref="UnitCount"/>, same contract as
+    /// <see cref="BuildingAt"/>.</summary>
+    public SimUnit UnitAt(int index) => _match.UnitAt(index);
+
     /// <summary>A player's current balance of one resource, 0 if no match
     /// is running -- for a build menu to gray out unaffordable options.</summary>
     public int PlayerWallet(int playerIndex, ResourceKind kind)

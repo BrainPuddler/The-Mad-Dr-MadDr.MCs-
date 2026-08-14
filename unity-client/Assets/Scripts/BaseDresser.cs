@@ -88,6 +88,19 @@ public class BaseDresser : MonoBehaviour
         return _alienSaucerMesh;
     }
 
+    // 2026-08 (Barracks/infantry roster pass): same "one shared Mesh
+    // asset, scaled per-instance via the caller's own Vector3 scale"
+    // idiom AlienSaucerMesh just above already established for THIS
+    // class -- BuildingDresser.cs keeps its own separate copy of this
+    // exact cache for the procedural city's houses, but BaseDresser had
+    // no reason to need a pitched roof until Barracks.
+    private static Mesh _gableRoofMesh;
+    private static Mesh GableRoofMesh()
+    {
+        if (_gableRoofMesh == null) _gableRoofMesh = ProceduralMeshKit.GableRoof();
+        return _gableRoofMesh;
+    }
+
     // UnderConstruction: one scaffold GameObject per building, a single
     // scaling cube (see the class header for why shape stays generic here).
     private readonly Dictionary<uint, GameObject> _scaffolds = new Dictionary<uint, GameObject>();
@@ -318,6 +331,9 @@ public class BaseDresser : MonoBehaviour
                 break;
             case BuildingKind.Defense:
                 BuildBunkerShape(root, fullScale);
+                break;
+            case BuildingKind.Barracks:
+                BuildBarracksShape(root, fullScale);
                 break;
             case BuildingKind.Hq:
                 BuildHqShape(root, fullScale, playerIndex);
@@ -555,6 +571,72 @@ public class BaseDresser : MonoBehaviour
             origin + Vector3.forward * (domeRadius * 0.95f) + Vector3.up * domeY,
             new Vector3(domeRadius * 0.5f, domeRadius * 0.18f, domeRadius * 0.3f), DarkRecess(), trim);
         SpawnRivets(origin + Vector3.up * bodyH, domeRadius * 1.05f, domeRadius * 0.08f, Steel(), trim, 10, 506);
+    }
+
+    /// <summary>Barracks -- 2026-08 (creator direction: "Human Army is
+    /// from army barracks -- part of the basic kit for Human army"). A
+    /// long, low, gable-roofed hut -- deliberately the opposite massing
+    /// from every other silhouette in this roster (Factory's tall block
+    /// +offset stack, Defense's low+dome, Hq's keep+turret): a real
+    /// barracks reads as ELONGATED and close to the ground, not another
+    /// boxy tower. Human Army only (Barracks trains real infantry, docs/23
+    /// §13 amendment D's roster is per-faction already -- no Doctor/Alien
+    /// dispatch needed the way Factory/Hq have, since only a HumanArmy
+    /// player is ever able to build one). Reuses the SAME materials
+    /// docs/31 §3's table already assigns Human Army (`HumanAluminum`
+    /// structure, `HumanCarbon` trim/roof) and the row of small square
+    /// windows docs/31 §2 already wrote for this exact building ("army-
+    /// barracks utilitarian... painted wood, simple trim") before this
+    /// method existed to actually build it.</summary>
+    private void BuildBarracksShape(GameObject root, Vector3 fullScale)
+    {
+        var origin = root.transform.position;
+        // Ridge runs along Z (ProceduralMeshKit.GableRoof's own
+        // convention) -- bodyLength is the long axis a real barracks hut
+        // stretches along, bodyWidth the short gable-end axis the roof
+        // slopes across.
+        var bodyLength = fullScale.z * 1.55f;
+        var bodyWidth = fullScale.x * 0.55f;
+        var bodyHeight = fullScale.y * 0.42f;
+
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyHeight * 0.5f),
+            new Vector3(bodyWidth, bodyHeight, bodyLength), HumanAluminum(), root.transform);
+
+        var roofHeight = fullScale.y * 0.22f;
+        builder.SpawnMesh(GableRoofMesh(), origin + Vector3.up * (bodyHeight + roofHeight * 0.5f),
+            new Vector3(bodyWidth * 1.08f, roofHeight, bodyLength * 1.04f), HumanCarbon(), root.transform, matte: true);
+
+        var trim = new GameObject("BarracksTrim").transform;
+        trim.SetParent(root.transform, false);
+
+        // A row of small square windows down each long side -- docs/31
+        // §2's own "Human Army: square/rectangular... simple trim... army-
+        // barracks utilitarian" window language, first real building to
+        // use it.
+        const int windowsPerSide = 4;
+        var windowSize = bodyHeight * 0.28f;
+        var windowY = bodyHeight * 0.55f;
+        for (var i = 0; i < windowsPerSide; i++)
+        {
+            var t = (i + 0.5f) / windowsPerSide - 0.5f;   // -0.4 .. 0.4-ish, evenly spaced, inset from the gable ends
+            var zOff = t * bodyLength * 0.8f;
+            builder.SpawnPrim(PrimitiveType.Cube,
+                origin + Vector3.right * (bodyWidth * 0.5f * 1.01f) + Vector3.up * windowY + Vector3.forward * zOff,
+                new Vector3(bodyWidth * 0.02f, windowSize, windowSize), HumanBlueLightMat(), trim);
+            builder.SpawnPrim(PrimitiveType.Cube,
+                origin - Vector3.right * (bodyWidth * 0.5f * 1.01f) + Vector3.up * windowY + Vector3.forward * zOff,
+                new Vector3(bodyWidth * 0.02f, windowSize, windowSize), HumanBlueLightMat(), trim);
+        }
+
+        // A dark entry-door recess at one gable end, and a small covered
+        // porch overhang above it -- same "trim carries the small
+        // readable details" split every other kind in this file uses.
+        builder.SpawnPrim(PrimitiveType.Cube,
+            origin + Vector3.forward * (bodyLength * 0.5f * 0.99f) + Vector3.up * (bodyHeight * 0.32f),
+            new Vector3(bodyWidth * 0.32f, bodyHeight * 0.6f, fullScale.x * 0.02f), DarkRecess(), trim);
+        builder.SpawnPrim(PrimitiveType.Cube,
+            origin + Vector3.forward * (bodyLength * 0.5f + fullScale.x * 0.12f) + Vector3.up * (bodyHeight * 0.85f),
+            new Vector3(bodyWidth * 0.5f, bodyHeight * 0.08f, fullScale.x * 0.28f), HumanCarbon(), trim);
     }
 
     /// <summary>Hq -- a tall keep plus a smaller turret perched off-center

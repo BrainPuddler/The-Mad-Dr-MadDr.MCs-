@@ -186,32 +186,178 @@ public struct HumanCombatProfile
         };
     }
 
-    /// <summary>2026-08: "Human Soldier" upgraded from docs/34's cosmetic-
-    /// only flavor unit (fake aim/fire, no `UnitCombat`, no damage) to a
-    /// real combatant on the shared kit -- the brief explicitly lists it
-    /// among the human-enemy roster, and leaving it as the one variant
-    /// NOT on real combat while everything else here is would be
-    /// inconsistent, not a reason to keep it decorative. Reuses the
-    /// EXISTING `HumanCharacterProfile.HumanSoldier()` visual preset
-    /// unchanged (helmet/backpack/broad shoulders, already built) --
-    /// only the combat layer is new. `Faction` "human" (matching Tank,
-    /// the existing Army-faction defender) rather than "monster" (the
-    /// Worker/Collector/creature-economy side) or the new
-    /// "hostile_civilian" bucket -- see this struct's own `Faction`
-    /// comment.</summary>
-    public static HumanCombatProfile Soldier()
+    /// <summary>2026-08 (creator direction: "start building Citizen with
+    /// guns, army etc" -- the deferred "Police/SWAT/Hunter/Militia" pair
+    /// from docs/35 §6's original scope cut, picked as "Police + SWAT" by
+    /// the creator's own follow-up). A fast, proactive responder --
+    /// notices trouble and moves in quickly (highest MoveSpeed of any
+    /// hostile_civilian variant) rather than the wide-aggro/slow-approach
+    /// read Grandma or Hunter use. Ordinary sidearm (reuses Revolver --
+    /// a real police-issue handgun, not a reason to invent a near-
+    /// identical third pistol profile) -- the LOW-drama, first-responder
+    /// contrast to SWAT's heavy tactical escalation right below.</summary>
+    public static HumanCombatProfile Police()
     {
         return new HumanCombatProfile
         {
-            Visual = HumanCharacterProfile.HumanSoldier(),
-            Faction = "human",
-            MaxHealth = 75f,
-            Radius = 0.55f,
+            Visual = new HumanCharacterProfile
+            {
+                BodyColor = new Color(0.16f, 0.2f, 0.32f),      // dark navy uniform
+                AccentColor = new Color(0.72f, 0.72f, 0.7f),    // silver badge/trim
+                HeightScale = 1f,
+                LimbThicknessScale = 1f,
+                ArmLengthScale = 1f,
+                ShoulderWidthScale = 1.02f,
+                HunchDegrees = 0f,
+                Asymmetric = false,
+                HasLegs = true,
+                HasHands = true,
+                OversizedHands = false,
+                HasBackpack = false,
+                Headgear = HeadgearKind.None,
+                Twitchy = false,
+            },
+            Faction = "hostile_civilian",
+            MaxHealth = 60f,
+            Radius = 0.5f,
+            AimHeight = 1.3f,
+            Mass = 1.1f,
+            MoveSpeed = 3.8f,
+            Weapon = WeaponProfile.Revolver(),
+            AggroRadius = 22f,
+            Aggressive = true,
+            TurnBeforeMove = false,
+        };
+    }
+
+    /// <summary>SWAT -- the heavy-armored tactical escalation Police
+    /// calls in. Broad, gear-laden silhouette (`HasBackpack` true,
+    /// `Headgear` Helmet -- a tactical helmet, not Soldier's military
+    /// one, but the same geometry reads close enough at RTS camera
+    /// distance that a bespoke third headgear kind wasn't worth adding),
+    /// the largest health pool of any hostile_civilian variant next to
+    /// Grandma's own "basically a tank" number (this engine has no
+    /// separate Armor stat -- same "toughness = health pool" translation
+    /// her own profile already established), and
+    /// <see cref="WeaponProfile.TacticalCarbine"/>'s sustained fast-
+    /// cadence fire.</summary>
+    public static HumanCombatProfile Swat()
+    {
+        return new HumanCombatProfile
+        {
+            Visual = new HumanCharacterProfile
+            {
+                BodyColor = new Color(0.12f, 0.13f, 0.14f),     // matte tactical black
+                AccentColor = new Color(0.28f, 0.3f, 0.24f),    // olive gear webbing
+                HeightScale = 1.04f,
+                LimbThicknessScale = 1.2f,
+                ArmLengthScale = 1f,
+                ShoulderWidthScale = 1.28f,   // the broadest silhouette of any hostile_civilian variant -- reads as armored bulk
+                HunchDegrees = 0f,
+                Asymmetric = false,
+                HasLegs = true,
+                HasHands = true,
+                OversizedHands = false,
+                HasBackpack = true,
+                Headgear = HeadgearKind.Helmet,
+                Twitchy = false,
+            },
+            Faction = "hostile_civilian",
+            MaxHealth = 160f,
+            Radius = 0.6f,
             AimHeight = 1.35f,
-            Mass = 1.2f,
-            MoveSpeed = 3.4f,
+            Mass = 1.6f,
+            MoveSpeed = 3.0f,   // slowest of the four new variants -- weighed down by gear, matching the "heavy" read
+            Weapon = WeaponProfile.TacticalCarbine(),
+            AggroRadius = 26f,
+            Aggressive = true,
+            TurnBeforeMove = false,
+        };
+    }
+
+    /// <summary>Hunter -- a rifle-armed civilian-tier threat built around
+    /// reach, not toughness: the WIDEST aggro radius of any
+    /// hostile_civilian variant (34m, matching <see
+    /// cref="WeaponProfile.HuntingRifle"/>'s own 34m range exactly -- he
+    /// notices and engages from the absolute edge of his weapon's own
+    /// envelope, never needing to close distance the way Grandma's
+    /// wide-aggro/short-weapon mismatch forces her to). Plain earthy
+    /// dress, ordinary health -- the threat is positional (you're in his
+    /// sightline) not physical (he's not a brawler).</summary>
+    public static HumanCombatProfile Hunter()
+    {
+        return new HumanCombatProfile
+        {
+            Visual = new HumanCharacterProfile
+            {
+                BodyColor = new Color(0.32f, 0.3f, 0.2f),       // drab canvas/hunting jacket
+                AccentColor = new Color(0.48f, 0.22f, 0.16f),   // blaze-orange-adjacent trim, muted
+                HeightScale = 1f,
+                LimbThicknessScale = 1f,
+                ArmLengthScale = 1f,
+                ShoulderWidthScale = 1f,
+                HunchDegrees = 0f,
+                Asymmetric = false,
+                HasLegs = true,
+                HasHands = true,
+                OversizedHands = false,
+                HasBackpack = true,   // a game bag/pack, not military webbing -- the same generic backpack prop reads fine for either
+                Headgear = HeadgearKind.None,
+                Twitchy = false,
+            },
+            Faction = "hostile_civilian",
+            MaxHealth = 65f,
+            Radius = 0.5f,
+            AimHeight = 1.3f,
+            Mass = 1.1f,
+            MoveSpeed = 3.3f,
+            Weapon = WeaponProfile.HuntingRifle(),
+            AggroRadius = 34f,
+            Aggressive = true,
+            TurnBeforeMove = false,
+        };
+    }
+
+    /// <summary>Militia -- an irregular, aggressive threat built around
+    /// <see cref="WeaponProfile.ServiceRifle"/> (orphaned when the old
+    /// cosmetic-parallel "Soldier" variant was superseded by a real
+    /// Barracks-trained Rifleman -- see this file's own header on that
+    /// -- and reused here rather than left dead: a trained rifle in an
+    /// untrained irregular's hands is exactly the "drilled hardware,
+    /// undisciplined user" read this variant wants). Patchwork,
+    /// asymmetric dress (mismatched surplus gear, not a uniform) and
+    /// the highest MaxHealth of the four non-SWAT new variants -- a
+    /// scrappy, hard-to-put-down brawler rather than a precise
+    /// marksman.</summary>
+    public static HumanCombatProfile Militia()
+    {
+        return new HumanCombatProfile
+        {
+            Visual = new HumanCharacterProfile
+            {
+                BodyColor = new Color(0.36f, 0.34f, 0.24f),     // mismatched surplus khaki
+                AccentColor = new Color(0.5f, 0.18f, 0.14f),    // a scrap of red cloth -- the "irregular," not issued, tell
+                HeightScale = 1.02f,
+                LimbThicknessScale = 1.05f,
+                ArmLengthScale = 1f,
+                ShoulderWidthScale = 1.05f,
+                HunchDegrees = 4f,   // a slight slouch -- undisciplined posture, contrasting SWAT/Rifleman's drilled stance
+                Asymmetric = true,   // patchwork gear, deliberately not uniform
+                HasLegs = true,
+                HasHands = true,
+                OversizedHands = false,
+                HasBackpack = false,
+                Headgear = HeadgearKind.None,
+                Twitchy = false,
+            },
+            Faction = "hostile_civilian",
+            MaxHealth = 85f,
+            Radius = 0.55f,
+            AimHeight = 1.3f,
+            Mass = 1.3f,
+            MoveSpeed = 3.5f,
             Weapon = WeaponProfile.ServiceRifle(),
-            AggroRadius = 24f,
+            AggroRadius = 26f,
             Aggressive = true,
             TurnBeforeMove = false,
         };

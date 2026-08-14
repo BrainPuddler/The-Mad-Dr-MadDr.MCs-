@@ -478,6 +478,14 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (baseDresser == null) baseDresser = gameObject.AddComponent<BaseDresser>();
         baseDresser.Init(_simBridge, this);
 
+        // 2026-08 (Barracks/infantry roster pass): same wiring shape as
+        // baseDresser just above -- see RosterInfantryView's own header
+        // for why this is a separate manager rather than folded into
+        // BaseDresser (units, not buildings; a different sim-side list).
+        var rosterInfantryView = gameObject.GetComponent<RosterInfantryView>();
+        if (rosterInfantryView == null) rosterInfantryView = gameObject.AddComponent<RosterInfantryView>();
+        rosterInfantryView.Init(_simBridge, this);
+
         var resourceHud = gameObject.GetComponent<ResourceHud>();
         if (resourceHud == null) resourceHud = gameObject.AddComponent<ResourceHud>();
         resourceHud.Init(_simBridge, playerIndex: 0);
@@ -635,6 +643,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var collectorLabHud = gameObject.GetComponent<CollectorLabHud>();
         if (collectorLabHud == null) collectorLabHud = gameObject.AddComponent<CollectorLabHud>();
         collectorLabHud.Init(this, playerIndex: 0);
+
+        var barracksHud = gameObject.GetComponent<BarracksHud>();
+        if (barracksHud == null) barracksHud = gameObject.AddComponent<BarracksHud>();
+        barracksHud.Init(this, playerIndex: 0);
 
         var productionQueueHud = gameObject.GetComponent<ProductionQueueHud>();
         if (productionQueueHud == null) productionQueueHud = gameObject.AddComponent<ProductionQueueHud>();
@@ -3448,13 +3460,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // here so that grant is actually usable.
         SpawnStartingWorkers(p0Hq, blocked, claimed);
 
-        // 2026-08: scoped to "the local human picked Human Army" only --
-        // see SpawnStartingSoldiers's own doc comment for why AI-opponent
-        // Army bases don't get this too in this pass. Soldier is a real
-        // combatant now (HumanoidCombatant), not purely cosmetic dressing
-        // the way it started (docs/34) -- the scope cut itself is
-        // unchanged, only what it's a garrison OF changed.
-        if (chosenFaction == FactionId.HumanArmy) SpawnStartingSoldiers(p0Hq, blocked, claimed);
+        // 2026-08 (creator direction: "Human Army is from army barracks
+        // -- part of the basic kit for Human army"): unlike the old
+        // Soldier spawn this superseded, NOT scoped to the local human
+        // only -- see the opponent loop below for the AI-opponent half.
+        if (chosenFaction == FactionId.HumanArmy) SpawnStartingBarracks(0, p0Hq, blocked, claimed);
 
         var opponentSeeds = AiOpponentSeedRing(center, opponents.Count, AiOpponentSeedRingRadius);
         for (var i = 0; i < opponents.Count; i++)
@@ -3472,6 +3482,15 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             var faction = opponents[i].Faction;
             if (faction == FactionId.HumanArmy || faction == FactionId.AlienHive)
                 SpawnOpponentStartingArmy(playerIndex, faction, opponents[i].Personality, hq, blocked, claimed);
+
+            // 2026-08 (creator direction: "Human Army is from army
+            // barracks -- part of the basic kit for Human army"): every
+            // HumanArmy player gets one, opponents included -- without
+            // this, an AI opponent's ProductionAdvisor (which now treats
+            // Barracks as a valid idle producer alongside Factory) would
+            // have no Barracks to ever actually train Rifleman/
+            // FlamethrowerTrooper from mid-match.
+            if (faction == FactionId.HumanArmy) SpawnStartingBarracks(playerIndex, hq, blocked, claimed);
         }
 
         SpawnHostileCivilians(center, blocked, claimed);
@@ -3512,33 +3531,47 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     }
 
     /// <summary>v0.1 placeholder (same "flag the invented number" status
-    /// as <see cref="StartingWorkerCount"/>) -- a small honor guard, not
-    /// a real garrison. 2026-08: Soldier is now a real combatant (see
-    /// <see cref="HumanoidCombatant"/>), not the purely-cosmetic docs/34
-    /// dressing unit it started as, so this count staying small is a
-    /// balance choice now, not just a GameObject-cost one.</summary>
-    private const int StartingSoldierCount = 4;
+    /// as <see cref="StartingWorkerCount"/>) -- how many Rifleman come
+    /// pre-trained the instant a Barracks is placed, same "one fully
+    /// functional X on startup, plus a little on top" bootstrap shape
+    /// <see cref="SpawnFactoryForPlayer"/> already established for
+    /// Factory.</summary>
+    private const int StartingRiflemanCount = 4;
 
-    /// <summary>2026-08 (creator brief: "Refactor Human Soldiers & Armed
-    /// Citizens into Monster Variants"): Soldier upgraded from docs/34's
-    /// cosmetic-only `HumanSoldier` (deleted, fully superseded -- no
-    /// duplicate implementation left behind) to a real combatant on the
-    /// shared <see cref="HumanoidCombatant"/> kit, via <see
-    /// cref="HumanCombatProfile.Soldier"/>. Scoped to the human's own
-    /// base only (never AI opponents', even when they're also Human
-    /// Army) -- Worker itself has this same "local human only" scope
-    /// today (see its own header); giving every AI opponent's base a
-    /// garrison too is a real, separate scope expansion, not something
-    /// this pass silently assumed.</summary>
-    private void SpawnStartingSoldiers(HexCoord nearHex, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
+    /// <summary>2026-08 (creator direction: "Human Army is from army
+    /// barracks -- part of the basic kit for Human army", confirmed as a
+    /// real production building, not a cosmetic prop -- see <see
+    /// cref="BuildingKind.Barracks"/>'s own doc comment). SUPERSEDES the
+    /// old `SpawnStartingSoldiers` (deleted, not kept alongside this --
+    /// the cosmetic-only-adjacent `HumanCombatProfile.Soldier` local-AI
+    /// garrison it spawned is now redundant with a REAL, visible,
+    /// ongoing-producible Rifleman via <see cref="RosterInfantryView"/>,
+    /// and the "correction, not retraction" convention this project
+    /// follows (CLAUDE.md) means replacing it outright rather than
+    /// running two parallel "Human Army infantry" spawns side by side).
+    /// Places one free starting Barracks (same bootstrap-grant contract
+    /// as <see cref="SpawnFactoryForPlayer"/> -- Complete immediately, no
+    /// cost) and seeds it with <see cref="StartingRiflemanCount"/>
+    /// already-trained Rifleman via <see
+    /// cref="SimBridge.SpawnRosterUnit"/> (the SAME bootstrap path <see
+    /// cref="SpawnOpponentStartingArmy"/> already uses for an AI
+    /// opponent's own opening force), so a fresh match doesn't wait on a
+    /// real training queue just to have SOME visible infantry. Called for
+    /// EVERY HumanArmy player -- the local human here, and every
+    /// HumanArmy AI opponent from <see cref="SpawnStartingBases"/>'s own
+    /// opponent loop -- unlike the old Soldier spawn, which was
+    /// deliberately local-human-only.</summary>
+    private void SpawnStartingBarracks(int playerIndex, HexCoord nearHex, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
     {
-        for (var i = 0; i < StartingSoldierCount; i++)
+        var barracksHex = FindOpenHexWide(nearHex, blocked, claimed, 24);
+        claimed.Add(barracksHex);
+        _simBridge.SpawnBarracksForPlayer(playerIndex, barracksHex);
+
+        for (var i = 0; i < StartingRiflemanCount; i++)
         {
-            var hex = FindOpenHexWide(nearHex, blocked, claimed, 24);
+            var hex = FindOpenHexWide(barracksHex, blocked, claimed, 24);
             claimed.Add(hex);
-            var go = new GameObject("Soldier_" + i);
-            var soldier = go.AddComponent<HumanoidCombatant>();
-            soldier.Init(this, HumanCombatProfile.Soldier(), WorldOf(hex));
+            _simBridge.SpawnRosterUnit(playerIndex, hex, RosterUnitKind.Rifleman);
         }
     }
 

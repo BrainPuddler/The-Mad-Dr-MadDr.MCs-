@@ -466,4 +466,35 @@ public struct HumanCharacterProfile
             Headgear = HeadgearKind.Helmet,
         };
     }
+
+    /// <summary>2026-08 (creator direction: "let's add a flame thrower
+    /// army person as well into the mix"). Same broad-shouldered military
+    /// build as <see cref="HumanSoldier"/> -- same faction, same
+    /// "disciplined... military posture" register -- but <see
+    /// cref="HumanCharacterProfile.HasBackpack"/> false here: this
+    /// variant's silhouette comes from <see cref="RosterInfantryView"/>'s
+    /// own bespoke twin fuel-tank props instead of the generic single
+    /// backpack cube, so turning the generic one on too would double up
+    /// and clip. Slightly darker, soot-tinted accent (vs. Soldier's plain
+    /// olive-drab) as a secondary, color-carries-role cue on top of the
+    /// tanks' own already-distinct silhouette.</summary>
+    public static HumanCharacterProfile FlamethrowerTrooper()
+    {
+        return new HumanCharacterProfile
+        {
+            BodyColor = new Color(0.35f, 0.4f, 0.3f),
+            AccentColor = new Color(0.16f, 0.15f, 0.14f),
+            HeightScale = 1.05f,
+            LimbThicknessScale = 1.1f,
+            ArmLengthScale = 1f,
+            ShoulderWidthScale = 1.2f,
+            HunchDegrees = 0f,
+            Asymmetric = false,
+            HasLegs = true,
+            HasHands = true,
+            OversizedHands = false,
+            HasBackpack = false,
+            Headgear = HeadgearKind.Helmet,
+        };
+    }
 }

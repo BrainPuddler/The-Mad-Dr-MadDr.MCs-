@@ -142,6 +142,37 @@ public class WeaponTests
     }
 
     [Fact]
+    public void PoliceSwatHunterMilitiaWeaponsAreDistinctArchetypes()
+    {
+        // 2026-08 (Police/SWAT/Hunter/Militia variant pass): the two NEW
+        // weapons this pass adds -- TacticalCarbine (SWAT) and
+        // HuntingRifle (Hunter) -- against the whole existing Human
+        // firearm family, same "not a recolor" discipline
+        // HumanoidCombatantWeaponsAreDistinctArchetypes already checks.
+        var carbine = WeaponProfile.TacticalCarbine();
+        var hunting = WeaponProfile.HuntingRifle();
+        var rifle = WeaponProfile.ServiceRifle();
+        var shotgun = WeaponProfile.Shotgun();
+
+        Assert.Equal(WeaponKind.Bullet, carbine.Kind);
+        Assert.Equal(WeaponKind.Bullet, hunting.Kind);
+
+        // carbine: fastest cadence of ANY firearm in the codebase --
+        // sustained suppressive fire is the whole point.
+        Assert.True(carbine.Cadence <= rifle.Cadence);
+        Assert.True(carbine.Cadence <= shotgun.Cadence);
+        Assert.True(carbine.Range < rifle.Range);   // CQB-focused, not a long-range weapon
+
+        // hunting rifle: longest range of any firearm in the codebase,
+        // slowest cadence of any Bullet-kind weapon -- one well-aimed
+        // shot, not sustained fire.
+        Assert.True(hunting.Range > rifle.Range);
+        Assert.True(hunting.Range > shotgun.Range);
+        Assert.True(hunting.Cadence > rifle.Cadence);
+        Assert.True(hunting.Damage > rifle.Damage);   // reach AND punch over the standard rifle
+    }
+
+    [Fact]
     public void HealthScalesWithBulkAndHeart()
     {
         var lean = Combat.Profile(Genome(bodyParams: new[] { 0.5, 0.1, 0.5, 0.5 }, heartTier: "faint")).MaxHealth;

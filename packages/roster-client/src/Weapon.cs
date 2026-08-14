@@ -120,10 +120,43 @@ namespace MadDr.RosterClient
         /// HumanoidCombatant kit -- a trained infantry rifle: longer
         /// range and faster cadence than Revolver/Shotgun (sustained,
         /// aimed fire), lower per-shot damage than Shotgun (a rifle wins
-        /// at range through rate of fire, not one devastating hit).</summary>
+        /// at range through rate of fire, not one devastating hit). Its
+        /// original owner (the old cosmetic-parallel "Soldier" variant)
+        /// is gone -- superseded by a real match-core Rifleman trained
+        /// from Barracks (HumanCombatProfile.cs's own header) -- reused
+        /// here instead for Militia, a real irregular-army read this
+        /// weapon's own "trained rifle" flavor still fits.</summary>
         public static WeaponProfile ServiceRifle()
         {
             return new WeaponProfile(WeaponKind.Bullet, "service rifle", 26, 12, 0.35, 140, 0, 255, 220, 140);
+        }
+
+        /// <summary>2026-08 ("Refactor Human Soldiers & Armed Citizens"
+        /// follow-up: Police/SWAT/Hunter/Militia). A tactical carbine --
+        /// SWAT's own weapon: short-medium range (a CQB/breaching read,
+        /// deliberately shorter than ServiceRifle's), the fastest cadence
+        /// of any firearm in the codebase (0.3s, sustained suppressive
+        /// fire), moderate per-shot damage -- volume of fire is the
+        /// threat, not one heavy hit, matching how the ARMOR half of
+        /// "heavy armored tactical" is expressed on HumanCombatProfile.
+        /// SWAT instead (a large health pool), not here. Cool pale-blue
+        /// tracer tint -- a deliberately "modern tactical" read distinct
+        /// from every other Human weapon's warm brass/amber tones.</summary>
+        public static WeaponProfile TacticalCarbine()
+        {
+            return new WeaponProfile(WeaponKind.Bullet, "tactical carbine", 20, 16, 0.3, 130, 0, 200, 220, 255);
+        }
+
+        /// <summary>Hunter's own weapon: the LONGEST range of any firearm
+        /// here (34m -- a hunting rifle's real advantage is reach, not
+        /// rate of fire), heavier per-shot damage than ServiceRifle, and
+        /// the slowest cadence of any Bullet-kind weapon (1.3s -- a
+        /// deliberate, single well-aimed shot at a time, not sustained
+        /// fire). Warm brass tone, close to but distinct from
+        /// ServiceRifle's.</summary>
+        public static WeaponProfile HuntingRifle()
+        {
+            return new WeaponProfile(WeaponKind.Bullet, "hunting rifle", 34, 20, 1.3, 150, 0, 230, 190, 120);
         }
     }
 
