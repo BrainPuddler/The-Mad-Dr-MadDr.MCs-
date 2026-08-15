@@ -18386,3 +18386,75 @@ would treat as a real cached value and never retry -- `||` retries
 correctly); confirmed `ProductionQueue` has exactly one consumer
 (`ProductionQueueHud.cs`) before widening its tuple shape, so no other
 caller could be silently broken by the new field.
+
+## 2026-08 follow-up: the brass platform was sinking half its own thickness below the roof
+
+Creator report, direct: "check the height of the disk on the roof of
+the factory and make sure it's above the roof not below."
+
+Root cause: Unity's `Cylinder` primitive is centered on its own pivot.
+The platform's `localPosition.y` was 0 (this class's own roof-surface
+origin) with `scale.y = 0.22` (a genuine half-height, for the "thick
+platform" ask) -- so the slab actually extended from Y=-0.22 to
+Y=+0.22, sinking HALF its own thickness into the roof. The doc comment
+above it already claimed "sits flush on the roof surface," but the code
+never actually offset it to make that true.
+
+Fix: raised the platform's own pivot by exactly its own half-height so
+the bottom face sits flush at Y=0 and the entire slab sits above the
+roof. Repositioned the rivet ring and glow disc to match the platform's
+now-correct top face (both had been keyed off the OLD, wrong center
+height).
+
+Checked by hand: the geometry re-derived explicitly (platform bottom=0,
+top=2*halfHeight, rivets/glow both sit just above that corrected top
+face) and brace/paren balance.
+
+## 2026-08 immediate follow-up: the platform was floating above the ROOF, not sunk below it
+
+Creator report, direct: "Still can not see the platform" -- after the
+Y=0-vs-below fix above. Investigated further rather than assuming the
+same fix needed repeating: the platform's OWN local geometry (relative
+to `MonsterAgent.transform`) was correct by this point. The bug was one
+level up -- WHERE `transform` itself gets placed before the platform is
+ever built under it.
+
+**Root cause**: `BaseDresser.RoofHeightFor(BuildingKind)` -- the ONLY
+function `GrabCursor.HoverTargetFor`/`Drop` use to compute "the world Y
+of a Factory's own roof" -- returned the FULL massing-cube envelope
+(`FullScaleFor(def).y`, the same number `BuildingDresser`'s roof-
+landing system uses for a totally different building family). But no
+Factory variant's own RENDERED body actually reaches that height:
+`BuildGenericFactoryShape`/`BuildDoctorFactory`/`BuildHumanFactory` all
+cap their real visible body cube at `fullScale.y * 0.65f`; `BuildAlien
+Factory`'s saucer hull caps at `fullScale.y * 0.42f` (only a thin
+smokestack/spire in one corner reaches higher, never the whole roof
+plane). Every caller of the old `RoofHeightFor` -- the grabbed/roof-
+displayed monster, and now the brass platform under it -- was landing
+35-58% of the building's OWN height above the real visible roof: not
+invisible, just floating in open air over a gap most default camera
+angles never happen to frame. This predates the entire brass-platform
+pass; the platform work was simply the first thing to actually surface
+it, since nothing before had ever needed the exact roof height to be
+right (a monster hovering slightly high in open air reads as "close
+enough" -- a flat brass disc floating visibly detached from the roof
+plane does not).
+
+**Fix**: a new faction-aware `BaseDresser.RoofHeightFor(BuildingKind,
+FactionId)` overload, returning the SAME fraction each `BuildXFactory`
+method actually renders to (0.65 Generic/Doctor/Human, 0.42 Alien) --
+mirrors the real render code instead of a generic tier table that was
+never actually true for this one building kind. The old faction-blind
+overload stays (every OTHER `BuildingKind` it covers has no per-faction
+body-height split to account for, and Mixed/unrecognized-faction
+callers have nothing more specific to fall back to). Both `GrabCursor`
+call sites now read the actual Factory owner's faction via `SimBridge.
+PlayerFaction` (already a small, defensive, existing accessor) before
+computing the roof Y.
+
+Same verification ceiling as the entry above: no Editor to render and
+confirm. Checked by hand: read all four `BuildXFactory` methods'
+own `bodyH` lines directly rather than trusting a summary; confirmed
+`RoofHeightFor`'s only two callers (both in `GrabCursor.cs`) so the new
+overload's signature change couldn't silently break anything else;
+brace/paren balance in both touched files.

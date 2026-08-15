@@ -266,8 +266,50 @@ public class BaseDresser : MonoBehaviour
     /// footprint's ground point -- the SAME tier-height table <see
     /// cref="FullScaleFor"/> already uses for rendering, exposed here so
     /// nothing outside this class has to duplicate (and risk drifting
-    /// from) those numbers.</summary>
+    /// from) those numbers.
+    ///
+    /// 2026-08 BUGFIX (creator report: "still can not see the platform"
+    /// -- traced past the brass-platform pass itself to a real,
+    /// pre-existing height bug this was the first thing to actually
+    /// expose): this used to return the FULL massing-cube envelope
+    /// (`FullScaleFor(def).y`), but no Factory variant's own visible
+    /// body actually reaches that height -- `BuildGenericFactoryShape`/
+    /// `BuildDoctorFactory`/`BuildHumanFactory` all cap their real body
+    /// cube at `fullScale.y * 0.65f`, and `BuildAlienFactory`'s saucer
+    /// hull at `fullScale.y * 0.42f` (only the smokestack/spire rises
+    /// past that, and only over one corner, not the whole roof). Every
+    /// caller of the OLD, faction-blind overload was landing a grabbed/
+    /// displayed monster (and, since the platform pass, the whole brass
+    /// platform under it) 35-58% of the building's own height ABOVE the
+    /// real visible roof -- floating in open air over an empty gap most
+    /// camera angles never happen to frame, which is exactly what "can
+    /// not see" looks like from the ground: not invisible, just parked
+    /// somewhere nobody was looking. This faction-aware overload returns
+    /// the SAME fraction each `BuildXFactory` method actually renders to,
+    /// so a caller that knows which faction it's landing on gets the
+    /// real roof height for the first time. The old faction-blind
+    /// overload stays (Mixed/unrecognized-faction callers, and every
+    /// OTHER `BuildingKind` this method covers, still has no per-faction
+    /// body-height split to account for) -- this new one only
+    /// overrides Factory's own known-wrong case.</summary>
     public static float RoofHeightFor(BuildingKind kind) => FullScaleFor(BuildingDef.Get(kind)).y;
+
+    /// <summary>Faction-aware overload -- see the faction-blind overload's
+    /// own doc comment for the bug this closes. `bodyHeightFraction`
+    /// mirrors each `BuildXFactory` method's own `bodyH` line exactly
+    /// (0.65 for Generic/Doctor/Human, 0.42 for Alien) -- if one of
+    /// those fractions ever changes, this must change with it, same
+    /// "don't let two copies of a number drift apart" discipline this
+    /// class already applies everywhere else (see this method's own
+    /// sibling's doc comment on why `RoofHeightFor` exists as a shared
+    /// accessor at all).</summary>
+    public static float RoofHeightFor(BuildingKind kind, FactionId faction)
+    {
+        var full = RoofHeightFor(kind);
+        if (kind != BuildingKind.Factory) return full;
+        var bodyHeightFraction = faction == FactionId.AlienHive ? 0.42f : 0.65f;
+        return full * bodyHeightFraction;
+    }
 
     /// <summary>2026-08 (creator direction: "it should start with 1 but
     /// then others popup in different places based on the building size

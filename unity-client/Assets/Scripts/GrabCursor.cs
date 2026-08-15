@@ -409,7 +409,15 @@ public class GrabCursor : MonoBehaviour
         if (factory == null) return groundPoint;
 
         var roofWorld = builder.WorldOf(factory.Hex);
-        roofWorld.y = builder.GroundHeightAt(roofWorld) + BaseDresser.RoofHeightFor(factory.Kind);
+        // 2026-08 bugfix (creator report: "still can not see the
+        // platform" -- traced to BaseDresser.RoofHeightFor's own
+        // faction-blind overload returning the FULL massing envelope,
+        // not the actual rendered body height any Factory variant caps
+        // at -- see that method's own doc comment). The faction-aware
+        // overload needs to know which faction actually built this
+        // Factory to pick the right fraction.
+        var faction = bridge != null ? bridge.PlayerFaction(factory.PlayerIndex) : FactionId.Mixed;
+        roofWorld.y = builder.GroundHeightAt(roofWorld) + BaseDresser.RoofHeightFor(factory.Kind, faction);
         return roofWorld;
     }
 
@@ -484,8 +492,16 @@ public class GrabCursor : MonoBehaviour
                 // (not consumed by cloning) settles on top of the Factory
                 // it was just dropped on, instead of hovering wherever
                 // the cursor happened to be.
+                //
+                // 2026-08 bugfix (creator report: "still can not see the
+                // platform" -- see HoverTargetFor's own matching comment
+                // for the full root cause): faction-aware RoofHeightFor,
+                // not the old faction-blind overload that returned the
+                // full massing envelope instead of the actual rendered
+                // roof height.
                 var roofWorld = builder.WorldOf(factory.Hex);
-                roofWorld.y = builder.GroundHeightAt(roofWorld) + BaseDresser.RoofHeightFor(factory.Kind);
+                var faction = bridge != null ? bridge.PlayerFaction(factory.PlayerIndex) : FactionId.Mixed;
+                roofWorld.y = builder.GroundHeightAt(roofWorld) + BaseDresser.RoofHeightFor(factory.Kind, faction);
                 agent.BeginRoofDisplay(roofWorld);
                 _roofOccupant[factory.EntityId] = agent;
                 return;
