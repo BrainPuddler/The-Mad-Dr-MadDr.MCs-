@@ -975,13 +975,24 @@ public class MonsterAgent : MonoBehaviour
         var platform = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         platform.name = "RoofBrassPlatform";
         platform.transform.SetParent(_roofPlatform.transform, false);
-        platform.transform.localPosition = Vector3.zero;   // sits flush on the roof surface, base at the model's own feet-level origin
-        platform.transform.localRotation = Quaternion.identity;
         // Cylinder is 1 unit diameter x 2 units tall at scale 1 (i.e.
         // scale.y is HALF the actual height) -- 0.22 here is a genuine
         // 0.44-unit-thick slab, a real "thick" platform next to the old
         // disc's 0.1-unit squash, not just a recolor of the same shape.
-        platform.transform.localScale = new Vector3(3.0f, 0.22f, 3.0f);
+        const float platformHalfHeight = 0.22f;
+        // 2026-08 bugfix (creator report: "check the height of the disk
+        // on the roof of the factory, make sure it's above the roof not
+        // below"): a Cylinder primitive is centered on its OWN pivot --
+        // at `localPosition.y = 0` (this class's own roof-surface
+        // origin), a slab this thick used to extend from -0.22 to +0.22,
+        // i.e. HALF of it sunk below the actual roof surface. Raising
+        // the pivot by exactly its own half-height puts the platform's
+        // BOTTOM face flush at Y=0 (the roof) and the whole slab
+        // entirely above it, matching what the doc comment already
+        // claimed but the code never actually did.
+        platform.transform.localPosition = new Vector3(0f, platformHalfHeight, 0f);
+        platform.transform.localRotation = Quaternion.identity;
+        platform.transform.localScale = new Vector3(3.0f, platformHalfHeight, 3.0f);
         var platformCollider = platform.GetComponent<Collider>();
         if (platformCollider != null) Object.Destroy(platformCollider);
         var platformMat = new Material(ShaderUtil.FindRenderableShader());
@@ -1002,6 +1013,14 @@ public class MonsterAgent : MonoBehaviour
         const int rivetCount = 14;
         const float rivetRadius = 1.42f;   // just inside the platform's own 1.5-unit edge (scale.x/z = 3.0, radius 1.5)
         const float rivetSize = 0.12f;
+        // 2026-08 (same roof-height bugfix as the platform's own
+        // localPosition above): the platform's real top face now sits at
+        // Y = 2 * platformHalfHeight (bottom flush at 0, full thickness
+        // above it), not at the OLD, wrong "Y = platformHalfHeight while
+        // centered on Y = 0" face height -- rivets/glow both key off this
+        // so they stay sitting proud of the platform's actual top surface
+        // instead of the platform having moved out from under them.
+        const float platformTopY = platformHalfHeight * 2f;
         var seedSalt = GetInstanceID();
         var rivetMat = new Material(ShaderUtil.FindRenderableShader());
         rivetMat.color = new Color(0.55f, 0.42f, 0.2f);   // a touch darker than the platform body -- domed studs read as raised hardware, not more flat brass
@@ -1012,7 +1031,7 @@ public class MonsterAgent : MonoBehaviour
             var angleRad = (baseAngleDeg + angleJitter) * Mathf.Deg2Rad;
             var radiusJitter = 1f + (PbrTextureAtlas.Jitter(i, seedSalt, 102) - 0.5f) * 0.06f;
             var r = rivetRadius * radiusJitter;
-            var localPos = new Vector3(Mathf.Sin(angleRad) * r, 0.24f, Mathf.Cos(angleRad) * r);   // sits proud of the platform's own top face
+            var localPos = new Vector3(Mathf.Sin(angleRad) * r, platformTopY + 0.02f, Mathf.Cos(angleRad) * r);   // sits proud of the platform's own top face
             var sizeJitter = 1f + (PbrTextureAtlas.Jitter(i, seedSalt, 103) - 0.5f) * 0.12f;
 
             var rivet = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -1029,7 +1048,7 @@ public class MonsterAgent : MonoBehaviour
         _roofGlow = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         _roofGlow.name = "RoofGlowDisc";
         _roofGlow.transform.SetParent(_roofPlatform.transform, false);
-        _roofGlow.transform.localPosition = new Vector3(0f, 0.45f, 0f);   // just above the brass platform's own top face (platform half-height 0.22 + a hair of clearance)
+        _roofGlow.transform.localPosition = new Vector3(0f, platformTopY + 0.01f, 0f);   // just above the brass platform's own (now correctly raised) top face
         _roofGlow.transform.localRotation = Quaternion.identity;
         _roofGlow.transform.localScale = new Vector3(2.6f, 0.05f, 2.6f);   // Cylinder is 1 unit diameter x 2 tall at scale 1 -- squashed flat into a disc, slightly inset from the platform's own 3.0-diameter rim
         var collider = _roofGlow.GetComponent<Collider>();
