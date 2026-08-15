@@ -18515,3 +18515,47 @@ center-placed disc); confirmed `TintShape`'s single-level `GetChild`
 sweep skips `trim` itself (no `Renderer` on an empty holder) so the
 platform can't be re-tinted; brace/paren balance in both touched files.
 No Editor in this environment to render and confirm visually.
+
+## 2026-08 follow-up: a real 3D rotating hologram of the portrait, on the roof
+
+Creator direction, verbatim: "I need to see the image rotating on the
+roof." Confirmed via `AskUserQuestion` before building anything: this
+meant a genuinely new 3D world-space feature, not the existing 2D queue
+tiles (`ProductionQueueHud`) or the actual 3D monster model's own
+existing roof-spin (`MonsterAgent.TickRoofDisplay`) — the Lab-exported
+portrait itself, spinning above the permanent brass platform, visible
+for as long as production is running even with no physical specimen
+ever having been dropped there.
+
+**New `RoofPortraitHologram` MonoBehaviour**, wired alongside
+`ProductionQueueHud` in `RuntimeCityBuilder`'s HUD-setup block: every
+frame, reads the front `GrabCursor.ProductionQueue` item's
+`PortraitPng`, decodes it, and positions/spins a double-sided vertical
+`Quad` above the Factory `GrabCursor.FindAnyOwnCompleteFactory()` is
+actually draining into — same "one queue, one factory" assumption
+`ProductionQueueHud`'s own floating badge already makes, since this
+project has no per-Factory queue model yet. Height keys off the exact
+same `BaseDresser.RoofHeightFor(factory.Kind, faction)` the physical
+platform and the monster roof-landing spot both already use, plus a
+fixed clearance so it floats visibly above the platform's rivets and
+glow disc instead of intersecting either. `_Cull` off (mirroring
+`PropLibrary`'s existing double-sided variant) so the portrait keeps
+reading as it spins edge-on, rather than vanishing for half of every
+rotation the way a normal backface-culled quad would.
+
+**Decode logic deduplicated, not copy-pasted a third time**: pulled
+`ProductionQueueHud`'s inline base64-PNG-to-`Texture2D` decode+cache out
+into a new shared static, `PortraitTexture`, since the hologram needed
+the exact same decode for the exact same field every frame — both
+consumers now share one cache instead of decoding the same blob twice
+under two separate `Dictionary`s.
+
+Checked by hand: confirmed `SimBridge`/`RuntimeCityBuilder`/`GrabCursor`
+member names and visibility (`bridge`, `builder`, `WorldOf`,
+`GroundHeightAt`, `FindAnyOwnCompleteFactory`, `HasQueuedProduction`,
+`ProductionQueue`) against their real declarations rather than
+assuming; brace/paren balance on all four touched/new files (`RuntimeCityBuilder.cs`'s
+own raw paren count carries a pre-existing one-paren imbalance from
+before this change — confirmed by diffing the count against the
+pre-edit revision — not something this pass introduced). No Editor in
+this environment to render and confirm visually.

@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -45,9 +44,10 @@ using UnityEngine;
 /// underneath... use the portrait created in the lab. Export that with
 /// the monster"): each tile now fills with the item's real portrait
 /// (<see cref="GrabCursor.ProductionQueue"/>'s own new `PortraitPng`
-/// field -- the Lab's actual WebGL-rendered thumbnail, decoded here into
-/// a <see cref="Texture2D"/> and cached per data-URL string so the SAME
-/// base64 blob is never decoded twice) instead of the flat tinted square
+/// field -- the Lab's actual WebGL-rendered thumbnail, decoded via <see
+/// cref="PortraitTexture"/>'s shared cache so the SAME base64 blob is
+/// never decoded twice, even across the roof hologram which reads the
+/// same field) instead of the flat tinted square
 /// the old text-abbreviation tile used, with the item's `Label`
 /// (genome id for a single unit, the battalion's own saved name for a
 /// Battalion/LabBattalion) drawn as a real text strip BELOW the tile --
@@ -72,58 +72,11 @@ public class ProductionQueueHud : MonoBehaviour
 
     private static Texture2D _tex;
 
-    /// <summary>2026-08 (portrait tiles): one decoded <see cref="Texture2D"/>
-    /// per distinct base64 PNG data URL, decoded ONCE and reused for as
-    /// long as this component lives -- `GrabCursor.ProductionQueue`
-    /// hands back the SAME data-URL string every frame for the same
-    /// queued item (it's a plain field read off `StoredGenomeDto`, not
-    /// re-fetched), so keying the cache by that string is exactly as
-    /// stable as keying by genome id would be, with no extra plumbing to
-    /// carry a genome id down to this HUD-only cache. A failed decode
-    /// (`LoadImage` returning false -- malformed/truncated data) caches
-    /// `null` under that same key rather than retrying every frame,
-    /// same "don't hard-fail, don't hot-loop on a known-bad value"
-    /// posture the rest of this pipeline's optional-field handling
-    /// already follows.</summary>
-    private readonly Dictionary<string, Texture2D> _portraitCache = new Dictionary<string, Texture2D>();
-
     public static bool PointerOver { get; private set; }
 
     public void Init(GrabCursor grabCursorRef)
     {
         grabCursor = grabCursorRef;
-    }
-
-    /// <summary>Decodes a `data:image/png;base64,...` URL into a
-    /// `Texture2D`, or returns null (and caches the null) if `png` is
-    /// empty or fails to decode. `Texture2D.LoadImage` auto-resizes the
-    /// texture to the PNG's own real dimensions -- the Lab's own
-    /// `renderThumbnail` always bakes at a fixed square size, so every
-    /// portrait this ever sees is already a clean square with nothing
-    /// further to crop/letterbox here.</summary>
-    private Texture2D PortraitTextureFor(string png)
-    {
-        if (string.IsNullOrEmpty(png)) return null;
-        if (_portraitCache.TryGetValue(png, out var cached)) return cached;
-
-        Texture2D tex = null;
-        var commaIdx = png.IndexOf(',');
-        if (commaIdx >= 0 && commaIdx + 1 < png.Length)
-        {
-            try
-            {
-                var bytes = Convert.FromBase64String(png.Substring(commaIdx + 1));
-                var candidate = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-                if (candidate.LoadImage(bytes)) tex = candidate;
-                else Destroy(candidate);
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning("ProductionQueueHud: failed decoding a queued item's portrait: " + e.Message);
-            }
-        }
-        _portraitCache[png] = tex;   // caches null too -- see this field's own doc comment
-        return tex;
     }
 
     private const float ProgressBarHeight = 4f;
@@ -162,7 +115,7 @@ public class ProductionQueueHud : MonoBehaviour
         {
             var item = items[i];
             var tileRect = new Rect(panelX + i * (tileSize + tileGap), panelY, tileSize, tileSize);
-            var portrait = PortraitTextureFor(item.PortraitPng);
+            var portrait = PortraitTexture.For(item.PortraitPng);
 
             if (portrait != null)
             {

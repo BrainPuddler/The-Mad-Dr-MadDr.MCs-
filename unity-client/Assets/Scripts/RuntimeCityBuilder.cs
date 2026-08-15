@@ -652,6 +652,14 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (productionQueueHud == null) productionQueueHud = gameObject.AddComponent<ProductionQueueHud>();
         productionQueueHud.Init(grabCursor);
 
+        // 2026-08 (creator direction: "I need to see the image rotating
+        // on the roof"): a real 3D hologram of the queue's own portrait,
+        // spinning above the Factory roof for as long as production
+        // runs -- see RoofPortraitHologram's own doc comment.
+        var roofPortraitHologram = gameObject.GetComponent<RoofPortraitHologram>();
+        if (roofPortraitHologram == null) roofPortraitHologram = gameObject.AddComponent<RoofPortraitHologram>();
+        roofPortraitHologram.Init(grabCursor);
+
         var clock = gameObject.GetComponent<AnalogClockHud>();
         if (clock == null) gameObject.AddComponent<AnalogClockHud>();
 
