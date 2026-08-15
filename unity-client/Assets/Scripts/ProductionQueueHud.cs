@@ -56,10 +56,35 @@ using UnityEngine;
 /// back to the old flat-tile-plus-abbreviation look whenever a portrait
 /// is unavailable (an older genome saved before portraits existed, or a
 /// failed client-side bake) -- never a hard error, never a blank
-/// tile.</summary>
+/// tile.
+///
+/// 2026-08 follow-up (creator direction: "Add a progress bar at the
+/// bottom of the current monster build to factory for both the
+/// individual monsters and battalion"; bug report: "the battalion
+/// build portrait is still not visible above the factory. Even the
+/// Battalion label... is not visible"): <see cref="DrawCurrentBuildAtRoof"/>
+/// floats a name label + progress bar at the exact world position <see
+/// cref="RoofPortraitHologram"/> anchors its own spinning portrait at,
+/// gated on that class's new `HasTarget` rather than on its portrait
+/// having actually decoded -- the fix for the label being invisible
+/// too: before this pass, everything above the Factory (image AND any
+/// label) depended on the SAME portrait decode succeeding, so a
+/// portrait-less genome (an older battalion member, a failed Lab
+/// upload) blanked the whole display with nothing left on screen to
+/// diagnose from.</summary>
 public class ProductionQueueHud : MonoBehaviour
 {
     public GrabCursor grabCursor;
+
+    /// <summary>2026-08 (creator report: "the battalion build portrait is
+    /// still not visible above the factory. Even the Battalion label
+    /// that should [be] with the portrait is not visible"): so the new
+    /// world-anchored build label + progress bar (<see
+    /// cref="DrawCurrentBuildAtRoof"/>) can float at the EXACT same spot
+    /// the hologram itself uses (<see
+    /// cref="RoofPortraitHologram.CurrentWorldAnchor"/>), rather than
+    /// re-deriving that world position a third time.</summary>
+    public RoofPortraitHologram roofHologram;
 
     [Header("Placement (docked to the screen's bottom-right corner)")]
     public float tileSize = 44f;
@@ -74,9 +99,10 @@ public class ProductionQueueHud : MonoBehaviour
 
     public static bool PointerOver { get; private set; }
 
-    public void Init(GrabCursor grabCursorRef)
+    public void Init(GrabCursor grabCursorRef, RoofPortraitHologram roofHologramRef)
     {
         grabCursor = grabCursorRef;
+        roofHologram = roofHologramRef;
     }
 
     private const float ProgressBarHeight = 4f;
@@ -199,6 +225,7 @@ public class ProductionQueueHud : MonoBehaviour
         // method's own note just below.
         UiScale.End(prevMatrix);
         DrawFactoryBadge(items[0].Remaining);
+        DrawCurrentBuildAtRoof(items[0].Label, items[0].Progress);
     }
 
     /// <summary>Billboards the front item's remaining count over the
@@ -300,6 +327,56 @@ public class ProductionQueueHud : MonoBehaviour
     private string CostText(int count)
     {
         return count * grabCursor.cloneCostBlood + " Blood";
+    }
+
+    /// <summary>2026-08 (creator direction: "Add a progress bar at the
+    /// bottom of the current monster build to factory for both the
+    /// individual monsters and battalion"; follow-up bug report: "the
+    /// battalion build portrait is still not visible above the factory.
+    /// Even the Battalion label that should [be] with the portrait is
+    /// not visible"): the label + progress bar the roof hologram was
+    /// always supposed to carry, drawn HERE instead of by <see
+    /// cref="RoofPortraitHologram"/> itself (that class is explicitly a
+    /// pure 3D-world component, no OnGUI -- see its own header) at the
+    /// EXACT same world anchor the hologram uses
+    /// (`roofHologram.CurrentWorldAnchor`), so the two always sit
+    /// together regardless of which Factory/faction is currently live.
+    /// Gated on `HasTarget`, NOT on the hologram's own quad being
+    /// visible -- this is precisely the fix for "even the label is not
+    /// visible": before this pass the whole display (image AND any
+    /// label) depended on the portrait itself decoding, so a genuinely
+    /// portrait-less genome (an old battalion member, a failed Lab
+    /// upload) blanked everything with nothing on screen to debug from.
+    /// `progress` (0..1, from <see cref="GrabCursor.ProductionQueue"/>'s
+    /// own tuple) already comes from the SAME shared `_productionTimer`
+    /// regardless of item Kind, so this needs no SingleUnit/Battalion
+    /// branch to cover both.</summary>
+    private void DrawCurrentBuildAtRoof(string label, float progress)
+    {
+        if (roofHologram == null || !roofHologram.HasTarget) return;
+        var cam = Camera.main;
+        if (cam == null) return;
+
+        var sp = cam.WorldToScreenPoint(roofHologram.CurrentWorldAnchor + Vector3.up * 1.8f);
+        if (sp.z <= 0f) return;
+
+        const float w = 120f, h = 34f, barH = 5f;
+        var x = sp.x - w * 0.5f;
+        var y = Screen.height - sp.y - h * 0.5f;
+
+        GUI.color = new Color(0f, 0f, 0f, 0.7f);
+        GUI.DrawTexture(new Rect(x, y, w, h), _tex);
+        GUI.color = Color.white;
+        GUI.Label(new Rect(x + 3f, y + 1f, w - 6f, 16f), string.IsNullOrEmpty(label) ? "?" : label);
+
+        // "a progress bar at the bottom" -- literally the bottom strip of
+        // this same badge, under the name.
+        var barRect = new Rect(x + 3f, y + h - barH - 3f, w - 6f, barH);
+        GUI.color = new Color(0f, 0f, 0f, 0.6f);
+        GUI.DrawTexture(barRect, _tex);
+        GUI.color = new Color(0.75f, 0.35f, 0.35f, 1f);
+        GUI.DrawTexture(new Rect(barRect.x, barRect.y, barRect.width * Mathf.Clamp01(progress), barRect.height), _tex);
+        GUI.color = Color.white;
     }
 
     private static string Abbrev(string label)

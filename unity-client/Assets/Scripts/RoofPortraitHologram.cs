@@ -44,6 +44,21 @@ public class RoofPortraitHologram : MonoBehaviour
     private GameObject _quad;
     private Material _mat;
     private string _lastPortraitPng;
+    private string _lastWarnedPortraitPng;
+    private bool _warnedNoFactory;
+
+    /// <summary>2026-08 (creator report: "the battalion build portrait is
+    /// still not visible above the factory. Even the Battalion label
+    /// that should [be] with the portrait is not visible"): the world
+    /// anchor this hologram floats at, exposed so <see
+    /// cref="ProductionQueueHud"/> can float the label/progress bar the
+    /// creator also reported missing at the EXACT same spot -- computed
+    /// and kept live whenever a queue item + Factory exist, regardless
+    /// of whether the portrait itself actually decoded. Read `HasTarget`
+    /// first: a default `Vector3.zero` here means "nothing queued right
+    /// now," not "the factory is at the origin."</summary>
+    public Vector3 CurrentWorldAnchor { get; private set; }
+    public bool HasTarget { get; private set; }
 
     public void Init(GrabCursor grabCursorRef)
     {
@@ -54,17 +69,68 @@ public class RoofPortraitHologram : MonoBehaviour
     {
         if (grabCursor == null || grabCursor.builder == null || !grabCursor.HasQueuedProduction)
         {
+            HasTarget = false;
             SetVisible(false);
             return;
         }
 
+        var factory = grabCursor.FindAnyOwnCompleteFactory();
+        if (factory == null)
+        {
+            // 2026-08 (creator report above): this is exactly the "object
+            // is either spawning in the wrong location or not at all"
+            // symptom, root cause #1 -- production is queued but this
+            // player currently has no live Complete Factory for
+            // FindAnyOwnCompleteFactory to anchor on (destroyed mid-
+            // match, or the very first frame before one finishes). Loud,
+            // not silent -- same "loud failure over silent spaghetti"
+            // posture MonsterBody.WarnIfFeetImplausible already
+            // established for this project.
+            if (!_warnedNoFactory)
+            {
+                Debug.LogWarning("RoofPortraitHologram: production is queued but FindAnyOwnCompleteFactory() returned null -- nothing to anchor the hologram/label on.");
+                _warnedNoFactory = true;
+            }
+            HasTarget = false;
+            SetVisible(false);
+            return;
+        }
+        _warnedNoFactory = false;
+
         string frontPortrait = null;
         foreach (var item in grabCursor.ProductionQueue) { frontPortrait = item.PortraitPng; break; }
-        var portrait = PortraitTexture.For(frontPortrait);
-        if (portrait == null) { SetVisible(false); return; }
 
-        var factory = grabCursor.FindAnyOwnCompleteFactory();
-        if (factory == null) { SetVisible(false); return; }
+        var faction = grabCursor.bridge != null ? grabCursor.bridge.PlayerFaction(factory.PlayerIndex) : FactionId.Mixed;
+        var roofWorld = grabCursor.builder.WorldOf(factory.Hex);
+        roofWorld.y = grabCursor.builder.GroundHeightAt(roofWorld)
+            + BaseDresser.RoofHeightFor(factory.Kind, faction) + HologramHeightAboveRoof;
+
+        // 2026-08 bugfix (creator report above): root cause #2 -- this
+        // anchor/HasTarget pair is now set UNCONDITIONALLY whenever a
+        // queue+Factory exist, BEFORE the portrait decode is even
+        // attempted. The old code computed nothing and returned early
+        // the instant PortraitTexture.For came back null, so a genome
+        // with no portrait (an older battalion member, a failed Lab
+        // upload) blanked the ENTIRE display -- quad AND the label a
+        // later pass was going to add -- with no way to tell "nothing
+        // queued" apart from "queued, but this one genome has no
+        // portrait" from the screen alone.
+        CurrentWorldAnchor = roofWorld;
+        HasTarget = true;
+
+        var portrait = PortraitTexture.For(frontPortrait);
+        if (portrait == null)
+        {
+            if (frontPortrait != _lastWarnedPortraitPng)
+            {
+                Debug.LogWarning(string.IsNullOrEmpty(frontPortrait)
+                    ? "RoofPortraitHologram: front queue item has no PortraitPng at all (never synced, or an older save from before portraits existed) -- showing the label with no image."
+                    : "RoofPortraitHologram: front queue item's PortraitPng failed to decode into a texture -- see PortraitTexture's own warning above for why.");
+                _lastWarnedPortraitPng = frontPortrait;
+            }
+            SetVisible(false);   // the QUAD hides -- label/progress bar (ProductionQueueHud) still draw via CurrentWorldAnchor/HasTarget above
+            return;
+        }
 
         EnsureQuad();
         SetVisible(true);
@@ -74,10 +140,6 @@ public class RoofPortraitHologram : MonoBehaviour
             _lastPortraitPng = frontPortrait;
         }
 
-        var faction = grabCursor.bridge != null ? grabCursor.bridge.PlayerFaction(factory.PlayerIndex) : FactionId.Mixed;
-        var roofWorld = grabCursor.builder.WorldOf(factory.Hex);
-        roofWorld.y = grabCursor.builder.GroundHeightAt(roofWorld)
-            + BaseDresser.RoofHeightFor(factory.Kind, faction) + HologramHeightAboveRoof;
         _quad.transform.position = roofWorld;
         _quad.transform.Rotate(Vector3.up, SpinDegPerSec * Time.deltaTime, Space.World);
     }

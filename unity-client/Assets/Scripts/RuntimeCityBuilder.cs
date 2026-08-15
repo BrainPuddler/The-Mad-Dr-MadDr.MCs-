@@ -652,17 +652,23 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (barracksHud == null) barracksHud = gameObject.AddComponent<BarracksHud>();
         barracksHud.Init(this, playerIndex: 0);
 
-        var productionQueueHud = gameObject.GetComponent<ProductionQueueHud>();
-        if (productionQueueHud == null) productionQueueHud = gameObject.AddComponent<ProductionQueueHud>();
-        productionQueueHud.Init(grabCursor);
-
         // 2026-08 (creator direction: "I need to see the image rotating
         // on the roof"): a real 3D hologram of the queue's own portrait,
         // spinning above the Factory roof for as long as production
-        // runs -- see RoofPortraitHologram's own doc comment.
+        // runs -- see RoofPortraitHologram's own doc comment. Built
+        // BEFORE ProductionQueueHud (was after) so its own reference can
+        // be handed straight into that Init call below -- ProductionQueueHud
+        // needs it to float the build label/progress bar at the exact
+        // same world anchor the hologram itself uses (2026-08 follow-up,
+        // creator report: "the Battalion label that should [be] with the
+        // portrait is not visible").
         var roofPortraitHologram = gameObject.GetComponent<RoofPortraitHologram>();
         if (roofPortraitHologram == null) roofPortraitHologram = gameObject.AddComponent<RoofPortraitHologram>();
         roofPortraitHologram.Init(grabCursor);
+
+        var productionQueueHud = gameObject.GetComponent<ProductionQueueHud>();
+        if (productionQueueHud == null) productionQueueHud = gameObject.AddComponent<ProductionQueueHud>();
+        productionQueueHud.Init(grabCursor, roofPortraitHologram);
 
         var clock = gameObject.GetComponent<AnalogClockHud>();
         if (clock == null) gameObject.AddComponent<AnalogClockHud>();

@@ -18805,3 +18805,78 @@ pass; brace/paren balance on every touched/new file (`GrabCursor.cs`,
 No Editor in this environment to render and confirm visually -- the
 Factory selection highlight/badges and cost text in particular are
 worth a real look next time the Editor is available.
+
+## 2026-08 follow-up: build progress at the Factory, and diagnosing the invisible battalion portrait/label
+
+Creator direction, verbatim: "Add a progress bar at the bottom of the
+current monster build to factory for both the individual monsters and
+battalion. Add a debug alert for portrait load errors. because the
+battalion build portrait is still not visible above the factory. Even
+the Battalion label that should [be] with the portrait is not visible.
+which signifies to me the object is either spawning in the wrong
+location or not at all."
+
+**Root cause, found by reading `RoofPortraitHologram.Update()` closely
+rather than guessing:** the ENTIRE display above the Factory -- quad
+AND any label -- was gated on the SAME `if (portrait == null) {
+SetVisible(false); return; }` check, and nothing computed a world
+anchor or drew a label at all until that point had already passed. A
+battalion built from members with no `PortraitPng` (an older genome, a
+failed Lab upload -- entirely possible for a live-fielded squad, unlike
+a fresh Lab spawn) hit that early return every single frame: not
+"spawning in the wrong location," literally never spawning anything,
+label included, with zero diagnostic anywhere to tell "nothing queued"
+apart from "queued, but this genome has no portrait" from the screen
+alone -- exactly the ambiguity the creator's own report named.
+
+**Fix, three parts:**
+
+1. **`RoofPortraitHologram`** now computes its world anchor and sets a
+   new public `HasTarget`/`CurrentWorldAnchor` UNCONDITIONALLY whenever
+   a queue item + own Factory both exist -- the quad itself still hides
+   without a valid portrait, but the anchor stays live so something can
+   draw there regardless. Also logs (once per distinct cause, not every
+   frame) when `FindAnyOwnCompleteFactory()` returns null with a queue
+   present, and separately when the front item's portrait is null vs.
+   present-but-failed-to-decode -- two genuinely different situations
+   the old code couldn't distinguish.
+2. **`PortraitTexture.For`** had exactly ONE logged failure path (an
+   outright exception from `Convert.FromBase64String`/`LoadImage`) --
+   two other silent-null paths existed with zero diagnostic: a
+   `dataUrl` with no `,` separator at all, and `LoadImage` returning
+   `false` (well-formed bytes, not a real image) without throwing. Both
+   now log a `Debug.LogWarning` too. Deliberately still silent for the
+   plain "no dataUrl at all" case -- that's the normal, expected state
+   for a portrait-less genome, not a load ERROR, which is specifically
+   what was asked for ("a debug alert for portrait load errors").
+3. **`ProductionQueueHud.DrawCurrentBuildAtRoof`** (new) draws the name
+   label + "a progress bar at the bottom" the roof display was always
+   supposed to carry, floated at `roofHologram.CurrentWorldAnchor`,
+   gated on `HasTarget` rather than on the portrait having decoded --
+   this is the actual fix for "even the label is not visible."
+   `progress` comes from `GrabCursor.ProductionQueue`'s own tuple, which
+   already reads the SAME shared `_productionTimer` regardless of
+   SingleUnit/Battalion/LabBattalion Kind, so one draw call covers "for
+   both the individual monsters and battalion" with no Kind branch
+   needed. `RoofPortraitHologram` stayed a pure 3D-world component (its
+   own header already says so) -- `ProductionQueueHud` draws every
+   OnGUI pixel this feature needs, same division of labor the rest of
+   this pass already established.
+
+`RuntimeCityBuilder`'s HUD-setup block now builds `RoofPortraitHologram`
+BEFORE `ProductionQueueHud` (was the other order) so its reference can
+be handed straight into `ProductionQueueHud.Init`'s new second
+parameter.
+
+Checked by hand: confirmed the ONE real call site for
+`ProductionQueueHud.Init` (`RuntimeCityBuilder.cs`) was updated for the
+new two-argument signature, and grepped for any other caller (none);
+brace/paren balance on every touched file (`RoofPortraitHologram.cs`,
+`PortraitTexture.cs`, `ProductionQueueHud.cs`, `RuntimeCityBuilder.cs`
+-- the latter's own pre-existing one-paren prose imbalance, confirmed
+unchanged, persists as already documented above). No Editor in this
+environment to actually see the new Console warnings fire or the label/
+bar render -- if the battalion's own genomes genuinely have no
+`PortraitPng`, the label/progress bar will now show WITHOUT an image
+(by design, not a bug), and the new warning will say so explicitly in
+the Console the next time this is run for real.
