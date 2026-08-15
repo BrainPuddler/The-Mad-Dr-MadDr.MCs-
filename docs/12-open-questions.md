@@ -18206,3 +18206,56 @@ the clerestory position/normal mismatch above; confirmed via grep that
 every one of `DressSmall`'s three picks and `DressIndustrial` now
 reaches at least one `SpawnFrontDoor` call and at least one window
 call.
+
+## 2026-08 immediate follow-up: east/west windows perpendicular to the wall + variable window count
+
+Creator report, with a screenshot: a black rectangle floating at a
+diagonal angle across the wall, not flush against it. "The east west
+wall windows are perpendicular to the walls, should be parallel. Vary
+the number 1 to 5 or what fits per wall, mix it up with logical
+groups."
+
+**Root cause**: `SpawnWindowStrip` (the shared helper every window call
+in `BuildingDresser.cs` goes through) hardcoded the window quad's WIDTH
+axis (`tangent`, passed to `BuildingWindowGrid.AddWindow`) to
+`Vector3.right`, regardless of which wall the window sat on. Every
+caller before the windows/doors pass above only ever placed windows on
+front/back walls (a ±Z normal) -- for THOSE walls, "width along world
+X" and "width along the wall's own surface" are the same thing, so the
+bug was invisible for the entire lifetime of this function until the
+previous pass's east/west (±X-normal) house walls became the first
+caller where they're NOT the same thing. On an east/west wall, "width
+along X" means "width along the wall's own OUTWARD NORMAL" -- a quad
+standing edge-on to the wall instead of lying flat against it, which is
+exactly the sheared, diagonal-looking rectangle in the screenshot.
+
+**Fix**: `tangent = Vector3.Cross(Vector3.up, normal).normalized` --
+derives the correct in-plane width axis for ANY cardinal wall normal
+instead of assuming one. For a ±Z normal this reduces to exactly
+±`Vector3.right`, the old hardcoded value, so every pre-existing front/
+back-wall caller (the apartment tier's own legacy strip loop included)
+is byte-identical; only the newly-added east/west callers actually
+change behavior, and only to become CORRECT.
+
+**"Vary the number 1 to 5... mix it up with logical groups"**: replaced
+the old fixed one-or-two-windows-per-wall calls with `WindowCountForWall`
+(a small deterministic hash, 1-5, independent per wall so different
+walls of the same building -- and the same wall across different
+buildings -- don't all land on the same count) and `SpawnWindowRow` (a
+row of that many windows evenly spaced and centered on the wall, the
+"logical group" reading -- symmetric, regularly spaced, the way a real
+building's own windows are actually laid out, not a random scatter).
+Applied to every `DressSmall` wall and `DressIndustrial`'s clerestory
+band. Where a wall ALSO has a door on it (the house's own front wall),
+`SpawnWindowRow`'s `clearCenterHalfWidth` splits the row into two
+symmetric flanks either side of the door instead of running windows
+through it -- the requested window COUNT still lands on that wall, just
+distributed around the door rather than ignoring it.
+
+Same verification ceiling as every entry above: no Editor to render the
+fix. Checked by hand: the tangent math re-derived explicitly (cross of
+world-up with each of the four cardinal normals, confirming ±Z reduces
+to the old hardcoded ±X exactly, and ±X reduces to a real ±Z tangent
+that didn't exist before); brace/paren balance; confirmed via grep that
+every `SpawnSmallHouseWindows` call site's positional/named arguments
+still match the helper's new signature after the parameter reorder.

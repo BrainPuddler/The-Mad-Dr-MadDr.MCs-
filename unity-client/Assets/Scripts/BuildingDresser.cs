@@ -592,16 +592,18 @@ public static class BuildingDresser
                 // land on the ridge, not sink to the flat tier height.
                 b.RegisterRoofLandingHeight(hex, height + GableApexOffset);
                 // 2026-08 ("all buildings need multiple windows and at
-                // least one door"): a small window pair on each of the
-                // four walls (a real house has windows on every side, not
-                // just the street face) plus a front door under the gable
-                // ridge's own long axis (GableRoofLength runs along local
-                // Z, matching the ridge in the mesh above -- the door
-                // faces the same direction the roof's ridge line runs, so
-                // it reads as this house's actual entrance wall, not an
-                // arbitrary side).
-                SpawnSmallHouseWindows(b, t, basePos, height, h);
+                // least one door"): a variable 1-5 window row on each of
+                // the four walls (a real house has windows on every side,
+                // not just the street face) plus a front door under the
+                // gable ridge's own long axis (GableRoofLength runs along
+                // local Z, matching the ridge in the mesh above -- the
+                // door faces the same direction the roof's ridge line
+                // runs, so it reads as this house's actual entrance wall,
+                // not an arbitrary side). The door sits at the SAME wall
+                // center the front window row is centered on, so the row
+                // is told to clear a gap around it rather than overlap.
                 SpawnFrontDoor(b, t, basePos, height, Vector3.forward, h);
+                SpawnSmallHouseWindows(b, t, basePos, height, h, frontDoorClearHalfWidth: 1.4f);
                 break;
             }
             case 1:   // gas station: forecourt canopy on poles + pylon sign
@@ -657,28 +659,101 @@ public static class BuildingDresser
         }
     }
 
-    /// <summary>Small window pair on each of the four walls of an 18m
-    /// massing cube, appended to the shared `BuildingWindowGrid` (same
-    /// mechanism `DressApartment`'s own legacy strip loop already uses
-    /// via `SpawnWindowStrip`) -- gives every Small-tier building real
-    /// glass on every side, not just whichever face happens to be
-    /// street-facing. `skipForward` lets a caller that already spawned
-    /// its own dedicated front window (the gas station kiosk pane, the
-    /// diner's wide street band) skip the redundant forward pair rather
-    /// than double up two different window treatments on the same
-    /// wall.</summary>
-    private static void SpawnSmallHouseWindows(RuntimeCityBuilder b, Transform t, Vector3 basePos, float height, int h, bool skipForward = false)
+    /// <summary>2026-08 follow-up (creator direction: "vary the number 1
+    /// to 5 or what fits per wall, mix it up with logical groups"): how
+    /// many windows THIS wall gets, 1-5, hashed independently per
+    /// (building, wallSalt) so different walls of the same building --
+    /// and the same wall across different buildings -- don't all land on
+    /// the same count. Deliberately its own small hash rather than
+    /// reusing `Hash()` (that one is keyed off a `HexCoord`; every caller
+    /// here already only has the flattened int `h` `Hash()` itself
+    /// produced upstream) -- same inline unchecked-multiply-xor shape
+    /// `SpawnWindowStrip`'s own `floorSeed` already uses for the same
+    /// reason.</summary>
+    private static int WindowCountForWall(int h, int wallSalt)
+    {
+        unchecked
+        {
+            var hash = (h * 397) ^ (wallSalt * 8191 + 17);
+            return 1 + ((hash & 0x7fffffff) % 5);
+        }
+    }
+
+    /// <summary>A row of `count` windows (1-5, see `WindowCountForWall`)
+    /// evenly spaced across one wall, appended to the shared
+    /// `BuildingWindowGrid`. Reads as a real "logical group" -- evenly
+    /// spaced and symmetric about the wall's own center -- rather than a
+    /// random scatter, the same way a real building's windows are
+    /// actually laid out. `clearCenterHalfWidth` (>0 only for a wall that
+    /// ALSO has a door on it) splits the row into two symmetric flanks
+    /// either side of that door instead of running windows straight
+    /// through it -- `count` windows are still spawned, just distributed
+    /// left/right of the clear zone rather than skipped.</summary>
+    private static void SpawnWindowRow(RuntimeCityBuilder b, Transform t, Vector3 basePos, float y,
+        Vector3 normal, Vector3 windowScale, int h, int baseSlot, int count, float clearCenterHalfWidth = 0f)
+    {
+        if (count <= 0) return;
+        // In-plane axis windows spread along -- perpendicular to the
+        // wall's own outward normal, lying flat in the wall's own plane
+        // (same construction SpawnWindowStrip's own tangent fix uses, so
+        // a row's individual windows and their own width axis always
+        // agree with each other).
+        var spreadAxis = Vector3.Cross(Vector3.up, normal).normalized;
+        var wallHalfSpan = Half - windowScale.x * 0.7f;   // margin clear of the corner trim
+        var facePos = basePos + Vector3.up * y + normal * (Half * 1.01f);
+
+        if (clearCenterHalfWidth <= 0f)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                var frac = count == 1 ? 0f : (i / (float)(count - 1)) * 2f - 1f;   // -1..1
+                SpawnWindowStrip(b, t, facePos + spreadAxis * (frac * wallHalfSpan), windowScale, normal, h, baseSlot + i);
+            }
+            return;
+        }
+
+        // split the row into two flanks either side of the door -- count
+        // divided as evenly as possible (the extra window, if `count` is
+        // odd, goes to whichever side rounds up).
+        var leftCount = count / 2;
+        var rightCount = count - leftCount;
+        var flankSpan = Mathf.Max(0f, wallHalfSpan - clearCenterHalfWidth);
+        var slot = baseSlot;
+        for (var i = 0; i < leftCount; i++)
+        {
+            var frac = leftCount == 1 ? 0.5f : i / (float)(leftCount - 1);
+            var offset = -(clearCenterHalfWidth + frac * flankSpan);
+            SpawnWindowStrip(b, t, facePos + spreadAxis * offset, windowScale, normal, h, slot++);
+        }
+        for (var i = 0; i < rightCount; i++)
+        {
+            var frac = rightCount == 1 ? 0.5f : i / (float)(rightCount - 1);
+            var offset = clearCenterHalfWidth + frac * flankSpan;
+            SpawnWindowStrip(b, t, facePos + spreadAxis * offset, windowScale, normal, h, slot++);
+        }
+    }
+
+    /// <summary>Real glass on every wall of an 18m Small-tier massing
+    /// cube, a variable 1-5 windows per wall (see `SpawnWindowRow`/
+    /// `WindowCountForWall`) instead of a flat fixed pair -- gives every
+    /// Small-tier building real windows on every side, not just whichever
+    /// face happens to be street-facing. `skipForward` lets a caller that
+    /// already spawned its own dedicated front window (the gas station
+    /// kiosk pane, the diner's wide street band) skip the redundant
+    /// forward row rather than double up two different window treatments
+    /// on the same wall. `frontDoorClearHalfWidth` (>0 only for the house
+    /// case, whose door sits on this same forward wall) keeps the front
+    /// row's windows clear of the door instead of overlapping it.</summary>
+    private static void SpawnSmallHouseWindows(RuntimeCityBuilder b, Transform t, Vector3 basePos, float height, int h,
+        bool skipForward = false, float frontDoorClearHalfWidth = 0f)
     {
         var y = height * 0.55f;
-        var scale = new Vector3(2.6f, height * 0.32f, 0.3f);
+        var scale = new Vector3(2.3f, height * 0.32f, 0.3f);
         if (!skipForward)
-        {
-            SpawnWindowStrip(b, t, basePos + new Vector3(-5f, y, Half * 1.01f), scale, Vector3.forward, h, 900);
-            SpawnWindowStrip(b, t, basePos + new Vector3(5f, y, Half * 1.01f), scale, Vector3.forward, h, 901);
-        }
-        SpawnWindowStrip(b, t, basePos + new Vector3(0f, y, -Half * 1.01f), scale, Vector3.back, h, 902);
-        SpawnWindowStrip(b, t, basePos + new Vector3(Half * 1.01f, y, 0f), scale, Vector3.right, h, 903);
-        SpawnWindowStrip(b, t, basePos + new Vector3(-Half * 1.01f, y, 0f), scale, Vector3.left, h, 904);
+            SpawnWindowRow(b, t, basePos, y, Vector3.forward, scale, h, 900, WindowCountForWall(h, 1), frontDoorClearHalfWidth);
+        SpawnWindowRow(b, t, basePos, y, Vector3.back, scale, h, 920, WindowCountForWall(h, 2));
+        SpawnWindowRow(b, t, basePos, y, Vector3.right, scale, h, 940, WindowCountForWall(h, 3));
+        SpawnWindowRow(b, t, basePos, y, Vector3.left, scale, h, 960, WindowCountForWall(h, 4));
     }
 
     /// <summary>A real door: a dark recessed void (same `DarkRecess`
@@ -749,20 +824,18 @@ public static class BuildingDresser
         b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(6f, 1.6f, 9.6f),
             new Vector3(0.35f, 1.6f, 0.35f), Concrete(), t);
 
-        // 2026-08 ("multiple windows and at least one door"): the real
-        // loading-dock door under the canopy above, plus a clerestory
-        // window band -- three small high-set panes per side wall,
-        // narrower and higher than a house's own window (SpawnSmallHouseWindows'
-        // 2.6x(height*0.32) at 0.55 height) to read as factory glazing,
-        // not domestic.
+        // 2026-08 ("multiple windows and at least one door"), follow-up
+        // ("vary the number 1 to 5... per wall, mix it up with logical
+        // groups"): the real loading-dock door under the canopy above,
+        // plus a variable 1-5-pane clerestory row per side wall --
+        // narrower and set higher than a house's own window
+        // (SpawnSmallHouseWindows' 2.3x(height*0.32) at 0.55 height) to
+        // read as factory glazing, not domestic.
         SpawnFrontDoor(b, t, basePos, height, Vector3.forward, h);
         var claY = height * 0.78f;
-        var claScale = new Vector3(1.8f, height * 0.16f, 0.25f);
-        for (var i = -1; i <= 1; i++)
-        {
-            SpawnWindowStrip(b, t, basePos + new Vector3(Half * 1.01f, claY, i * 5f), claScale, Vector3.right, h, 910 + i);
-            SpawnWindowStrip(b, t, basePos + new Vector3(-Half * 1.01f, claY, i * 5f), claScale, Vector3.left, h, 913 + i);
-        }
+        var claScale = new Vector3(1.4f, height * 0.16f, 0.25f);
+        SpawnWindowRow(b, t, basePos, claY, Vector3.right, claScale, h, 910, WindowCountForWall(h, 5));
+        SpawnWindowRow(b, t, basePos, claY, Vector3.left, claScale, h, 930, WindowCountForWall(h, 6));
 
         if (primary)
         {
@@ -802,7 +875,26 @@ public static class BuildingDresser
         // by half that depth. A flat quad at plain `pos` sits back at the
         // Cube's CENTER instead, close enough to the wall to z-fight with
         // it. Restore the old Cube's outward-face position.
-        BuildingWindowGrid.For(t).AddWindow(pos + normal * (scale.z * 0.5f), Vector3.right, normal, scale.x, scale.y, seed, lit, WindowGlowColor);
+        //
+        // 2026-08 BUGFIX (creator report, with a screenshot: "the east
+        // west wall windows are perpendicular to the walls, should be
+        // parallel"): `tangent` (the window's WIDTH axis) used to be
+        // hardcoded `Vector3.right` regardless of `normal` -- correct
+        // by coincidence for every pre-existing caller (all of them used
+        // a +-Z, front/back normal, where "width along X" is actually
+        // right), but every caller before this pass only ever used front/
+        // back normals -- nothing had ever called this with a +-X (east/
+        // west) normal until `SpawnSmallHouseWindows`/`DressIndustrial`'s
+        // clerestory band added them. On an east/west wall, "width along
+        // world X" means "width along the wall's own OUTWARD normal" --
+        // a quad edge-on to the wall instead of flat against it, which is
+        // exactly the sheared, perpendicular-looking rectangle in the
+        // report's screenshot. `Vector3.Cross(Vector3.up, normal)` derives
+        // the correct in-plane tangent for ANY cardinal normal instead of
+        // assuming one -- for a +-Z normal this reduces to +-Vector3.right
+        // exactly, so every existing front/back caller is byte-identical.
+        var tangent = Vector3.Cross(Vector3.up, normal).normalized;
+        BuildingWindowGrid.For(t).AddWindow(pos + normal * (scale.z * 0.5f), tangent, normal, scale.x, scale.y, seed, lit, WindowGlowColor);
     }
 
     // ---- medium tier: brick walk-up apartments ---------------------------------
