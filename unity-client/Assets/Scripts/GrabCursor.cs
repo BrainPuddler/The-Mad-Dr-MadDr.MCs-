@@ -115,6 +115,18 @@ public class GrabCursor : MonoBehaviour
     private readonly System.Collections.Generic.Dictionary<uint, MonsterAgent> _roofOccupant =
         new System.Collections.Generic.Dictionary<uint, MonsterAgent>();
 
+    // 2026-08 (creator direction, verbatim: "if a monster is grabbed
+    // from the roof of a factory, any movement beyond the factory
+    // bounds should result in a snap to a clear ground position close"):
+    // set only when the monster currently in `_carried` was pulled off
+    // THIS Factory's own roof slot -- null for a normal ground-standing
+    // monster grabbed anywhere else on the map, which this new bounds
+    // check must never affect. Cleared at every place `_carried` itself
+    // gets cleared (Drop, ExitToOff, and the bounds-snap below), same
+    // "kept in sync everywhere the state it mirrors changes" discipline
+    // `_roofOccupant` already follows.
+    private SimBuilding _carriedFromRoofFactory;
+
     private static Texture2D _clawTexture;
 
     // ---- production queue (2026-08 creator direction: "Factories, like
@@ -426,9 +438,100 @@ public class GrabCursor : MonoBehaviour
         if (_carried == null) { _mode = Mode.Armed; return; }   // held monster died/was destroyed mid-carry
 
         var groundPoint = GroundUnderCursor(cam, mouse);
+
+        // 2026-08 (creator direction, verbatim: "if a monster is grabbed
+        // from the roof of a factory, any movement beyond the factory
+        // bounds should result in a snap to a clear ground position
+        // close" -- see SnapCarriedOffRoofBounds's own doc comment):
+        // only for a monster that came off ITS OWN Factory's roof slot,
+        // and only once the cursor's own hex is no longer within that
+        // SAME Factory's drop range -- the exact "still at/near this
+        // Factory" test Drop/HoverTargetFor already use, applied here to
+        // decide when the carry itself gets cut short instead of when a
+        // drop counts as a clone.
+        if (_carriedFromRoofFactory != null && groundPoint.HasValue)
+        {
+            var hex = builder.HexAt(groundPoint.Value);
+            if (FindOwnFactoryNear(hex) != _carriedFromRoofFactory)
+            {
+                SnapCarriedOffRoofBounds();
+                return;
+            }
+        }
+
         if (groundPoint.HasValue) _carried.TickHeld(HoverTargetFor(groundPoint.Value), Time.deltaTime);
 
         if (mouse.leftButton.wasPressedThisFrame) Drop(groundPoint);
+    }
+
+    /// <summary>2026-08 (creator direction, verbatim: "if a monster is
+    /// grabbed from the roof of a factory, any movement beyond the
+    /// factory bounds should result in a snap to a clear ground position
+    /// close but also avoid building Mesh collisions or collisions with
+    /// other monsters. use the push function of navigation to find a
+    /// appropriate parking spot"): ends the carry immediately (same
+    /// "gone the instant the drag interrupts it" contract as any other
+    /// pickup that's about to be re-anchored -- a roof specimen isn't
+    /// meant to be freely flown anywhere on the map the way a normal
+    /// ground pickup is, only re-homed near the building it came off of)
+    /// and teleports straight to a validated nearby hex rather than the
+    /// walking creep <see cref="MonsterAgent.BootFromRoof"/>'s own roof-
+    /// eviction uses -- unlike that automatic bump, this interrupts a
+    /// carry already hovering mid-air with the cursor, so an instant
+    /// reposition ("snap," read literally) reads far more natural than a
+    /// creature that was just floating suddenly turning to walk from
+    /// wherever the cursor happened to be yanked to.
+    ///
+    /// Reuses <see cref="FindOpenHexNear"/> verbatim -- the SAME ring-
+    /// search "push outward from the Factory until a clear hex turns up"
+    /// this project already relies on for clone placement and roof-
+    /// eviction parking, so building-footprint clearance (its own
+    /// `InsideBuildingFootprint` check) needs no new logic here. It only
+    /// checks its own `claimed` set for overlap, though, which normally
+    /// tracks one placement BATCH, not the whole battlefield -- so
+    /// `NearbyMonsterHexes` pre-seeds that set with every OTHER live
+    /// monster's current hex near the Factory, extending the exact same
+    /// clearance math (`bodyRadius * 2 + groupSpacing`) to already-
+    /// standing monsters instead of just monsters being placed together
+    /// right now.</summary>
+    private void SnapCarriedOffRoofBounds()
+    {
+        var agent = _carried;
+        var factory = _carriedFromRoofFactory;
+        _carried = null;
+        _carriedFromRoofFactory = null;
+        _mode = Mode.Armed;
+        if (agent == null) return;
+
+        agent.EndHeld();
+        if (factory == null) return;   // defensive only -- shouldn't happen, see this field's own doc comment
+
+        var claimed = NearbyMonsterHexes(factory.Hex, agent);
+        var parkHex = FindOpenHexNear(factory.Hex, claimed, agent.Radius);
+        if (parkHex.HasValue) agent.TeleportTo(builder.WorldOf(parkHex.Value));
+        // no open hex found within the ring search -- leave it wherever
+        // EndHeld already put it (the last hover point before the bounds
+        // check fired) rather than teleporting into a spot never actually
+        // validated.
+    }
+
+    /// <summary>Every OTHER live monster's current hex within
+    /// <see cref="FindOpenHexNear"/>'s own 8-ring search radius of
+    /// `center` -- pre-seeds that method's `claimed` parameter so its
+    /// existing per-claimed-hex clearance check (`bodyRadius * 2 +
+    /// groupSpacing`) also keeps a parking spot clear of monsters that
+    /// were already standing there, not just other hexes being claimed
+    /// in the same placement batch.</summary>
+    private System.Collections.Generic.HashSet<HexCoord> NearbyMonsterHexes(HexCoord center, MonsterAgent exclude)
+    {
+        var occupied = new System.Collections.Generic.HashSet<HexCoord>();
+        foreach (var m in builder.Monsters)
+        {
+            if (m == null || m == exclude || m.IsHeld) continue;
+            var hex = builder.HexAt(m.transform.position);
+            if (hex.DistanceTo(center) <= 8) occupied.Add(hex);
+        }
+        return occupied;
     }
 
     /// <summary>Creator direction: "when I move the pointer with the
@@ -483,6 +586,7 @@ public class GrabCursor : MonoBehaviour
             _carried.EndHeld();
             _carried = null;
         }
+        _carriedFromRoofFactory = null;
         _mode = Mode.Off;
         Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
     }
@@ -494,6 +598,7 @@ public class GrabCursor : MonoBehaviour
         var agent = hit.Value.collider.GetComponentInParent<MonsterAgent>();
         if (agent == null || agent.IsHeld) return;
 
+        _carriedFromRoofFactory = FindRoofOccupantFactory(agent);
         RemoveFromRoofOccupancy(agent);
         agent.BeginHeld();
         _carried = agent;
@@ -504,6 +609,7 @@ public class GrabCursor : MonoBehaviour
     {
         var agent = _carried;
         _carried = null;
+        _carriedFromRoofFactory = null;
         _mode = Mode.Armed;   // stays armed -- pick up the next one right away
         if (agent == null) return;
 
@@ -572,6 +678,29 @@ public class GrabCursor : MonoBehaviour
             break;
         }
         if (key.HasValue) _roofOccupant.Remove(key.Value);
+    }
+
+    /// <summary>2026-08 (roof-bounds snap): which Factory, if any, `agent`
+    /// was currently occupying the roof of -- called from `TryPickUp`
+    /// BEFORE `RemoveFromRoofOccupancy` clears the entry, so the bounds
+    /// check in `Update()` knows which Factory's own range to measure
+    /// against for as long as this pickup is being carried. Null for a
+    /// normal ground-standing monster, same as `_roofOccupant` simply
+    /// having no entry for it.</summary>
+    private SimBuilding FindRoofOccupantFactory(MonsterAgent agent)
+    {
+        if (bridge == null) return null;
+        foreach (var kv in _roofOccupant)
+        {
+            if (kv.Value != agent) continue;
+            for (var i = 0; i < bridge.BuildingCount; i++)
+            {
+                var b = bridge.BuildingAt(i);
+                if (b.EntityId == kv.Key) return b;
+            }
+            break;
+        }
+        return null;
     }
 
     private SimBuilding FindOwnFactoryNear(HexCoord hex)

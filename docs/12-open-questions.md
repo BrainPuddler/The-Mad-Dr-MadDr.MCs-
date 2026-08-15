@@ -18637,3 +18637,78 @@ brace/paren balance check on all three touched files (`GrabCursor.cs`,
 same pre-existing one-paren imbalance noted in the hologram follow-up
 above, confirmed unchanged by diffing the raw count against the
 pre-edit revision).
+
+## 2026-08 follow-up: flying grab-snap, take two -- a third stale altitude field
+
+Creator report: "it sort of works now but is unreliable," following the
+first grab-snap pass above. Root cause: `MonsterBody._descentFloor` (a
+THIRD altitude field, separate from `_flightLift`/`_groundY`), pushed
+every frame by `MonsterAgent.Update()` from
+`SurfaceHeightAt(transform.position)` -- exactly the kind of per-frame
+push that stops the instant `Update()` early-returns for `_held`. Left
+un-reset by the first pass, it stayed pinned at whatever it was the
+instant before the grab: a real nonzero number anytime a flyer got
+grabbed while cruising over/near a building (the factory itself, most
+often -- exactly where a player reaches for one). The very next
+`UpdateLocomotion` tick then read `Max(_groundY=0, _descentFloor=stale)`
+and eased `_flightLift` right back up toward it -- the snap touched 0
+for a frame, then climbed again. Explains "sort of works... unreliable"
+precisely: fine grabbed clear of any building, broken again next to the
+one building this whole feature is about. Fix: `SnapToGrabbed()` now
+also zeroes `_descentFloor`.
+
+## 2026-08 follow-up: grabbing a monster off a Factory roof snaps to a nearby parking spot once dragged off it
+
+Creator direction, verbatim: "if a monster is grabbed from the roof of
+a factory, any movement beyond the factory bounds should result in a
+snap to a clear ground position close but also avoid building Mesh
+collisions or collisions with other monsters. use the push function of
+navigation to find a appropriate parking spot."
+
+A roof-displaying specimen picked back up via `TryPickUp` used to become
+a completely ordinary carried monster -- freely draggable anywhere on
+the map like any ground pickup, with nothing distinguishing "this one
+came off a roof." New behavior: `GrabCursor` now remembers which
+Factory (if any) the carry started from
+(`_carriedFromRoofFactory`, resolved via a new `FindRoofOccupantFactory`
+BEFORE `RemoveFromRoofOccupancy` clears the entry it would otherwise
+read). Every frame while carrying, if that field is set and the
+cursor's own hex is no longer within that SAME Factory's `dropRangeHexes`
+(the exact "still at/near this Factory" test `Drop`/`HoverTargetFor`
+already use), the carry ends immediately and the specimen teleports to
+a validated nearby hex instead of continuing to follow the cursor.
+
+Deliberately an instant teleport, not the walking creep
+`MonsterAgent.BootFromRoof`'s own automatic roof-eviction uses for the
+same "closest parking spot" idea -- that one is bumping something that
+was already standing still; this one is interrupting a carry already
+hovering mid-air with the cursor, so a creature that was just floating
+suddenly turning to walk from wherever the drag happened to reach would
+read far worse than an instant reposition ("snap," read literally). New
+`MonsterAgent.TeleportTo` pairs the position jump with
+`MonsterBody.SnapFeetToGround` so the legs replant at the new spot
+instead of stretching back from the old one --
+`WarnIfFeetImplausible`'s own doc comment already names this exact
+failure mode ("was the body teleported without SnapFeetToGround()?").
+
+"Use the push function of navigation": reused `FindOpenHexNear`
+verbatim -- the same ring-search "push outward from the Factory until a
+clear hex turns up" this project already relies on for clone placement
+and roof-eviction parking, so building-footprint clearance needed no
+new logic. It only checks its own `claimed` set for overlap, though,
+which normally tracks one placement batch, not the whole battlefield --
+so a new `NearbyMonsterHexes` helper pre-seeds that set with every
+OTHER live monster's current hex within the same 8-ring search radius,
+extending the exact same clearance math (`bodyRadius * 2 +
+groupSpacing`) to already-standing monsters instead of just monsters
+being placed together right now. `builder.Monsters` is global (every
+faction), so this avoids parking on top of anyone, not just the
+player's own roster.
+
+Checked by hand: confirmed `SimBuilding` is a `sealed class` with a
+stable per-entity instance from `MatchState.BuildingAt`'s own backing
+list (not a fresh wrapper per call), so the new `!=` reference-equality
+bounds check is sound; confirmed `RuntimeCityBuilder.Monsters` is public
+and global-scope; brace/paren balance on all three touched files
+(`GrabCursor.cs`, `MonsterAgent.cs`, `MonsterBody.cs`). No Editor in
+this environment to render and confirm visually.

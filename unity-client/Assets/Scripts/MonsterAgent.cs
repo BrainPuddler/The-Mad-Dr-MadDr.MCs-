@@ -830,6 +830,24 @@ public class MonsterAgent : MonoBehaviour
         }
     }
 
+    /// <summary>2026-08 (roof-bounds snap, <see cref="GrabCursor.
+    /// SnapCarriedOffRoofBounds"/>): an instant reposition for an
+    /// EXISTING live monster, called right after <see cref="EndHeld"/>.
+    /// Unlike a freshly spawned clone (which walks to its own park spot
+    /// via <see cref="SetSettleTarget"/>) or a normal drop (which just
+    /// stays wherever <see cref="TickHeld"/> already left it), this jumps
+    /// the root transform straight to `worldPos` and immediately
+    /// replants the feet there via <see cref="MonsterBody.
+    /// SnapFeetToGround"/> instead of leaving them to stretch back from
+    /// wherever they were the frame before -- exactly the failure
+    /// `MonsterBody.WarnIfFeetImplausible`'s own doc comment already
+    /// flags ("was the body teleported without SnapFeetToGround()?").</summary>
+    public void TeleportTo(Vector3 worldPos)
+    {
+        transform.position = worldPos;
+        if (_body != null) _body.SnapFeetToGround();
+    }
+
     // 2026-07 refinement (creator direction: "the wiggling needs to be a
     // bit faster, with arm and legs struggling" -- a follow-up to the
     // earlier "slower, roll+pitch only" pass, not a reversion to the
