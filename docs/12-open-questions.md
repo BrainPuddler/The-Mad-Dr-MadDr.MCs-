@@ -18045,3 +18045,78 @@ confirmed via `git show HEAD:...` diff, not introduced here); the fix
 reuses an already-established, already-relied-upon pattern
 (`NearestOwnFactoryApproachPosition`) rather than inventing new
 geometry logic from scratch.
+
+## 2026-08 follow-up: factory chimney smoke -- larger, varied, coalescing, wind-directional
+
+Creator direction, verbatim: "Make the smoke from the factory larger by
+200% but also spawn various sizes. it should run together as it floats
+away and get larger and then fade out. Similar to the fire smoke but
+more directional to the wind."
+
+Scoped first: `BaseDresser`'s standalone `ChimneySmoke` (`SmokePlume`,
+attached once per Factory at construction-complete, independent of
+damage state) is `SmokePlume`/`SmokePuff.InitPlume`'s ONLY remaining
+caller -- `DamageFx.AttachSmoke`'s own damage-triggered wall plumes
+migrated to the newer, heat-reactive `SmokeCluster` a pass earlier (see
+that class's own header). So every change below is scoped to exactly
+"the smoke from the factory" as asked, with no risk of also changing
+damage/fire smoke's own separately-tuned look.
+
+**"Larger by 200%"**: `BaseDresser`'s own `SmokePlume.Init` scale
+argument raised 2.2 -> 6.6 (literally 3x, i.e. the original size PLUS
+200% more) -- the single knob that call site has always owned for base
+puff size.
+
+**"Spawn various sizes"**: `SmokePlume.SpawnPuff` used to size every
+puff at EXACTLY the plume's own shared scale -- one repeating stamp.
+Now applies a deterministic per-puff multiplier (`SizeVarianceMin`
+0.65 / `SizeVarianceMax` 1.6, salted by a running `_puffCount` so
+consecutive puffs from the SAME chimney differ from each other, this
+file's own standing "no `UnityEngine.Random`" convention).
+
+**"Run together as it floats away"**: `SmokePlume`'s own spawn cadence
+tightened from a flat 0.7-1.0s to a faster, still-varied 0.32-0.54s
+(`SpawnIntervalMin`/`SpawnIntervalRange`) -- consecutive puffs now
+visibly overlap as they rise and drift, reading as one continuous,
+thickening column instead of a string of separate discrete puffs. The
+existing "get larger" growth cap (`SmokeGrowthMultiplier`, hard-clamped
+to [1, 2] -- a real, deliberate ceiling from an earlier pass, "growth in
+size should never exceed 2 times the size of the original") is
+UNCHANGED; density does the "run together" work, not a bigger per-puff
+growth cap (which would have reopened the exact "smoke swallowed the
+fire" problem an earlier pass already fixed once).
+
+**"More directional to the wind" (specifically: as it floats away, "similar
+to the fire smoke")**: the old wind lean was a flat, constant-rate pull
+applied from the instant a puff was born. Split into a separate
+`SmokePuff._growingLean` field, ramped in via a `3*t*t` curve over the
+puff's own age (t=0..1) instead of a flat rate -- a fresh puff now rises
+mostly straight off the stack (matching how real chimney smoke behaves
+before open air catches it) and leans harder into the wind the
+older/higher it gets, "more directional... as it floats away" read
+literally. The `3*t*t` shape specifically (not a plain `t*t`) is
+deliberate: its average over the puff's whole life is exactly 1, so
+total lateral wind travel by end-of-life matches what the OLD constant-
+rate lean would have covered -- shaping WHEN the wind bites without
+weakening how far it ultimately carries the puff (a naive `t*t` would
+have cut total drift to a third, reading as LESS wind-driven overall,
+the opposite of the request). Puff life extended 3.2 -> 4.6s to give a
+bigger, denser column room to actually complete that drift/growth arc
+before fading -- "get larger and then fade out" needs enough lifetime to
+read as a sequence, not a blip.
+
+Every new field defaults to zero/no-op for every OTHER `SmokePuff`
+caller (`InitBurst`/`InitVent`/`InitFlame`/`InitJet`) -- `SmokeCluster`'s
+fire-reactive vents, muzzle flashes, water jets, and fire's own licking
+flame puffs are all completely untouched by this pass, same "decoupled,
+not just similar-looking" discipline `SmokeCluster`'s own header already
+established for staying independent of `FireCluster`.
+
+Same verification ceiling as every other Unity-only change in this
+project: no Editor to render and confirm the visual result. Checked by
+hand: brace/paren balance in `DamageFx.cs`/`BaseDresser.cs`; the `3*t*t`
+average-preserving math re-derived explicitly (∫3t²dt from 0 to 1 = 1)
+rather than asserted; confirmed via grep that `ChimneySmoke` is
+genuinely `SmokePlume`'s only remaining call site before touching
+shared `SmokePuff` code, so no other smoke/fire/dust/water-puff caller
+could be silently affected.

@@ -395,6 +395,29 @@ public class SmokePlume : MonoBehaviour
     // independent puffs each wobbling their own random direction.
     private Vector2 _lean;
 
+    // 2026-08 (creator direction: "make the smoke from the factory larger
+    // by 200%... spawn various sizes"): a per-puff size jitter on top of
+    // the shared plume-wide `_scale` -- every puff used to render at
+    // EXACTLY the same starting size, which read as one repeating stamp
+    // rather than a real chimney's naturally uneven puffs. Deterministic
+    // per-puff hash (this file's own standing "no UnityEngine.Random"
+    // idiom), not a per-plume constant, so consecutive puffs from the
+    // SAME chimney visibly differ from each other.
+    private const float SizeVarianceMin = 0.65f;
+    private const float SizeVarianceMax = 1.6f;
+
+    // 2026-08 (creator direction: "run together as it floats away and get
+    // larger... more directional to the wind"): puffs spawn closer
+    // together than the original 0.7-1.0s cadence so consecutive puffs
+    // visually overlap as they rise and drift -- a real chimney's smoke
+    // reads as one continuous, thickening column, not a string of
+    // separate discrete puffs. This class's own SpawnPuff already grows
+    // each puff up to SmokeGrowthMultiplier's cap over its life
+    // (unchanged, still respects the existing "never exceed 2x" ceiling)
+    // -- density does the "coalescing" work, not a bigger per-puff cap.
+    private const float SpawnIntervalMin = 0.32f;
+    private const float SpawnIntervalRange = 0.22f;
+
     /// <summary>`outwardAngle` is the SAME angle <see cref="DamageFx.AttachSmoke"/>
     /// already used to push this plume's origin outside the building's
     /// footprint -- reusing it here keeps the drift moving further in the
@@ -430,11 +453,20 @@ public class SmokePlume : MonoBehaviour
         _timer = (GetInstanceID() & 7) * 0.1f;
     }
 
+    private int _puffCount;
+
     private void Update()
     {
         _timer -= Time.deltaTime;
         if (_timer > 0f) return;
-        _timer = 0.7f + (GetInstanceID() & 3) * 0.1f;
+        _puffCount++;
+        // 2026-08 ("run together as it floats away"): tighter, per-spawn-
+        // varied cadence (SpawnIntervalMin/Range) instead of the old fixed
+        // 0.7-1.0s -- salted by `_puffCount` (not just this plume's own
+        // constant GetInstanceID()) so consecutive puffs from the SAME
+        // chimney get different intervals, not one fixed repeating gap.
+        var hash = (GetInstanceID() + _puffCount * 92821) & 0xFFFF;
+        _timer = SpawnIntervalMin + (hash / 65536f) * SpawnIntervalRange;
         SpawnPuff();
     }
 
@@ -491,7 +523,14 @@ public class SmokePlume : MonoBehaviour
         go.transform.position = transform.position;
         var id = go.GetInstanceID();
         var resizePct = DamageFxProfile.Active.SmokeResizePct;
-        var startSize = 1.1f * resizePct * _scale;
+        // 2026-08 ("spawn various sizes"): a deterministic per-puff
+        // multiplier on top of the plume's own shared _scale -- every
+        // puff used to start at EXACTLY the same size; consecutive puffs
+        // from the same chimney now visibly differ, the same way real
+        // smoke never puffs out in identical stamps.
+        var sizeJitterHash = (id + _puffCount * 40507) & 0xFFFF;
+        var sizeJitter = Mathf.Lerp(SizeVarianceMin, SizeVarianceMax, sizeJitterHash / 65536f);
+        var startSize = 1.1f * resizePct * _scale * sizeJitter;
         go.transform.localScale = new Vector3(startSize, startSize, startSize);
 
         var meshFilter = go.AddComponent<MeshFilter>();
@@ -510,7 +549,13 @@ public class SmokePlume : MonoBehaviour
         LabMeshBuilder.MakeTransparent(mat);
         renderer.sharedMaterial = mat;
 
-        go.AddComponent<SmokePuff>().InitPlume(mat, 3.2f, startSize, baseAlpha, _lean);
+        // 2026-08 ("run together as it floats away and get larger... more
+        // directional to the wind"): a longer life (3.2 -> 4.6s) so a
+        // bigger, denser column has time to visibly drift and grow before
+        // fading, and InitPlume now grows the wind's own pull over that
+        // life instead of applying it at one constant rate from the
+        // instant a puff is born (see InitPlume's own doc comment).
+        go.AddComponent<SmokePuff>().InitPlume(mat, 4.6f, startSize, baseAlpha, _lean);
     }
 }
 
@@ -1980,6 +2025,15 @@ public class SmokePuff : MonoBehaviour
     private bool _useGrowthMultiplier;
     private float _growthMultiplier = 2f;
 
+    // 2026-08 (creator direction: "more directional to the wind" as a
+    // smoke plume "floats away"): the plume-wide wind lean SmokePlume
+    // hands to InitPlume, applied at a RAMPING rate over the puff's own
+    // age instead of a flat constant from birth -- see InitPlume's own
+    // doc comment. Zero (Vector3.zero, no-op) for every other puff kind
+    // (InitBurst/InitVent/InitFlame/InitJet never touch this), so only
+    // SmokePlume's ambient chimney puffs get the growing-wind treatment.
+    private Vector3 _growingLean;
+
     public void Init(Material mat)
     {
         _mat = mat;
@@ -2044,7 +2098,17 @@ public class SmokePuff : MonoBehaviour
         _useGrowthMultiplier = true;
         _growthMultiplier = Mathf.Clamp(DamageFxProfile.Active.SmokeGrowthMultiplier, 1f, 2f);
         var riseSpeed = DamageFxProfile.Active.SmokeRiseSpeed;
-        _drift = new Vector3(_drift.x + lean.x, riseSpeed, _drift.z + lean.y);
+        _drift = new Vector3(_drift.x, riseSpeed, _drift.z);
+        // 2026-08 (creator direction: "more directional to the wind" --
+        // meant as the puff floats away, not from the instant it's born):
+        // `lean` used to be baked straight into `_drift` at a constant
+        // rate for the puff's whole life. Now stored separately and
+        // ramped up over `t` in Update instead (see `_growingLean`'s own
+        // comment) -- a fresh puff rises mostly straight off the stack,
+        // the same way real chimney smoke does before the open air
+        // catches it, and only leans hard into the wind once it's floated
+        // higher/further away.
+        _growingLean = new Vector3(lean.x, 0f, lean.y);
         _easeFade = true;
     }
 
@@ -2104,6 +2168,21 @@ public class SmokePuff : MonoBehaviour
         _age += Time.deltaTime;
         var t = Mathf.Clamp01(_age / _life);
         transform.position += _drift * Time.deltaTime;
+        // 2026-08 ("more directional to the wind" as it "floats away"):
+        // ramps in smoothly rather than snapping on at full strength from
+        // birth -- a fresh puff drifts mostly straight up off the stack,
+        // the wind's pull building the further/older it gets. The `3*t*t`
+        // curve (not a plain `t*t`) is deliberate: its average over a
+        // puff's whole life equals 1, so total lateral travel by end of
+        // life matches what a flat, constant-rate lean would have covered
+        // -- shaping WHEN the wind bites without weakening how far it
+        // ultimately carries the puff (a naive `t*t` ramp would cut total
+        // drift to a third of the old constant-rate amount, reading as
+        // LESS wind-driven overall, the opposite of what was asked for).
+        // No-op (Vector3.zero) for every puff kind that never called
+        // InitPlume.
+        if (_growingLean.sqrMagnitude > 0.0001f)
+            transform.position += _growingLean * (3f * t * t) * Time.deltaTime;
         if (_swayAmp > 0f)
         {
             _swayPhase += Time.deltaTime * _swayFreq;

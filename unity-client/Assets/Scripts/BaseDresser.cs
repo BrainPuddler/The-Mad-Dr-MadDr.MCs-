@@ -863,7 +863,19 @@ public class BaseDresser : MonoBehaviour
         // fully opaque 1.0 at each puff's freshest/densest moment, fading
         // out as it disperses same as before) -- denser near the stack,
         // thinning with distance, the same way a real chimney's smoke reads.
-        smokeGo.AddComponent<SmokePlume>().Init(2.2f, smokeAngle, 1.25f);
+        //
+        // 2026-08 follow-up (creator direction: "make the smoke from the
+        // factory larger by 200%... spawn various sizes... run together
+        // as it floats away and get larger and then fade out... more
+        // directional to the wind"): scale raised 2.2->6.6 (literal "larger
+        // by 200%" -- 3x this call site's own prior value). The variety/
+        // coalescing/wind-strengthening half of this request lives in
+        // SmokePlume/SmokePuff themselves (SizeVarianceMin/Max, the
+        // tighter SpawnIntervalMin/Range so puffs visibly overlap as they
+        // rise, and the growing `_growingLean` wind pull), not here --
+        // this call site only owns the base SIZE knob, same "one scale
+        // number in, per-puff variety/behavior out" split it already had.
+        smokeGo.AddComponent<SmokePlume>().Init(6.6f, smokeAngle, 1.25f);
 
         // 2026-08 (faction gauntlet, docs/31 §7 Phase 3, "massive stone
         // construction, towers, battlements... preserving existing
