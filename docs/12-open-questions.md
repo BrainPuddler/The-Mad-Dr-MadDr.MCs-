@@ -18712,3 +18712,96 @@ bounds check is sound; confirmed `RuntimeCityBuilder.Monsters` is public
 and global-scope; brace/paren balance on all three touched files
 (`GrabCursor.cs`, `MonsterAgent.cs`, `MonsterBody.cs`). No Editor in
 this environment to render and confirm visually.
+
+## 2026-08 follow-up: dial-in build counts (carry + selected Factory), auto-eviction on completion, live cost indicator
+
+Creator direction, verbatim, across three messages: "When a monster is
+grabbed. if the user presses the space bar a number on the grab
+increments, denoting the number of that monster you want to build. Once
+the factory has built X number of units the monster is kick out of the
+factory and parked nearby to continue monstering. the user may also
+click on the factory highlighting it and press space or + or - keys to
+increase of decrease the number of monsters to build." Follow-up: "add
+a indicator of cost showing up as you increase or decrease the number
+of units to build. Build orders and cost outline also apply to
+battalions."
+
+**Before this pass**, every drop onto a Factory queued a flat
+`maxClonesPerDrop` (10) regardless of what the player actually wanted,
+and the roof occupant sat there forever once its batch finished,
+blocking the roof for anything else.
+
+**Dial while carrying.** New `GrabCursor._pendingBuildCount`, starting
+at 1 on every fresh `TryPickUp`, +1 per space press while Carrying
+(capped at `maxClonesPerDrop`, which is now purely a ceiling rather than
+the automatic amount). `CloneOnto` reads this instead of the flat
+constant at the moment of an actual drop.
+
+**Auto-eviction on completion.** `TickProduction`'s SingleUnit-complete
+branch now calls a new `EvictRoofOccupantIfDone(genomeId)`, which finds
+whichever Factory's roof occupant shares that genome and boots it via
+the same `BootFromRoof` walking-park mechanic manual eviction already
+uses -- "continue monstering" read literally: the display specimen
+steps aside once its job is done, instead of loitering. Deliberately
+does NOT fire when the player manually cancels a build down to zero via
+the new `-` key (see below) -- that's an explicit early stop, not the
+batch actually finishing. `Drop`'s existing manual-bump eviction and
+this new completion eviction now share one `EvictRoofOccupant(factory,
+occupant)` helper, itself built on the SAME `FindOpenHexNear` +
+`NearbyMonsterHexes` pairing the off-bounds carry-snap pass introduced
+-- every parking placement in this file now clears both buildings and
+already-standing monsters, not just buildings.
+
+**Click a Factory to select and adjust it.** No building had any click
+identity at all before this (`ProductionQueueHud`'s own header already
+flagged this exact gap). New minimal `BuildingIdentity` component
+(`EntityId` only, mirroring how `MonsterAgent` is the click-identity for
+monster raycasts) gets attached to every completed building's root in
+`BaseDresser`. `GrabCursor.TryPickUp`, when a click doesn't hit a
+monster, now checks for one via `BuildingIdentity` and -- if it's one of
+the player's own Complete Factories -- selects it (`_selectedFactory`),
+spawning a lazily-built amber ground-glow ring under it (`SlowSpin`,
+same lazy-build-then-toggle shape `MonsterAgent.EnsureRoofGlow`
+established). Clicking empty space, an enemy building, or a non-Factory
+building deselects. While a Factory is selected, Space/`+`/`-`
+(`TickFactorySelectionKeys`) edit the FRONT queue item's own count live
+-- deliberately the front item of the one SHARED queue, not something
+Factory-specific: this project has no real per-Factory queue model
+(`TickProduction` already drains into "any" own Complete Factory), so
+selecting any own Factory surfaces the same front item, flagged in the
+same "known scope simplification" spirit `ProductionQueueHud`'s own
+header already uses.
+
+**Battalions too** (the cost/count follow-up): SingleUnit is a flat
+integer move. `Battalion`/`LabBattalion` have no single integer --
+growing/shrinking a real composition duplicates or drops its own TAIL
+member rather than inventing a new one from nothing, so `+`/`-` there
+extends/shrinks whichever type was queued last. Decrementing either
+kind to empty removes the item (never auto-evicts, same as SingleUnit).
+
+**Cost indicator.** Both new UI reads -- the pending-count badge that
+follows the real cursor while carrying, and a floating badge over the
+selected Factory -- now show `count * cloneCostBlood` next to the
+count, in `ProductionQueueHud`'s new `DrawPendingBuildBadge`/
+`DrawSelectedFactoryBadge`/`CostText`. Deliberately the SAME flat rate
+`TickProduction` actually spends via `TrySpendBlood` (no per-genome cost
+model exists yet), so the number shown can never drift from what
+production will actually charge. Both live in real, unscaled screen-
+pixel space (before `UiScale.Begin`), same coordinate space
+`DrawFactoryBadge` already established, and both had to move OUTSIDE
+the panel's old `!HasQueuedProduction` early return -- a pending carry
+or a selected empty-queue Factory both need to draw with nothing
+actually queued yet.
+
+Checked by hand: confirmed `SimBuilding.EntityId`/`PlayerIndex`/`Kind`/
+`State`/`Hex` field names against real declarations rather than
+assuming; confirmed `List<T>` reachable via its own generic API for the
+Battalion/LabBattalion tail-duplicate logic (no non-generic `IList`
+casting, which an earlier draft of this pass used and then deliberately
+un-did for type safety); caught and removed one leftover duplicate XML
+doc comment stacked above `CloneOnto` from an earlier edit in this same
+pass; brace/paren balance on every touched/new file (`GrabCursor.cs`,
+`ProductionQueueHud.cs`, `BaseDresser.cs`, new `BuildingIdentity.cs`).
+No Editor in this environment to render and confirm visually -- the
+Factory selection highlight/badges and cost text in particular are
+worth a real look next time the Editor is available.

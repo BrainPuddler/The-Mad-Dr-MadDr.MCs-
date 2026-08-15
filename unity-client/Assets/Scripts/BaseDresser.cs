@@ -182,6 +182,10 @@ public class BaseDresser : MonoBehaviour
                 root = new GameObject("Building_" + b.Kind + "_" + b.EntityId);
                 root.transform.SetParent(transform, false);
                 root.transform.position = new Vector3(hexWorld.x, groundY, hexWorld.z);
+                // 2026-08 ("click on the factory, highlighting it"): see
+                // BuildingIdentity's own doc comment -- the only thing a
+                // GrabCursor raycast needs to resolve which building it hit.
+                root.AddComponent<BuildingIdentity>().EntityId = b.EntityId;
                 BuildCompleteShape(root, b.Kind, fullScale, b.PlayerIndex);
                 _completed[b.EntityId] = root;
             }

@@ -83,8 +83,33 @@ public class ProductionQueueHud : MonoBehaviour
 
     private void OnGUI()
     {
-        if (grabCursor == null || !grabCursor.HasQueuedProduction) { PointerOver = false; return; }
+        if (grabCursor == null) { PointerOver = false; return; }
+
+        // 2026-08 (creator direction: "if the user presses the space bar
+        // a number on the grab increments"; "the user may also click on
+        // the factory... press space or + or - keys to increase or
+        // decrease the number of monsters to build"; follow-up: "add an
+        // indicator of cost showing up as you increase or decrease the
+        // number of units to build"): these two can both be live with an
+        // otherwise EMPTY queue (a fresh carry that hasn't been dropped
+        // yet; a selected Factory with nothing queued), so they're read
+        // and gated BEFORE the old "nothing queued, draw nothing" early
+        // return below, not folded inside it.
+        var pendingCount = grabCursor.PendingBuildCount;
+        var selectedBuild = grabCursor.SelectedFactoryBuild;
+
+        if (!grabCursor.HasQueuedProduction && pendingCount <= 0 && !selectedBuild.HasSelection)
+        {
+            PointerOver = false;
+            return;
+        }
         if (_tex == null) _tex = Texture2D.whiteTexture;
+
+        if (pendingCount > 0) DrawPendingBuildBadge(pendingCount);
+        if (selectedBuild.HasSelection) DrawSelectedFactoryBadge(selectedBuild.Label, selectedBuild.Count, selectedBuild.WorldPos);
+
+        if (!grabCursor.HasQueuedProduction) { PointerOver = false; return; }
+
         var prevMatrix = UiScale.Begin();
 
         var screenW = UiScale.Width;
@@ -206,6 +231,75 @@ public class ProductionQueueHud : MonoBehaviour
         GUI.DrawTexture(new Rect(x, y, badgeSize, badgeSize), _tex);
         GUI.color = Color.white;
         GUI.Label(new Rect(x, y + 1f, badgeSize, badgeSize), remaining.ToString());
+    }
+
+    /// <summary>2026-08 (creator direction: "if the user presses the
+    /// space bar a number on the grab increments, denoting the number of
+    /// that monster you want to build"; follow-up: "add an indicator of
+    /// cost showing up as you increase or decrease the number of units
+    /// to build"): follows the real OS cursor while carrying (<see
+    /// cref="Event.current"/>'s own mousePosition, same screen-pixel
+    /// space <see cref="DrawFactoryBadge"/> already draws in) rather than
+    /// UiScale's scaled canvas -- called before <see cref="UiScale.
+    /// Begin"/> even runs, so this and <see
+    /// cref="DrawSelectedFactoryBadge"/> both stay in that same real-
+    /// pixel space without needing their own End/Begin bracket.</summary>
+    private void DrawPendingBuildBadge(int count)
+    {
+        var e = Event.current;
+        if (e == null) return;
+        var pos = e.mousePosition;
+
+        const float w = 96f, h = 34f;
+        var rect = new Rect(pos.x + 18f, pos.y + 18f, w, h);
+        GUI.color = new Color(0f, 0f, 0f, 0.75f);
+        GUI.DrawTexture(rect, _tex);
+        GUI.color = Color.white;
+        GUI.Label(new Rect(rect.x + 4f, rect.y + 2f, rect.width - 8f, 16f), "Build x" + count);
+        GUI.color = new Color(0.85f, 0.85f, 0.55f, 1f);
+        GUI.Label(new Rect(rect.x + 4f, rect.y + 17f, rect.width - 8f, 16f), CostText(count));
+        GUI.color = Color.white;
+    }
+
+    /// <summary>2026-08 (creator direction: "the user may also click on
+    /// the factory... press space or + or - keys to increase or
+    /// decrease the number of monsters to build"; follow-up: "Build
+    /// orders and cost outline also apply to battalions"): floats above
+    /// the selected Factory, the exact same world-to-screen billboard
+    /// idiom <see cref="DrawFactoryBadge"/> already uses, showing the
+    /// front queue item's own label/count/cost live as
+    /// `GrabCursor.TickFactorySelectionKeys` mutates it.</summary>
+    private void DrawSelectedFactoryBadge(string label, int count, Vector3 worldPos)
+    {
+        var cam = Camera.main;
+        if (cam == null) return;
+
+        var sp = cam.WorldToScreenPoint(worldPos + Vector3.up * 6f);
+        if (sp.z <= 0f) return;
+
+        const float w = 130f, h = 40f;
+        var x = sp.x - w * 0.5f;
+        var y = Screen.height - sp.y - h * 0.5f;
+        var rect = new Rect(x, y, w, h);
+
+        GUI.color = new Color(0f, 0f, 0f, 0.75f);
+        GUI.DrawTexture(rect, _tex);
+        GUI.color = Color.white;
+        GUI.Label(new Rect(rect.x + 4f, rect.y + 2f, rect.width - 8f, 16f), (string.IsNullOrEmpty(label) ? "?" : label) + " x" + count);
+        GUI.color = new Color(0.85f, 0.85f, 0.55f, 1f);
+        GUI.Label(new Rect(rect.x + 4f, rect.y + 18f, rect.width - 8f, 16f), CostText(count));
+        GUI.color = Color.white;
+    }
+
+    /// <summary>"An indicator of cost" -- `count * grabCursor.
+    /// cloneCostBlood`, the SAME flat per-clone rate <see
+    /// cref="GrabCursor.TickProduction"/> actually spends via
+    /// `TrySpendBlood` (this project has no per-genome cost model yet,
+    /// see that class's own header), so this can never drift from what
+    /// production will actually charge.</summary>
+    private string CostText(int count)
+    {
+        return count * grabCursor.cloneCostBlood + " Blood";
     }
 
     private static string Abbrev(string label)

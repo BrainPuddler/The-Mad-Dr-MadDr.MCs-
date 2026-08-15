@@ -57,9 +57,13 @@ using UnityEngine.InputSystem;
 /// (`CommandKind.SpendResource`, new) -- that part is generic and
 /// doesn't require a roster kind at all.
 ///
-/// IMGUI-free: this component draws nothing itself (the claw is a REAL OS
-/// cursor, not a screen-space icon) -- only Cursor.SetCursor and Update()
-/// logic.
+/// IMGUI-free: this component draws no screen-space UI itself (the claw is
+/// a REAL OS cursor, not a screen-space icon; <see cref="ProductionQueueHud"/>
+/// owns every OnGUI draw call this feature needs, including the ones reading
+/// this class's own public state) -- only Cursor.SetCursor, Update() logic,
+/// and (2026-08, factory selection) one lazily-built world-space highlight
+/// prop, the same kind of procedural GameObject every other script in this
+/// project spawns directly, not an IMGUI draw.
 /// </summary>
 public class GrabCursor : MonoBehaviour
 {
@@ -72,7 +76,7 @@ public class GrabCursor : MonoBehaviour
     [Tooltip("Blood spent per clone -- an invented v0.1 placeholder number (CLAUDE.md's standing policy for every unsourced cost in this project), not from any design doc.")]
     public int cloneCostBlood = 60;
 
-    [Tooltip("Hard cap on clones spawned from one drop, regardless of how much Blood is banked -- a very full wallet shouldn't be able to flood the field in a single click.")]
+    [Tooltip("2026-08 (creator direction: \"if the user presses the space bar a number on the grab increments, denoting the number of that monster you want to build\"): ceiling on how high the space-bar-dialed build count can go for one carry, AND the hard cap on clones spawned from one drop regardless of how much Blood is banked -- a very full wallet shouldn't be able to flood the field in a single click. Before this feature, every drop queued exactly this many flat; now it's just the upper bound on what the player can dial up to.")]
     public int maxClonesPerDrop = 10;
 
     [Tooltip("How many hex-rings out from the Factory's own hex a drop still counts as \"on it\" -- some forgiveness, same idea as any real drag-and-drop target having a hit margin bigger than its exact pixel bounds.")]
@@ -102,6 +106,72 @@ public class GrabCursor : MonoBehaviour
     /// would ALSO draw and apply a selection-changing marquee
     /// underneath it.</summary>
     public bool IsGrabModeActive { get { return _mode != Mode.Off; } }
+
+    // 2026-08 (creator direction, verbatim: "if the user presses the
+    // space bar a number on the grab increments, denoting the number of
+    // that monster you want to build"): how many clones THIS carry will
+    // queue if dropped onto a Factory -- starts fresh at 1 on every
+    // TryPickUp (see its own comment), climbs by 1 per space press while
+    // Carrying (capped at maxClonesPerDrop, same safety ceiling that
+    // used to be the flat amount every drop queued outright), and is
+    // read once by CloneOnto at the moment of an actual drop. Separate
+    // from the Space/+/- adjustment a SELECTED factory takes (see
+    // TickFactorySelectionKeys) -- that one edits an ALREADY-queued
+    // item's own RemainingCount directly, a different number with a
+    // different lifetime, which just happens to share the same keys.
+    private int _pendingBuildCount = 1;
+
+    /// <summary>0 when nothing is being carried (ProductionQueueHud's own
+    /// badge draw gates on this being &gt; 0 rather than separately
+    /// checking Carrying), otherwise the live dial from the field
+    /// above.</summary>
+    public int PendingBuildCount { get { return _mode == Mode.Carrying ? _pendingBuildCount : 0; } }
+
+    // 2026-08 ("click on the factory, highlighting it and press space or
+    // + or - keys to increase or decrease the number of monsters to
+    // build"): which own Factory (if any) is currently selected -- see
+    // SelectFactory/TickFactorySelectionKeys.
+    private SimBuilding _selectedFactory;
+    private GameObject _selectionHighlight;
+
+    /// <summary>Live read for <see cref="ProductionQueueHud"/>'s own cost
+    /// badge over a selected Factory. Reads the FRONT queue item
+    /// (whatever `TickProduction` is actively draining), not something
+    /// specific to which own Factory happens to be selected -- this
+    /// project has exactly one shared build queue draining into "any"
+    /// own Complete Factory (<see cref="FindAnyOwnCompleteFactory"/>,
+    /// used throughout this file), not a real per-Factory queue model,
+    /// so there is no more specific "this Factory's own build" to report
+    /// -- selecting any own Factory surfaces the same front item.
+    /// Flagging this here the same way <see cref="ProductionQueueHud"/>'s
+    /// own header already flags its "one queue, one badge" scope
+    /// simplification, for a future pass that gives Factories a real
+    /// individual queue to revisit. `HasSelection` false means nothing
+    /// to draw -- no Factory selected, or one selected with an empty
+    /// queue.</summary>
+    public (bool HasSelection, string Label, int Count, Vector3 WorldPos) SelectedFactoryBuild
+    {
+        get
+        {
+            if (_selectedFactory == null || _queue.Count == 0 || builder == null) return (false, null, 0, Vector3.zero);
+            var item = _queue[0];
+            return (true, item.Label, RemainingOf(item), builder.WorldOf(_selectedFactory.Hex));
+        }
+    }
+
+    /// <summary>How many units are still left to build in `item`,
+    /// regardless of Kind -- the same three-way branch <see
+    /// cref="ProductionQueue"/>'s own getter already computes inline for
+    /// its `Remaining` tuple field, pulled out here so <see
+    /// cref="SelectedFactoryBuild"/> and <see
+    /// cref="TickFactorySelectionKeys"/> don't each grow a THIRD copy of
+    /// it.</summary>
+    private static int RemainingOf(QueueItem item)
+    {
+        if (item.Kind == QueueItemKind.SingleUnit) return item.RemainingCount;
+        if (item.Kind == QueueItemKind.Battalion) return item.BattalionRemaining.Count;
+        return item.LabBattalionRemaining.Count;
+    }
 
     // 2026-07 (creator direction: "when a new monster is dropped on a
     // factory, the current monster is booted to the next parking spot
@@ -213,21 +283,18 @@ public class GrabCursor : MonoBehaviour
             for (var i = 0; i < _queue.Count; i++)
             {
                 var item = _queue[i];
-                int remaining;
+                var remaining = RemainingOf(item);
                 string portraitPng;
                 if (item.Kind == QueueItemKind.SingleUnit)
                 {
-                    remaining = item.RemainingCount;
                     portraitPng = item.SingleGenome?.PortraitPng;
                 }
                 else if (item.Kind == QueueItemKind.Battalion)
                 {
-                    remaining = item.BattalionRemaining.Count;
                     portraitPng = FirstPortrait(item.BattalionRemaining, m => m.Genome?.PortraitPng);
                 }
                 else
                 {
-                    remaining = item.LabBattalionRemaining.Count;
                     portraitPng = FirstPortrait(item.LabBattalionRemaining, g => g?.PortraitPng);
                 }
                 var progress = i == 0 ? Mathf.Clamp01(_productionTimer / Mathf.Max(0.01f, productionSecondsPerUnit)) : 0f;
@@ -333,7 +400,11 @@ public class GrabCursor : MonoBehaviour
         if (item.Kind == QueueItemKind.SingleUnit)
         {
             item.RemainingCount--;
-            if (item.RemainingCount <= 0) _queue.RemoveAt(0);
+            if (item.RemainingCount <= 0)
+            {
+                _queue.RemoveAt(0);
+                EvictRoofOccupantIfDone(item.SingleGenome.Id);
+            }
         }
         else if (item.Kind == QueueItemKind.Battalion)
         {
@@ -431,11 +502,19 @@ public class GrabCursor : MonoBehaviour
         if (_mode == Mode.Armed)
         {
             if (mouse.leftButton.wasPressedThisFrame) TryPickUp(cam, mouse);
+            if (_selectedFactory != null) TickFactorySelectionKeys(keyboard);
             return;
         }
 
         // Carrying
         if (_carried == null) { _mode = Mode.Armed; return; }   // held monster died/was destroyed mid-carry
+
+        // 2026-08 (creator direction: "if the user presses the space bar
+        // a number on the grab increments, denoting the number of that
+        // monster you want to build"): see _pendingBuildCount's own
+        // comment -- consumed once by CloneOnto at the moment of drop.
+        if (keyboard.spaceKey.wasPressedThisFrame)
+            _pendingBuildCount = Mathf.Min(_pendingBuildCount + 1, maxClonesPerDrop);
 
         var groundPoint = GroundUnderCursor(cam, mouse);
 
@@ -534,6 +613,59 @@ public class GrabCursor : MonoBehaviour
         return occupied;
     }
 
+    /// <summary>Shared roof-eviction parking search -- reused by both
+    /// `Drop`'s "a fresh drop bumps the current roof occupant" gesture
+    /// and <see cref="EvictRoofOccupantIfDone"/>'s "the batch this
+    /// specimen was displaying finished" one below. Same
+    /// <see cref="FindOpenHexNear"/>/<see cref="NearbyMonsterHexes"/>
+    /// pair the off-bounds carry snap already uses, so every way a
+    /// monster ends up parked near a Factory shares one clearance
+    /// standard (buildings AND other live monsters) instead of the
+    /// building-only check this used to run inline.</summary>
+    private void EvictRoofOccupant(SimBuilding factory, MonsterAgent occupant)
+    {
+        if (factory == null || occupant == null) return;
+        var claimed = NearbyMonsterHexes(factory.Hex, occupant);
+        var bootSpot = FindOpenHexNear(factory.Hex, claimed, occupant.Radius);
+        if (bootSpot != null) occupant.BootFromRoof(builder.WorldOf(bootSpot.Value));
+    }
+
+    /// <summary>2026-08 (creator direction, verbatim: "Once the factory
+    /// has built X number of units the monster is kicked out of the
+    /// factory and parked nearby to continue monstering"): called the
+    /// instant a SingleUnit queue item's `RemainingCount` reaches 0 and
+    /// gets removed -- finds whichever Factory currently has a roof
+    /// occupant sharing THAT genome (`_roofOccupant` has no direct link
+    /// to a queue item, so this is a small linear scan over however many
+    /// Factories the player owns, not a hot path) and evicts it exactly
+    /// like a fresh drop would. Only ever fires for a genuinely FINISHED
+    /// batch -- manually cancelling a build early via <see
+    /// cref="TickFactorySelectionKeys"/>'s `-` key does NOT reach this,
+    /// deliberately (see that method's own doc comment).</summary>
+    private void EvictRoofOccupantIfDone(string genomeId)
+    {
+        if (string.IsNullOrEmpty(genomeId) || bridge == null) return;
+        uint? key = null;
+        MonsterAgent occupant = null;
+        foreach (var kv in _roofOccupant)
+        {
+            if (kv.Value == null || kv.Value.Creature == null || kv.Value.Creature.Id != genomeId) continue;
+            key = kv.Key;
+            occupant = kv.Value;
+            break;
+        }
+        if (key == null) return;
+        _roofOccupant.Remove(key.Value);
+
+        SimBuilding factory = null;
+        for (var i = 0; i < bridge.BuildingCount; i++)
+        {
+            var b = bridge.BuildingAt(i);
+            if (b.EntityId == key.Value) { factory = b; break; }
+        }
+        EvictRoofOccupant(factory, occupant);
+    }
+
     /// <summary>Creator direction: "when I move the pointer with the
     /// grabbed monster it should automatically position the monster
     /// above the roof of the factory." A drag-and-drop snap preview: once
@@ -587,22 +719,40 @@ public class GrabCursor : MonoBehaviour
             _carried = null;
         }
         _carriedFromRoofFactory = null;
+        SelectFactory(null);   // grab mode fully exiting clears every grab-mode-scoped selection, same as the carry above
         _mode = Mode.Off;
         Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
     }
 
+    /// <summary>2026-08 (creator direction: "the user may also click on
+    /// the factory highlighting it and press space or + or - keys to
+    /// increase or decrease the number of monsters to build"): a left-
+    /// click while Armed that DOESN'T hit a monster now also checks for
+    /// one of the player's own Complete Factories (via <see
+    /// cref="BuildingIdentity"/>) and selects it -- clicking empty space,
+    /// an enemy building, or a non-Factory building of the player's own
+    /// all deselect, same "click elsewhere to clear selection" contract
+    /// as everything else that can be selected in this project.</summary>
     private void TryPickUp(Camera cam, Mouse mouse)
     {
         var hit = RaycastCursor(cam, mouse);
-        if (hit == null) return;
-        var agent = hit.Value.collider.GetComponentInParent<MonsterAgent>();
-        if (agent == null || agent.IsHeld) return;
+        if (hit == null) { SelectFactory(null); return; }
 
-        _carriedFromRoofFactory = FindRoofOccupantFactory(agent);
-        RemoveFromRoofOccupancy(agent);
-        agent.BeginHeld();
-        _carried = agent;
-        _mode = Mode.Carrying;
+        var agent = hit.Value.collider.GetComponentInParent<MonsterAgent>();
+        if (agent != null)
+        {
+            if (agent.IsHeld) return;   // already being carried somehow -- defensive no-op, leaves selection as-is
+            _carriedFromRoofFactory = FindRoofOccupantFactory(agent);
+            RemoveFromRoofOccupancy(agent);
+            agent.BeginHeld();
+            _carried = agent;
+            _mode = Mode.Carrying;
+            _pendingBuildCount = 1;
+            return;
+        }
+
+        var building = hit.Value.collider.GetComponentInParent<BuildingIdentity>();
+        SelectFactory(building != null ? FindOwnFactoryById(building.EntityId) : null);
     }
 
     private void Drop(Vector3? groundPoint)
@@ -628,13 +778,10 @@ public class GrabCursor : MonoBehaviour
                 // already holds this Factory's roof slot (if anyone, and
                 // if it isn't this same agent being re-dropped on its own
                 // spot) steps aside to the nearest open hex before the new
-                // arrival takes the roof, the SAME FindOpenHexNear parking
-                // search CloneOnto's own fan-out already uses.
+                // arrival takes the roof (see EvictRoofOccupant's own doc
+                // comment for the shared parking search).
                 if (_roofOccupant.TryGetValue(factory.EntityId, out var evicted) && evicted != null && evicted != agent)
-                {
-                    var bootSpot = FindOpenHexNear(factory.Hex, new System.Collections.Generic.HashSet<HexCoord>(), evicted.Radius);
-                    if (bootSpot != null) evicted.BootFromRoof(builder.WorldOf(bootSpot.Value));
-                }
+                    EvictRoofOccupant(factory, evicted);
 
                 // creator direction: "it should land on the roof and
                 // rotate slowly in the Y axis" -- the ORIGINAL creature
@@ -715,20 +862,130 @@ public class GrabCursor : MonoBehaviour
         return null;
     }
 
-    /// <summary>2026-08 (creator direction: "Factories, like in StarCraft
-    /// make x number of units... the monsters line up at the cloning
-    /// door of the factory and one at a time walk get cloned"): queues
-    /// `maxClonesPerDrop` more clones of `original`'s own genome for
-    /// <see cref="TickProduction"/> to work through one at a time, rather
-    /// than instantly spawning them all in one frame the way this used
-    /// to. A repeat drop of the SAME creature stacks onto the existing
-    /// queued count instead of adding a second entry -- see <see
-    /// cref="QueueSingleUnit"/>'s own doc.</summary>
+    /// <summary>Same ownership/kind/state filter <see
+    /// cref="FindOwnFactoryNear"/> already applies, just resolved by
+    /// `EntityId` (from a <see cref="BuildingIdentity"/> raycast hit)
+    /// instead of hex proximity -- an enemy Factory, a different
+    /// building kind, or one still under construction all resolve to
+    /// null, so clicking them deselects rather than selecting something
+    /// this feature was never meant to apply to.</summary>
+    private SimBuilding FindOwnFactoryById(uint entityId)
+    {
+        if (bridge == null || !bridge.HasMatch) return null;
+        for (var i = 0; i < bridge.BuildingCount; i++)
+        {
+            var b = bridge.BuildingAt(i);
+            if (b.EntityId != entityId) continue;
+            return b.PlayerIndex == localPlayerIndex && b.Kind == BuildingKind.Factory && b.State == BuildingState.Complete ? b : null;
+        }
+        return null;
+    }
+
+    /// <summary>2026-08 ("click on the factory, highlighting it"): swaps
+    /// the current selection and toggles a simple ground-level glow
+    /// under whichever Factory (if any) is now selected -- built lazily
+    /// once, then just repositioned/toggled on every later selection
+    /// change, same "build once, toggle after" shape every other lazy
+    /// prop in this project already follows (<see
+    /// cref="MonsterAgent.EnsureRoofGlow"/>'s own precedent).</summary>
+    private void SelectFactory(SimBuilding factory)
+    {
+        _selectedFactory = factory;
+        if (factory == null)
+        {
+            if (_selectionHighlight != null) _selectionHighlight.SetActive(false);
+            return;
+        }
+        EnsureSelectionHighlight();
+        var world = builder.WorldOf(factory.Hex);
+        world.y = builder.GroundHeightAt(world) + 0.05f;
+        _selectionHighlight.transform.position = world;
+        _selectionHighlight.SetActive(true);
+    }
+
+    private void EnsureSelectionHighlight()
+    {
+        if (_selectionHighlight != null) return;
+        _selectionHighlight = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        _selectionHighlight.name = "FactorySelectionHighlight";
+        var collider = _selectionHighlight.GetComponent<Collider>();
+        if (collider != null) Destroy(collider);
+        _selectionHighlight.transform.localScale = new Vector3(6f, 0.02f, 6f);
+
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        var glowColor = new Color(1f, 0.86f, 0.25f);   // warm amber -- distinct from the cool brass/steel/cyan palette every roof fixture already uses, so a selected Factory reads as a UI state, not more building dressing
+        mat.color = new Color(glowColor.r, glowColor.g, glowColor.b, 0.5f);
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", glowColor * 1.6f);
+        LabMeshBuilder.MakeTransparent(mat);
+        var renderer = _selectionHighlight.GetComponent<Renderer>();
+        if (renderer != null)
+        {
+            renderer.sharedMaterial = mat;
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        }
+        _selectionHighlight.AddComponent<SlowSpin>().degreesPerSecond = 15f;
+    }
+
+    /// <summary>2026-08 (creator direction: "press space or + or - keys
+    /// to increase or decrease the number of monsters to build"; follow-
+    /// up: "Build orders and cost outline also apply to battalions"):
+    /// mutates the FRONT queue item's own remaining-count directly (see
+    /// <see cref="SelectedFactoryBuild"/>'s own doc comment for why the
+    /// front item specifically). SingleUnit is a flat integer, capped at
+    /// `maxClonesPerDrop` the same ceiling the carry dial respects,
+    /// floored at 0 (which removes the item outright -- same "cancel the
+    /// remainder" outcome <see cref="CancelAllProduction"/> gives the
+    /// whole queue, just for one item). Battalion/LabBattalion have no
+    /// single integer to move -- growing/shrinking a real composition
+    /// means duplicating or dropping its own LAST queued member rather
+    /// than inventing a new one from nothing, so `+`/`-` there
+    /// duplicates/removes the tail entry of whichever list is still
+    /// remaining. Decrementing to empty removes the item, same as
+    /// SingleUnit -- but never auto-evicts a roof occupant the way a
+    /// NATURALLY finished build does (<see
+    /// cref="EvictRoofOccupantIfDone"/>): this is the player explicitly
+    /// cancelling early, not the batch actually completing.</summary>
+    private void TickFactorySelectionKeys(Keyboard keyboard)
+    {
+        var increment = keyboard.spaceKey.wasPressedThisFrame || keyboard.equalsKey.wasPressedThisFrame || keyboard.numpadPlusKey.wasPressedThisFrame;
+        var decrement = keyboard.minusKey.wasPressedThisFrame || keyboard.numpadMinusKey.wasPressedThisFrame;
+        if (!increment && !decrement) return;
+        if (_selectedFactory == null || _queue.Count == 0) return;
+
+        var item = _queue[0];
+        if (item.Kind == QueueItemKind.SingleUnit)
+        {
+            item.RemainingCount += increment ? 1 : -1;
+            item.RemainingCount = Mathf.Min(item.RemainingCount, maxClonesPerDrop);
+            if (item.RemainingCount <= 0) _queue.RemoveAt(0);
+        }
+        else if (item.Kind == QueueItemKind.Battalion)
+        {
+            var list = item.BattalionRemaining;
+            if (increment) { if (list.Count > 0 && list.Count < maxClonesPerDrop) list.Add(list[list.Count - 1]); }
+            else if (list.Count > 0) { list.RemoveAt(list.Count - 1); if (list.Count == 0) _queue.RemoveAt(0); }
+        }
+        else
+        {
+            var list = item.LabBattalionRemaining;
+            if (increment) { if (list.Count > 0 && list.Count < maxClonesPerDrop) list.Add(list[list.Count - 1]); }
+            else if (list.Count > 0) { list.RemoveAt(list.Count - 1); if (list.Count == 0) _queue.RemoveAt(0); }
+        }
+    }
+
+    /// <summary>2026-08 (creator direction: "if the user presses the
+    /// space bar a number on the grab increments, denoting the number
+    /// of that monster you want to build"): queues `_pendingBuildCount`
+    /// clones -- the player's own dialed-in amount for THIS carry,
+    /// defaulting to 1 if space was never pressed (was always a flat
+    /// `maxClonesPerDrop` before this feature; that field is now only
+    /// the ceiling the dial can climb to, not the automatic amount).</summary>
     private void CloneOnto(MonsterAgent original)
     {
         var creature = original.Creature;
         if (creature == null || builder == null) return;
-        QueueSingleUnit(creature, original.Radius, maxClonesPerDrop);
+        QueueSingleUnit(creature, original.Radius, _pendingBuildCount);
     }
 
     /// <summary>2026-08 (creator direction: "battalion grouping system...
