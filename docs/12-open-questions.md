@@ -18600,3 +18600,40 @@ every type along the path (`StoredGenomeDto.PortraitPng` is a plain
 nullable `string` on both the Battalion tuple's `.Genome` and the
 LabBattalion list's own element type) and a brace/paren balance check on
 `GrabCursor.cs`.
+
+## 2026-08 follow-up: grab mode fighting the lasso marquee for the left button
+
+Creator direction, verbatim: "When cursor is in grab mode, disable lasso
+rectangle select."
+
+`GrabCursor` and `WaypointCommander` are two separate `MonoBehaviour`s
+that each independently poll `Mouse.current.leftButton` in their own
+`Update()` -- `GrabCursor` never told `WaypointCommander` grab mode
+(Armed/Carrying) already owns the button for pick-up/drop, so dragging
+the mouse to reposition a carried monster before dropping it ALSO
+tracked and (on release) applied a left-drag marquee box-select
+underneath it, changing the RTS selection as a side effect of an
+unrelated grab-and-drop gesture.
+
+Fix: `GrabCursor.IsGrabModeActive` (`_mode != Mode.Off`, i.e. Armed or
+Carrying) is now public; `RuntimeCityBuilder`'s HUD-setup block wires a
+`grabCursor` back-reference onto `WaypointCommander` right after both
+components exist (same "set the public field once both exist" shape
+`grabCursor.commander` already used, just the other direction).
+`WaypointCommander.HandleSelection` checks it before ever setting
+`_leftDown`/`_dragStart` on a left-press -- since the on-screen marquee
+overlay (`OnGUI`) and the eventual box-select application both gate on
+`_leftDown`, never starting it during grab mode suppresses the whole
+lasso (rectangle drawing included), not just its selection effect.
+Plain click-select and orders are untouched -- only asked to disable the
+lasso specifically, and grab mode already fully owned single clicks
+before this change (unaffected either way).
+
+No Editor in this environment to confirm visually; verified by
+re-checking the actual field/property names and Init/wiring order in
+`RuntimeCityBuilder.cs` against their real declarations, and a
+brace/paren balance check on all three touched files (`GrabCursor.cs`,
+`WaypointCommander.cs`, `RuntimeCityBuilder.cs` -- the latter carries the
+same pre-existing one-paren imbalance noted in the hologram follow-up
+above, confirmed unchanged by diffing the raw count against the
+pre-edit revision).

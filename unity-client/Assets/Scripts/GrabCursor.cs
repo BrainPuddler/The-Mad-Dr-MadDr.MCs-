@@ -91,6 +91,18 @@ public class GrabCursor : MonoBehaviour
     private Mode _mode = Mode.Off;
     private MonsterAgent _carried;
 
+    /// <summary>Armed (claw cursor, waiting to pick something up) or
+    /// Carrying (a monster is already in hand) -- either way, THIS
+    /// script already owns the left mouse button for its own pick-up/
+    /// drop semantics. Public so <see cref="WaypointCommander"/> can
+    /// suppress its own left-drag marquee box-select while grab mode
+    /// has the button claimed (creator direction: "when cursor is in
+    /// grab mode, disable lasso rectangle select") -- without this, the
+    /// same drag that repositions a carried monster before dropping it
+    /// would ALSO draw and apply a selection-changing marquee
+    /// underneath it.</summary>
+    public bool IsGrabModeActive { get { return _mode != Mode.Off; } }
+
     // 2026-07 (creator direction: "when a new monster is dropped on a
     // factory, the current monster is booted to the next parking spot
     // closest to the factory and the new monster replaces the old one on

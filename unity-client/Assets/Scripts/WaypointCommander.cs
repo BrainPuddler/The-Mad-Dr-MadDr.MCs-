@@ -47,6 +47,21 @@ public class WaypointCommander : MonoBehaviour
     private const float DoubleClickDistSq = 100f;  // 10 px: a second click must land near the first
 
     private RuntimeCityBuilder _builder;
+
+    /// <summary>2026-08 (creator direction: "when cursor is in grab
+    /// mode, disable lasso rectangle select"): wired by
+    /// `RuntimeCityBuilder` right after both components exist, so
+    /// <see cref="HandleSelection"/> can check
+    /// <see cref="GrabCursor.IsGrabModeActive"/> before starting a
+    /// left-drag marquee -- grab mode already owns the left button for
+    /// its own pick-up/drop, and letting a marquee track underneath it
+    /// meant dragging a carried monster into position also silently
+    /// drew and applied a box-select. Null-checked everywhere it's read
+    /// (same "optional collaborator" posture every other cross-script
+    /// reference in this file already takes) so a scene missing a
+    /// GrabCursor just behaves as if grab mode never activates.</summary>
+    public GrabCursor grabCursor;
+
     private readonly List<MonsterAgent> _selected = new List<MonsterAgent>();
 
     // 2026-08 (Zombie/SCV-style "cannon fodder I choose," docs/12): a
@@ -340,8 +355,12 @@ public class WaypointCommander : MonoBehaviour
     {
         // Ctrl+left is claimed by the right-click stand-in above, and
         // A/P-left by the attack-move/patrol order below -- never let any
-        // of them start a selection click/drag too.
-        if (mouse.leftButton.wasPressedThisFrame && !ctrlHeld && !attackMoveHeld && !patrolHeld)
+        // of them start a selection click/drag too. Grab mode (see
+        // `grabCursor`'s own doc comment) claims the left button just as
+        // exclusively, for pick-up/drop instead of an order -- same
+        // reasoning, same guard shape.
+        var grabModeActive = grabCursor != null && grabCursor.IsGrabModeActive;
+        if (mouse.leftButton.wasPressedThisFrame && !ctrlHeld && !attackMoveHeld && !patrolHeld && !grabModeActive)
         {
             _leftDown = true;
             _dragStart = mouse.position.ReadValue();

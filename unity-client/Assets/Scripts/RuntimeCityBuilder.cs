@@ -596,6 +596,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (commander == null) commander = gameObject.AddComponent<WaypointCommander>();
         commander.Init(this);
         grabCursor.commander = commander;
+        // 2026-08 (creator direction: "when cursor is in grab mode,
+        // disable lasso rectangle select"): see WaypointCommander's own
+        // `grabCursor` field doc for why it needs this back-reference.
+        commander.grabCursor = grabCursor;
 
         var hud = gameObject.GetComponent<HudStatus>();
         if (hud == null) hud = gameObject.AddComponent<HudStatus>();
