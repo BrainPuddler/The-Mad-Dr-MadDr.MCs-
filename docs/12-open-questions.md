@@ -18120,3 +18120,89 @@ rather than asserted; confirmed via grep that `ChimneySmoke` is
 genuinely `SmokePlume`'s only remaining call site before touching
 shared `SmokePuff` code, so no other smoke/fire/dust/water-puff caller
 could be silently affected.
+
+## 2026-08 follow-up: procedural-city buildings with no windows or doors
+
+Creator report, direct: "There are cement building without windows or
+doors, or any other details. Check if it's a bug or somehow lost...
+ALL buildings need multiple windows and at least one door. THIS IS A
+AAA game those details count."
+
+**Investigated first, not assumed**: read `BuildingDresser.cs`
+(procedural CITY buildings -- the ones that make up the vast majority
+of a generated map) end to end, tracing every tier's own dress method
+for a window/door call. Verdict: **a real, standing gap that has
+existed since these methods were first written -- nothing was "lost."**
+Two concrete findings:
+
+1. **`DressSmall`** (house/gas-station/diner archetypes) never called
+   `SpawnWindowStrip`/`BuildingWindowGrid.AddWindow` at all, for any of
+   its three picks -- despite a comment elsewhere in the same file
+   (`SpawnWindowStrip`'s own doc comment) that WRONGLY implied it was
+   already used "for Small-tier buildings." Small tier is single-hex
+   only (`CityGenerator`'s own tier split: `footprint.Count >= 2 ?
+   Medium : Small`), so this is the overwhelming majority of every
+   generated city's own building count -- every house, gas station, and
+   diner was a bare textured box under its roof/canopy/chrome trim,
+   with zero glass and zero door anywhere on the actual walls.
+2. **`DressIndustrial`** (the railyard/warehouse re-skin, applied to
+   any Small OR Medium building flagged industrial by proximity to the
+   generated railyard) never called it either -- pure massing
+   (corrugated roof cap, a loading-dock CANOPY that sits proud of the
+   wall but never actually punches a door opening into it, pipes,
+   smokestack) over a flat `Concrete()`-textured wall. This is almost
+   certainly the literal "cement building" the report describes --
+   `Concrete()` is genuinely the material name, and this method had
+   *zero* other detail on the actual wall surface.
+
+Medium/Large tier buildings running through the real facade-grammar
+system (`DressFacadeGrammar`, when NOT industrial-flagged) were already
+fine -- `FacadeGrammar`'s own WFC solver already places real
+`RecessedEntrance`/`StoopEntrance`/`Shopfront` door modules and punched
+`WindowBay`/`OrielBay` glass. That system was never the problem; the two
+still-primitive-only dress paths above were.
+
+**Fix, both paths, "multiple windows and at least one door" applied
+literally**:
+
+- Two new shared helpers, `SpawnSmallHouseWindows` (a window pair on
+  each of a Small building's four walls -- real glass on every side,
+  not just whichever face happens to face a street) and `SpawnFrontDoor`
+  (a real `DarkRecess`-void door with a proud frame trim, matching the
+  same "an opening reads as an opening, not a smudge" material
+  convention `BaseDresser.cs`'s own player-building doors already
+  established -- `glass: true` swaps in `WindowBand` instead, for the
+  diner's own glass-front read).
+- `DressSmall` house case: windows on all four walls, front door under
+  the gable ridge's own long axis.
+- `DressSmall` gas station: a wide plate-glass kiosk pane facing the
+  forecourt (matching the pumps/canopy it's actually serving) plus a
+  door beside it, side/back windows via the shared helper.
+- `DressSmall` diner: a wide street-level glass band under the existing
+  chrome trim (the classic "counter visible through the window" diner
+  read) plus a glass door, side/back windows via the shared helper.
+- `DressIndustrial`: a real loading-dock door under the existing canopy
+  (which never punched an opening before this fix) plus a clerestory
+  window band -- three small, high-set panes per side wall, narrower
+  and set near the roofline rather than at eye level, the actual period
+  factory-glazing read instead of a domestic window transplanted onto a
+  warehouse.
+
+A real bug was caught and fixed during this same pass, before commit:
+the clerestory loop's first draft placed the window POSITIONS on the
+front/back (Z-offset) walls while giving them side-wall (`Vector3.
+right`/`left`) NORMALS -- a geometric mismatch that would have floated
+the glass quads facing the wrong direction entirely. Corrected to
+X-offset positions matching their actual side-wall normals before
+commit, not left for a later report to catch.
+
+Same verification ceiling as every other Unity-only change in this
+project: no Editor to render the result. Checked by hand: brace/paren
+balance (a real, if purely cosmetic, mismatch was introduced by an
+unclosed parenthesis in a doc comment -- caught and fixed the same
+pass, confirmed via `git show HEAD:...` diff that the baseline was
+balanced before this edit and the added lines were the actual cause);
+the clerestory position/normal mismatch above; confirmed via grep that
+every one of `DressSmall`'s three picks and `DressIndustrial` now
+reaches at least one `SpawnFrontDoor` call and at least one window
+call.

@@ -551,6 +551,19 @@ public static class BuildingDresser
     private const float GableRoofLength = 17.5f;
     private const float GableApexOffset = GableRoofHeight;
 
+    /// <summary>2026-08, creator report: "cement building without
+    /// windows or doors" -- confirmed a real, standing gap, not a
+    /// regression: `DressSmall` never called `SpawnWindowStrip` for any
+    /// of its three archetypes, despite a since-corrected comment nearby
+    /// implying it did. Small tier is always a SINGLE-hex footprint
+    /// (`CityGenerator`'s own tier split), so this is the overwhelming
+    /// majority of the city's own buildings -- houses, gas stations,
+    /// diners -- and every one of them was a bare textured box under its
+    /// roof/canopy/trim. Creator direction: "ALL buildings need multiple
+    /// windows and at least one door." Fixed uniformly across all three
+    /// picks below via two small shared helpers (`SpawnSmallHouseWindows`,
+    /// `SpawnFrontDoor`) rather than duplicating the same window-strip/
+    /// door-void code three times.</summary>
     private static void DressSmall(RuntimeCityBuilder b, HexCoord hex, Transform t, float height, int h, bool primary, bool suburb = false)
     {
         var basePos = t.position;
@@ -578,6 +591,17 @@ public static class BuildingDresser
                 // (not rooftop-kit clutter) -- a flyer should be able to
                 // land on the ridge, not sink to the flat tier height.
                 b.RegisterRoofLandingHeight(hex, height + GableApexOffset);
+                // 2026-08 ("all buildings need multiple windows and at
+                // least one door"): a small window pair on each of the
+                // four walls (a real house has windows on every side, not
+                // just the street face) plus a front door under the gable
+                // ridge's own long axis (GableRoofLength runs along local
+                // Z, matching the ridge in the mesh above -- the door
+                // faces the same direction the roof's ridge line runs, so
+                // it reads as this house's actual entrance wall, not an
+                // arbitrary side).
+                SpawnSmallHouseWindows(b, t, basePos, height, h);
+                SpawnFrontDoor(b, t, basePos, height, Vector3.forward, h);
                 break;
             }
             case 1:   // gas station: forecourt canopy on poles + pylon sign
@@ -595,6 +619,16 @@ public static class BuildingDresser
                     b.SpawnPrim(PrimitiveType.Sphere, basePos + new Vector3(-8f, 9.6f, 8f),
                         new Vector3(2.6f, 2.6f, 0.9f), NeonRed(), t);    // round sign
                 }
+                // 2026-08 ("multiple windows and at least one door"): a
+                // wide plate-glass office window under the canopy (the
+                // "pay here" office every real station kiosk has) facing
+                // the same forecourt (+Z) the canopy/pumps face, plus a
+                // door beside it and small side windows on the other
+                // walls.
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(-3f, height * 0.55f, Half * 1.01f),
+                    new Vector3(6f, height * 0.6f, 0.2f), WindowBand(), t);
+                SpawnFrontDoor(b, t, basePos + Vector3.right * 4f, height, Vector3.forward, h);
+                SpawnSmallHouseWindows(b, t, basePos, height, h, skipForward: true);
                 break;
             }
             default:  // diner: chrome band + rooftop sign
@@ -608,9 +642,72 @@ public static class BuildingDresser
                     b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, height + 2.2f, 0.5f),
                         new Vector3(7.4f, 1.2f, 0.4f), NeonTeal(), t);   // neon script strip
                 }
+                // 2026-08 ("multiple windows and at least one door"): a
+                // real diner is mostly glass at street level (the classic
+                // "walk-up counter visible through the window" read) --
+                // one wide band under the chrome trim on the front face,
+                // plus a glass door -- rather than a solid wall under an
+                // otherwise all-decoration building.
+                b.SpawnPrim(PrimitiveType.Cube, basePos + new Vector3(0f, height * 0.42f, Half * 1.01f),
+                    new Vector3(14f, height * 0.5f, 0.2f), WindowBand(), t);
+                SpawnFrontDoor(b, t, basePos + Vector3.right * 7f, height, Vector3.forward, h, glass: true);
+                SpawnSmallHouseWindows(b, t, basePos, height, h, skipForward: true);
                 break;
             }
         }
+    }
+
+    /// <summary>Small window pair on each of the four walls of an 18m
+    /// massing cube, appended to the shared `BuildingWindowGrid` (same
+    /// mechanism `DressApartment`'s own legacy strip loop already uses
+    /// via `SpawnWindowStrip`) -- gives every Small-tier building real
+    /// glass on every side, not just whichever face happens to be
+    /// street-facing. `skipForward` lets a caller that already spawned
+    /// its own dedicated front window (the gas station kiosk pane, the
+    /// diner's wide street band) skip the redundant forward pair rather
+    /// than double up two different window treatments on the same
+    /// wall.</summary>
+    private static void SpawnSmallHouseWindows(RuntimeCityBuilder b, Transform t, Vector3 basePos, float height, int h, bool skipForward = false)
+    {
+        var y = height * 0.55f;
+        var scale = new Vector3(2.6f, height * 0.32f, 0.3f);
+        if (!skipForward)
+        {
+            SpawnWindowStrip(b, t, basePos + new Vector3(-5f, y, Half * 1.01f), scale, Vector3.forward, h, 900);
+            SpawnWindowStrip(b, t, basePos + new Vector3(5f, y, Half * 1.01f), scale, Vector3.forward, h, 901);
+        }
+        SpawnWindowStrip(b, t, basePos + new Vector3(0f, y, -Half * 1.01f), scale, Vector3.back, h, 902);
+        SpawnWindowStrip(b, t, basePos + new Vector3(Half * 1.01f, y, 0f), scale, Vector3.right, h, 903);
+        SpawnWindowStrip(b, t, basePos + new Vector3(-Half * 1.01f, y, 0f), scale, Vector3.left, h, 904);
+    }
+
+    /// <summary>A real door: a dark recessed void (same `DarkRecess`
+    /// material every door/window opening in this codebase already uses
+    /// to read as "an opening into an interior," per this file's own
+    /// established convention -- see `SpawnRivets`/pedestal door
+    /// comments elsewhere) plus a thin frame trim so it doesn't just look
+    /// like a smudge on the wall. `glass = true` (the diner) uses
+    /// `WindowBand` instead of a dark void -- a period diner's own front
+    /// door is as much glass as its walls, unlike a house's solid
+    /// door.</summary>
+    private static void SpawnFrontDoor(RuntimeCityBuilder b, Transform t, Vector3 basePos, float height, Vector3 normal, int h, bool glass = false)
+    {
+        var doorH = Mathf.Min(height * 0.55f, 3.4f);
+        var doorW = 1.6f;
+        var doorMat = glass ? WindowBand() : DarkRecess();
+        var facePos = basePos + normal * (Half * 1.01f) + Vector3.up * (doorH * 0.5f);
+        var alongX = Mathf.Abs(normal.z) > 0.5f;
+        var size = alongX ? new Vector3(doorW, doorH, 0.15f) : new Vector3(0.15f, doorH, doorW);
+        b.SpawnPrim(PrimitiveType.Cube, facePos, size, doorMat, t);
+        // frame -- a touch wider/taller than the void itself, proud of
+        // the wall (same "trim only reads as trim if it protrudes" rule
+        // FacadeKit's own Proud constant documents), tinted by hash so
+        // it isn't the exact same trim color on every single house.
+        var frameMat = (h / 3) % 2 == 0 ? Cream() : Mustard();
+        var frameSize = alongX
+            ? new Vector3(doorW + 0.3f, doorH + 0.3f, 0.08f)
+            : new Vector3(0.08f, doorH + 0.3f, doorW + 0.3f);
+        b.SpawnPrim(PrimitiveType.Cube, basePos + normal * (Half * 1.02f) + Vector3.up * (doorH * 0.5f), frameSize, frameMat, t);
     }
 
     // ---- railyard/industrial re-skin (docs/21 batch 2, item 6) -----------------
@@ -622,6 +719,22 @@ public static class BuildingDresser
     // than staying flat.
     private static Material Corrugated() { return MTextured("corrugated-metal", 0.46f, 0.44f, 0.42f, PbrTextureAtlas.PaintedMetal); }
 
+    /// <summary>2026-08 (creator report: "cement building without
+    /// windows or doors" -- see `DressSmall`'s own matching doc comment
+    /// for the fuller investigation writeup; this was the OTHER real gap
+    /// found the same pass). This method's roof/loading-dock-canopy/
+    /// pipe/smokestack massing sat directly over a completely bare
+    /// textured wall -- the loading-dock canopy at +Z is genuinely
+    /// EXTERNAL structure (it sits proud of the wall at `Half * 1.1`, a
+    /// canopy over open ground in front of the door), not a door itself,
+    /// so it never actually punched an opening into the building it's
+    /// attached to. Adds a real loading-dock door void under that same
+    /// canopy (same `SpawnFrontDoor` helper `DressSmall` uses, `glass:
+    /// false` -- a warehouse door is solid, not plate glass) plus small
+    /// utilitarian steel-sash windows on the two side walls (a factory
+    /// floor's real light source, distinct from a house's domestic
+    /// window read -- narrower and set higher, near the roofline, the
+    /// classic "clerestory" industrial window band).</summary>
     private static void DressIndustrial(RuntimeCityBuilder b, Transform t, float height, int h, bool primary)
     {
         var basePos = t.position;
@@ -635,6 +748,21 @@ public static class BuildingDresser
             new Vector3(0.35f, 1.6f, 0.35f), Concrete(), t);
         b.SpawnPrim(PrimitiveType.Cylinder, basePos + new Vector3(6f, 1.6f, 9.6f),
             new Vector3(0.35f, 1.6f, 0.35f), Concrete(), t);
+
+        // 2026-08 ("multiple windows and at least one door"): the real
+        // loading-dock door under the canopy above, plus a clerestory
+        // window band -- three small high-set panes per side wall,
+        // narrower and higher than a house's own window (SpawnSmallHouseWindows'
+        // 2.6x(height*0.32) at 0.55 height) to read as factory glazing,
+        // not domestic.
+        SpawnFrontDoor(b, t, basePos, height, Vector3.forward, h);
+        var claY = height * 0.78f;
+        var claScale = new Vector3(1.8f, height * 0.16f, 0.25f);
+        for (var i = -1; i <= 1; i++)
+        {
+            SpawnWindowStrip(b, t, basePos + new Vector3(Half * 1.01f, claY, i * 5f), claScale, Vector3.right, h, 910 + i);
+            SpawnWindowStrip(b, t, basePos + new Vector3(-Half * 1.01f, claY, i * 5f), claScale, Vector3.left, h, 913 + i);
+        }
 
         if (primary)
         {
