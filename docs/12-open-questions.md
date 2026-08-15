@@ -18458,3 +18458,59 @@ own `bodyH` lines directly rather than trusting a summary; confirmed
 `RoofHeightFor`'s only two callers (both in `GrabCursor.cs`) so the new
 overload's signature change couldn't silently break anything else;
 brace/paren balance in both touched files.
+
+## 2026-08 follow-up: the platform needs to be permanent, not per-monster
+
+Creator direction, verbatim: "the platform should always be there even
+when there is no monster on the roof!" Both fixes above corrected the
+platform's Y placement, but the platform itself was still owned by
+`MonsterAgent.EnsureRoofGlow()` -- built lazily under a specific monster
+instance the first time it landed on a roof, and toggled invisible
+(along with the rest of that assembly) the moment `_roofDisplay` went
+false. A Factory with no specimen currently resting on it -- the normal
+state, most of the time -- showed no platform at all, exactly the
+report.
+
+**Fix**: moved the physical brass platform + its rivet ring out of
+`MonsterAgent` entirely and into `BaseDresser` as permanent Factory roof
+geometry, built once alongside the rest of each faction's own
+`BuildXFactory` shape (new shared helper, `SpawnRoofDisplayPlatform`,
+called from `BuildGenericFactoryShape`/`BuildDoctorFactory`/
+`BuildAlienFactory`/`BuildHumanFactory`). It reuses the existing
+`Brass()`/`Steel()`/`SpawnRivets()` infrastructure directly instead of
+`MonsterAgent`'s old hand-rolled `Material`s (which existed only because
+`MonsterAgent` has no `BaseDresser` instance to call through). Parented
+under each faction's own `trim` holder (creating one for
+`BuildGenericFactoryShape`, which previously had none) rather than
+`root` directly -- `TintShape` only re-tints DIRECT children of `root`
+that carry a `Renderer`, so anything under `trim` (an empty holder with
+no `Renderer` of its own) keeps its real brass/steel color instead of
+being flattened to the building owner's faction tint every time damage
+state changes.
+
+Centered on `origin`'s own X/Z (the roof's actual center), not tucked
+into a corner: `GrabCursor.HoverTargetFor`/`Drop` land the monster at
+`builder.WorldOf(factory.Hex)` with only Y adjusted, which is exactly
+that same X/Z -- so the platform now sits precisely where the monster
+actually appears, not just somewhere on the same roof. Each faction's
+own chimney/spire already claims one roof corner (all at +0.32/+0.32
+of `fullScale`), leaving the center clear -- except Human Alliance's
+roof ventilation, which used to sit dead center (`Z=0`) and got pushed
+back to `-0.35 * bodyD` so it no longer collides with the new platform.
+
+The glow disc stays exactly where it was, still owned by
+`MonsterAgent.EnsureRoofGlow()` and still gated on `_roofDisplay` --
+"illuminates the monster being built" only makes sense while one is
+actually there, unlike the physical slab underneath it. It now floats
+at a literal `platformTopY = 0.44f` (matching
+`SpawnRoofDisplayPlatform`'s own `platformHalfHeight * 2f`) instead of
+computing that from a platform this class no longer builds.
+
+Checked by hand: re-read all four `BuildXFactory` methods' own
+`trim`/`bodyH`/corner-offset geometry before placing each call (Doctor's
+towers, tank, pipes, housing, and Alien's rim-mounted portholes/sacs all
+sit on the body's own edges or corners, confirmed clear of a
+center-placed disc); confirmed `TintShape`'s single-level `GetChild`
+sweep skips `trim` itself (no `Renderer` on an empty holder) so the
+platform can't be re-tinted; brace/paren balance in both touched files.
+No Editor in this environment to render and confirm visually.

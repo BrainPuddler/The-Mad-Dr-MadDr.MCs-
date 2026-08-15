@@ -580,13 +580,30 @@ public class BaseDresser : MonoBehaviour
     /// than guessing at one.</summary>
     private void BuildGenericFactoryShape(GameObject root, Vector3 fullScale)
     {
+        var origin = root.transform.position;
         var bodyH = fullScale.y * 0.65f;
-        builder.SpawnPrim(PrimitiveType.Cube, root.transform.position + Vector3.up * (bodyH * 0.5f),
+        builder.SpawnPrim(PrimitiveType.Cube, origin + Vector3.up * (bodyH * 0.5f),
             new Vector3(fullScale.x * 0.9f, bodyH, fullScale.z * 0.9f), Placeholder(), root.transform);
         var stackRadius = fullScale.x * 0.09f;
         builder.SpawnPrim(PrimitiveType.Cylinder,
-            root.transform.position + Vector3.right * (fullScale.x * 0.32f) + Vector3.forward * (fullScale.z * 0.32f) + Vector3.up * (fullScale.y * 0.5f),
+            origin + Vector3.right * (fullScale.x * 0.32f) + Vector3.forward * (fullScale.z * 0.32f) + Vector3.up * (fullScale.y * 0.5f),
             new Vector3(stackRadius * 2f, fullScale.y * 0.5f, stackRadius * 2f), Placeholder(), root.transform);
+
+        // 2026-08 ("the platform should always be there even when there
+        // is no monster on the roof!"): a `trim` holder specifically so
+        // the brass platform stays brass-colored -- see
+        // SpawnRoofDisplayPlatform's own doc comment for why (TintShape
+        // only re-tints DIRECT children of `root`). Centered on the roof
+        // (X/Z = `origin`, same as `root.transform.position`) rather than
+        // tucked in a corner: GrabCursor's own landing spot for the
+        // monster (`builder.WorldOf(factory.Hex)`, Y only raised to roof
+        // height) is exactly this X/Z, so the platform needs to actually
+        // BE where the monster lands, not just somewhere on the roof.
+        // The smokestack claims corner (0.32, 0.32) only, leaving the
+        // roof's own center clear.
+        var trim = new GameObject("FactoryTrim").transform;
+        trim.SetParent(root.transform, false);
+        SpawnRoofDisplayPlatform(trim, origin + Vector3.up * bodyH, Mathf.Min(fullScale.x, fullScale.z) * 0.5f);
     }
 
     /// <summary>Defense -- a low wide bunker plus a domed turret centered
@@ -853,6 +870,15 @@ public class BaseDresser : MonoBehaviour
 
         var trim = new GameObject("FactoryTrim").transform;
         trim.SetParent(root.transform, false);
+
+        // 2026-08 ("the platform should always be there even when there
+        // is no monster on the roof!"): see SpawnRoofDisplayPlatform's
+        // own doc comment -- centered on `origin`'s own X/Z, matching
+        // exactly where GrabCursor lands the monster. The chimney/tank/
+        // towers below all sit at the body's own edges/corners, leaving
+        // the roof center clear.
+        SpawnRoofDisplayPlatform(trim, origin + Vector3.up * bodyH, Mathf.Min(bodyW, bodyD) * 0.5f);
+
         var brassMat = DoctorBrass();
         var brickMat = DoctorDarkBrick();
         var flueVoidMat = DoctorFlueVoidMat();
@@ -1191,6 +1217,15 @@ public class BaseDresser : MonoBehaviour
 
         var trim = new GameObject("FactoryTrim").transform;
         trim.SetParent(root.transform, false);
+
+        // 2026-08 ("the platform should always be there even when there
+        // is no monster on the roof!"): see SpawnRoofDisplayPlatform's
+        // own doc comment -- centered on `origin`'s own X/Z, matching
+        // exactly where GrabCursor lands the monster. The spire/sacs/
+        // portholes/ribs below all sit on the saucer's own rim or a
+        // corner, leaving the dome's own top center clear.
+        SpawnRoofDisplayPlatform(trim, origin + Vector3.up * bodyH, Mathf.Min(bodyW, bodyD) * 0.5f);
+
         // 2026-08 silver-steel pass: both were AlienCrystalMat()/
         // AlienMembraneMat() (organic purple crystal/membrane, now
         // deleted) -- kept as two separate locals (both now the SAME
@@ -1575,6 +1610,15 @@ public class BaseDresser : MonoBehaviour
 
         var trim = new GameObject("FactoryTrim").transform;
         trim.SetParent(root.transform, false);
+
+        // 2026-08 ("the platform should always be there even when there
+        // is no monster on the roof!"): see SpawnRoofDisplayPlatform's
+        // own doc comment -- centered on `origin`'s own X/Z, matching
+        // exactly where GrabCursor lands the monster. Roof ventilation
+        // below is pushed back off center (see its own comment) so the
+        // two don't overlap.
+        SpawnRoofDisplayPlatform(trim, origin + Vector3.up * bodyH, Mathf.Min(bodyW, bodyD) * 0.5f);
+
         var aluminumMat = HumanAluminum();
         var carbonMat = HumanCarbon();
 
@@ -1618,12 +1662,14 @@ public class BaseDresser : MonoBehaviour
             origin + Vector3.up * (bodyH * 0.5f) + Vector3.forward * (bodyD * 0.5f * 0.99f),
             new Vector3(windowW, windowH, fullScale.x * 0.02f), HumanBlueLightMat(), trim);
 
-        // roof ventilation
+        // roof ventilation -- 2026-08: pushed back to -0.35 * bodyD (was
+        // Z=0, dead center) so it clears the new roof display platform
+        // added above, which now claims the roof's own center.
         float[] ventXFrac = { -0.15f, 0.15f };
         foreach (var xf in ventXFrac)
         {
             builder.SpawnPrim(PrimitiveType.Cylinder,
-                origin + new Vector3(xf * bodyW, bodyH + fullScale.x * 0.03f, 0f),
+                origin + new Vector3(xf * bodyW, bodyH + fullScale.x * 0.03f, -bodyD * 0.35f),
                 new Vector3(fullScale.x * 0.05f, fullScale.x * 0.03f, fullScale.x * 0.05f), aluminumMat, trim);
         }
     }
@@ -2144,6 +2190,52 @@ public class BaseDresser : MonoBehaviour
             + Vector3.up * plaqueCenterY;
         builder.SpawnPrim(PrimitiveType.Cube, plaquePos, new Vector3(plaqueW, plaqueH, plaqueDepth),
             PedestalPlaqueMat(), pedestalTrim.transform);
+    }
+
+    /// <summary>2026-08 (creator direction: "Place a thick round brass
+    /// platform with rivets on the roof of the factory where the grabbed
+    /// subject is displayed" -- follow-up, verbatim: "the platform
+    /// should always be there even when there is no monster on the
+    /// roof!"). PERMANENT Factory roof dressing, built once alongside
+    /// the rest of each faction's own `BuildXFactory` shape, not
+    /// something `MonsterAgent` builds lazily on first landing (the
+    /// original placement, which meant the platform only ever existed
+    /// while a specimen happened to be resting there -- exactly the bug
+    /// this report caught). `MonsterAgent.EnsureRoofGlow` still owns the
+    /// GLOW LIGHT on top of this platform (a real light genuinely tied
+    /// to "illuminating the monster being built" only makes sense while
+    /// one is actually there) -- only the physical brass slab and its
+    /// rivets moved here.
+    ///
+    /// Parented under the caller's own `trim` holder, same as every
+    /// other non-owner-tinted fixture in this file (the smokestack,
+    /// cooling towers, etc.) -- `TintShape`'s own single-level
+    /// `GetChild` sweep only re-tints DIRECT children of `root`, so
+    /// anything under `trim` (this platform included) keeps its real
+    /// brass color instead of being overwritten to the owner's flat
+    /// faction tint. `roofCenter` (the platform's own world-space
+    /// center, at ROOF height already -- caller adds `bodyH` on top of
+    /// `origin` itself) is caller-supplied rather than a fixed offset
+    /// baked in here -- it needs to match `origin`'s own X/Z exactly,
+    /// because that is also exactly where GrabCursor lands the monster
+    /// (`builder.WorldOf(factory.Hex)`, only Y raised to roof height):
+    /// the platform has to actually BE under the monster, not just
+    /// somewhere on the same roof. Each faction's own chimney/spire
+    /// claims a roof corner (`stackXZ`/`spikeXZ`, all at +0.32/+0.32)
+    /// well clear of this center placement.</summary>
+    private void SpawnRoofDisplayPlatform(Transform trim, Vector3 roofCenter, float platformDiameter)
+    {
+        const float platformHalfHeight = 0.22f;   // a genuine 0.44-unit-thick slab -- "thick," not a coin
+
+        var platform = builder.SpawnPrim(PrimitiveType.Cylinder,
+            roofCenter + Vector3.up * platformHalfHeight,   // pivot at the slab's own half-height, so the BOTTOM face sits flush on the roof (Cylinder is pivot-centered) instead of sinking into it
+            new Vector3(platformDiameter, platformHalfHeight, platformDiameter), Brass(), trim);
+        platform.name = "RoofDisplayPlatform";
+
+        var platformTopY = platformHalfHeight * 2f;
+        var rivetRadius = platformDiameter * 0.5f * 0.94f;   // just inside the platform's own edge
+        var rivetSize = platformDiameter * 0.024f;
+        SpawnRivets(roofCenter + Vector3.up * (platformTopY + 0.02f), rivetRadius, rivetSize, Steel(), trim, 14, 520);
     }
 
     /// <summary>Evenly spaced around `ringCenter`'s own circumference at

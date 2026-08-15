@@ -758,7 +758,7 @@ public class MonsterAgent : MonoBehaviour
         {
             _roofDisplay = false;
             if (_body != null) _body.ForceTuckLegs = false;
-            if (_roofPlatform != null) _roofPlatform.SetActive(false);
+            if (_roofGlow != null) _roofGlow.SetActive(false);
         }
     }
 
@@ -864,12 +864,6 @@ public class MonsterAgent : MonoBehaviour
     private bool _roofDisplay;
     private const float RoofSpinDegPerSec = 40f;
     private GameObject _roofGlow;
-    // 2026-08 ("thick round brass platform with rivets"): the container
-    // the platform/rivets/glow disc all live under -- toggled as ONE
-    // unit at every site that used to toggle `_roofGlow` directly, so
-    // the platform appears/disappears in lockstep with the light rather
-    // than staying visible after a specimen leaves the roof.
-    private GameObject _roofPlatform;
 
     /// <summary>Creator direction: "When dropped into the factory, it
     /// should land on the roof and rotate slowly in the Y axis" -- AFTER
@@ -906,7 +900,7 @@ public class MonsterAgent : MonoBehaviour
         }
         if (_fighter != null) _fighter.LastVelocity = Vector3.zero;
         EnsureRoofGlow();
-        if (_roofPlatform != null) _roofPlatform.SetActive(true);
+        if (_roofGlow != null) _roofGlow.SetActive(true);
     }
 
     private void TickRoofDisplay(float dt)
@@ -931,126 +925,43 @@ public class MonsterAgent : MonoBehaviour
     /// `Light`) only fires if this point wins the shared city-wide
     /// budget, same as every other glow point in the game.
     ///
-    /// 2026-08 follow-up (creator direction, verbatim: "Place a thick
-    /// round brass platform with rivets on the roof of the factory where
-    /// the grabbed subject is displayed"): the flat squashed-disc glow
-    /// light stays exactly as it was (still the same cool energy-cyan
-    /// "cloning vat" light, still Tier-1/Tier-2 gated the same way) --
-    /// but it now sits ON TOP of a real, THICK brass platform underneath
-    /// it, riveted around its own rim, "mechanically embedded" the same
-    /// way `BaseDresser.SpawnRivets` already reads for every other real
-    /// bolted-metal surface in this project (reusing `PbrTextureAtlas.
-    /// Jitter` directly rather than a third copy of that hash -- this
-    /// class has no `BaseDresser` instance to call its own `SpawnRivets`
-    /// through, so the same jittered-ring placement math is inlined
-    /// here instead of duplicating a whole new helper class for one
-    /// call site).
+    /// 2026-08 follow-up (creator direction, verbatim: "the platform
+    /// should always be there even when there is no monster on the
+    /// roof!"): the brass platform + rivets this method used to build
+    /// itself (lazily, per-monster, invisible whenever no specimen was
+    /// resting there) moved OUT to <see cref="BaseDresser.
+    /// SpawnRoofDisplayPlatform"/> as permanent Factory roof geometry --
+    /// see that method's own doc comment. This method now owns only the
+    /// GLOW DISC sitting on top of it, which genuinely IS still tied to
+    /// "the monster being built" and should stay dark when the roof is
+    /// empty. `platformTopY` below is kept as a literal matching
+    /// `SpawnRoofDisplayPlatform`'s own `platformHalfHeight * 2f` so the
+    /// disc still rests flush on the (now building-owned) platform's top
+    /// face without this class needing a reference to it.
     ///
     /// Parented as a LOCAL child of this agent's own root and left there
     /// (unlike the discarded carry-glow's own per-frame world-space
     /// tracking) -- while roof-displaying this root only ROTATES in
     /// place around Y (see TickRoofDisplay), it never translates, and a
-    /// flat symmetric disc (or a round platform under it) looks
-    /// identical at any Y rotation, so a fixed local offset stays
-    /// correctly under the model with no per-frame work needed.</summary>
+    /// flat symmetric disc looks identical at any Y rotation, so a fixed
+    /// local offset stays correctly under the model with no per-frame
+    /// work needed.</summary>
     private void EnsureRoofGlow()
     {
-        if (_roofPlatform != null) return;
+        if (_roofGlow != null) return;
 
-        // 2026-08 ("thick round brass platform with rivets"): one shared
-        // container every roof-display piece (platform, rivets, glow
-        // disc) parents under, so the whole assembly toggles as ONE unit
-        // at every site that used to toggle the glow disc alone --
-        // otherwise the platform would stay visible after a specimen
-        // leaves the roof, which is wrong (it's part of the DISPLAY, not
-        // permanent roof set dressing).
-        _roofPlatform = new GameObject("RoofDisplayPlatform");
-        _roofPlatform.transform.SetParent(transform, false);
-        _roofPlatform.transform.localPosition = Vector3.zero;
-        _roofPlatform.transform.localRotation = Quaternion.identity;
-
-        // the actual platform body -- a real disc with genuine THICKNESS
-        // (not the old glow disc's paper-thin 0.05 squash), brass-toned
-        // and opaque, riveted around its rim.
-        var platform = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        platform.name = "RoofBrassPlatform";
-        platform.transform.SetParent(_roofPlatform.transform, false);
-        // Cylinder is 1 unit diameter x 2 units tall at scale 1 (i.e.
-        // scale.y is HALF the actual height) -- 0.22 here is a genuine
-        // 0.44-unit-thick slab, a real "thick" platform next to the old
-        // disc's 0.1-unit squash, not just a recolor of the same shape.
-        const float platformHalfHeight = 0.22f;
-        // 2026-08 bugfix (creator report: "check the height of the disk
-        // on the roof of the factory, make sure it's above the roof not
-        // below"): a Cylinder primitive is centered on its OWN pivot --
-        // at `localPosition.y = 0` (this class's own roof-surface
-        // origin), a slab this thick used to extend from -0.22 to +0.22,
-        // i.e. HALF of it sunk below the actual roof surface. Raising
-        // the pivot by exactly its own half-height puts the platform's
-        // BOTTOM face flush at Y=0 (the roof) and the whole slab
-        // entirely above it, matching what the doc comment already
-        // claimed but the code never actually did.
-        platform.transform.localPosition = new Vector3(0f, platformHalfHeight, 0f);
-        platform.transform.localRotation = Quaternion.identity;
-        platform.transform.localScale = new Vector3(3.0f, platformHalfHeight, 3.0f);
-        var platformCollider = platform.GetComponent<Collider>();
-        if (platformCollider != null) Object.Destroy(platformCollider);
-        var platformMat = new Material(ShaderUtil.FindRenderableShader());
-        var brassColor = new Color(0.72f, 0.56f, 0.26f);   // same brass hue family BaseDresser.Brass()/DoctorBrass() already establish project-wide
-        platformMat.color = brassColor;
-        var platformRenderer = platform.GetComponent<Renderer>();
-        if (platformRenderer != null) platformRenderer.sharedMaterial = platformMat;
-
-        // rivets: a ring of small domed studs around the platform's own
-        // rim, same jittered-angle/radius/size placement
-        // `BaseDresser.SpawnRivets` uses for every other bolted-metal
-        // surface in this project -- "mechanically embedded," not a
-        // laser-perfect sterile ring. Reuses `PbrTextureAtlas.Jitter`
-        // directly (an `internal static` helper, reachable from this
-        // class in the same assembly) rather than a third copy of that
-        // hash -- this class has no `BaseDresser` instance to call its
-        // own `SpawnRivets` through.
-        const int rivetCount = 14;
-        const float rivetRadius = 1.42f;   // just inside the platform's own 1.5-unit edge (scale.x/z = 3.0, radius 1.5)
-        const float rivetSize = 0.12f;
-        // 2026-08 (same roof-height bugfix as the platform's own
-        // localPosition above): the platform's real top face now sits at
-        // Y = 2 * platformHalfHeight (bottom flush at 0, full thickness
-        // above it), not at the OLD, wrong "Y = platformHalfHeight while
-        // centered on Y = 0" face height -- rivets/glow both key off this
-        // so they stay sitting proud of the platform's actual top surface
-        // instead of the platform having moved out from under them.
-        const float platformTopY = platformHalfHeight * 2f;
-        var seedSalt = GetInstanceID();
-        var rivetMat = new Material(ShaderUtil.FindRenderableShader());
-        rivetMat.color = new Color(0.55f, 0.42f, 0.2f);   // a touch darker than the platform body -- domed studs read as raised hardware, not more flat brass
-        for (var i = 0; i < rivetCount; i++)
-        {
-            var baseAngleDeg = i / (float)rivetCount * 360f;
-            var angleJitter = (PbrTextureAtlas.Jitter(i, seedSalt, 101) - 0.5f) * (360f / rivetCount) * 0.3f;
-            var angleRad = (baseAngleDeg + angleJitter) * Mathf.Deg2Rad;
-            var radiusJitter = 1f + (PbrTextureAtlas.Jitter(i, seedSalt, 102) - 0.5f) * 0.06f;
-            var r = rivetRadius * radiusJitter;
-            var localPos = new Vector3(Mathf.Sin(angleRad) * r, platformTopY + 0.02f, Mathf.Cos(angleRad) * r);   // sits proud of the platform's own top face
-            var sizeJitter = 1f + (PbrTextureAtlas.Jitter(i, seedSalt, 103) - 0.5f) * 0.12f;
-
-            var rivet = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            rivet.name = "PlatformRivet";
-            rivet.transform.SetParent(_roofPlatform.transform, false);
-            rivet.transform.localPosition = localPos;
-            rivet.transform.localScale = Vector3.one * (rivetSize * sizeJitter);
-            var rivetCollider = rivet.GetComponent<Collider>();
-            if (rivetCollider != null) Object.Destroy(rivetCollider);
-            var rivetRenderer = rivet.GetComponent<Renderer>();
-            if (rivetRenderer != null) rivetRenderer.sharedMaterial = rivetMat;
-        }
+        // matches BaseDresser.SpawnRoofDisplayPlatform's own
+        // `platformHalfHeight` (0.22) * 2 -- the permanent building
+        // platform's real top face height above the roof surface this
+        // agent's own transform sits at while roof-displaying.
+        const float platformTopY = 0.44f;
 
         _roofGlow = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         _roofGlow.name = "RoofGlowDisc";
-        _roofGlow.transform.SetParent(_roofPlatform.transform, false);
-        _roofGlow.transform.localPosition = new Vector3(0f, platformTopY + 0.01f, 0f);   // just above the brass platform's own (now correctly raised) top face
+        _roofGlow.transform.SetParent(transform, false);
+        _roofGlow.transform.localPosition = new Vector3(0f, platformTopY + 0.01f, 0f);   // just above the brass platform's own top face
         _roofGlow.transform.localRotation = Quaternion.identity;
-        _roofGlow.transform.localScale = new Vector3(2.6f, 0.05f, 2.6f);   // Cylinder is 1 unit diameter x 2 tall at scale 1 -- squashed flat into a disc, slightly inset from the platform's own 3.0-diameter rim
+        _roofGlow.transform.localScale = new Vector3(2.6f, 0.05f, 2.6f);   // Cylinder is 1 unit diameter x 2 tall at scale 1 -- squashed flat into a disc
         var collider = _roofGlow.GetComponent<Collider>();
         if (collider != null) Object.Destroy(collider);
 
@@ -1065,7 +976,7 @@ public class MonsterAgent : MonoBehaviour
 
         GlowPointRegistry.Register(_roofGlow.transform, glowColor, isEligible: () => _roofDisplay);
 
-        _roofPlatform.SetActive(false);
+        _roofGlow.SetActive(false);
     }
 
     /// <summary>2026-07 (GrabCursor's clone-onto-Factory feature): give an
@@ -1109,7 +1020,7 @@ public class MonsterAgent : MonoBehaviour
                 _body.ForceTuckLegs = false;
                 _body.StrugglePhase = 0f;
             }
-            if (_roofPlatform != null) _roofPlatform.SetActive(false);
+            if (_roofGlow != null) _roofGlow.SetActive(false);
         }
         SetSettleTarget(parkWorldPos);
     }
