@@ -18559,3 +18559,44 @@ own raw paren count carries a pre-existing one-paren imbalance from
 before this change — confirmed by diffing the count against the
 pre-edit revision — not something this pass introduced). No Editor in
 this environment to render and confirm visually.
+
+## 2026-08 follow-up: battalion builds could show no roof hologram at all
+
+Creator direction, verbatim: "When building a battalion in the factory,
+the thumbnail of the current monster is not visible. It should be [shown]
+the same as a monster being built by the factory, rotating over the
+build plate on the roof, rotating slowly."
+
+Root cause, found by tracing `GrabCursor.ProductionQueue` end to end
+(server `withPortrait` merge in mutator-service's store, `RosterFetcher`'s
+full per-creature GET, `StoredGenomeDto.PortraitPng`, then the hologram
+and `ProductionQueueHud` tile, both keyed off the same field) rather than
+guessed: the whole pipeline was already generic across `SingleUnit`,
+`Battalion`, and `LabBattalion` queue items — EXCEPT `ProductionQueue`
+picked a Battalion/LabBattalion item's portrait from literal index `[0]`
+of its remaining-members list. Portrait upload (site/main.js
+`syncPortrait`) is fire-and-forget and best-effort, scoped to the moment
+a creature is saved to the Stable — a failed upload, or a genome saved
+before portraits existed, leaves that ONE member with no `PortraitPng`.
+For a `SingleUnit` build that's a direct 1:1 miss (nothing else to show
+either way), but a battalion has several members: if its literal first
+remaining member happens to be the one un-portraited genome — plausible,
+since "3 Tetrapods + 2 Winged" mixes members saved at different times —
+the roof hologram AND the 2D queue tile both went blank for the WHOLE
+group, even though its other members did have a portrait.
+
+Fix: `GrabCursor.ProductionQueue` now walks the remaining-members list
+for the first member that actually HAS a portrait (`FirstPortrait<T>`),
+instead of hard-coding index 0. Still deterministic — same static queue
+snapshot every frame, not "whichever happens to build next" (which would
+flicker the tile as the queue drains, the exact thing index-0 was
+originally chosen to avoid). No change to `SingleUnit` (only ever one
+genome, so "first with a portrait" and "index 0" are the same thing), no
+change to `RoofPortraitHologram`/`ProductionQueueHud` themselves — both
+already just read whatever `ProductionQueue` yields.
+
+No Editor in this environment to confirm visually; verified by re-tracing
+every type along the path (`StoredGenomeDto.PortraitPng` is a plain
+nullable `string` on both the Battalion tuple's `.Genome` and the
+LabBattalion list's own element type) and a brace/paren balance check on
+`GrabCursor.cs`.

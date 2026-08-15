@@ -166,7 +166,22 @@ public class GrabCursor : MonoBehaviour
     /// image for a mixed battalion, and the first member is a stable,
     /// deterministic choice (not e.g. "whichever happens to build
     /// next," which would flicker the tile's own image as the queue
-    /// drains).</summary>
+    /// drains).
+    ///
+    /// 2026-08 (creator direction: "when building a battalion... the
+    /// thumbnail of the current monster is not visible"): portrait
+    /// upload (site/main.js `syncPortrait`) is fire-and-forget and
+    /// best-effort -- a failed upload, or a genome saved before
+    /// portraits existed, leaves that one member with no `PortraitPng`.
+    /// For a SingleUnit build that's a direct 1:1 miss (nothing to fall
+    /// back to), but a Battalion/LabBattalion has several members --
+    /// blanking the WHOLE group's thumbnail just because its literal
+    /// first remaining member happens to be the one un-portraited genome
+    /// (while its siblings do have one) is a worse "representative
+    /// image" than skipping ahead to the first member that actually has
+    /// one. Still deterministic (same static queue snapshot each frame,
+    /// not "whichever happens to build next") -- see <see
+    /// cref="FirstPortrait{T}"/>.</summary>
     public IEnumerable<(string Label, int Remaining, float Progress, string PortraitPng)> ProductionQueue
     {
         get
@@ -184,17 +199,33 @@ public class GrabCursor : MonoBehaviour
                 else if (item.Kind == QueueItemKind.Battalion)
                 {
                     remaining = item.BattalionRemaining.Count;
-                    portraitPng = item.BattalionRemaining.Count > 0 ? item.BattalionRemaining[0].Genome?.PortraitPng : null;
+                    portraitPng = FirstPortrait(item.BattalionRemaining, m => m.Genome?.PortraitPng);
                 }
                 else
                 {
                     remaining = item.LabBattalionRemaining.Count;
-                    portraitPng = item.LabBattalionRemaining.Count > 0 ? item.LabBattalionRemaining[0]?.PortraitPng : null;
+                    portraitPng = FirstPortrait(item.LabBattalionRemaining, g => g?.PortraitPng);
                 }
                 var progress = i == 0 ? Mathf.Clamp01(_productionTimer / Mathf.Max(0.01f, productionSecondsPerUnit)) : 0f;
                 yield return (item.Label, remaining, progress, portraitPng);
             }
         }
+    }
+
+    /// <summary>First remaining member (in queue order) that actually
+    /// has a portrait -- see <see cref="ProductionQueue"/>'s own doc for
+    /// why index 0 alone isn't good enough for a multi-member item. Null
+    /// if none of the remaining members have one, same "optional field,
+    /// never a hard error" fallback every other portrait consumer in
+    /// this pipeline already uses.</summary>
+    private static string FirstPortrait<T>(System.Collections.Generic.List<T> members, System.Func<T, string> portraitOf)
+    {
+        foreach (var m in members)
+        {
+            var p = portraitOf(m);
+            if (!string.IsNullOrEmpty(p)) return p;
+        }
+        return null;
     }
 
     public bool HasQueuedProduction { get { return _queue.Count > 0; } }
