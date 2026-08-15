@@ -372,6 +372,32 @@ public class MonsterBody : MonoBehaviour
         _flyingHigh = high;
     }
 
+    /// <summary>2026-08 (creator direction, verbatim: "When grab is
+    /// grabbing a flying units must snap elevation to the ground. This
+    /// will avoid the floating way above the factory"): an immediate,
+    /// non-eased reset of flight state, unlike `SetFlying(false, ...)`'s
+    /// normal ~1.4s glide-down (see `_flightLift`'s own comment). A
+    /// flying creature grabbed mid-cruise kept its `_flightLift` cruise-
+    /// altitude offset on the TORSO (a child transform -- see
+    /// `UpdateLocomotion`'s `_torso.localPosition` line) even though
+    /// `MonsterAgent.BeginHeld`/`TickHeld` immediately takes over the
+    /// ROOT transform and repositions it right at the cursor's own
+    /// ground/roof height every frame from then on -- `_flying` was
+    /// never told to turn off, so the torso just kept rendering tens of
+    /// meters above a root that had already snapped down, and that same
+    /// stale offset was still there later when the specimen landed on a
+    /// Factory roof. Called once from `BeginHeld`, not every frame --
+    /// this is a one-time snap, not an ongoing constraint.</summary>
+    public void SnapToGrabbed()
+    {
+        if (!_canFly) return;
+        _flying = false;
+        _flyingHigh = false;
+        _flightLift = 0f;
+        _groundY = 0f;
+        SnapFeetToGround();
+    }
+
     /// <summary>The surface this creature stands (or lands) on: 0 at
     /// street level, a roof height when perching on a building. Landing
     /// eases the lift down to THIS height instead of always to the

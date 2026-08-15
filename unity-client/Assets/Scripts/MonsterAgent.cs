@@ -777,7 +777,18 @@ public class MonsterAgent : MonoBehaviour
     /// feet from the ground when grabbed" -- <see cref="MonsterBody.
     /// ForceTuckLegs"/> folds them up the same way a flying creature's
     /// legs already tuck mid-air, since a grabbed creature has just as
-    /// little ground under it.</summary>
+    /// little ground under it.
+    ///
+    /// 2026-08 follow-up (creator direction, verbatim: "When grab is
+    /// grabbing a flying units must snap elevation to the ground. This
+    /// will avoid the floating way above the factory"): <see
+    /// cref="MonsterBody.SnapToGrabbed"/> -- a flying unit grabbed
+    /// mid-cruise kept its cruise-altitude torso offset even after
+    /// `TickHeld` took the ROOT transform down to the cursor's own
+    /// hover height, so the visible mesh floated tens of meters above
+    /// where it was actually being carried, and that same stale offset
+    /// was still there on landing (e.g. a Factory roof). A no-op on a
+    /// non-flying plan (see that method's own `_canFly` guard).</summary>
     public void BeginHeld()
     {
         _held = true;
@@ -787,7 +798,11 @@ public class MonsterAgent : MonoBehaviour
         _path = null;
         _order = OrderKind.Idle;
         if (_fighter != null) _fighter.LastVelocity = Vector3.zero;
-        if (_body != null) _body.ForceTuckLegs = true;
+        if (_body != null)
+        {
+            _body.ForceTuckLegs = true;
+            _body.SnapToGrabbed();
+        }
     }
 
     /// <summary>Ends the grab-carry state -- the very next Update() resumes
