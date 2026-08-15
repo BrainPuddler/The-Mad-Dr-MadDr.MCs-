@@ -387,7 +387,25 @@ public class MonsterBody : MonoBehaviour
     /// meters above a root that had already snapped down, and that same
     /// stale offset was still there later when the specimen landed on a
     /// Factory roof. Called once from `BeginHeld`, not every frame --
-    /// this is a one-time snap, not an ongoing constraint.</summary>
+    /// this is a one-time snap, not an ongoing constraint.
+    ///
+    /// 2026-08 bugfix (creator report: "it sort of works now but is
+    /// unreliable" -- after the first pass above only reset
+    /// `_flightLift`/`_groundY`): `_descentFloor` is a THIRD altitude
+    /// field, pushed every frame by `MonsterAgent.Update()` from
+    /// `SurfaceHeightAt(transform.position)` -- exactly the kind of
+    /// per-frame push that stops the instant `Update()` early-returns
+    /// for `_held`. Left un-reset, it stayed pinned at whatever it was
+    /// the instant BEFORE the grab -- a real, nonzero number anytime a
+    /// flyer got grabbed while cruising over/near a building (the
+    /// factory itself, most often, since that's exactly where a player
+    /// reaches for one). The very next `UpdateLocomotion` tick then read
+    /// `Mathf.Max(_groundY=0, _descentFloor=stale)` and started easing
+    /// `_flightLift` right back UP toward that stale floor -- the snap
+    /// "worked" (briefly touched 0) only to immediately climb again,
+    /// which is exactly "sort of works... unreliable": fine when grabbed
+    /// clear of any building, broken again next to the one building this
+    /// whole feature is about.</summary>
     public void SnapToGrabbed()
     {
         if (!_canFly) return;
@@ -395,6 +413,7 @@ public class MonsterBody : MonoBehaviour
         _flyingHigh = false;
         _flightLift = 0f;
         _groundY = 0f;
+        _descentFloor = 0f;
         SnapFeetToGround();
     }
 
