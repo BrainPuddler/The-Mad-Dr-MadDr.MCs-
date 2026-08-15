@@ -222,6 +222,45 @@ on it. Concretely:
   itself is the one remaining capsule holdout, left alone on purpose
   (docs/34 §0) until that Civilian Victim work actually happens.
 
+## 7a. Smoke & ambient particle FX
+
+Distilled from the 2026-08 factory-chimney smoke pass (`docs/12`'s own
+dated entry has the full before/after and the math). Applies to any
+*ambient, ongoing* plume (a chimney, a vent, anything ongoing rather
+than a one-shot burst) — not necessarily fire/damage smoke, which has
+its own separate, already-tuned `SmokeCluster` system.
+
+- **A plume is a column, not a string of separate puffs.** Individual
+  puffs should spawn close enough together in time that they visually
+  overlap as they rise — the READ should be one continuous, thickening
+  body of smoke, never a beat of distinct blobs you can count.
+- **Size variety, always.** Every puff at an identical starting size
+  reads as a repeating stamp, not real smoke. Vary each puff
+  deterministically (this project's standing "no `UnityEngine.Random`"
+  convention — a per-instance hash, not a shared RNG stream).
+- **The full arc: small → grows → fades.** A puff should start modest,
+  visibly grow as it climbs (capped — see the "growth can't exceed 2x"
+  rule below), and dissolve smoothly at the end, not disappear on a
+  flat linear ramp. Give it enough lifetime to actually read as a
+  sequence, not a blip.
+- **Wind should strengthen with distance/age, not apply at a flat rate
+  from birth.** A puff freshly leaving its source should rise close to
+  straight up (open air hasn't caught it yet); the lean into the wind
+  should build the longer/higher it's traveled. If you ramp a
+  previously-constant force in like this, do the algebra so the
+  ramped curve's average matches the old constant rate over the
+  puff's full life (e.g. a `3·t²` ramp, not a plain `t²`, which would
+  quietly cut total drift to a third and read as LESS windy — the
+  opposite of the intent).
+- **Never let smoke visually swallow what it's rising from.** This
+  creator has corrected smoke-vs-fire visibility in both directions
+  more than once — bigger/denser smoke is good, but the growth CAP and
+  spawn-origin offset (smoke starts *outside* the structure/flame it's
+  attached to) still apply. Use puff DENSITY (tighter spawn cadence) to
+  make a plume read as bigger and more "together," not an uncapped
+  per-puff growth ceiling — that's the lever that broke fire visibility
+  before.
+
 ## 8. The self-check pattern (recurring mistakes to catch before they ship)
 
 If you're about to say a visual fix is done, run it against this list —
