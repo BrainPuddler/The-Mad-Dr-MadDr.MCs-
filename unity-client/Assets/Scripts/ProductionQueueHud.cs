@@ -94,10 +94,25 @@ public class ProductionQueueHud : MonoBehaviour
     public int maxVisibleTiles = 8;
     [Tooltip("Extra strip below each tile for the item's name (\"the battalion name underneath\") -- 0 would silently omit it, so this stays a real, non-zero default rather than an opt-in.")]
     public float labelStripHeight = 14f;
+    [Tooltip("2026-08 (Factory Build Queue / Order Clipboard): gap between this tile row and FactoryOrdersHud's own popup, which docks directly above it -- same dockGapPixels convention BattalionHud/LabBattalionHud already use for the opposite corner's stack.")]
+    public float dockGapPixels = 8f;
 
     private static Texture2D _tex;
 
     public static bool PointerOver { get; private set; }
+
+    /// <summary>2026-08 (Factory Build Queue / Order Clipboard): the Y
+    /// (screen space, GUI top-left origin) a panel wanting to dock right
+    /// ABOVE this one's own tile row should treat as its own bottom edge
+    /// -- same "read a neighbour's own dynamic height" contract <see
+    /// cref="BattalionHud.StackTop"/> already established for the
+    /// opposite corner's stack, exposed so <see cref="FactoryOrdersHud"/>
+    /// never overlaps this row. Defaults to the screen's own bottom-right
+    /// margin (i.e. "nothing to dock above") whenever the tile row itself
+    /// isn't drawn this frame -- set at the very TOP of `OnGUI`, before
+    /// any early return, and only ever raised (never lowered) once the
+    /// real panel height is known further down.</summary>
+    public float TileRowTop { get; private set; }
 
     public void Init(GrabCursor grabCursorRef, RoofPortraitHologram roofHologramRef)
     {
@@ -109,6 +124,7 @@ public class ProductionQueueHud : MonoBehaviour
 
     private void OnGUI()
     {
+        TileRowTop = UiScale.Height - marginPixels;
         if (grabCursor == null) { PointerOver = false; return; }
 
         // 2026-08 (creator direction: "if the user presses the space bar
@@ -123,8 +139,9 @@ public class ProductionQueueHud : MonoBehaviour
         // return below, not folded inside it.
         var pendingCount = grabCursor.PendingBuildCount;
         var selectedBuild = grabCursor.SelectedFactoryBuild;
+        var carryingOrder = grabCursor.IsCarryingOrder;
 
-        if (!grabCursor.HasQueuedProduction && pendingCount <= 0 && !selectedBuild.HasSelection)
+        if (!grabCursor.HasQueuedProduction && pendingCount <= 0 && !selectedBuild.HasSelection && !carryingOrder)
         {
             PointerOver = false;
             return;
@@ -132,6 +149,15 @@ public class ProductionQueueHud : MonoBehaviour
         if (_tex == null) _tex = Texture2D.whiteTexture;
 
         if (pendingCount > 0) DrawPendingBuildBadge(pendingCount);
+        // 2026-08 (Factory Build Queue / Order Clipboard, creator
+        // direction: "Grab a Battalion Group from the existing bottom-
+        // left menu. Drag it toward a Factory"): a Battalion/LabBattalion
+        // carry has no physical MonsterAgent to follow the cursor, so
+        // this badge -- the SAME cursor-following visual/position
+        // DrawPendingBuildBadge already established for a carried
+        // monster's dialed-in count -- is the only feedback the player
+        // gets that something is actually in hand.
+        if (carryingOrder) DrawCarriedOrderBadge(grabCursor.CarriedOrderLabel, grabCursor.CarriedOrderCount);
         if (selectedBuild.HasSelection) DrawSelectedFactoryBadge(selectedBuild.Label, selectedBuild.Count, selectedBuild.WorldPos);
 
         if (!grabCursor.HasQueuedProduction) { PointerOver = false; return; }
@@ -154,6 +180,7 @@ public class ProductionQueueHud : MonoBehaviour
         var panelX = screenW - marginPixels - panelWidth;
         var panelY = screenH - marginPixels - panelHeight;
         var panelRect = new Rect(panelX, panelY, panelWidth, panelHeight);
+        TileRowTop = panelY - dockGapPixels;
 
         var e = Event.current;
         PointerOver = e != null && panelRect.Contains(e.mousePosition);
@@ -283,6 +310,32 @@ public class ProductionQueueHud : MonoBehaviour
         GUI.DrawTexture(rect, _tex);
         GUI.color = Color.white;
         GUI.Label(new Rect(rect.x + 4f, rect.y + 2f, rect.width - 8f, 16f), "Build x" + count);
+        GUI.color = new Color(0.85f, 0.85f, 0.55f, 1f);
+        GUI.Label(new Rect(rect.x + 4f, rect.y + 17f, rect.width - 8f, 16f), CostText(count));
+        GUI.color = Color.white;
+    }
+
+    /// <summary>2026-08 (Factory Build Queue / Order Clipboard, creator
+    /// direction: "Grab a Battalion Group from the existing bottom-left
+    /// menu. Drag it toward a Factory"): the SAME cursor-following badge
+    /// shape <see cref="DrawPendingBuildBadge"/> uses for a carried
+    /// monster's dialed-in count, showing the carried Battalion/
+    /// LabBattalion's own name + member count + cost instead -- "Build
+    /// orders and cost outline also apply to battalions," and this is
+    /// the ONLY visual feedback an abstract order (no physical transform
+    /// to move) gets while being dragged.</summary>
+    private void DrawCarriedOrderBadge(string label, int count)
+    {
+        var e = Event.current;
+        if (e == null) return;
+        var pos = e.mousePosition;
+
+        const float w = 110f, h = 34f;
+        var rect = new Rect(pos.x + 18f, pos.y + 18f, w, h);
+        GUI.color = new Color(0f, 0f, 0f, 0.75f);
+        GUI.DrawTexture(rect, _tex);
+        GUI.color = Color.white;
+        GUI.Label(new Rect(rect.x + 4f, rect.y + 2f, rect.width - 8f, 16f), (string.IsNullOrEmpty(label) ? "?" : label) + " x" + count);
         GUI.color = new Color(0.85f, 0.85f, 0.55f, 1f);
         GUI.Label(new Rect(rect.x + 4f, rect.y + 17f, rect.width - 8f, 16f), CostText(count));
         GUI.color = Color.white;

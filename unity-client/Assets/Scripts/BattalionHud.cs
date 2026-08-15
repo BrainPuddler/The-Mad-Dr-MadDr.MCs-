@@ -19,6 +19,14 @@ using UnityEngine;
 /// or before <see cref="Init"/> has a live commander/minimap -- same "don't
 /// draw before there's anything to draw" contract every other HUD panel in
 /// this project already follows.
+///
+/// 2026-08 follow-up (Factory Build Queue / Order Clipboard, creator
+/// direction: "Grab a Battalion Group from the existing bottom-left
+/// menu. Drag it toward a Factory"): the "select" click on each row now
+/// picks the battalion up (<see cref="GrabCursor.BeginCarryingOrder"/>)
+/// instead, while Grab Mode is armed and empty-handed -- the "Build"
+/// button is untouched, still an immediate one-click build at the
+/// nearest own Factory.
 /// </summary>
 public class BattalionHud : MonoBehaviour
 {
@@ -84,7 +92,26 @@ public class BattalionHud : MonoBehaviour
         {
             var labelRect = new Rect(mapRect.x, y, labelWidth, rowHeight);
             var label = battalion.Slot + ": " + battalion.Name + " (" + battalion.Count + ")";
-            if (GUI.Button(labelRect, label)) commander.SelectBattalion(battalion.Slot);
+            if (GUI.Button(labelRect, label))
+            {
+                // 2026-08 (creator direction: "Grab a Battalion Group
+                // from the existing bottom-left menu. Drag it toward a
+                // Factory"): the SAME click this row already used for
+                // "select" now picks the battalion UP instead, while
+                // Grab Mode is armed and empty-handed -- matches the
+                // rest of Grab Mode's own click-to-pick-up/click-to-drop
+                // convention exactly (no new hold-and-drag gesture; a
+                // live monster in the world is already picked up the
+                // same way, one click, not a press-hold-release). Outside
+                // Grab Mode the row keeps its original meaning
+                // unchanged. `BeginCarryingOrder` itself no-ops if
+                // something is already being carried, so this never
+                // double-picks.
+                if (grabCursor != null && grabCursor.IsGrabModeActive)
+                    grabCursor.BeginCarryingOrder(commander.BattalionMembers(battalion.Slot));
+                else
+                    commander.SelectBattalion(battalion.Slot);
+            }
 
             var buildRect = new Rect(mapRect.x + labelWidth, y, buttonWidth, rowHeight);
             if (GUI.Button(buildRect, "Build") && grabCursor != null)

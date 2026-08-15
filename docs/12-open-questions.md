@@ -18880,3 +18880,148 @@ bar render -- if the battalion's own genomes genuinely have no
 `PortraitPng`, the label/progress bar will now show WITHOUT an image
 (by design, not a bug), and the new warning will say so explicitly in
 the Console the next time this is run for real.
+
+## 2026-08: Factory Build Queue / Order Clipboard system
+
+Creator direction, in full: "Implement and integrate a Factory Build
+Queue / Order Clipboard system into the existing factory-building
+functionality" -- extend Grab Mode so a Battalion (from the existing
+bottom-left menu) or a live monster can be dragged and dropped either
+directly on a Factory ("build this now," interrupting/re-prioritizing
+whatever's currently building without losing it) or onto a new small
+clipboard prop standing beside the Factory ("add to the queue, don't
+interrupt"), with a bottom-right popup for managing that Factory's own
+queue (reorder, +/- quantity, cancel).
+
+**Investigated first, per the request's own "before modifying code"
+list**, rather than guessed at: an Explore agent read `packages/
+match-core` directly and confirmed it has NO queue concept for
+buildings at all -- only a single in-progress training slot
+(`SimBuilding.TrainingKind`), no `CommandKind` for queueing/cancelling,
+and the Mad Doctor clone system was already entirely client-side (only
+`TrySpendBlood` touches match-core). No save/load system exists for
+match state anywhere in the project. Conclusion, confirmed with the
+creator before writing any code (a real architectural fork, not a
+detail): extend `GrabCursor`'s existing client-side queue rather than
+inventing a parallel one, don't touch match-core, don't add
+persistence.
+
+**The queue went from one shared list to one per Factory.** Before this
+pass, EVERY Factory the player owned drained into a single
+`List<QueueItem>`, picked by "nearest Complete Factory to city center"
+-- a scope simplification flagged in several places across this log
+already. The request's own validation checklist ("repeat with multiple
+Factories") only makes sense with real independence, so `_queue`/
+`_productionTimer` became `Dictionary<uint, FactoryQueue>` keyed by
+Factory `EntityId` (`FactoryQueue` = its own `List<QueueItem>` + its own
+timer). `TickProduction` now loops the dictionary, advancing and
+draining each Factory's own front item independently -- same spend/
+park/spawn logic verbatim (`FindOpenHexNear`, `TrySpendBlood`,
+`builder.SpawnMonster`), just addressed per-Factory instead of via one
+global pick. Every pre-existing HUD element that read "the" queue with
+no Factory argument (the always-visible tile row, the floating count
+badge, `RoofPortraitHologram`) keeps a convenience overload anchored on
+`FindAnyOwnCompleteFactory()` -- deliberately NOT converted to
+multi-instance in this pass, to keep the change contained; only the new
+clipboard/popup are genuinely per-Factory.
+
+**Direct-drop vs. clipboard-drop is one extra step, not two code
+paths.** Both targets call the exact same queueing helpers
+(`QueueSingleUnit`/`QueueBattalionAt`/`QueueLabBattalionAt`) -- a
+clipboard drop stops there (append/stack, exactly the pre-existing
+behavior every Factory drop already had); a Factory-BODY drop
+additionally calls a new `PromoteToFront`, which removes the
+just-queued item from wherever it landed and re-inserts it at index 0.
+Whatever WAS at index 0 simply shifts to index 1 -- its own
+`RemainingCount`/`BattalionRemaining` completely untouched, so "kick the
+current build... do not destroy or lose it" is a plain list reorder,
+never a deletion. Net effect worth naming explicitly: **the OLD direct-
+Factory-drop behavior IS what this feature calls a clipboard drop** --
+the only genuinely new behavior is the promote-to-front. Targeting
+itself: a precise raycast hit on the new `FactoryClipboard` collider
+wins first (a smaller, deliberate target); otherwise falls back to the
+EXISTING, unchanged, forgiving hex-proximity check every monster drop
+already used, so a near-miss of the clipboard still reads as "build
+this now" -- the original UX is exactly preserved for anyone who never
+aims for the clipboard at all.
+
+**The clipboard prop** (`FactoryClipboard.cs`, mirrors the `EntityId`-
+only shape `BuildingIdentity` already established last session) is two
+primitives -- a post and a board -- spawned once per completed Factory
+(`BaseDresser.SpawnFactoryClipboard`, called from all four
+`BuildXFactory` methods right after `SpawnRoofDisplayPlatform`),
+positioned OUTSIDE the building's own footprint so it never needs to
+individually dodge any faction's own chimney/spire/corner-tower/
+buttress placement. Parented under each faction's own `trim` holder
+(same reasoning as the brass roof platform: `TintShape` only re-tints
+DIRECT children of `root`, so the clipboard keeps its own real
+parchment/post color).
+
+**Dragging a Battalion off the bottom-left menu is new** -- there was
+no drag gesture for battalions at all before this (both `BattalionHud`
+and `LabBattalionHud` only ever had an immediate "Build" button).
+`GrabCursor` gained a second "what's being carried" variant
+(`_carriedOrderKind`/`BeginCarryingOrder`/`BeginCarryingLabOrder`)
+alongside the existing physical-monster carry, entering the SAME
+Armed->Carrying state machine. Each row's own click (while Grab Mode is
+armed and empty-handed) now picks the battalion up instead of selecting
+it -- the exact same one-click pick-up-then-click-to-drop convention
+the rest of Grab Mode already uses, not a new hold-and-drag gesture.
+The existing "Build" buttons are completely untouched. The dragged
+Battalion is the SAME `commander.BattalionMembers(slot)`/Lab-template
+`CreatureIds` data the buttons already passed to
+`BuildBattalionAtOwnFactory`/`BuildLabBattalion` -- no second Battalion
+representation exists anywhere in this change.
+
+**Visual feedback while dragging**: two lazily-built ground-glow props
+(same recipe as the existing factory-selection ring -- `SlowSpin` +
+transparent emissive cylinder, built once, then just toggled/
+repositioned) -- green under the Factory body, amber on the clipboard
+itself, computed once per frame from the same `ResolveDropTarget` call
+used for the actual drop resolution (no second raycast).
+
+**The order popup** (`FactoryOrdersHud.cs`, new) opens on a clipboard
+click, docks directly above `ProductionQueueHud`'s own tile row (reading
+a new `TileRowTop` anchor, same "read a neighbour's dynamic height"
+contract `LabBattalionHud` already uses for the opposite corner's
+stack), and owns no queue state of its own -- only which Factory is
+open, so closing/reopening never loses anything. Shows "NOW BUILDING"
+(index 0) and a numbered "QUEUE" (the rest), each row with up/down
+(`MoveOrderUp`/`MoveOrderDown`, plain index swaps -- index 0 moving down
+demotes the active build exactly the same way a fresh Factory-body drop
+does, since "the active build" is simply defined as "whatever is at
+index 0," never a separate flag), +/- (`AdjustOrderQuantity`, the SAME
+per-Kind logic the existing keyboard quick-adjust already had, pulled
+into a shared method instead of duplicated a third time), and Cancel
+(`CancelQueueItem` -- removes exactly one item, never touches the roof
+occupant even for index 0, matching the already-established "manual
+cancel is not the same event as a batch finishing" rule from the
+previous pass's `-` key). Plain ASCII button glyphs throughout (no
+unicode arrows) -- Unity's default IMGUI font's glyph coverage can't be
+confirmed without a real Editor render in this environment, so this
+avoids the risk of a blank/tofu button label entirely.
+
+**Known gap, disclosed rather than silently left**: dropping a Battalion
+directly onto a Factory that currently has a roof-display occupant
+(a physical monster resting on the brass platform, representing a
+SingleUnit build) does not evict/replace that occupant the way a fresh
+monster drop already does. The roof-display system was built for a
+single genome, not a composite squad -- there's no single creature a
+Battalion drop could put up there instead -- so this is a pre-existing
+limitation of that system surfacing through the new interrupt path, not
+a new regression. Left as-is rather than guessing at a redesign of the
+roof display itself, which is real, separate, not-yet-scoped work.
+
+Checked by hand, no Unity Editor in this environment (same standing
+limit as every other Unity change this session): brace/paren balance on
+every touched/new file (`GrabCursor.cs`, `FactoryClipboard.cs`,
+`BaseDresser.cs`, `BattalionHud.cs`, `LabBattalionHud.cs`,
+`ProductionQueueHud.cs`, `FactoryOrdersHud.cs`, `RuntimeCityBuilder.cs`,
+`WaypointCommander.cs`); every public `GrabCursor` method referenced by
+another file confirmed to actually exist with a matching signature by
+grep, not assumed; a full written walkthrough of the request's own
+17-step validation list and its edge-case list against the actual code
+paths, not just the happy path; caught and fixed a real bug during
+review (`Drop()` used to re-resolve its own drop target with a null
+Camera, which would have silently disabled clipboard detection for
+every physical-monster drop) before it ever reached a commit.

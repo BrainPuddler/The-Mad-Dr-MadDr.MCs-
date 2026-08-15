@@ -670,6 +670,15 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (productionQueueHud == null) productionQueueHud = gameObject.AddComponent<ProductionQueueHud>();
         productionQueueHud.Init(grabCursor, roofPortraitHologram);
 
+        // 2026-08 (Factory Build Queue / Order Clipboard): opened by
+        // clicking a Factory's own FactoryClipboard prop (GrabCursor's
+        // OpenOrdersPopup event) -- built after ProductionQueueHud so its
+        // reference can be handed in for the "dock right above the tile
+        // row" anchor (ProductionQueueHud.TileRowTop).
+        var factoryOrdersHud = gameObject.GetComponent<FactoryOrdersHud>();
+        if (factoryOrdersHud == null) factoryOrdersHud = gameObject.AddComponent<FactoryOrdersHud>();
+        factoryOrdersHud.Init(grabCursor, productionQueueHud);
+
         var clock = gameObject.GetComponent<AnalogClockHud>();
         if (clock == null) gameObject.AddComponent<AnalogClockHud>();
 

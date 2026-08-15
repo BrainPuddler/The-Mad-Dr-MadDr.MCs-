@@ -608,6 +608,7 @@ public class BaseDresser : MonoBehaviour
         var trim = new GameObject("FactoryTrim").transform;
         trim.SetParent(root.transform, false);
         SpawnRoofDisplayPlatform(trim, origin + Vector3.up * bodyH, Mathf.Min(fullScale.x, fullScale.z) * 0.5f);
+        SpawnFactoryClipboard(trim, origin, fullScale, root);
     }
 
     /// <summary>Defense -- a low wide bunker plus a domed turret centered
@@ -882,6 +883,7 @@ public class BaseDresser : MonoBehaviour
         // towers below all sit at the body's own edges/corners, leaving
         // the roof center clear.
         SpawnRoofDisplayPlatform(trim, origin + Vector3.up * bodyH, Mathf.Min(bodyW, bodyD) * 0.5f);
+        SpawnFactoryClipboard(trim, origin, fullScale, root);
 
         var brassMat = DoctorBrass();
         var brickMat = DoctorDarkBrick();
@@ -1229,6 +1231,7 @@ public class BaseDresser : MonoBehaviour
         // portholes/ribs below all sit on the saucer's own rim or a
         // corner, leaving the dome's own top center clear.
         SpawnRoofDisplayPlatform(trim, origin + Vector3.up * bodyH, Mathf.Min(bodyW, bodyD) * 0.5f);
+        SpawnFactoryClipboard(trim, origin, fullScale, root);
 
         // 2026-08 silver-steel pass: both were AlienCrystalMat()/
         // AlienMembraneMat() (organic purple crystal/membrane, now
@@ -1622,6 +1625,7 @@ public class BaseDresser : MonoBehaviour
         // below is pushed back off center (see its own comment) so the
         // two don't overlap.
         SpawnRoofDisplayPlatform(trim, origin + Vector3.up * bodyH, Mathf.Min(bodyW, bodyD) * 0.5f);
+        SpawnFactoryClipboard(trim, origin, fullScale, root);
 
         var aluminumMat = HumanAluminum();
         var carbonMat = HumanCarbon();
@@ -2240,6 +2244,89 @@ public class BaseDresser : MonoBehaviour
         var rivetRadius = platformDiameter * 0.5f * 0.94f;   // just inside the platform's own edge
         var rivetSize = platformDiameter * 0.024f;
         SpawnRivets(roofCenter + Vector3.up * (platformTopY + 0.02f), rivetRadius, rivetSize, Steel(), trim, 14, 520);
+    }
+
+    /// <summary>2026-08 (creator direction: "Implement and integrate a
+    /// Factory Build Queue / Order Clipboard system... Add a medium-sized
+    /// clipboard/order-form object physically attached to or positioned
+    /// on the Factory. The clipboard is the Factory's production
+    /// queue/order form... Do not make the clipboard unnecessarily
+    /// large... approximately medium-sized relative to the Factory and
+    /// easy to target without dominating the scene... Keep the clipboard
+    /// geometry extremely lightweight"): exactly TWO primitives -- a
+    /// short post plus a flat board -- positioned OUTSIDE the building's
+    /// own footprint, the same "beside the building, not overlapping the
+    /// body" convention the Doctor faction's own tank/pipes/housing/tube
+    /// already use for their own ground-level fixtures. Placed there
+    /// deliberately rather than tucked into a specific corner: every
+    /// faction's own roof/ground dressing already claims different
+    /// corners in different ways (chimney/spire always +0.32/+0.32,
+    /// Doctor's own corner towers near every corner, buttresses flanking
+    /// the front wall) -- a spot fully outside the footprint needs no
+    /// per-faction collision-dodging the way a roof or corner placement
+    /// would.
+    ///
+    /// Parented under the caller's own `trim` holder (identical reasoning
+    /// to <see cref="SpawnRoofDisplayPlatform"/>'s own doc comment --
+    /// `TintShape` only re-tints DIRECT children of `root`, so anything
+    /// under `trim` keeps its own real parchment/post color instead of
+    /// being flattened to the owner's faction tint) and tagged with a
+    /// <see cref="FactoryClipboard"/> identity component so
+    /// `GrabCursor`'s raycast can tell "hit the clipboard" apart from
+    /// "hit the rest of the Factory body" (<see
+    /// cref="GrabCursor.ResolveDropTarget"/>) -- `entityId` is read off
+    /// `root`'s own <see cref="BuildingIdentity"/> (already attached by
+    /// `BuildCompleteShape`'s caller before any `BuildXFactory` method
+    /// runs) rather than threaded through every dispatch signature as a
+    /// new parameter.</summary>
+    private void SpawnFactoryClipboard(Transform trim, Vector3 origin, Vector3 fullScale, GameObject root)
+    {
+        var identity = root.GetComponent<BuildingIdentity>();
+        var entityId = identity != null ? identity.EntityId : 0u;
+
+        var postHeight = Mathf.Clamp(fullScale.y * 0.14f, 0.9f, 1.6f);
+        var postRadius = fullScale.x * 0.015f;
+        var boardWidth = postHeight * 0.55f;
+        var boardHeight = postHeight * 0.65f;
+        var boardThickness = postRadius * 3f;
+
+        // outside the footprint, back-left -- clear of every faction's
+        // own roof/corner/front-wall fixtures without needing to know
+        // what any of them are.
+        var basePos = origin + Vector3.back * (fullScale.z * 0.5f + 1.5f) + Vector3.left * (fullScale.x * 0.25f);
+
+        var post = builder.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (postHeight * 0.5f),
+            new Vector3(postRadius * 2f, postHeight * 0.5f, postRadius * 2f), ClipboardPostMat(), trim);
+        post.name = "FactoryClipboardPost";
+
+        var boardCenter = basePos + Vector3.up * (postHeight - boardHeight * 0.35f);
+        var board = builder.SpawnPrim(PrimitiveType.Cube, boardCenter,
+            new Vector3(boardWidth, boardHeight, boardThickness), ClipboardBoardMat(), trim);
+        board.name = "FactoryClipboardBoard";
+        var clip = board.AddComponent<FactoryClipboard>();
+        clip.FactoryEntityId = entityId;
+    }
+
+    private static Material _clipboardBoardMat;
+    private static Material ClipboardBoardMat()
+    {
+        if (_clipboardBoardMat == null)
+        {
+            _clipboardBoardMat = new Material(ShaderUtil.FindRenderableShader());
+            _clipboardBoardMat.color = new Color(0.86f, 0.82f, 0.68f);   // pale parchment -- reads as "paper," distinct from every faction's own brass/steel/stone/aluminum palette
+        }
+        return _clipboardBoardMat;
+    }
+
+    private static Material _clipboardPostMat;
+    private static Material ClipboardPostMat()
+    {
+        if (_clipboardPostMat == null)
+        {
+            _clipboardPostMat = new Material(ShaderUtil.FindRenderableShader());
+            _clipboardPostMat.color = new Color(0.25f, 0.22f, 0.18f);   // dark wood/iron post
+        }
+        return _clipboardPostMat;
     }
 
     /// <summary>Evenly spaced around `ringCenter`'s own circumference at

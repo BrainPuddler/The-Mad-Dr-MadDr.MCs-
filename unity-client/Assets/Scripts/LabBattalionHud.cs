@@ -22,6 +22,14 @@ using UnityEngine;
 /// battalions loaded yet, or before <see cref="Init"/> has a live
 /// builder/minimap -- same "don't draw before there's anything to draw"
 /// contract every other HUD panel in this project already follows.
+///
+/// 2026-08 follow-up (Factory Build Queue / Order Clipboard, creator
+/// direction: "Grab a Battalion Group from the existing bottom-left
+/// menu. Drag it toward a Factory"): the name row is now a real button
+/// that picks the template up (<see
+/// cref="GrabCursor.BeginCarryingLabOrder"/>) while Grab Mode is armed
+/// and empty-handed -- the "Build" button is untouched, still an
+/// immediate one-click build at the nearest own Factory.
 /// </summary>
 public class LabBattalionHud : MonoBehaviour
 {
@@ -71,7 +79,18 @@ public class LabBattalionHud : MonoBehaviour
         foreach (var t in templates)
         {
             var labelRect = new Rect(mapRect.x, y, labelWidth, rowHeight);
-            GUI.Label(labelRect, t.Name + " (" + t.CreatureIds.Length + ")");
+            // 2026-08 (creator direction: "Grab a Battalion Group from
+            // the existing bottom-left menu. Drag it toward a Factory"):
+            // this row was a plain GUI.Label before (no click behavior
+            // at all -- Lab templates have no in-game "select" concept
+            // the way live battalions do) -- now a real button so it can
+            // be picked up while Grab Mode is armed and empty-handed,
+            // same one-click pick-up-and-carry BattalionHud's own row
+            // just gained. A click while NOT armed is a silent no-op,
+            // same as the old Label doing nothing.
+            if (GUI.Button(labelRect, t.Name + " (" + t.CreatureIds.Length + ")")
+                && grabCursor != null && grabCursor.IsGrabModeActive)
+                grabCursor.BeginCarryingLabOrder(t.Name, t.CreatureIds);
 
             var buildRect = new Rect(mapRect.x + labelWidth, y, buttonWidth, rowHeight);
             if (GUI.Button(buildRect, "Build") && grabCursor != null)
