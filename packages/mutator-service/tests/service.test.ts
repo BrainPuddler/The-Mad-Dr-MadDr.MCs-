@@ -114,6 +114,59 @@ test("you cannot touch another account's creature", () => {
   );
 });
 
+// ---- portrait (2026-08, "use the portrait created in the lab. Export
+// that with the monster") -------------------------------------------------
+
+test("a genome has no portrait until one is set, then getCreature/listCreatures both return it", () => {
+  const { svc } = fresh();
+  const id = spawn(svc);
+  assert.equal(svc.getCreature(ACC, id).portraitPng, undefined);
+
+  const png = "data:image/png;base64,aGVsbG8=";
+  const result = svc.setPortrait(ACC, id, png);
+  assert.deepEqual(result, { ok: true });
+
+  assert.equal(svc.getCreature(ACC, id).portraitPng, png);
+  const listed = svc.listCreatures(ACC, undefined).items.find((g) => g.id === id);
+  assert.equal(listed?.portraitPng, png);
+});
+
+test("setPortrait refuses another account's creature and a non-data-URL value", () => {
+  const { svc } = fresh();
+  const mine = spawn(svc, ACC);
+  assert.throws(
+    () => svc.setPortrait("acct-2", mine, "data:image/png;base64,aGVsbG8="),
+    (e: any) => e.status === 403,
+  );
+  assert.throws(
+    () => svc.setPortrait(ACC, mine, "not-a-data-url"),
+    (e: any) => e.status === 400,
+  );
+  assert.throws(
+    () => svc.setPortrait(ACC, mine, "data:image/png;base64," + "a".repeat(200_000)),
+    (e: any) => e.status === 400,
+  );
+});
+
+test("re-setting a portrait replaces the old one -- no versioning, no accumulation", () => {
+  const { svc } = fresh();
+  const id = spawn(svc);
+  svc.setPortrait(ACC, id, "data:image/png;base64,AAA=");
+  svc.setPortrait(ACC, id, "data:image/png;base64,BBB=");
+  assert.equal(svc.getCreature(ACC, id).portraitPng, "data:image/png;base64,BBB=");
+});
+
+test("a genome's own immutable row is untouched by setting a portrait -- signature/genome/createdAt unchanged", () => {
+  const { svc } = fresh();
+  const id = spawn(svc);
+  const before = svc.getCreature(ACC, id);
+  svc.setPortrait(ACC, id, "data:image/png;base64,AAA=");
+  const after = svc.getCreature(ACC, id);
+  assert.equal(after.signature, before.signature);
+  assert.deepEqual(after.genome, before.genome);
+  assert.equal(after.createdAt, before.createdAt);
+});
+
 // ---- surgery plumbing --------------------------------------------------------
 
 test("harvest stumps the donor and drops a usable part in the tray", () => {

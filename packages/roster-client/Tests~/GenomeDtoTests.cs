@@ -70,6 +70,11 @@ public class GenomeDtoTests
         Assert.Equal("test-account-1783904806", stored.AccountId);
         Assert.Equal("16b7a8e3d589da515c0ce131d0b75f1acb9a6f5e79fdc6729bf8ae4187d81923", stored.Signature);
         Assert.Equal("2026-07-13T01:06:46.331Z", stored.CreatedAt);
+        // 2026-08 ("use the portrait created in the lab. Export that
+        // with the monster"): this fixture predates the field entirely
+        // -- confirms a genome saved before portraits existed parses as
+        // "no portrait," not a crash or a spurious empty string.
+        Assert.Null(stored.PortraitPng);
 
         var g = stored.Genome;
         Assert.Equal(2, g.GenomeVersion);
@@ -129,6 +134,57 @@ public class GenomeDtoTests
         Assert.Equal(original.AccountId, reparsed.AccountId);
         Assert.Equal(original.CreatureIds, reparsed.CreatureIds);
         Assert.Equal(original.UpdatedAt, reparsed.UpdatedAt);
+    }
+
+    // 2026-08 ("use the portrait created in the lab. Export that with
+    // the monster"): mutator-service merges portraitPng into a
+    // GET /creature response only when one was actually PUT to
+    // /creature/:id/portrait first -- captured shape, not hand-guessed.
+    private const string StoredGenomeWithPortraitFixture = """
+    {
+      "id": "cr_e85fdbb7a81e2c7c68",
+      "accountId": "test-account-1783904806",
+      "genome": {
+        "genomeVersion": 2,
+        "parentIds": [],
+        "body": {"plan": "tetrapod", "params": [0.1, 0.2, 0.3, 0.4]},
+        "brain": {"tier": "average", "params": [0.1, 0.2, 0.3, 0.4, 0.5]},
+        "heart": {"tier": "steady", "params": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]},
+        "slots": {
+          "hand": {"family": "claw_hand", "params": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]},
+          "sensor": {"family": "horn", "params": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]},
+          "eye": {"family": "stalk_eyes", "params": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]},
+          "leg": {"family": "talon_leg", "params": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]}
+        },
+        "creatureId": "cr_e85fdbb7a81e2c7c68"
+      },
+      "signature": "16b7a8e3d589da515c0ce131d0b75f1acb9a6f5e79fdc6729bf8ae4187d81923",
+      "createdAt": "2026-07-13T01:06:46.331Z",
+      "portraitPng": "data:image/png;base64,aGVsbG8="
+    }
+    """;
+
+    [Fact]
+    public void Parses_portraitPng_when_present()
+    {
+        var stored = StoredGenomeDto.FromJson(JsonValue.Parse(StoredGenomeWithPortraitFixture));
+        Assert.Equal("data:image/png;base64,aGVsbG8=", stored.PortraitPng);
+    }
+
+    [Fact]
+    public void PortraitPng_round_trips_through_ToJson_then_FromJson_unchanged()
+    {
+        var original = StoredGenomeDto.FromJson(JsonValue.Parse(StoredGenomeWithPortraitFixture));
+        var reparsed = StoredGenomeDto.FromJson(original.ToJson());
+        Assert.Equal(original.PortraitPng, reparsed.PortraitPng);
+    }
+
+    [Fact]
+    public void ToJson_omits_portraitPng_entirely_when_absent_rather_than_writing_null()
+    {
+        var stored = StoredGenomeDto.FromJson(JsonValue.Parse(StoredGenomeFixture));
+        var json = stored.ToJson();
+        Assert.Null(json.FieldOrNull("portraitPng"));
     }
 
     [Fact]

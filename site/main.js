@@ -743,6 +743,42 @@ function doSaveStable() {
   if (c.signature) local.stableBackup[c.id] = { genome: c.genome, signature: c.signature };
   saveLocal(); logEntry(`⭐ ${c.name} saved to the stable.`); render();
   syncMenagerie();
+  syncPortrait(c);
+}
+
+// 2026-08 (creator direction: "use the portrait created in the lab.
+// Export that with the monster" -- the in-game battalion build queue
+// should show the exact image the Lab already renders per specimen).
+// Bakes THIS specimen's real thumbnail (creature-renderer.js's own
+// renderThumbnail, the SAME renderer/canvas the Stable grid's own
+// thumbCache already uses -- reusing the cache below when possible
+// rather than re-rendering) and PUTs it to mutator-service so Unity can
+// fetch it alongside the genome. Fire-and-forget, same shape
+// `syncMenagerie` already established for this exact "don't block the
+// UI on a background sync" reason -- a slow/failed portrait upload just
+// means the queue tile falls back to text, never a broken save flow.
+//
+// Deliberately scoped to the moment a creature is SAVED TO THE STABLE,
+// not every mint (spawn/mutate/splice/graft/sew) -- the Stable IS the
+// account's Menagerie (this file's own header above `syncMenagerie`),
+// so only a Stabled creature can ever actually reach a battlefield
+// roster or a battalion in the first place; baking+uploading a portrait
+// for every intermediate mutation on the workbench that never gets
+// saved would be pure waste.
+async function syncPortrait(c) {
+  try {
+    const fac = factionOfCreature(c);
+    // `||`, not `??` -- a prior failed bake leaves "" in thumbCache
+    // (renderStable's own catch, below), which is falsy but not
+    // nullish; `??` would return that empty string as-is and never
+    // retry the render.
+    const portraitPng = thumbCache[c.id] || renderThumbnail(c.genome, fac);
+    if (!portraitPng) return;   // renderThumbnail already logs its own failure; nothing more to do
+    thumbCache[c.id] = portraitPng;
+    await api("PUT", `/creature/${c.id}/portrait`, { portraitPng });
+  } catch (e) {
+    logEntry(`⚠️ Couldn't upload ${c.name}'s portrait: ${e.message}`);
+  }
 }
 function doUnsaveStable(id) {
   local.stable = (local.stable ?? []).filter(x => x !== id);

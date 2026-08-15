@@ -147,19 +147,52 @@ public class GrabCursor : MonoBehaviour
     /// <summary>Read-only view for <see cref="ProductionQueueHud"/> --
     /// one entry per queued item, in build order, with a 0..1 progress
     /// fraction (only meaningful, and only ever nonzero, for the FRONT
-    /// item -- everything behind it hasn't started).</summary>
-    public IEnumerable<(string Label, int Remaining, float Progress)> ProductionQueue
+    /// item -- everything behind it hasn't started).
+    ///
+    /// 2026-08 (creator direction: "When Building a battalion it should
+    /// show a image of the monster being built, and the battalion name
+    /// underneath... use the portrait created in the lab. Export that
+    /// with the monster"): `PortraitPng` is the SAME base64 PNG data URL
+    /// <see cref="StoredGenomeDto.PortraitPng"/> already carries down
+    /// from mutator-service (the Lab's own real WebGL-rendered
+    /// thumbnail, not a re-derived icon) -- null when the underlying
+    /// genome has none (an old genome saved before portraits existed, or
+    /// a failed client-side bake), which <see cref="ProductionQueueHud"/>
+    /// falls back to its old text-abbreviation tile for, same
+    /// "optional field, never a hard error" contract every other layer
+    /// of this pipeline already follows. A Battalion/LabBattalion item
+    /// shows its FIRST still-remaining member's portrait as
+    /// representative of the whole group -- there's no single "the"
+    /// image for a mixed battalion, and the first member is a stable,
+    /// deterministic choice (not e.g. "whichever happens to build
+    /// next," which would flicker the tile's own image as the queue
+    /// drains).</summary>
+    public IEnumerable<(string Label, int Remaining, float Progress, string PortraitPng)> ProductionQueue
     {
         get
         {
             for (var i = 0; i < _queue.Count; i++)
             {
                 var item = _queue[i];
-                var remaining = item.Kind == QueueItemKind.SingleUnit ? item.RemainingCount
-                    : item.Kind == QueueItemKind.Battalion ? item.BattalionRemaining.Count
-                    : item.LabBattalionRemaining.Count;
+                int remaining;
+                string portraitPng;
+                if (item.Kind == QueueItemKind.SingleUnit)
+                {
+                    remaining = item.RemainingCount;
+                    portraitPng = item.SingleGenome?.PortraitPng;
+                }
+                else if (item.Kind == QueueItemKind.Battalion)
+                {
+                    remaining = item.BattalionRemaining.Count;
+                    portraitPng = item.BattalionRemaining.Count > 0 ? item.BattalionRemaining[0].Genome?.PortraitPng : null;
+                }
+                else
+                {
+                    remaining = item.LabBattalionRemaining.Count;
+                    portraitPng = item.LabBattalionRemaining.Count > 0 ? item.LabBattalionRemaining[0]?.PortraitPng : null;
+                }
                 var progress = i == 0 ? Mathf.Clamp01(_productionTimer / Mathf.Max(0.01f, productionSecondsPerUnit)) : 0f;
-                yield return (item.Label, remaining, progress);
+                yield return (item.Label, remaining, progress, portraitPng);
             }
         }
     }

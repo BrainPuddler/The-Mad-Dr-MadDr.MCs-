@@ -135,6 +135,9 @@ export function createApp(service: MutatorService): ReturnType<typeof createServ
   );
   add("GET", "/creature/:id", (c) => service.getCreature(c.accountId, c.params.id!));
   add("GET", "/creature/:id/lineage", (c) => ({ ancestors: service.lineage(c.accountId, c.params.id!) }));
+  add("PUT", "/creature/:id/portrait", (c) =>
+    service.setPortrait(c.accountId, c.params.id!, c.body.portraitPng),
+  );
   add("GET", "/menagerie", (c) => service.getMenagerie(c.accountId));
   add("PUT", "/menagerie", (c) => service.setMenagerie(c.accountId, c.body.creatureIds ?? []));
   add("GET", "/battalions", (c) => ({ battalions: service.listBattalions(c.accountId) }));

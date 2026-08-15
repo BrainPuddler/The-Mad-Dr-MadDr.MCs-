@@ -251,23 +251,39 @@ namespace MadDr.RosterClient
         public string Signature { get; }
         public string CreatedAt { get; }
 
-        public StoredGenomeDto(string id, string accountId, GenomeDto genome, string signature, string createdAt)
+        /// <summary>2026-08 (creator direction: "use the portrait created
+        /// in the lab. Export that with the monster"): a base64 PNG data
+        /// URL (`data:image/png;base64,...`), baked client-side by the
+        /// Lab's own WebGL renderer and PUT to `/creature/:id/portrait`
+        /// (mutator-service's own new endpoint) -- null for a genome
+        /// saved before this field existed, or whose bake failed
+        /// client-side; every caller must treat that as "no portrait
+        /// available," never a hard error. Mirrors `StoredGenome.
+        /// portraitPng`'s own optional-field contract on the TS side
+        /// exactly (see that field's own doc comment for why this lives
+        /// OUTSIDE the immutable genome row).</summary>
+        public string PortraitPng { get; }
+
+        public StoredGenomeDto(string id, string accountId, GenomeDto genome, string signature, string createdAt, string portraitPng = null)
         {
             Id = id;
             AccountId = accountId;
             Genome = genome;
             Signature = signature;
             CreatedAt = createdAt;
+            PortraitPng = portraitPng;
         }
 
         public static StoredGenomeDto FromJson(JsonValue v)
         {
+            var portraitField = v.FieldOrNull("portraitPng");
             return new StoredGenomeDto(
                 v.Field("id").AsString(),
                 v.Field("accountId").AsString(),
                 GenomeDto.FromJson(v.Field("genome")),
                 v.Field("signature").AsString(),
-                v.Field("createdAt").AsString());
+                v.Field("createdAt").AsString(),
+                portraitField != null ? portraitField.AsString() : null);
         }
 
         public JsonValue ToJson()
@@ -278,6 +294,7 @@ namespace MadDr.RosterClient
             obj["genome"] = Genome.ToJson();
             obj["signature"] = JsonValue.Of(Signature);
             obj["createdAt"] = JsonValue.Of(CreatedAt);
+            if (PortraitPng != null) obj["portraitPng"] = JsonValue.Of(PortraitPng);
             return JsonValue.Of(obj);
         }
     }

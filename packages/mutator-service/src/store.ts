@@ -18,6 +18,29 @@ export interface StoredGenome {
   readonly genome: Genome;
   readonly signature: string;
   readonly createdAt: string;
+  /**
+   * 2026-08 (creator direction: "use the portrait created in the lab.
+   * Export that with the monster" -- the battalion-build queue in-game
+   * should show the SAME image the Lab already renders per specimen,
+   * not a re-derived or separately-authored one). A base64 PNG data URL
+   * (`data:image/png;base64,...`), baked client-side by the Lab's own
+   * WebGL renderer (site/creature-renderer.js `renderThumbnail`) --
+   * this service never renders one itself (no WebGL/DOM here, and
+   * shouldn't need one: the Lab already produces the exact pixels the
+   * player looks at). Deliberately NOT part of the immutable genome row
+   * above (docs/07's own "genomes are immutable rows" rule is about the
+   * GENETIC data an operation could mutate; a display portrait is
+   * neither genetic nor written by a mutation op) -- stored and updated
+   * through a SEPARATE mutable side-table (see `setPortrait`/
+   * `getPortrait` below, same "separate mutable side-state next to an
+   * immutable row" shape `retireGenome`/`isRetired` already established
+   * for genome lifecycle) so re-baking/replacing a portrait later never
+   * has to pretend it minted a new genome. Optional -- a genome saved
+   * before this field existed, or whose thumbnail bake failed
+   * client-side, simply has none; every reader treats it as "no
+   * portrait available," never a hard error.
+   */
+  readonly portraitPng?: string;
 }
 
 export type OpType =
@@ -108,6 +131,17 @@ export interface Store {
   retireGenome(id: string): void;
   isRetired(id: string): boolean;
 
+  /** 2026-08 (creator direction: "use the portrait created in the lab.
+   * Export that with the monster") -- a separate mutable side-slot per
+   * genome id, same "doesn't touch the immutable row" shape as
+   * retireGenome/isRetired above. `setPortrait` overwrites freely (a
+   * player re-baking/re-saving the same specimen replaces the old
+   * image, it doesn't accumulate versions) -- unlike the genome row
+   * itself, a display portrait has no lineage/audit reason to be
+   * append-only. */
+  setPortrait(genomeId: string, portraitPng: string): void;
+  getPortrait(genomeId: string): string | undefined;
+
   // operations (idempotency + audit)
   getOpByKey(accountId: string, idempotencyKey: string): OperationRecord | undefined;
   putOp(op: OperationRecord): void;
@@ -148,6 +182,7 @@ export class InMemoryStore implements Store {
   private battalions = new Map<string, BattalionTemplate>();
   private catalogs = new Map<string, Set<string>>();
   private retired = new Set<string>();
+  private portraits = new Map<string, string>();
 
   private opKey(accountId: string, key: string): string {
     return `${accountId}::${key}`;
@@ -160,15 +195,31 @@ export class InMemoryStore implements Store {
     if (this.genomes.has(g.id)) throw new Error(`genome ${g.id} already exists (immutable)`);
     this.genomes.set(g.id, g);
   }
+
+  /** Merges in a stored portrait (see `setPortrait`/`getPortrait`) if
+   * one exists -- the ONE place every read path (getGenome directly,
+   * listGenomes below, and every service method that calls either)
+   * picks it up, so a caller never has to remember to ask for it
+   * separately. A genome with no saved portrait is returned completely
+   * unchanged (`portraitPng` stays absent, not `undefined`-but-present
+   * -- `{...g}` with an `undefined` value would still serialize as a
+   * JSON `null` field on every genome, which is worse for callers than
+   * the field just not existing at all). */
+  private withPortrait(g: StoredGenome): StoredGenome {
+    const portraitPng = this.portraits.get(g.id);
+    return portraitPng === undefined ? g : { ...g, portraitPng };
+  }
+
   getGenome(id: string): StoredGenome | undefined {
-    return this.genomes.get(id);
+    const g = this.genomes.get(id);
+    return g ? this.withPortrait(g) : undefined;
   }
   listGenomes(accountId: string, cursor: string | undefined, limit: number): Page<StoredGenome> {
     const all = [...this.genomes.values()]
       .filter((g) => g.accountId === accountId)
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
     const start = cursor ? all.findIndex((g) => g.id === cursor) + 1 : 0;
-    const items = all.slice(start, start + limit);
+    const items = all.slice(start, start + limit).map((g) => this.withPortrait(g));
     const nextCursor = start + limit < all.length ? items[items.length - 1]?.id : undefined;
     return { items, ...(nextCursor ? { nextCursor } : {}) };
   }
@@ -253,5 +304,12 @@ export class InMemoryStore implements Store {
   }
   isRetired(id: string): boolean {
     return this.retired.has(id);
+  }
+
+  setPortrait(genomeId: string, portraitPng: string): void {
+    this.portraits.set(genomeId, portraitPng);
+  }
+  getPortrait(genomeId: string): string | undefined {
+    return this.portraits.get(genomeId);
   }
 }

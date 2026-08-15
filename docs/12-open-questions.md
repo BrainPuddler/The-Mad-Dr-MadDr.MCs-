@@ -18259,3 +18259,130 @@ to the old hardcoded ±X exactly, and ±X reduces to a real ±Z tangent
 that didn't exist before); brace/paren balance; confirmed via grep that
 every `SpawnSmallHouseWindows` call site's positional/named arguments
 still match the helper's new signature after the parameter reorder.
+
+## 2026-08: brass roof-display platform + a real cross-stack portrait pipeline
+
+Two requests handled in one pass: "Place a thick round brass platform
+with rivets on the roof of the factory where the grabbed subject is
+displayed" and "When Building a battalion it should show a image of the
+monster being built, and the battalion name underneath... use the
+portrait created in the lab. Export that with the monster."
+
+### Brass roof-display platform
+
+`MonsterAgent.EnsureRoofGlow` (docs/12's own earlier "glowing disc on
+the roof" entry) built a single flat, paper-thin (0.05-unit) cyan disc
+under a specimen resting on the Factory roof mid-clone-production.
+Rebuilt around a NEW `_roofPlatform` container GameObject: a real
+0.44-unit-thick brass cylinder (`RoofBrassPlatform`) sits under the
+existing glow disc, ringed by 14 small domed rivet studs placed with
+the exact same jittered-angle/radius/size math `BaseDresser.SpawnRivets`
+already uses for every other bolted-metal surface in this project
+(reusing `PbrTextureAtlas.Jitter` directly -- `MonsterAgent` has no
+`BaseDresser` instance to call the real helper through, so the same
+math is inlined here rather than duplicating a whole class for one call
+site). The glow disc itself is unchanged (still the same cool
+energy-cyan light, still Tier-1/Tier-2 `GlowPointRegistry`-gated),
+just repositioned to sit on top of the new platform instead of directly
+on the roof.
+
+A real bug was caught and fixed before commit, not shipped: the
+platform/rivets were originally parented directly under the agent's own
+root transform (same as the glow disc always was), toggled independently
+-- but nothing toggled the NEW platform off when a specimen left the
+roof (`ClearTargets`/`BootFromRoof`, the two "any fresh order cancels
+the display" exit paths, only ever knew about `_roofGlow`). The platform
+would have stayed permanently visible under any monster that ever
+landed on a Factory roof once, even after it walked away. Fixed by
+introducing the `_roofPlatform` container: platform, rivets, and glow
+disc all parent under it, and all four existing toggle call sites
+(`ClearTargets`, `BeginRoofDisplay`, `EnsureRoofGlow`'s own initial
+inactive state, `BootFromRoof`) now toggle that ONE container instead
+of the glow disc alone.
+
+### Portrait export: Lab → mutator-service → Unity, end to end
+
+Investigated first: the Lab (`site/creature-renderer.js`) already had a
+real, working `renderThumbnail(genome, faction)` -- bakes an actual
+WebGL render of the specimen to a PNG data URL, already used for the
+Stable grid's own thumbnails. `ProductionQueueHud`, on the Unity side,
+drew every queue tile as a flat tinted square with a 3-letter text
+abbreviation -- no image pipeline existed at all between the two. The
+creator's own follow-up ("use the portrait created in the lab. Export
+that with the monster") set the actual scope: reuse the EXISTING Lab
+render, don't build a second one.
+
+**mutator-service** (`packages/mutator-service/src/`):
+- `StoredGenome.portraitPng` (optional) -- a base64 PNG data URL.
+  Deliberately NOT a field mutated onto the immutable genome row
+  (docs/07's own "genomes are immutable rows" invariant is about
+  GENETIC data an operation could change; a display portrait is
+  neither genetic nor produced by a mutation op) -- stored in a
+  separate mutable side-map (`Store.setPortrait`/`getPortrait`), same
+  shape `retireGenome`/`isRetired` already established for genome
+  lifecycle state that lives next to, not inside, the row. `getGenome`/
+  `listGenomes` merge it in automatically via a new private
+  `withPortrait` helper, so every existing read path (`GET /creature/
+  :id`, `GET /creatures`, anything that walks lineage) picks it up for
+  free with zero call-site changes.
+- `MutatorService.setPortrait` + `PUT /creature/:id/portrait` -- the
+  Lab PUTs its own client-rendered PNG here (the server has no WebGL/
+  DOM and shouldn't grow one just to re-derive an image the browser
+  already made correctly). Same ownership check (`requireOwned`) every
+  other per-genome operation in this file already runs, plus a
+  data-URL-shape check and a 200KB size cap (belt-and-suspenders next
+  to `http.ts`'s existing whole-request 256KB `MAX_BODY`).
+- 4 new tests (36 total, all passing): no-portrait-by-default, set-then-
+  read via both `getCreature`/`listCreatures`, ownership/validation
+  rejection, re-setting replaces rather than accumulates, and the
+  immutable row (signature/genome/createdAt) provably untouched by
+  setting a portrait.
+
+**roster-client** (`packages/roster-client/src/GenomeDto.cs`):
+`StoredGenomeDto.PortraitPng` (nullable, same `FieldOrNull` optional-
+field idiom the existing `Hue`/`creatureId` fields already use) --
+null for a genome saved before this field existed. New tests confirm
+the old real-captured fixture (predates the field) parses as null, a
+new fixture WITH the field parses/round-trips correctly, and `ToJson`
+omits the field entirely rather than writing a JSON `null` when absent.
+
+**Lab** (`site/main.js`): `syncPortrait(c)`, called from `doSaveStable`
+-- the moment a creature is saved to the Stable, which IS the account's
+Menagerie (this file's own existing header comment), so it's the one
+real chokepoint every creature that could ever reach a battlefield
+roster or battalion passes through. Reuses the Stable grid's own
+`thumbCache` (bake once, reuse for both the grid AND the upload) rather
+than re-rendering, fire-and-forget (same shape `syncMenagerie` already
+established) so a slow/failed upload never blocks the save UI -- it
+just logs and the queue tile falls back to text.
+
+**Unity** (`unity-client/Assets/Scripts/`):
+- `GrabCursor.ProductionQueue`'s yielded tuple gains a `PortraitPng`
+  field -- the front member's portrait for a `SingleUnit` item, the
+  FIRST still-remaining member's portrait (a stable, non-flickering
+  choice) for a `Battalion`/`LabBattalion` item.
+- `ProductionQueueHud`: decodes each distinct base64 PNG once into a
+  cached `Texture2D` (`Convert.FromBase64String` + `Texture2D.
+  LoadImage`), draws it filling the tile in place of the old flat
+  tinted square, with the item's full `Label` (not the old 3-letter
+  abbreviation -- this new strip has real room) drawn as a shadowed
+  text strip directly below the tile, "the battalion name underneath"
+  read literally. Falls back to the original flat-tile-plus-
+  abbreviation look whenever no portrait is available -- an old genome,
+  or a failed client-side bake -- never a blank tile or a hard error.
+  Panel height/every downstream Rect (badge, progress bar, Cancel
+  button, the floating factory badge) recomputed to make room for the
+  new label strip.
+
+Same verification ceiling as every C#/JS entry in this log: no dotnet
+SDK, no Unity Editor, no browser to click through the Lab's own UI in
+this environment. `packages/mutator-service`'s TypeScript half IS
+directly runnable here though, and was: `npm test` (36/36 passing) and
+a full `tsc` compile, both clean. Checked by hand for the rest: brace/
+paren balance in every touched C#/JS file; `node --check site/main.js`
+(clean); the `??` vs `||` distinction in `syncPortrait` re-derived
+explicitly (a prior FAILED bake leaves `""` in `thumbCache`, which `??`
+would treat as a real cached value and never retry -- `||` retries
+correctly); confirmed `ProductionQueue` has exactly one consumer
+(`ProductionQueueHud.cs`) before widening its tuple shape, so no other
+caller could be silently broken by the new field.

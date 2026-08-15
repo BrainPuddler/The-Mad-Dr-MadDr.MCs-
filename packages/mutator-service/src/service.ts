@@ -489,6 +489,28 @@ export class MutatorService {
     return this.requireOwned(accountId, id);
   }
 
+  /** 2026-08 (creator direction: "use the portrait created in the lab.
+   * Export that with the monster"). The Lab bakes the PNG client-side
+   * (WebGL, no server-side render pipeline exists or should exist here)
+   * and PUTs it here to attach to an already-minted, already-owned
+   * genome -- `requireOwned` both confirms the genome exists and that
+   * this account actually owns it, the same ownership check every other
+   * per-genome operation in this file already runs, before accepting an
+   * arbitrary string blob tied to that id. A rough size cap (`MAX_BODY`
+   * in http.ts already caps the WHOLE request at 256KB; this is a
+   * second, more specific guard so a wildly oversized data URL fails
+   * with a clear message instead of just tripping the generic body-size
+   * limit) -- a 168x168 baked PNG data URL is comfortably under this in
+   * practice. */
+  setPortrait(accountId: string, id: string, portraitPng: string): { ok: true } {
+    this.requireOwned(accountId, id);
+    if (typeof portraitPng !== "string" || !portraitPng.startsWith("data:image/"))
+      throw badRequest("portraitPng must be a data:image/... URL");
+    if (portraitPng.length > 200_000) throw badRequest("portraitPng too large (200KB limit)");
+    this.store.setPortrait(id, portraitPng);
+    return { ok: true };
+  }
+
   lineage(accountId: string, id: string): StoredGenome[] {
     const root = this.requireOwned(accountId, id);
     const out: StoredGenome[] = [];

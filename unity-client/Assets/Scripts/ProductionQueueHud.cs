@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -37,7 +39,24 @@ using UnityEngine;
 /// cref="HarvesterMarkerHud"/>/<see cref="HealthBars"/>) hovering over
 /// <see cref="GrabCursor.FindAnyOwnCompleteFactory"/>'s position whenever
 /// the queue is non-empty, showing the front item's remaining count.
-/// </summary>
+///
+/// 2026-08 (creator direction: "When Building a battalion it should show
+/// a image of the monster being built, and the battalion name
+/// underneath... use the portrait created in the lab. Export that with
+/// the monster"): each tile now fills with the item's real portrait
+/// (<see cref="GrabCursor.ProductionQueue"/>'s own new `PortraitPng`
+/// field -- the Lab's actual WebGL-rendered thumbnail, decoded here into
+/// a <see cref="Texture2D"/> and cached per data-URL string so the SAME
+/// base64 blob is never decoded twice) instead of the flat tinted square
+/// the old text-abbreviation tile used, with the item's `Label`
+/// (genome id for a single unit, the battalion's own saved name for a
+/// Battalion/LabBattalion) drawn as a real text strip BELOW the tile --
+/// "the battalion name underneath," read literally, not squeezed inside
+/// the tile itself where a real name would overflow a 44px square. Falls
+/// back to the old flat-tile-plus-abbreviation look whenever a portrait
+/// is unavailable (an older genome saved before portraits existed, or a
+/// failed client-side bake) -- never a hard error, never a blank
+/// tile.</summary>
 public class ProductionQueueHud : MonoBehaviour
 {
     public GrabCursor grabCursor;
@@ -48,8 +67,25 @@ public class ProductionQueueHud : MonoBehaviour
     public float marginPixels = 12f;
     public float cancelButtonHeight = 20f;
     public int maxVisibleTiles = 8;
+    [Tooltip("Extra strip below each tile for the item's name (\"the battalion name underneath\") -- 0 would silently omit it, so this stays a real, non-zero default rather than an opt-in.")]
+    public float labelStripHeight = 14f;
 
     private static Texture2D _tex;
+
+    /// <summary>2026-08 (portrait tiles): one decoded <see cref="Texture2D"/>
+    /// per distinct base64 PNG data URL, decoded ONCE and reused for as
+    /// long as this component lives -- `GrabCursor.ProductionQueue`
+    /// hands back the SAME data-URL string every frame for the same
+    /// queued item (it's a plain field read off `StoredGenomeDto`, not
+    /// re-fetched), so keying the cache by that string is exactly as
+    /// stable as keying by genome id would be, with no extra plumbing to
+    /// carry a genome id down to this HUD-only cache. A failed decode
+    /// (`LoadImage` returning false -- malformed/truncated data) caches
+    /// `null` under that same key rather than retrying every frame,
+    /// same "don't hard-fail, don't hot-loop on a known-bad value"
+    /// posture the rest of this pipeline's optional-field handling
+    /// already follows.</summary>
+    private readonly Dictionary<string, Texture2D> _portraitCache = new Dictionary<string, Texture2D>();
 
     public static bool PointerOver { get; private set; }
 
@@ -57,6 +93,40 @@ public class ProductionQueueHud : MonoBehaviour
     {
         grabCursor = grabCursorRef;
     }
+
+    /// <summary>Decodes a `data:image/png;base64,...` URL into a
+    /// `Texture2D`, or returns null (and caches the null) if `png` is
+    /// empty or fails to decode. `Texture2D.LoadImage` auto-resizes the
+    /// texture to the PNG's own real dimensions -- the Lab's own
+    /// `renderThumbnail` always bakes at a fixed square size, so every
+    /// portrait this ever sees is already a clean square with nothing
+    /// further to crop/letterbox here.</summary>
+    private Texture2D PortraitTextureFor(string png)
+    {
+        if (string.IsNullOrEmpty(png)) return null;
+        if (_portraitCache.TryGetValue(png, out var cached)) return cached;
+
+        Texture2D tex = null;
+        var commaIdx = png.IndexOf(',');
+        if (commaIdx >= 0 && commaIdx + 1 < png.Length)
+        {
+            try
+            {
+                var bytes = Convert.FromBase64String(png.Substring(commaIdx + 1));
+                var candidate = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                if (candidate.LoadImage(bytes)) tex = candidate;
+                else Destroy(candidate);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("ProductionQueueHud: failed decoding a queued item's portrait: " + e.Message);
+            }
+        }
+        _portraitCache[png] = tex;   // caches null too -- see this field's own doc comment
+        return tex;
+    }
+
+    private const float ProgressBarHeight = 4f;
 
     private void OnGUI()
     {
@@ -67,11 +137,16 @@ public class ProductionQueueHud : MonoBehaviour
         var screenW = UiScale.Width;
         var screenH = UiScale.Height;
 
-        var items = new System.Collections.Generic.List<(string Label, int Remaining, float Progress)>(grabCursor.ProductionQueue);
+        var items = new List<(string Label, int Remaining, float Progress, string PortraitPng)>(grabCursor.ProductionQueue);
         var shown = Mathf.Min(items.Count, maxVisibleTiles);
 
         var panelWidth = shown * tileSize + Mathf.Max(0, shown - 1) * tileGap;
-        var panelHeight = tileSize + cancelButtonHeight + tileGap;
+        // 2026-08 (portrait tiles, "the battalion name underneath"): the
+        // label strip and its own gap now sit between the tile row and
+        // the progress bar/Cancel button -- every row below the tiles
+        // shifted down by exactly labelStripHeight + tileGap from the
+        // old layout, nothing else about the stacking order changed.
+        var panelHeight = tileSize + tileGap + labelStripHeight + ProgressBarHeight + tileGap + cancelButtonHeight;
         var panelX = screenW - marginPixels - panelWidth;
         var panelY = screenH - marginPixels - panelHeight;
         var panelRect = new Rect(panelX, panelY, panelWidth, panelHeight);
@@ -87,11 +162,24 @@ public class ProductionQueueHud : MonoBehaviour
         {
             var item = items[i];
             var tileRect = new Rect(panelX + i * (tileSize + tileGap), panelY, tileSize, tileSize);
+            var portrait = PortraitTextureFor(item.PortraitPng);
 
-            GUI.color = new Color(0.32f, 0.28f, 0.38f, 1f);
-            GUI.DrawTexture(tileRect, _tex);
-            GUI.color = Color.white;
-            GUI.Label(tileRect, Abbrev(item.Label));
+            if (portrait != null)
+            {
+                // fills the tile edge-to-edge -- no tint (the portrait IS
+                // the visual, unlike the old flat-color placeholder tile)
+                GUI.DrawTexture(tileRect, portrait, ScaleMode.ScaleToFit);
+            }
+            else
+            {
+                // fallback: the original flat tinted tile + text
+                // abbreviation, for an item whose genome has no portrait
+                // (an older save, or a failed client-side bake).
+                GUI.color = new Color(0.32f, 0.28f, 0.38f, 1f);
+                GUI.DrawTexture(tileRect, _tex);
+                GUI.color = Color.white;
+                GUI.Label(tileRect, Abbrev(item.Label));
+            }
 
             var badgeRect = new Rect(tileRect.xMax - 18f, tileRect.yMax - 16f, 18f, 16f);
             GUI.color = new Color(0f, 0f, 0f, 0.8f);
@@ -99,9 +187,16 @@ public class ProductionQueueHud : MonoBehaviour
             GUI.color = Color.white;
             GUI.Label(badgeRect, item.Remaining.ToString());
 
+            // "the battalion name underneath" -- a real text strip below
+            // the tile, shadowed for legibility against whatever the
+            // portrait's own background happens to be (a flat color tile
+            // never needed this; a photographic-ish portrait does).
+            var labelRect = new Rect(tileRect.x, tileRect.yMax + 1f, tileSize, labelStripHeight);
+            DrawShadowedNameLabel(labelRect, item.Label);
+
             if (i == 0)
             {
-                var barRect = new Rect(tileRect.x, tileRect.yMax + 1f, tileSize, 4f);
+                var barRect = new Rect(tileRect.x, labelRect.yMax + 1f, tileSize, ProgressBarHeight);
                 GUI.color = new Color(0f, 0f, 0f, 0.7f);
                 GUI.DrawTexture(barRect, _tex);
                 GUI.color = new Color(0.75f, 0.35f, 0.35f, 1f);
@@ -113,7 +208,7 @@ public class ProductionQueueHud : MonoBehaviour
         if (items.Count > shown)
             GUI.Label(new Rect(panelX, panelY - 16f, panelWidth, 14f), "+" + (items.Count - shown) + " more");
 
-        var cancelRect = new Rect(panelX, panelY + tileSize + tileGap, panelWidth, cancelButtonHeight);
+        var cancelRect = new Rect(panelX, panelY + tileSize + tileGap + labelStripHeight + ProgressBarHeight + tileGap, panelWidth, cancelButtonHeight);
         if (GUI.Button(cancelRect, "Cancel All")) grabCursor.CancelAllProduction();
 
         // 2026-08 (creator direction: "the ui is not scaling properly to
@@ -164,5 +259,28 @@ public class ProductionQueueHud : MonoBehaviour
     {
         if (string.IsNullOrEmpty(label)) return "?";
         return label.Length <= 3 ? label : label.Substring(0, 3);
+    }
+
+    /// <summary>"The battalion name underneath" -- the FULL label (a
+    /// genome id or a real saved battalion name), not the 3-letter
+    /// `Abbrev` the fallback-tile text used, since this strip has real
+    /// horizontal room a cramped 44px tile never did. IMGUI wraps/clips
+    /// to the Rect automatically at small sizes, so an unusually long
+    /// name degrades to a clipped tail rather than overflowing into a
+    /// neighboring tile.</summary>
+    private static void DrawShadowedNameLabel(Rect rect, string label)
+    {
+        var text = string.IsNullOrEmpty(label) ? "?" : label;
+        var prevAlignment = GUI.skin.label.alignment;
+        var prevFontSize = GUI.skin.label.fontSize;
+        GUI.skin.label.alignment = TextAnchor.UpperCenter;
+        GUI.skin.label.fontSize = 10;
+        GUI.color = new Color(0f, 0f, 0f, 0.85f);
+        GUI.Label(new Rect(rect.x + 1f, rect.y + 1f, rect.width, rect.height), text);
+        GUI.color = new Color(0.92f, 0.9f, 0.85f, 1f);
+        GUI.Label(rect, text);
+        GUI.color = Color.white;
+        GUI.skin.label.alignment = prevAlignment;
+        GUI.skin.label.fontSize = prevFontSize;
     }
 }
