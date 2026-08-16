@@ -19069,3 +19069,55 @@ Checked by hand, no Unity Editor in this environment: confirmed
 issuing path) so leaving it unfiltered is correct, not an oversight;
 brace/paren balance on both touched files (`MonsterAgent.cs`,
 `WaypointCommander.cs`).
+
+## 2026-08 follow-up: the clipboard was effectively unreachable at normal camera zoom
+
+Creator report: "the snap takes effect before I can reach the pink
+clipboard, verify the clipboard is showing and active."
+
+**Verified the wiring first, not assumed**: `SpawnFactoryClipboard` is
+called from all four faction `BuildXFactory` methods (grepped for the
+call site directly, all four present), so the prop genuinely spawns on
+every completed Factory.
+
+**Root cause of "can't reach it"**: `GrabCursor.ResolveDropTarget`
+checks a precise raycast against the clipboard FIRST, falling back to
+the Factory body's own much more forgiving hex-proximity check only if
+that raycast misses. The clipboard's own collider used to be Unity's
+default auto-sized one, matching its small VISIBLE mesh exactly (a
+board roughly half a meter across) -- at a normal RTS camera distance,
+landing a precise raycast on a target that size is genuinely difficult,
+so almost every attempt missed and fell straight through to the
+Factory-body fallback, which reads as "it snaps to build-now before I
+can even reach the clipboard."
+
+**Fix**: the board's and post's own default colliders are now destroyed
+outright; a THIRD, separate, invisible object (`FactoryClipboardHitZone`
+-- a Cube collider with its own Renderer destroyed right after spawning,
+so nothing new is drawn) generously covers both, several times wider
+than what's actually rendered. This is the standard "clickable area
+bigger than the visible art" trick for small world-space UI targets --
+the clipboard still LOOKS the same small, medium-sized prop, it's just
+far more forgiving to actually land a raycast on. Carries the one
+`FactoryClipboard` identity for the whole prop now, so a hit anywhere
+in the padded zone around post OR board resolves correctly (previously
+only the board itself carried the identity -- clicking the post did
+nothing at all).
+
+**On "pink"**: the board's material is intentionally a pale parchment/
+cream (`Color(0.86, 0.82, 0.68)`), built the exact same way (`new
+Material(ShaderUtil.FindRenderableShader())` + a flat `.color`) as
+several other flat-colored materials already working in this file
+(`ScaffoldMat`, etc.) -- structurally there's no reason to expect a
+shader-fallback magenta here specifically. Left the color unchanged for
+now rather than guessing at a fix with no visual confirmation available
+in this environment; flagging it explicitly in case it's a real
+rendering issue distinct from the targeting one, worth a second look
+once this can actually be seen in-Editor.
+
+Checked by hand, no Unity Editor in this environment: re-confirmed all
+four `SpawnFactoryClipboard` call sites are present; confirmed
+`GetComponentInParent<FactoryClipboard>` correctly finds a component
+attached directly to the hit collider's own GameObject (not just an
+ancestor), so the new hit-zone object resolves the same way the old
+board-only identity did; brace/paren balance on `BaseDresser.cs`.

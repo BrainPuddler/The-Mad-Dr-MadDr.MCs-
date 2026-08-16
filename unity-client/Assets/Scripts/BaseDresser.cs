@@ -2298,13 +2298,48 @@ public class BaseDresser : MonoBehaviour
         var post = builder.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (postHeight * 0.5f),
             new Vector3(postRadius * 2f, postHeight * 0.5f, postRadius * 2f), ClipboardPostMat(), trim);
         post.name = "FactoryClipboardPost";
+        DestroyColliderIfPresent(post);   // hit-testing goes through the dedicated zone below, not this thin post's own capsule
 
         var boardCenter = basePos + Vector3.up * (postHeight - boardHeight * 0.35f);
         var board = builder.SpawnPrim(PrimitiveType.Cube, boardCenter,
             new Vector3(boardWidth, boardHeight, boardThickness), ClipboardBoardMat(), trim);
         board.name = "FactoryClipboardBoard";
-        var clip = board.AddComponent<FactoryClipboard>();
+        DestroyColliderIfPresent(board);
+
+        // 2026-08 bugfix (creator report: "the snap takes effect before
+        // I can reach the pink clipboard" -- traced to the board's own
+        // default collider exactly matching its small VISIBLE mesh, so
+        // from a typical RTS camera distance a raycast almost never
+        // landed precisely on it -- the much larger, always-succeeding
+        // Factory-body hex-proximity fallback (GrabCursor.
+        // ResolveDropTarget's own second check) won by default nearly
+        // every time, reading as "it snaps to build-now before I can
+        // even reach the clipboard"). A dedicated, INVISIBLE hit zone
+        // (collider only -- its own Renderer is destroyed right after
+        // spawning) generously covers post+board together, several
+        // times wider than what's actually drawn -- the same "the
+        // clickable area is bigger than the visible art" trick most
+        // real games use for small UI-adjacent world props, needed here
+        // because neither primitive's own auto-sized collider was ever
+        // going to be reliably hittable at normal zoom. Carries the ONE
+        // FactoryClipboard identity for the whole prop, so a hit
+        // anywhere in the padded zone around post OR board resolves the
+        // same way.
+        var hitZoneSize = Mathf.Max(boardWidth, boardHeight, postRadius * 2f) + 1.6f;
+        var hitZoneCenter = basePos + Vector3.up * (postHeight * 0.5f);
+        var hitZone = builder.SpawnPrim(PrimitiveType.Cube, hitZoneCenter,
+            new Vector3(hitZoneSize, postHeight + 1f, hitZoneSize), Placeholder(), trim);
+        hitZone.name = "FactoryClipboardHitZone";
+        var hitZoneRenderer = hitZone.GetComponent<Renderer>();
+        if (hitZoneRenderer != null) Destroy(hitZoneRenderer);
+        var clip = hitZone.AddComponent<FactoryClipboard>();
         clip.FactoryEntityId = entityId;
+    }
+
+    private static void DestroyColliderIfPresent(GameObject go)
+    {
+        var collider = go.GetComponent<Collider>();
+        if (collider != null) Destroy(collider);
     }
 
     private static Material _clipboardBoardMat;
