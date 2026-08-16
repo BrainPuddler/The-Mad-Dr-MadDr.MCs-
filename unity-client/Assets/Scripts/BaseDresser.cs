@@ -2303,13 +2303,28 @@ public class BaseDresser : MonoBehaviour
     /// spans the pole's FULL height (not just the board near the top),
     /// so the tall, hard-to-miss silhouette this pass adds is also a
     /// forgiving click target top to bottom, not only right at the
-    /// board.</summary>
+    /// board.
+    ///
+    /// 2026-08 follow-up (creator report, verbatim: "it was inside a
+    /// building behind the factory before make it even taller"): the
+    /// actual root cause of "can not see it on any race" -- this prop's
+    /// `basePos` offset (outside the FACTORY's own footprint) has no
+    /// idea what else the surrounding procedural city placed nearby, and
+    /// a Factory can be built anywhere in a dense city; the pole's own
+    /// base was landing physically inside an unrelated neighboring
+    /// building's own footprint, fully occluded by its walls. A real
+    /// fix would query the city layout for a genuinely clear spot --
+    /// real, separate, not-yet-attempted scope -- so this pass takes the
+    /// creator's own pragmatic route instead: tall enough that the
+    /// glowing board near the top clears a typical neighbor's roofline
+    /// even with the base still buried, height clamp raised again
+    /// (9-18 -> 16-30).</summary>
     private void SpawnFactoryClipboard(Transform trim, Vector3 origin, Vector3 fullScale, GameObject root)
     {
         var identity = root.GetComponent<BuildingIdentity>();
         var entityId = identity != null ? identity.EntityId : 0u;
 
-        var postHeight = Mathf.Clamp(fullScale.y * 0.9f, 9f, 18f);
+        var postHeight = Mathf.Clamp(fullScale.y * 1.4f, 16f, 30f);
         var postRadius = fullScale.x * 0.018f;
         var boardWidth = Mathf.Clamp(fullScale.x * 0.12f, 2.6f, 4.6f);
         var boardHeight = boardWidth * 1.25f;

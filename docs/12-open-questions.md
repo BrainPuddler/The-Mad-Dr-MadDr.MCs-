@@ -19212,3 +19212,36 @@ issue (spawn order, a layer/culling setting, or something else this
 session's static review genuinely cannot diagnose without a live
 render) worth flagging explicitly rather than iterating on size/glow
 again.
+
+## 2026-08 follow-up: found it -- the pole was buried inside a neighboring building
+
+Creator report, verbatim: "it was inside a building behind the factory
+before make it even taller."
+
+This is the actual root cause of "can not see the clipboard on any
+race," finally identified: `SpawnFactoryClipboard`'s own `basePos`
+offset only ever accounted for clearing the FACTORY's own footprint --
+it has no awareness of the surrounding procedural city at all, and a
+Factory can be built anywhere in a dense city block. The pole's base
+was landing physically inside an unrelated neighboring building's own
+walls, fully occluded -- not a shader/material bug, not a size problem,
+genuinely hidden behind solid geometry.
+
+A real fix would query the city layout for an actually-clear spot near
+the Factory (real, separate, not-yet-scoped work -- this file has no
+existing "is this world point inside ANY building, mine or not"
+per-corner search to reuse for it, only the Factory's own footprint
+math). Per the creator's own direction, this pass takes the pragmatic
+route instead: raise the pole height clamp again (9-18 -> 16-30 units,
+multiplier 0.9x -> 1.4x of the Factory's own height) so the glowing
+board near the top clears a typical neighbor's roofline even with the
+base still buried inside it. The board itself stays the same size
+(tied to the Factory's own width, not the pole's height) -- only the
+pole grows, so this doesn't balloon the actual clickable sign into
+something disproportionate, just lets it clear obstructions.
+
+Checked by hand: brace/paren balance on `BaseDresser.cs`. No Unity
+Editor in this environment to confirm the board now actually clears
+whatever building was occluding it in the reported case -- if it's
+still buried after this, the real fix is the city-aware placement
+query described above, not a fourth height increase.
