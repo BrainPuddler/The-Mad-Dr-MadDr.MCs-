@@ -19245,3 +19245,84 @@ Editor in this environment to confirm the board now actually clears
 whatever building was occluding it in the reported case -- if it's
 still buried after this, the real fix is the city-aware placement
 query described above, not a fourth height increase.
+
+## 2026-08 follow-up: clipboard prop replaced entirely -- C-key Order Sheet, StarCraft-2-style slots
+
+Creator report, verbatim: "the clipboard interface isn't working
+disable it. Replace it with If the user press the C key near the
+factory a order sheet will open with slots for build orders, the
+current monster being built is in the current slot and new monster or
+battalion can be dropped in a slot. the user can increase or decrease
+or delete the order or the quantity." Follow-up, verbatim: "very much
+like starcraft 2."
+
+Four prior passes (hit-zone size, board size/shape, height+glow,
+height again for the buried-pole fix above) each fixed a different
+physical/spatial failure mode of the clipboard prop, and it still
+wasn't working reliably. Rather than a fifth patch, this pass removes
+the prop and its whole raycast-hit-testing path entirely and replaces
+it with a keyboard-triggered, proximity-gated UI panel -- which by
+construction can never be "buried inside another building" or "too
+small to precisely raycast" the way a 3D world object can, since it
+has no physical presence in the scene at all.
+
+**Removed:** `FactoryClipboard.cs` (identity component) and
+`BaseDresser.SpawnFactoryClipboard` (prop geometry + materials + call
+sites in all four faction `BuildXFactory` methods) -- roughly 190
+lines. `GrabCursor`'s `DropTarget.Clipboard` enum value, its raycast
+branch in drop-target resolution, the `OpenOrdersPopup` event, and the
+old `OrdersFor` (Label/Remaining/IsSingleUnit) tuple method are all
+gone.
+
+**New:** pressing **C** while the cursor is near one of the player's
+own Factories (the same hex-proximity "near" check `FindOwnFactoryNear`
+already used for the "drop to build now" target) toggles
+`FactoryOrdersHud` open for that Factory -- works in any Grab Mode
+state, including mid-carry, since the point is being able to open the
+sheet and drop straight onto one of its own slots. `GrabCursor` now
+holds a direct `public FactoryOrdersHud orderSheetHud` reference
+(replacing the one-way event) because the relationship is genuinely
+bidirectional: GrabCursor calls into the HUD to open/toggle it, and
+reads back `OpenFactory`/`HoveredSlotIndex` every frame while Carrying
+to resolve a slot-drop.
+
+**Slot semantics:** slot 0 ("the current slot") is the active build --
+dropping there calls the same `PromoteToFront` reorder the old direct
+Factory-body drop already used (interrupt, never destroy). Any other
+visible slot, including a trailing always-present empty "+" slot,
+appends to the queue -- deliberately not true positional insertion;
+the sheet's own up/down buttons already cover "put it exactly here"
+after the fact. `DropMonsterAt`/`DropOrderAt` were factored out of the
+old inline `Drop`/`DropCarriedOrder` bodies so the normal 3D-world
+drop and the new slot-drop share exactly one queueing implementation
+each.
+
+**Visual redesign (the "like StarCraft 2" note):** `FactoryOrdersHud`
+no longer draws numbered text rows. It's a horizontal row of portrait
+tiles, reusing `GrabCursor.ProductionQueueFor(factory)` directly (the
+same Label/Remaining/Progress/PortraitPng data `ProductionQueueHud`'s
+own tile row already shows, instead of a separate poorer-shaped
+tuple) -- each tile shows the item's real Lab-rendered portrait (or a
+flat-tile text-abbreviation fallback), a corner quantity badge, a name
+strip underneath, and (slot 0 only) a live progress bar. A compact
+per-slot button strip (^/v reorder, -/+ quantity, X cancel) still
+calls straight into `GrabCursor`'s existing queue mutators -- no
+duplicated queue logic. Hover detection for the slot-drop happens
+during `OnGUI` via `Event.current.mousePosition` against each slot's
+own `Rect`, exposed as `HoveredSlotIndex`.
+
+`RuntimeCityBuilder`'s HUD-setup block gained one new line wiring the
+reverse reference (`grabCursor.orderSheetHud = factoryOrdersHud`) right
+after both objects exist.
+
+Checked by hand: brace/paren balance on every touched file
+(`GrabCursor.cs`, `BaseDresser.cs`, `FactoryOrdersHud.cs`,
+`RuntimeCityBuilder.cs`); grep sweep confirmed no remaining code
+references to `FactoryClipboard`/`OpenOrdersPopup`/the old `OrdersFor`
+signature anywhere in `unity-client/`, only historical doc-comment
+mentions. Also fixed an unrelated pre-existing unclosed `(` found by
+the balance check, in a comment in `RuntimeCityBuilder.cs` (harmless
+for compilation, just cosmetic). No Unity Editor in this environment --
+same standing limitation as every other Unity change this session; the
+actual on-screen slot layout, portrait scaling, and click-through
+behavior can't be confirmed without a live Editor/Player render.

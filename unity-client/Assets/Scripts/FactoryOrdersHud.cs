@@ -1,82 +1,100 @@
+using System.Collections.Generic;
 using MadDr.MatchCore;
 using UnityEngine;
 
-/// <summary>2026-08 (creator direction: "Implement and integrate a
-/// Factory Build Queue / Order Clipboard system... When the player
-/// clicks/taps the Factory clipboard, open an Order Queue popup anchored
-/// toward the bottom-right of the screen... Follow the game's existing
-/// UI conventions rather than introducing a completely different UI
-/// style"): the SAME IMGUI dark-panel-plus-buttons idiom every other
-/// HUD in this project already uses (`GUI.color = new Color(0.02f,
-/// 0.02f, 0.02f, 0.65f)` panel backing, plain `GUI.Button`/`GUI.Label`
-/// rows, <see cref="UiScale.Begin"/>/`End`), docked directly ABOVE <see
-/// cref="ProductionQueueHud"/>'s own always-visible tile row (reading
-/// its live <see cref="ProductionQueueHud.TileRowTop"/> rather than
-/// hardcoding a height, same "read a neighbour's own dynamic anchor"
-/// contract <see cref="LabBattalionHud"/> already uses for the opposite
-/// corner's stack) -- the one remaining unclaimed edge of that same
-/// corner.
+/// <summary>2026-08 follow-up (creator report, verbatim: "the clipboard
+/// interface isn't working disable it. Replace it with If the user press
+/// the C key near the factory a order sheet will open with slots for
+/// build orders, the current monster being built is in the current slot
+/// and new monster or battalion can be dropped in a slot. the user can
+/// increase or decrease or delete the order or the quantity"; follow-up:
+/// "very much like starcraft 2"):
 ///
-/// Opened by <see cref="GrabCursor.OpenOrdersPopup"/>, fired when a
-/// raycast hits a Factory's own <see cref="FactoryClipboard"/> prop
-/// (<see cref="GrabCursor.TryPickUp"/>) -- clicking the SAME Factory's
-/// clipboard again closes it (a plain toggle); clicking a DIFFERENT
-/// Factory's clipboard switches straight to that one. All of this
-/// panel's own queue-mutating buttons (<see
-/// cref="GrabCursor.MoveOrderUp"/>/`MoveOrderDown`/
-/// `AdjustOrderQuantity`/`CancelQueueItem`) read/write the SAME
-/// per-Factory queue data <see cref="GrabCursor.TickProduction"/>
-/// actually drains -- this class owns no queue state of its own, only
-/// which Factory is currently open, so closing and reopening the popup
-/// can never lose anything.</summary>
+/// Opened/closed/switched by <see cref="Toggle"/>, called directly from
+/// <see cref="GrabCursor"/>'s own C-key handler (no more event
+/// subscription -- see <see cref="GrabCursor.orderSheetHud"/>'s own doc
+/// comment for why the relationship is now a direct, bidirectional
+/// reference instead). A horizontal row of StarCraft-2-style portrait
+/// slots -- reusing <see cref="GrabCursor.ProductionQueueFor"/> directly
+/// (the SAME Label/Remaining/Progress/PortraitPng data <see
+/// cref="ProductionQueueHud"/>'s own always-visible tile row already
+/// shows) rather than a separate, poorer text-row shape. Slot 0 is "the
+/// current slot" (the active build, with its own live progress bar);
+/// every other filled slot is the queue, in build order; one extra empty
+/// "+" slot past the last filled one is always drawn as a direct drop
+/// target for a brand-new order (<see cref="GrabCursor.DropIntoSlot"/>
+/// treats it exactly like any other non-zero slot -- append, don't
+/// interrupt).
+///
+/// Docked directly ABOVE <see cref="ProductionQueueHud"/>'s own tile row
+/// (reading its live <see cref="ProductionQueueHud.TileRowTop"/>, same
+/// "read a neighbour's own dynamic anchor" contract this panel already
+/// used before this pivot). Per-slot controls (^/v reorder, -/+ quantity,
+/// X cancel) still call straight into <see cref="GrabCursor"/>'s own
+/// queue mutators -- this class owns no queue state of its own, only
+/// which Factory is currently open and which slot the cursor is
+/// currently over.</summary>
 public class FactoryOrdersHud : MonoBehaviour
 {
     public GrabCursor grabCursor;
     public ProductionQueueHud productionQueueHud;
 
     [Header("Placement (docks above ProductionQueueHud's own tile row)")]
-    public float panelWidth = 240f;
-    public float rowHeight = 22f;
+    public float tileSize = 52f;
+    public float tileGap = 6f;
+    public float labelStripHeight = 13f;
+    public float progressBarHeight = 4f;
+    public float buttonRowHeight = 16f;
     public float headerHeight = 20f;
-    public float sectionLabelHeight = 16f;
     public float marginPixels = 12f;
     public float closeButtonSize = 18f;
-    public float smallButtonWidth = 20f;
+    public int maxVisibleSlots = 8;
 
     private SimBuilding _openFactory;
 
     public static bool PointerOver { get; private set; }
 
+    /// <summary>Which slot column (0 = current build, higher = queue, one
+    /// past the last filled slot = the empty "add new order" slot) the
+    /// cursor is currently over -- -1 if the sheet is closed or the
+    /// cursor isn't over any slot. Recomputed every OnGUI frame; <see
+    /// cref="GrabCursor"/> reads it every Update() while Carrying to
+    /// decide whether a click drops directly into a slot instead of the
+    /// normal 3D world.</summary>
+    public int HoveredSlotIndex { get; private set; } = -1;
+
+    /// <summary>The Factory this sheet is currently open for, or null if
+    /// closed -- <see cref="GrabCursor"/> reads this every frame to know
+    /// whether a slot-drop is even possible right now.</summary>
+    public SimBuilding OpenFactory { get { return _openFactory; } }
+
     public void Init(GrabCursor grabCursorRef, ProductionQueueHud productionQueueHudRef)
     {
         grabCursor = grabCursorRef;
         productionQueueHud = productionQueueHudRef;
-        if (grabCursor != null) grabCursor.OpenOrdersPopup += HandleOpenOrdersPopup;
     }
 
-    /// <summary>2026-08 ("click on the Factory clipboard... open an
-    /// Order Queue popup"): a plain toggle -- the SAME clipboard clicked
-    /// again closes its own popup (no separate close gesture needed for
-    /// the common case), a DIFFERENT Factory's clipboard switches
-    /// straight to it without requiring an explicit close first.</summary>
-    private void HandleOpenOrdersPopup(SimBuilding factory)
+    /// <summary>2026-08 ("press the C key near the factory... will
+    /// open"): a plain toggle -- C pressed again near the SAME open
+    /// Factory closes it, C pressed near a DIFFERENT Factory switches
+    /// straight to that one. Called directly by <see
+    /// cref="GrabCursor.ToggleOrderSheetNearCursor"/>.</summary>
+    public void Toggle(SimBuilding factory)
     {
         _openFactory = _openFactory == factory ? null : factory;
     }
 
     private void OnGUI()
     {
-        if (grabCursor == null || _openFactory == null) { PointerOver = false; return; }
+        if (grabCursor == null || _openFactory == null) { PointerOver = false; HoveredSlotIndex = -1; return; }
 
         var prevMatrix = UiScale.Begin();
 
-        var orders = grabCursor.OrdersFor(_openFactory);
-        var queueRows = Mathf.Max(0, orders.Count - 1);
-        // header + "NOW BUILDING" label + its own row (or an "idle" row
-        // if nothing's building) + "QUEUE" label + one row per queued
-        // item (or an "empty" row if the queue itself is empty).
-        var rows = 1 /* now-building row or idle row */ + Mathf.Max(1, queueRows);
-        var panelHeight = headerHeight + sectionLabelHeight + sectionLabelHeight + rows * rowHeight + marginPixels;
+        var items = new List<(string Label, int Remaining, float Progress, string PortraitPng)>(grabCursor.ProductionQueueFor(_openFactory));
+        var shown = Mathf.Min(items.Count + 1, maxVisibleSlots);   // +1 = the trailing empty "add new order" slot
+
+        var panelWidth = shown * tileSize + Mathf.Max(0, shown - 1) * tileGap;
+        var panelHeight = headerHeight + tileSize + labelStripHeight + progressBarHeight + buttonRowHeight + marginPixels;
 
         var screenW = UiScale.Width;
         var defaultBottom = UiScale.Height - marginPixels;
@@ -86,7 +104,8 @@ public class FactoryOrdersHud : MonoBehaviour
         var panelRect = new Rect(panelX, panelY, panelWidth, panelHeight);
 
         var e = Event.current;
-        PointerOver = e != null && panelRect.Contains(e.mousePosition);
+        var mouse = e != null ? e.mousePosition : new Vector2(-1f, -1f);
+        PointerOver = e != null && panelRect.Contains(mouse);
 
         GUI.color = new Color(0.02f, 0.02f, 0.02f, 0.72f);
         GUI.DrawTexture(panelRect, Texture2D.whiteTexture);
@@ -94,79 +113,135 @@ public class FactoryOrdersHud : MonoBehaviour
 
         var y = panelRect.y;
 
-        // "Factory identity/name if the existing UI supports this" --
-        // GrabCursor.FactoryDisplayName reads the same faction lookup
-        // Drop/HoverTargetFor already do. A close ("X") button sits at
-        // the header's own right edge -- explicit close, in addition to
-        // the clipboard-toggle above.
         GUI.Label(new Rect(panelRect.x + 4f, y, panelWidth - closeButtonSize - 8f, headerHeight),
             grabCursor.FactoryDisplayName(_openFactory) + " ORDERS");
         var closeRect = new Rect(panelRect.xMax - closeButtonSize - 4f, y + 1f, closeButtonSize, closeButtonSize);
         if (GUI.Button(closeRect, "X")) _openFactory = null;
         y += headerHeight;
 
-        GUI.Label(new Rect(panelRect.x + 4f, y, panelWidth, sectionLabelHeight), "NOW BUILDING");
-        y += sectionLabelHeight;
+        var hovered = -1;
+        for (var i = 0; i < shown; i++)
+        {
+            var colX = panelRect.x + i * (tileSize + tileGap);
+            var isEmptySlot = i >= items.Count;
 
-        if (orders.Count > 0)
-        {
-            DrawOrderRow(panelRect, y, "", orders[0].Label, orders[0].Remaining, 0);
-        }
-        else
-        {
-            GUI.Label(new Rect(panelRect.x + 4f, y, panelWidth, rowHeight), "(idle)");
-        }
-        y += rowHeight;
+            // hit-test the icon+label+progress area (not the button row
+            // below it, which has its own real buttons) -- this IS what
+            // reads as "the slot" to drop something onto.
+            var hitRect = new Rect(colX, y, tileSize, tileSize + labelStripHeight + progressBarHeight);
+            if (e != null && hitRect.Contains(mouse)) hovered = i;
 
-        GUI.Label(new Rect(panelRect.x + 4f, y, panelWidth, sectionLabelHeight), "QUEUE");
-        y += sectionLabelHeight;
-
-        if (queueRows == 0)
-        {
-            GUI.Label(new Rect(panelRect.x + 4f, y, panelWidth, rowHeight), "(empty)");
-            y += rowHeight;
+            if (isEmptySlot) DrawEmptySlot(colX, y);
+            else DrawSlot(colX, y, i, items[i]);
         }
-        else
-        {
-            for (var i = 1; i < orders.Count; i++)
-            {
-                DrawOrderRow(panelRect, y, i + ".", orders[i].Label, orders[i].Remaining, i);
-                y += rowHeight;
-            }
-        }
+        HoveredSlotIndex = hovered;
 
         UiScale.End(prevMatrix);
     }
 
-    /// <summary>2026-08 ("Allow queued orders to be moved up/down... Each
-    /// queued order should support increasing or decreasing its
-    /// quantity... Allow the player to cancel an order"): one row --
-    /// index/label/remaining-count text plus four buttons, all of them
-    /// calling straight into `GrabCursor`'s own queue mutators (no
-    /// duplicated queue logic here). Index 0 (the active build) still
-    /// gets the SAME row shape -- `MoveOrderUp`/`MoveOrderDown` already
-    /// no-op safely at either end of the list, so nothing needs a
-    /// separate "is this the front row" branch here.</summary>
-    private void DrawOrderRow(Rect panelRect, float y, string prefix, string label, int remaining, int index)
+    /// <summary>One filled slot: portrait tile (falling back to a flat
+    /// tinted square + text abbreviation, same as <see
+    /// cref="ProductionQueueHud"/>'s own tile row, for a genome with no
+    /// baked portrait) with a corner quantity badge, the item's full name
+    /// underneath, a progress bar (index 0 only -- the active build is
+    /// the only one actually being timed), and a StarCraft-2-style button
+    /// strip (^/v reorder, -/+ quantity, X cancel) -- all four calling
+    /// straight into <see cref="GrabCursor"/>'s own queue mutators, no
+    /// duplicated queue logic here.</summary>
+    private void DrawSlot(float x, float y, int index, (string Label, int Remaining, float Progress, string PortraitPng) item)
     {
-        var textWidth = panelWidth - closeButtonSize - smallButtonWidth * 4f - 12f;
-        var textRect = new Rect(panelRect.x + 4f, y, textWidth, rowHeight);
-        GUI.Label(textRect, prefix + " " + (string.IsNullOrEmpty(label) ? "?" : label) + "  x" + remaining);
+        var tileRect = new Rect(x, y, tileSize, tileSize);
+        var portrait = PortraitTexture.For(item.PortraitPng);
+        if (portrait != null)
+        {
+            GUI.DrawTexture(tileRect, portrait, ScaleMode.ScaleToFit);
+        }
+        else
+        {
+            GUI.color = new Color(0.32f, 0.28f, 0.38f, 1f);
+            GUI.DrawTexture(tileRect, Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            GUI.Label(tileRect, Abbrev(item.Label));
+        }
 
-        // plain ASCII glyphs throughout (same as the header's own "X"
-        // close button) -- Unity's default IMGUI font's coverage of
-        // arrow/cross unicode glyphs can't be confirmed without a real
-        // Editor/Player render in this environment, so this avoids the
-        // risk of a blank/tofu button label entirely.
-        var bx = panelRect.x + 4f + textWidth;
-        if (GUI.Button(new Rect(bx, y, smallButtonWidth, rowHeight), "^")) grabCursor.MoveOrderUp(_openFactory, index);
-        bx += smallButtonWidth;
-        if (GUI.Button(new Rect(bx, y, smallButtonWidth, rowHeight), "v")) grabCursor.MoveOrderDown(_openFactory, index);
-        bx += smallButtonWidth;
-        if (GUI.Button(new Rect(bx, y, smallButtonWidth, rowHeight), "-")) grabCursor.AdjustOrderQuantity(_openFactory, index, false);
-        bx += smallButtonWidth;
-        if (GUI.Button(new Rect(bx, y, smallButtonWidth, rowHeight), "+")) grabCursor.AdjustOrderQuantity(_openFactory, index, true);
-        bx += smallButtonWidth;
-        if (GUI.Button(new Rect(bx, y, closeButtonSize, rowHeight), "X")) grabCursor.CancelQueueItem(_openFactory, index);
+        var badgeRect = new Rect(tileRect.xMax - 18f, tileRect.yMax - 16f, 18f, 16f);
+        GUI.color = new Color(0f, 0f, 0f, 0.8f);
+        GUI.DrawTexture(badgeRect, Texture2D.whiteTexture);
+        GUI.color = Color.white;
+        GUI.Label(badgeRect, item.Remaining.ToString());
+
+        var labelRect = new Rect(x, tileRect.yMax + 1f, tileSize, labelStripHeight);
+        DrawShadowedNameLabel(labelRect, item.Label);
+
+        var barRect = new Rect(x, labelRect.yMax + 1f, tileSize, progressBarHeight);
+        if (index == 0)
+        {
+            GUI.color = new Color(0f, 0f, 0f, 0.7f);
+            GUI.DrawTexture(barRect, Texture2D.whiteTexture);
+            GUI.color = new Color(0.75f, 0.35f, 0.35f, 1f);
+            GUI.DrawTexture(new Rect(barRect.x, barRect.y, barRect.width * Mathf.Clamp01(item.Progress), barRect.height), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+        }
+
+        // plain ASCII glyphs (same reasoning the header's own "X" close
+        // button and the claw cursor's design note both give -- unicode
+        // arrow/cross glyph coverage in Unity's default IMGUI font can't
+        // be confirmed without a real Editor/Player render here).
+        var buttonWidth = tileSize / 5f;
+        var by = barRect.yMax + 1f;
+        var bx = x;
+        if (GUI.Button(new Rect(bx, by, buttonWidth, buttonRowHeight), "^")) grabCursor.MoveOrderUp(_openFactory, index);
+        bx += buttonWidth;
+        if (GUI.Button(new Rect(bx, by, buttonWidth, buttonRowHeight), "v")) grabCursor.MoveOrderDown(_openFactory, index);
+        bx += buttonWidth;
+        if (GUI.Button(new Rect(bx, by, buttonWidth, buttonRowHeight), "-")) grabCursor.AdjustOrderQuantity(_openFactory, index, false);
+        bx += buttonWidth;
+        if (GUI.Button(new Rect(bx, by, buttonWidth, buttonRowHeight), "+")) grabCursor.AdjustOrderQuantity(_openFactory, index, true);
+        bx += buttonWidth;
+        if (GUI.Button(new Rect(bx, by, tileSize - bx + x, buttonRowHeight), "X")) grabCursor.CancelQueueItem(_openFactory, index);
+    }
+
+    /// <summary>The trailing "add a new order" slot -- always drawn one
+    /// past the last filled slot (creator direction: "new monster or
+    /// battalion can be dropped in a slot"), a plain dashed-look outline
+    /// with a centered "+" so it reads as an empty target rather than a
+    /// broken/missing tile. No buttons -- there's nothing queued here yet
+    /// to reorder/adjust/cancel.</summary>
+    private void DrawEmptySlot(float x, float y)
+    {
+        var tileRect = new Rect(x, y, tileSize, tileSize);
+        GUI.color = new Color(1f, 1f, 1f, 0.06f);
+        GUI.DrawTexture(tileRect, Texture2D.whiteTexture);
+        GUI.color = new Color(1f, 1f, 1f, 0.35f);
+        var prevAlignment = GUI.skin.label.alignment;
+        var prevFontSize = GUI.skin.label.fontSize;
+        GUI.skin.label.alignment = TextAnchor.MiddleCenter;
+        GUI.skin.label.fontSize = 22;
+        GUI.Label(tileRect, "+");
+        GUI.skin.label.alignment = prevAlignment;
+        GUI.skin.label.fontSize = prevFontSize;
+        GUI.color = Color.white;
+    }
+
+    private static string Abbrev(string label)
+    {
+        if (string.IsNullOrEmpty(label)) return "?";
+        return label.Length <= 3 ? label : label.Substring(0, 3);
+    }
+
+    private static void DrawShadowedNameLabel(Rect rect, string label)
+    {
+        var text = string.IsNullOrEmpty(label) ? "?" : label;
+        var prevAlignment = GUI.skin.label.alignment;
+        var prevFontSize = GUI.skin.label.fontSize;
+        GUI.skin.label.alignment = TextAnchor.UpperCenter;
+        GUI.skin.label.fontSize = 10;
+        GUI.color = new Color(0f, 0f, 0f, 0.85f);
+        GUI.Label(new Rect(rect.x + 1f, rect.y + 1f, rect.width, rect.height), text);
+        GUI.color = new Color(0.92f, 0.9f, 0.85f, 1f);
+        GUI.Label(rect, text);
+        GUI.color = Color.white;
+        GUI.skin.label.alignment = prevAlignment;
+        GUI.skin.label.fontSize = prevFontSize;
     }
 }

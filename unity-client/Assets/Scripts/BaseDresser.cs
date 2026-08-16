@@ -608,7 +608,6 @@ public class BaseDresser : MonoBehaviour
         var trim = new GameObject("FactoryTrim").transform;
         trim.SetParent(root.transform, false);
         SpawnRoofDisplayPlatform(trim, origin + Vector3.up * bodyH, Mathf.Min(fullScale.x, fullScale.z) * 0.5f);
-        SpawnFactoryClipboard(trim, origin, fullScale, root);
     }
 
     /// <summary>Defense -- a low wide bunker plus a domed turret centered
@@ -883,7 +882,6 @@ public class BaseDresser : MonoBehaviour
         // towers below all sit at the body's own edges/corners, leaving
         // the roof center clear.
         SpawnRoofDisplayPlatform(trim, origin + Vector3.up * bodyH, Mathf.Min(bodyW, bodyD) * 0.5f);
-        SpawnFactoryClipboard(trim, origin, fullScale, root);
 
         var brassMat = DoctorBrass();
         var brickMat = DoctorDarkBrick();
@@ -1231,7 +1229,6 @@ public class BaseDresser : MonoBehaviour
         // portholes/ribs below all sit on the saucer's own rim or a
         // corner, leaving the dome's own top center clear.
         SpawnRoofDisplayPlatform(trim, origin + Vector3.up * bodyH, Mathf.Min(bodyW, bodyD) * 0.5f);
-        SpawnFactoryClipboard(trim, origin, fullScale, root);
 
         // 2026-08 silver-steel pass: both were AlienCrystalMat()/
         // AlienMembraneMat() (organic purple crystal/membrane, now
@@ -1625,7 +1622,6 @@ public class BaseDresser : MonoBehaviour
         // below is pushed back off center (see its own comment) so the
         // two don't overlap.
         SpawnRoofDisplayPlatform(trim, origin + Vector3.up * bodyH, Mathf.Min(bodyW, bodyD) * 0.5f);
-        SpawnFactoryClipboard(trim, origin, fullScale, root);
 
         var aluminumMat = HumanAluminum();
         var carbonMat = HumanCarbon();
@@ -2244,197 +2240,6 @@ public class BaseDresser : MonoBehaviour
         var rivetRadius = platformDiameter * 0.5f * 0.94f;   // just inside the platform's own edge
         var rivetSize = platformDiameter * 0.024f;
         SpawnRivets(roofCenter + Vector3.up * (platformTopY + 0.02f), rivetRadius, rivetSize, Steel(), trim, 14, 520);
-    }
-
-    /// <summary>2026-08 (creator direction: "Implement and integrate a
-    /// Factory Build Queue / Order Clipboard system... Add a medium-sized
-    /// clipboard/order-form object physically attached to or positioned
-    /// on the Factory"): positioned OUTSIDE the building's own footprint,
-    /// the same "beside the building, not overlapping the body"
-    /// convention the Doctor faction's own tank/pipes/housing/tube
-    /// already use for their own ground-level fixtures. Placed there
-    /// deliberately rather than tucked into a specific corner: every
-    /// faction's own roof/ground dressing already claims different
-    /// corners in different ways (chimney/spire always +0.32/+0.32,
-    /// Doctor's own corner towers near every corner, buttresses flanking
-    /// the front wall) -- a spot fully outside the footprint needs no
-    /// per-faction collision-dodging the way a roof or corner placement
-    /// would.
-    ///
-    /// Parented under the caller's own `trim` holder (identical reasoning
-    /// to <see cref="SpawnRoofDisplayPlatform"/>'s own doc comment --
-    /// `TintShape` only re-tints DIRECT children of `root`, so anything
-    /// under `trim` keeps its own real parchment/post/steel color instead
-    /// of being flattened to the owner's faction tint) and tagged with a
-    /// <see cref="FactoryClipboard"/> identity component so
-    /// `GrabCursor`'s raycast can tell "hit the clipboard" apart from
-    /// "hit the rest of the Factory body" (<see
-    /// cref="GrabCursor.ResolveDropTarget"/>) -- `entityId` is read off
-    /// `root`'s own <see cref="BuildingIdentity"/> (already attached by
-    /// `BuildCompleteShape`'s caller before any `BuildXFactory` method
-    /// runs) rather than threaded through every dispatch signature as a
-    /// new parameter.
-    ///
-    /// 2026-08 follow-up (creator direction, verbatim: "make it much
-    /// bigger and look like a clip board, and big enough so at a
-    /// reasonable RTS distance it is easy to drop onto"): explicitly
-    /// supersedes this method's own original "do not make the clipboard
-    /// unnecessarily large... medium-sized" brief above -- a real
-    /// playtest found medium too small to reliably use at all, so this
-    /// pass prioritizes "easy to drop onto" over "small and out of the
-    /// way." A third primitive -- a `Steel()` clip band across the top,
-    /// the SAME project-wide steel material every other faction's rivets
-    /// already use -- gives it a real clipboard silhouette (board + clip)
-    /// instead of reading as a plain sign board.
-    ///
-    /// 2026-08 follow-up (creator report, verbatim: "I CAN NOT see the
-    /// clipboard on any of the races. Put it on a Tall Pole next to the
-    /// Factory and make it GLOW!"): the post is now a genuine tall pole
-    /// (clamped 9-18 units, at or above the building's own roofline in
-    /// most cases -- was 2.4-4.5, waist-height at best) with the board
-    /// mounted near its TOP rather than partway up, like a sign/beacon
-    /// rather than a notice board. `ClipboardBoardMat` now carries real
-    /// base emission, driven at runtime by <see cref="SpawnPulseLight"/>
-    /// (the SAME real-time Point Light + pulsing-emission pairing every
-    /// other glowing fixture in this file already uses, e.g. the Doctor
-    /// faction's own glass tube) -- a genuine light source, not just a
-    /// bright material, so the whole pole reads as a lit beacon from
-    /// well outside normal click range, day or night. The hit zone now
-    /// spans the pole's FULL height (not just the board near the top),
-    /// so the tall, hard-to-miss silhouette this pass adds is also a
-    /// forgiving click target top to bottom, not only right at the
-    /// board.
-    ///
-    /// 2026-08 follow-up (creator report, verbatim: "it was inside a
-    /// building behind the factory before make it even taller"): the
-    /// actual root cause of "can not see it on any race" -- this prop's
-    /// `basePos` offset (outside the FACTORY's own footprint) has no
-    /// idea what else the surrounding procedural city placed nearby, and
-    /// a Factory can be built anywhere in a dense city; the pole's own
-    /// base was landing physically inside an unrelated neighboring
-    /// building's own footprint, fully occluded by its walls. A real
-    /// fix would query the city layout for a genuinely clear spot --
-    /// real, separate, not-yet-attempted scope -- so this pass takes the
-    /// creator's own pragmatic route instead: tall enough that the
-    /// glowing board near the top clears a typical neighbor's roofline
-    /// even with the base still buried, height clamp raised again
-    /// (9-18 -> 16-30).</summary>
-    private void SpawnFactoryClipboard(Transform trim, Vector3 origin, Vector3 fullScale, GameObject root)
-    {
-        var identity = root.GetComponent<BuildingIdentity>();
-        var entityId = identity != null ? identity.EntityId : 0u;
-
-        var postHeight = Mathf.Clamp(fullScale.y * 1.4f, 16f, 30f);
-        var postRadius = fullScale.x * 0.018f;
-        var boardWidth = Mathf.Clamp(fullScale.x * 0.12f, 2.6f, 4.6f);
-        var boardHeight = boardWidth * 1.25f;
-        var boardThickness = postRadius * 3f;
-        var clipWidth = boardWidth * 0.46f;
-        var clipHeight = boardHeight * 0.16f;
-        var clipThickness = boardThickness * 2.4f;   // protrudes past the board's own face -- the detail that actually reads as "a clip," not just a thicker board
-
-        // outside the footprint, back-left -- clear of every faction's
-        // own roof/corner/front-wall fixtures without needing to know
-        // what any of them are.
-        var basePos = origin + Vector3.back * (fullScale.z * 0.5f + 2.4f) + Vector3.left * (fullScale.x * 0.25f);
-
-        var post = builder.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (postHeight * 0.5f),
-            new Vector3(postRadius * 2f, postHeight * 0.5f, postRadius * 2f), ClipboardPostMat(), trim);
-        post.name = "FactoryClipboardPost";
-        DestroyColliderIfPresent(post);   // hit-testing goes through the dedicated zone below, not this thin post's own capsule
-
-        // mounted near the TOP of the tall pole -- a beacon, not a
-        // waist-height notice board.
-        var boardCenter = basePos + Vector3.up * (postHeight - boardHeight * 0.6f);
-        var board = builder.SpawnPrim(PrimitiveType.Cube, boardCenter,
-            new Vector3(boardWidth, boardHeight, boardThickness), ClipboardBoardMat(), trim);
-        board.name = "FactoryClipboardBoard";
-        DestroyColliderIfPresent(board);
-
-        // real light, not just a bright material -- "make it GLOW,"
-        // read literally. Warm amber-gold, distinct from every faction's
-        // own accent lighting (Doctor green, Alien purple, Human blue),
-        // so a lit clipboard never gets mistaken for faction dressing.
-        SpawnPulseLight(trim, boardCenter, board,
-            new Color(1f, 0.82f, 0.4f), new Color(1f, 0.82f, 0.4f) * 1.6f, fullScale.x * 1.8f, 3.4f);
-
-        // the clip -- a real metal band across the top of the board,
-        // protruding forward past the board's own face, the ONE detail
-        // that actually makes this read as "a clipboard" instead of "a
-        // sign." Reuses Steel() rather than a new one-off metal material.
-        var clipCenter = boardCenter
-            + Vector3.up * (boardHeight * 0.5f - clipHeight * 0.4f)
-            + Vector3.back * (boardThickness * 0.5f + clipThickness * 0.3f);
-        var clip = builder.SpawnPrim(PrimitiveType.Cube, clipCenter,
-            new Vector3(clipWidth, clipHeight, clipThickness), Steel(), trim);
-        clip.name = "FactoryClipboardClip";
-        DestroyColliderIfPresent(clip);
-
-        // 2026-08 bugfix (creator report: "the snap takes effect before
-        // I can reach the pink clipboard" -- traced to the board's own
-        // default collider exactly matching its small VISIBLE mesh, so
-        // from a typical RTS camera distance a raycast almost never
-        // landed precisely on it -- the much larger, always-succeeding
-        // Factory-body hex-proximity fallback (GrabCursor.
-        // ResolveDropTarget's own second check) won by default nearly
-        // every time). A dedicated, INVISIBLE hit zone (collider only --
-        // its own Renderer is destroyed right after spawning) now spans
-        // the WHOLE pole height (ground to top), not just the board near
-        // the top -- the tall pole itself is now a big, hard-to-miss
-        // visual target, so letting the player click anywhere along its
-        // length (not only right at the small board) makes it far more
-        // forgiving. Carries the ONE FactoryClipboard identity for the
-        // whole prop, so a hit anywhere in the padded zone around the
-        // post, board, OR clip resolves the same way.
-        var hitZoneSize = Mathf.Max(boardWidth, boardHeight) + 2.5f;
-        var hitZoneCenter = basePos + Vector3.up * (postHeight * 0.5f);
-        var hitZone = builder.SpawnPrim(PrimitiveType.Cube, hitZoneCenter,
-            new Vector3(hitZoneSize, postHeight + 2f, hitZoneSize), Placeholder(), trim);
-        hitZone.name = "FactoryClipboardHitZone";
-        var hitZoneRenderer = hitZone.GetComponent<Renderer>();
-        if (hitZoneRenderer != null) Destroy(hitZoneRenderer);
-        var identityComponent = hitZone.AddComponent<FactoryClipboard>();
-        identityComponent.FactoryEntityId = entityId;
-    }
-
-    private static void DestroyColliderIfPresent(GameObject go)
-    {
-        var collider = go.GetComponent<Collider>();
-        if (collider != null) Destroy(collider);
-    }
-
-    /// <summary>2026-08 follow-up (creator report: "I CAN NOT see the
-    /// clipboard on any of the races... make it GLOW!"): base emission
-    /// (`_EMISSION` keyword + a base `_EmissionColor`) is set here, same
-    /// as `DoctorGlowMat`'s own pattern -- `SpawnPulseLight`/
-    /// `EerieChamberGlow` then modulate this renderer's emission
-    /// intensity at runtime via a per-instance `MaterialPropertyBlock`
-    /// (never touching the shared `Material` asset itself, so every
-    /// Factory's own clipboard pulses independently despite sharing one
-    /// cached material).</summary>
-    private static Material _clipboardBoardMat;
-    private static Material ClipboardBoardMat()
-    {
-        if (_clipboardBoardMat == null)
-        {
-            _clipboardBoardMat = new Material(ShaderUtil.FindRenderableShader());
-            var glow = new Color(1f, 0.86f, 0.55f);   // warm amber-gold parchment glow -- reads as "an illuminated order form," distinct from every faction's own brass/steel/stone/aluminum palette
-            _clipboardBoardMat.color = glow;
-            _clipboardBoardMat.EnableKeyword("_EMISSION");
-            _clipboardBoardMat.SetColor("_EmissionColor", glow * 1.4f);
-        }
-        return _clipboardBoardMat;
-    }
-
-    private static Material _clipboardPostMat;
-    private static Material ClipboardPostMat()
-    {
-        if (_clipboardPostMat == null)
-        {
-            _clipboardPostMat = new Material(ShaderUtil.FindRenderableShader());
-            _clipboardPostMat.color = new Color(0.25f, 0.22f, 0.18f);   // dark wood/iron post
-        }
-        return _clipboardPostMat;
     }
 
     /// <summary>Evenly spaced around `ringCenter`'s own circumference at

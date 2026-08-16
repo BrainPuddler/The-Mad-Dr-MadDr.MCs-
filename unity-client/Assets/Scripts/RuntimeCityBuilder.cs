@@ -670,14 +670,21 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (productionQueueHud == null) productionQueueHud = gameObject.AddComponent<ProductionQueueHud>();
         productionQueueHud.Init(grabCursor, roofPortraitHologram);
 
-        // 2026-08 (Factory Build Queue / Order Clipboard): opened by
-        // clicking a Factory's own FactoryClipboard prop (GrabCursor's
-        // OpenOrdersPopup event) -- built after ProductionQueueHud so its
-        // reference can be handed in for the "dock right above the tile
-        // row" anchor (ProductionQueueHud.TileRowTop).
+        // 2026-08 follow-up (creator report: "the clipboard interface
+        // isn't working disable it. Replace it with... press the C key
+        // near the factory a order sheet will open"): opened/toggled by
+        // GrabCursor's own C-key handler now, not a clipboard click --
+        // built after ProductionQueueHud so its reference can be handed
+        // in for the "dock right above the tile row" anchor
+        // (ProductionQueueHud.TileRowTop). The reverse reference just
+        // below is new for this pivot: GrabCursor needs to both call INTO
+        // this HUD (open/toggle) and read FROM it (which Factory is open,
+        // which slot is hovered) every frame -- see
+        // GrabCursor.orderSheetHud's own doc comment.
         var factoryOrdersHud = gameObject.GetComponent<FactoryOrdersHud>();
         if (factoryOrdersHud == null) factoryOrdersHud = gameObject.AddComponent<FactoryOrdersHud>();
         factoryOrdersHud.Init(grabCursor, productionQueueHud);
+        grabCursor.orderSheetHud = factoryOrdersHud;
 
         var clock = gameObject.GetComponent<AnalogClockHud>();
         if (clock == null) gameObject.AddComponent<AnalogClockHud>();
@@ -2834,7 +2841,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // actually damage via TickAttack/ApplyBuildingDamage, the vast
         // majority of the map. Same fire-cluster call BaseDresser makes,
         // scaled off this building's own real footprint size (hex count)
-        // instead of the RTS roster's fixed-size silhouette table.
+        // instead of the RTS roster's fixed-size silhouette table).
         var footprintRadius = Mathf.Sqrt(building.Footprint.Count) * (float)HexCoord.HexMeters * 0.4f;
         // 2026-08 follow-up BUGFIX (creator report: "I still do not see
         // the fire"): cube.transform.position.y is NOT ground level --

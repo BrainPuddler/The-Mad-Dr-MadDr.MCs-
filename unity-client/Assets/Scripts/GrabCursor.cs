@@ -62,25 +62,40 @@ using UnityEngine.InputSystem;
 /// and <see cref="FactoryOrdersHud"/> own every OnGUI draw call this
 /// feature needs, including the ones reading this class's own public
 /// state) -- only Cursor.SetCursor, Update() logic, and (2026-08, factory
-/// selection / drag-target highlights) a handful of lazily-built
+/// selection / drag-target highlight) a handful of lazily-built
 /// world-space highlight props, the same kind of procedural GameObject
 /// every other script in this project spawns directly, not an IMGUI draw.
 ///
 /// 2026-08 follow-up (creator direction: "Implement and integrate a
 /// Factory Build Queue / Order Clipboard system into the existing
 /// factory-building functionality"): every Factory now has its OWN
-/// production queue (was one shared queue for "any" own Factory) and a
-/// small physical clipboard prop (<see cref="FactoryClipboard"/>,
-/// spawned by <see cref="BaseDresser"/>) standing in for "add to queue"
-/// as a drop target distinct from the Factory body itself ("build this
-/// now" -- see <see cref="ResolveDropTarget"/>'s own doc comment for the
-/// exact targeting rule). Dragging a Battalion off the existing bottom-
-/// left menu rows (<see cref="BattalionHud"/>/<see
-/// cref="LabBattalionHud"/>) now works the same way dragging a live
-/// monster already did, via a new "carrying an abstract order" variant
-/// of the existing Armed/Carrying state machine (see <see
-/// cref="BeginCarryingOrder"/>) -- no second drag system, no second
-/// Battalion representation.
+/// production queue (was one shared queue for "any" own Factory).
+/// Dragging a Battalion off the existing bottom-left menu rows (<see
+/// cref="BattalionHud"/>/<see cref="LabBattalionHud"/>) now works the
+/// same way dragging a live monster already did, via a new "carrying an
+/// abstract order" variant of the existing Armed/Carrying state machine
+/// (see <see cref="BeginCarryingOrder"/>) -- no second drag system, no
+/// second Battalion representation.
+///
+/// 2026-08 follow-up (creator report, verbatim: "the clipboard interface
+/// isn't working disable it. Replace it with If the user press the C key
+/// near the factory a order sheet will open with slots for build orders,
+/// the current monster being built is in the current slot and new
+/// monster or battalion can be dropped in a slot. the user can increase
+/// or decrease or delete the order or the quantity"): the physical
+/// clipboard prop (<see cref="BaseDresser"/>'s own former
+/// `SpawnFactoryClipboard`) and its whole raycast-hit-testing path are
+/// GONE -- see docs/12 for why static review alone couldn't pin down its
+/// exact failure mode after two prior attempts. Pressing C near an own
+/// Factory (same hex-proximity "near" <see cref="FindOwnFactoryNear"/>
+/// already used for the "build now" drop target) toggles <see
+/// cref="FactoryOrdersHud"/> open for that Factory -- works in ANY mode,
+/// including while actively Carrying something, since the whole point is
+/// being able to open the sheet mid-drag and drop directly onto one of
+/// its own slots (<see cref="DropIntoSlot"/>) instead of only the 3D
+/// world. A keyboard-driven, proximity-gated trigger can never be
+/// "buried inside another building" or "too small to raycast" the way a
+/// world prop could.
 /// </summary>
 public class GrabCursor : MonoBehaviour
 {
@@ -89,6 +104,18 @@ public class GrabCursor : MonoBehaviour
     public RuntimeCityBuilder builder;
     public int localPlayerIndex = 0;
 
+    /// <summary>2026-08 (Order Sheet): the reverse reference
+    /// `TickFactorySelectionKeys`'s own "HUDs only read FROM GrabCursor"
+    /// precedent didn't need before -- opening/toggling the sheet from a
+    /// C-key press, and reading back which slot (if any) is currently
+    /// hovered while Carrying, is genuinely bidirectional, so a direct
+    /// reference replaced the old one-way `OpenOrdersPopup` event this
+    /// feature briefly had when it was still triggered by a clipboard
+    /// click. Wired once by <see cref="RuntimeCityBuilder"/>'s own
+    /// HUD-setup block, same as every other cross-script reference in
+    /// this project.</summary>
+    public FactoryOrdersHud orderSheetHud;
+
     [Header("Cloning (v0.1 placeholder economy)")]
     [Tooltip("Blood spent per clone -- an invented v0.1 placeholder number (CLAUDE.md's standing policy for every unsourced cost in this project), not from any design doc.")]
     public int cloneCostBlood = 60;
@@ -96,7 +123,7 @@ public class GrabCursor : MonoBehaviour
     [Tooltip("2026-08 (creator direction: \"if the user presses the space bar a number on the grab increments, denoting the number of that monster you want to build\"): ceiling on how high the space-bar-dialed build count can go for one carry, AND the hard cap on clones spawned from one drop regardless of how much Blood is banked -- a very full wallet shouldn't be able to flood the field in a single click. Before this feature, every drop queued exactly this many flat; now it's just the upper bound on what the player can dial up to.")]
     public int maxClonesPerDrop = 10;
 
-    [Tooltip("How many hex-rings out from the Factory's own hex a drop still counts as \"on it\" -- some forgiveness, same idea as any real drag-and-drop target having a hit margin bigger than its exact pixel bounds.")]
+    [Tooltip("How many hex-rings out from the Factory's own hex a drop still counts as \"on it\" -- some forgiveness, same idea as any real drag-and-drop target having a hit margin bigger than its exact pixel bounds. Also how \"near the Factory\" is defined for the C-key Order Sheet toggle.")]
     public int dropRangeHexes = 1;
 
     [Tooltip("2026-08 (creator direction: \"increase the building no parking area to take into account the monster size\"): extra clearance, in meters, ADDED on top of a monster's own body radius when FindOpenHexNear checks a candidate parking spot's near edge against the building's real footprint -- the exact-fit geometric check alone leaves zero breathing room (a spot that JUST clears the wall still reads as uncomfortably tight once a body is actually standing there). Widening this widens the effective no-parking zone around every building for every monster size at once, without touching the per-monster radius math itself.")]
@@ -147,11 +174,11 @@ public class GrabCursor : MonoBehaviour
     // 2026-08 ("click on the factory, highlighting it and press space or
     // + or - keys to increase or decrease the number of monsters to
     // build"): which own Factory (if any) is currently selected -- see
-    // SelectFactory/TickFactorySelectionKeys. Distinct from the NEW
-    // FactoryOrdersHud popup (opened by clicking the CLIPBOARD, not the
-    // factory body) -- both can be live at once, on different Factories
-    // even, without conflicting; they read/write the same per-Factory
-    // queue data either way.
+    // SelectFactory/TickFactorySelectionKeys. Distinct from <see
+    // cref="orderSheetHud"/>'s own open Factory (a C-key press, not a
+    // click) -- both can be live at once, on different Factories even,
+    // without conflicting; they read/write the same per-Factory queue
+    // data either way.
     private SimBuilding _selectedFactory;
     private GameObject _selectionHighlight;
 
@@ -194,9 +221,9 @@ public class GrabCursor : MonoBehaviour
     // the factory roof"): one roof slot per Factory, keyed by its own
     // EntityId. Kept in sync at the two (and only two) places a roof
     // occupant's real state can change -- TryPickUp (grabbed back off the
-    // roof) and Drop (bumped by a fresh drop) -- see
-    // RemoveFromRoofOccupancy's own header for why nothing else needs to
-    // touch this dictionary.
+    // roof) and a drop landing on a Factory (bumped by a fresh drop) --
+    // see RemoveFromRoofOccupancy's own header for why nothing else needs
+    // to touch this dictionary.
     private readonly Dictionary<uint, MonsterAgent> _roofOccupant = new Dictionary<uint, MonsterAgent>();
 
     // 2026-08 (creator direction, verbatim: "if a monster is grabbed
@@ -285,8 +312,12 @@ public class GrabCursor : MonoBehaviour
     }
 
     /// <summary>Read-only view for <see cref="ProductionQueueHud"/>'s
-    /// always-visible bottom-right tile row -- one entry per queued item
-    /// on `factory`'s OWN queue, in build order, with a 0..1 progress
+    /// always-visible bottom-right tile row AND <see
+    /// cref="FactoryOrdersHud"/>'s own slot row (2026-08 -- the Order
+    /// Sheet reuses this directly instead of a separate, poorer-shaped
+    /// tuple, so its slots can show the SAME real portrait/progress data
+    /// the tile row already does) -- one entry per queued item on
+    /// `factory`'s OWN queue, in build order, with a 0..1 progress
     /// fraction (only meaningful, and only ever nonzero, for the FRONT
     /// item -- everything behind it hasn't started).
     ///
@@ -298,16 +329,15 @@ public class GrabCursor : MonoBehaviour
     /// from mutator-service (the Lab's own real WebGL-rendered
     /// thumbnail, not a re-derived icon) -- null when the underlying
     /// genome has none (an old genome saved before portraits existed, or
-    /// a failed client-side bake), which <see cref="ProductionQueueHud"/>
-    /// falls back to its old text-abbreviation tile for, same
-    /// "optional field, never a hard error" contract every other layer
-    /// of this pipeline already follows. A Battalion/LabBattalion item
-    /// shows its FIRST still-remaining member's portrait as
-    /// representative of the whole group -- there's no single "the"
-    /// image for a mixed battalion, and the first member is a stable,
-    /// deterministic choice (not e.g. "whichever happens to build
-    /// next," which would flicker the tile's own image as the queue
-    /// drains).</summary>
+    /// a failed client-side bake), which every consumer falls back to a
+    /// text-abbreviation tile for, same "optional field, never a hard
+    /// error" contract every other layer of this pipeline already
+    /// follows. A Battalion/LabBattalion item shows its FIRST still-
+    /// remaining member's portrait as representative of the whole group
+    /// -- there's no single "the" image for a mixed battalion, and the
+    /// first member is a stable, deterministic choice (not e.g.
+    /// "whichever happens to build next," which would flicker the
+    /// tile's own image as the queue drains).</summary>
     public IEnumerable<(string Label, int Remaining, float Progress, string PortraitPng)> ProductionQueueFor(SimBuilding factory)
     {
         var q = FactoryQueueFor(factory, false);
@@ -400,9 +430,8 @@ public class GrabCursor : MonoBehaviour
     /// drops. `radius` is captured NOW (from whichever live agent is
     /// being dropped/queued), not re-derived from the genome later --
     /// see <see cref="QueueItem"/>'s own doc for why. Returns the
-    /// touched/created item so a direct Factory-body drop can promote it
-    /// to the front (see <see cref="PromoteToFront"/>) -- a clipboard
-    /// drop just leaves the return value unused.</summary>
+    /// touched/created item so a direct Factory-body (or slot-0) drop
+    /// can promote it to the front (see <see cref="PromoteToFront"/>).</summary>
     private QueueItem QueueSingleUnit(SimBuilding factory, StoredGenomeDto genome, float radius, int count)
     {
         if (genome == null || count <= 0) return null;
@@ -429,15 +458,17 @@ public class GrabCursor : MonoBehaviour
     /// dropped onto the Factory itself, it is an immediate command...
     /// [it] is interrupted/kicked out according to existing rules... [is]
     /// parked nearby / otherwise preserved... [the new order] becomes
-    /// current build"): moves `item` to index 0 of `factory`'s own queue
-    /// -- whatever WAS at index 0 simply shifts to index 1, its
+    /// current build"; follow-up: "the current monster being built is in
+    /// the current slot"): moves `item` to index 0 of `factory`'s own
+    /// queue -- whatever WAS at index 0 simply shifts to index 1, its
     /// `RemainingCount`/`BattalionRemaining` completely untouched, so
     /// "kick the current build" is a plain reorder, never a deletion.
-    /// This is the ONLY thing that distinguishes a direct Factory-body
-    /// drop from a clipboard drop -- both call the exact same Queue*
-    /// method first; only a Factory-body drop calls this afterward. A
-    /// no-op if `item` is null (nothing was actually queued -- an empty
-    /// battalion, a null genome) or already at the front.</summary>
+    /// Used by both a direct Factory-body drop (<see cref="Drop"/>/<see
+    /// cref="DropCarriedOrder"/>) and a slot-0 drop in the Order Sheet
+    /// (<see cref="DropIntoSlot"/>) -- "the current slot" IS index 0,
+    /// the same concept either way. A no-op if `item` is null (nothing
+    /// was actually queued -- an empty battalion, a null genome) or
+    /// already at the front.</summary>
     private void PromoteToFront(SimBuilding factory, QueueItem item)
     {
         if (item == null) return;
@@ -665,69 +696,51 @@ public class GrabCursor : MonoBehaviour
         _carriedLabBattalionCreatureIds = null;
     }
 
-    // ---- drag-target resolution + visual feedback (2026-08, Factory
-    // Build Queue / Order Clipboard) --------------------------------------
+    // ---- drag-target resolution + visual feedback ------------------------
 
-    public enum DropTarget { None, FactoryBody, Clipboard }
+    public enum DropTarget { None, FactoryBody }
 
-    /// <summary>2026-08 (creator direction: "Factory target highlights as
-    /// an immediate-build target. Clipboard highlights as a queue
-    /// target"): the ONE targeting rule both the physical-monster carry
-    /// and the abstract-order carry share. A precise raycast hit on the
-    /// small <see cref="FactoryClipboard"/> collider wins first --
-    /// "deliberately drops... onto the clipboard" reads as a smaller,
-    /// more precise target than the whole building, so it has to
-    /// actually be hit, not just be in the general vicinity. Otherwise
-    /// falls back to the EXISTING, unchanged, forgiving hex-proximity
-    /// check (<see cref="FindOwnFactoryNear"/>, `dropRangeHexes` rings)
-    /// already used for every monster drop before this feature existed
-    /// -- so a near-miss of the clipboard, or anywhere else on/near the
-    /// Factory, still reads as "build this now," preserving the original
-    /// UX exactly for anyone who never aims for the clipboard at
-    /// all.</summary>
-    private (DropTarget Target, SimBuilding Factory, Vector3 ClipboardWorldPos) ResolveDropTarget(Vector3? groundPoint, Camera cam, Mouse mouse)
+    /// <summary>2026-08 follow-up (creator report: "the clipboard
+    /// interface isn't working disable it"): the ONLY remaining targeting
+    /// rule, now that the clipboard's own precise-raycast check is gone
+    /// -- the EXISTING, unchanged, forgiving hex-proximity check (<see
+    /// cref="FindOwnFactoryNear"/>, `dropRangeHexes` rings) that every
+    /// monster drop already used before the clipboard ever existed.
+    /// Dropping anywhere near an own Factory in the 3D world is "build
+    /// this now"; queueing WITHOUT interrupting now happens exclusively
+    /// through the Order Sheet's own slots (<see cref="DropIntoSlot"/>),
+    /// opened by pressing C near the Factory, not through a second world
+    /// drop target.</summary>
+    private (DropTarget Target, SimBuilding Factory) ResolveDropTarget(Vector3? groundPoint)
     {
-        var hit = RaycastCursor(cam, mouse);
-        if (hit != null)
-        {
-            var clip = hit.Value.collider.GetComponentInParent<FactoryClipboard>();
-            if (clip != null)
-            {
-                var cf = FindOwnFactoryById(clip.FactoryEntityId);
-                if (cf != null) return (DropTarget.Clipboard, cf, hit.Value.collider.transform.position);
-            }
-        }
         if (groundPoint.HasValue)
         {
             var hex = builder.HexAt(groundPoint.Value);
             var bf = FindOwnFactoryNear(hex);
-            if (bf != null) return (DropTarget.FactoryBody, bf, Vector3.zero);
+            if (bf != null) return (DropTarget.FactoryBody, bf);
         }
-        return (DropTarget.None, null, Vector3.zero);
+        return (DropTarget.None, null);
     }
 
     private GameObject _dragFactoryHighlight;
-    private GameObject _dragClipboardHighlight;
 
     /// <summary>2026-08 ("the feedback should be lightweight and
     /// performant... follow the existing game's visual language"):
-    /// toggles/repositions two lazily-built glow props (same
-    /// `SlowSpin` + transparent-emissive-cylinder recipe <see
+    /// toggles/repositions a lazily-built glow prop (same `SlowSpin` +
+    /// transparent-emissive-cylinder recipe <see
     /// cref="EnsureSelectionHighlight"/> already established for the
     /// factory-selection ring) from the ALREADY-computed drag-target
     /// result -- no new geometry created per frame, just SetActive +
-    /// reposition on whichever of the two props is relevant this frame.
-    /// Green under the Factory body ("build this now"), amber on the
-    /// clipboard itself ("add to queue") -- distinct from the existing
-    /// factory-SELECTION ring's own amber (a different, non-drag state
-    /// that can be live on a different Factory at the same time), so the
-    /// two never fight over one shared prop.</summary>
-    private void UpdateDragHighlights(DropTarget target, SimBuilding factory, Vector3 clipboardWorldPos)
+    /// reposition. Green under the Factory body ("build this now") --
+    /// the clipboard's own former amber "add to queue" highlight is
+    /// gone along with the clipboard itself; queueing without
+    /// interrupting is now an Order Sheet slot action, whose own hover
+    /// feedback lives in <see cref="FactoryOrdersHud"/>'s own OnGUI, not
+    /// a 3D-world prop.</summary>
+    private void UpdateDragHighlight(DropTarget target, SimBuilding factory)
     {
         if (_dragFactoryHighlight == null && target == DropTarget.FactoryBody)
             _dragFactoryHighlight = BuildDragHighlight(new Color(0.35f, 1f, 0.4f), 6f);
-        if (_dragClipboardHighlight == null && target == DropTarget.Clipboard)
-            _dragClipboardHighlight = BuildDragHighlight(new Color(1f, 0.7f, 0.15f), 2.2f);
 
         if (_dragFactoryHighlight != null)
         {
@@ -740,18 +753,11 @@ public class GrabCursor : MonoBehaviour
                 _dragFactoryHighlight.transform.position = world;
             }
         }
-        if (_dragClipboardHighlight != null)
-        {
-            var show = target == DropTarget.Clipboard;
-            _dragClipboardHighlight.SetActive(show);
-            if (show) _dragClipboardHighlight.transform.position = clipboardWorldPos;
-        }
     }
 
-    private void HideDragHighlights()
+    private void HideDragHighlight()
     {
         if (_dragFactoryHighlight != null) _dragFactoryHighlight.SetActive(false);
-        if (_dragClipboardHighlight != null) _dragClipboardHighlight.SetActive(false);
     }
 
     private GameObject BuildDragHighlight(Color glowColor, float diameter)
@@ -796,10 +802,26 @@ public class GrabCursor : MonoBehaviour
             return;
         }
 
-        if (_mode == Mode.Off) return;
-
         var cam = Camera.main;
         if (cam == null) return;
+
+        // 2026-08 (creator direction: "If the user press the C key near
+        // the factory a order sheet will open"): works in ANY mode --
+        // including Carrying -- since the whole point is opening the
+        // sheet mid-drag to drop straight into one of its own slots.
+        // Checked BEFORE the Mode.Off early-return below (unlike the
+        // rest of this method, C doesn't need Grab Mode armed at all --
+        // "press C near the factory" is its own independent trigger, not
+        // a Grab Mode sub-feature) and before the OnGUI-claimed guard --
+        // a keypress isn't a click, so it can't double-fire a world
+        // action underneath a UI panel the way a mouse click could.
+        if (keyboard.cKey.wasPressedThisFrame)
+        {
+            ToggleOrderSheetNearCursor(cam, mouse);
+            return;
+        }
+
+        if (_mode == Mode.Off) return;
 
         // same "OnGUI already claimed this click" guard every other
         // click-handling script in this project applies for Minimap/
@@ -817,8 +839,20 @@ public class GrabCursor : MonoBehaviour
         if (_carriedOrderKind != CarriedOrderKind.None)
         {
             var orderGroundPoint = GroundUnderCursor(cam, mouse);
-            var (target, factory, clipPos) = ResolveDropTarget(orderGroundPoint, cam, mouse);
-            UpdateDragHighlights(target, factory, clipPos);
+
+            // 2026-08 (creator direction: "new monster or battalion can
+            // be dropped in a slot"): the OPEN Order Sheet's own hovered
+            // slot (if any) takes priority over the normal 3D-world
+            // Factory-body target -- see DropIntoSlot's own doc comment.
+            if (orderSheetHud != null && orderSheetHud.OpenFactory != null && orderSheetHud.HoveredSlotIndex >= 0)
+            {
+                if (mouse.leftButton.wasPressedThisFrame)
+                    DropIntoSlot(orderSheetHud.OpenFactory, orderSheetHud.HoveredSlotIndex);
+                return;
+            }
+
+            var (target, factory) = ResolveDropTarget(orderGroundPoint);
+            UpdateDragHighlight(target, factory);
             if (mouse.leftButton.wasPressedThisFrame) DropCarriedOrder(target, factory);
             return;
         }
@@ -857,31 +891,156 @@ public class GrabCursor : MonoBehaviour
 
         if (groundPoint.HasValue) _carried.TickHeld(HoverTargetFor(groundPoint.Value), Time.deltaTime);
 
-        // 2026-08 (drag-target highlights): a live monster carry gets
-        // the exact same green/amber feedback an abstract order does --
-        // one shared targeting rule, one shared highlight pair. Resolved
-        // ONCE per frame and reused for both the highlight AND (below)
-        // the actual drop -- Drop() used to blindly re-resolve with a
-        // null camera/mouse, which silently disabled clipboard detection
-        // entirely; passing the already-resolved target through avoids
-        // both the bug and a second raycast.
-        var (monsterTarget, monsterFactory, monsterClipPos) = ResolveDropTarget(groundPoint, cam, mouse);
-        UpdateDragHighlights(monsterTarget, monsterFactory, monsterClipPos);
+        // 2026-08 (creator direction: "new monster or battalion can be
+        // dropped in a slot"): the OPEN Order Sheet's own hovered slot
+        // takes priority for a carried MONSTER too, same as an abstract
+        // order above -- one shared slot-drop path either way.
+        if (orderSheetHud != null && orderSheetHud.OpenFactory != null && orderSheetHud.HoveredSlotIndex >= 0)
+        {
+            if (mouse.leftButton.wasPressedThisFrame)
+                DropIntoSlot(orderSheetHud.OpenFactory, orderSheetHud.HoveredSlotIndex);
+            return;
+        }
+
+        // 2026-08 (drag-target highlight): resolved ONCE per frame and
+        // reused for both the highlight AND (below) the actual drop --
+        // Drop() used to blindly re-resolve with a null camera, which
+        // silently disabled clipboard detection entirely (fixed
+        // earlier, and moot now that the clipboard is gone); passing
+        // the already-resolved target through still avoids a redundant
+        // second lookup.
+        var (monsterTarget, monsterFactory) = ResolveDropTarget(groundPoint);
+        UpdateDragHighlight(monsterTarget, monsterFactory);
 
         if (mouse.leftButton.wasPressedThisFrame) Drop(monsterTarget, monsterFactory);
     }
 
-    /// <summary>2026-08 (Factory Build Queue / Order Clipboard): the
-    /// abstract-order counterpart to <see cref="Drop"/> -- same
-    /// direct-vs-clipboard branching (see <see
-    /// cref="ResolveDropTarget"/>), just queueing a Battalion/LabBattalion
-    /// instead of moving a physical `MonsterAgent`. Dropping outside any
-    /// valid target (`DropTarget.None`) simply cancels the carry --
-    /// nothing was ever "picked up" physically, so there's nothing to
-    /// return to the world, matching "if there's nothing under the
-    /// cursor, the order just isn't placed" rather than inventing a drop
-    /// location for an object that has no independent existence outside
-    /// the queue.</summary>
+    /// <summary>2026-08 (creator direction, verbatim: "If the user press
+    /// the C key near the factory a order sheet will open"): finds the
+    /// player's own Factory near the cursor's ground point (the SAME
+    /// hex-proximity "near" <see cref="FindOwnFactoryNear"/> already
+    /// uses for the "build now" drop target -- one definition of "near
+    /// the factory" for this whole file, not a second one invented for
+    /// the keybind) and toggles <see cref="orderSheetHud"/> open for it.
+    /// A no-op if nothing's near, or the reference isn't wired.</summary>
+    private void ToggleOrderSheetNearCursor(Camera cam, Mouse mouse)
+    {
+        if (orderSheetHud == null) return;
+        var groundPoint = GroundUnderCursor(cam, mouse);
+        if (!groundPoint.HasValue) return;
+        var hex = builder.HexAt(groundPoint.Value);
+        var factory = FindOwnFactoryNear(hex);
+        if (factory == null) return;
+        orderSheetHud.Toggle(factory);
+    }
+
+    /// <summary>2026-08 (creator direction, verbatim: "the current
+    /// monster being built is in the current slot and new monster or
+    /// battalion can be dropped in a slot"): whichever of `_carried`/the
+    /// abstract-order fields is actually active gets queued at
+    /// `factory`, exactly like a normal drop -- slot 0 ("the current
+    /// slot") promotes to the active build (<see
+    /// cref="PromoteToFront"/>), any other visible slot appends to the
+    /// queue, same "slot 0 interrupts, everything else queues" split a
+    /// direct Factory-body drop vs. the old clipboard already had.
+    /// Deliberately does NOT distinguish which specific non-zero slot
+    /// was targeted beyond that -- true positional insertion would need
+    /// to shift every later item, and the Order Sheet's own up/down
+    /// buttons already cover "put it exactly here" after the fact.
+    /// Shares <see cref="DropMonsterAt"/>/<see cref="DropOrderAt"/> with
+    /// the normal 3D-world drop paths (<see cref="Drop"/>/<see
+    /// cref="DropCarriedOrder"/>) so there's exactly one place each
+    /// actually queues something, not two copies that could drift.</summary>
+    private void DropIntoSlot(SimBuilding factory, int slotIndex)
+    {
+        var promote = slotIndex == 0;
+        if (_carried != null)
+        {
+            var agent = _carried;
+            _carried = null;
+            _carriedFromRoofFactory = null;
+            _mode = Mode.Armed;
+            HideDragHighlight();
+            DropMonsterAt(factory, agent, promote);
+            return;
+        }
+        if (_carriedOrderKind != CarriedOrderKind.None)
+        {
+            var kind = _carriedOrderKind;
+            var members = _carriedBattalionMembers;
+            var labName = _carriedLabBattalionName;
+            var labIds = _carriedLabBattalionCreatureIds;
+            EndCarryingOrder();
+            _mode = Mode.Armed;
+            HideDragHighlight();
+            DropOrderAt(factory, kind, members, labName, labIds, promote);
+        }
+    }
+
+    /// <summary>2026-08 (Factory Build Queue / Order Clipboard, "The
+    /// newly dropped Monster/Battalion becomes the Factory's current
+    /// build"): the actual queue+roof-display logic for dropping a
+    /// physical monster at `factory` -- shared by the normal world drop
+    /// (<see cref="Drop"/>) and the Order Sheet's own slot drop (<see
+    /// cref="DropIntoSlot"/>) so this exists in exactly one place. A
+    /// null `factory` just ends the hold in place (nothing to drop
+    /// onto), matching this method's own callers' existing "dropped
+    /// outside any valid target" behavior.</summary>
+    private void DropMonsterAt(SimBuilding factory, MonsterAgent agent, bool promoteToFront)
+    {
+        if (factory == null) { agent.EndHeld(); return; }
+
+        var item = CloneOnto(factory, agent);
+
+        // creator direction: "when a new monster is dropped on a
+        // factory, the current monster is booted to the next parking
+        // spot closest to the factory and the new monster replaces the
+        // old one on the factory roof" -- whoever already holds this
+        // Factory's roof slot (if anyone, and if it isn't this same
+        // agent being re-dropped on its own spot) steps aside to the
+        // nearest open hex before the new arrival takes the roof (see
+        // EvictRoofOccupant's own doc comment for the shared parking
+        // search). Fires regardless of `promoteToFront` -- the roof
+        // DISPLAY specimen and the queue's own front-of-line are two
+        // different things (see PromoteToFront's own doc comment).
+        if (_roofOccupant.TryGetValue(factory.EntityId, out var evicted) && evicted != null && evicted != agent)
+            EvictRoofOccupant(factory, evicted);
+
+        // creator direction: "it should land on the roof and rotate
+        // slowly in the Y axis" -- the ORIGINAL creature (not consumed
+        // by cloning) settles on top of the Factory it was just dropped
+        // on, instead of hovering wherever the cursor happened to be.
+        var roofWorld = builder.WorldOf(factory.Hex);
+        var faction = bridge != null ? bridge.PlayerFaction(factory.PlayerIndex) : FactionId.Mixed;
+        roofWorld.y = builder.GroundHeightAt(roofWorld) + BaseDresser.RoofHeightFor(factory.Kind, faction);
+        agent.BeginRoofDisplay(roofWorld);
+        _roofOccupant[factory.EntityId] = agent;
+
+        if (promoteToFront) PromoteToFront(factory, item);
+    }
+
+    /// <summary>The abstract-order counterpart to <see
+    /// cref="DropMonsterAt"/> -- queues a Battalion/LabBattalion at
+    /// `factory` and optionally promotes it, shared by <see
+    /// cref="DropCarriedOrder"/> and <see cref="DropIntoSlot"/>. A null
+    /// `factory` is a silent no-op (an abstract order has no physical
+    /// presence to "leave behind" the way a monster does).</summary>
+    private void DropOrderAt(SimBuilding factory, CarriedOrderKind kind, IReadOnlyList<MonsterAgent> members, string labName, string[] labIds, bool promoteToFront)
+    {
+        if (factory == null) return;
+        QueueItem item = null;
+        if (kind == CarriedOrderKind.Battalion) item = QueueBattalionAt(factory, members);
+        else if (kind == CarriedOrderKind.LabBattalion) item = QueueLabBattalionAt(factory, labName, labIds);
+        if (promoteToFront) PromoteToFront(factory, item);
+    }
+
+    /// <summary>The abstract-order counterpart to <see cref="Drop"/> --
+    /// same direct-drop-promotes / dropped-outside-does-nothing shape,
+    /// just queueing a Battalion/LabBattalion instead of moving a
+    /// physical `MonsterAgent`. Dropping outside any valid target
+    /// (`DropTarget.None`) simply cancels the carry -- nothing was ever
+    /// "picked up" physically, so there's nothing to return to the
+    /// world.</summary>
     private void DropCarriedOrder(DropTarget target, SimBuilding factory)
     {
         var kind = _carriedOrderKind;
@@ -890,15 +1049,10 @@ public class GrabCursor : MonoBehaviour
         var labIds = _carriedLabBattalionCreatureIds;
         EndCarryingOrder();
         _mode = Mode.Armed;
-        HideDragHighlights();
+        HideDragHighlight();
 
         if (target == DropTarget.None || factory == null) return;
-
-        QueueItem item = null;
-        if (kind == CarriedOrderKind.Battalion) item = QueueBattalionAt(factory, members);
-        else if (kind == CarriedOrderKind.LabBattalion) item = QueueLabBattalionAt(factory, labName, labIds);
-
-        if (target == DropTarget.FactoryBody) PromoteToFront(factory, item);
+        DropOrderAt(factory, kind, members, labName, labIds, target == DropTarget.FactoryBody);
     }
 
     /// <summary>2026-08 (creator direction, verbatim: "if a monster is
@@ -938,7 +1092,7 @@ public class GrabCursor : MonoBehaviour
         _carried = null;
         _carriedFromRoofFactory = null;
         _mode = Mode.Armed;
-        HideDragHighlights();
+        HideDragHighlight();
         if (agent == null) return;
 
         agent.EndHeld();
@@ -973,9 +1127,9 @@ public class GrabCursor : MonoBehaviour
     }
 
     /// <summary>Shared roof-eviction parking search -- reused by both
-    /// `Drop`'s "a fresh drop bumps the current roof occupant" gesture
-    /// and <see cref="EvictRoofOccupantIfDone"/>'s "the batch this
-    /// specimen was displaying finished" one below. Same
+    /// `DropMonsterAt`'s "a fresh drop bumps the current roof occupant"
+    /// gesture and <see cref="EvictRoofOccupantIfDone"/>'s "the batch
+    /// this specimen was displaying finished" one below. Same
     /// <see cref="FindOpenHexNear"/>/<see cref="NearbyMonsterHexes"/>
     /// pair the off-bounds carry snap already uses, so every way a
     /// monster ends up parked near a Factory shares one clearance
@@ -1000,7 +1154,7 @@ public class GrabCursor : MonoBehaviour
     /// like a fresh drop would. Only ever fires for a genuinely FINISHED
     /// batch -- manually cancelling a build early via <see
     /// cref="TickFactorySelectionKeys"/>'s `-` key, or <see
-    /// cref="CancelQueueItem"/> from the order popup, does NOT reach
+    /// cref="CancelQueueItem"/> from the Order Sheet, does NOT reach
     /// this, deliberately (see those methods' own doc comments).</summary>
     private void EvictRoofOccupantIfDone(string genomeId)
     {
@@ -1075,7 +1229,7 @@ public class GrabCursor : MonoBehaviour
         }
         _carriedFromRoofFactory = null;
         EndCarryingOrder();
-        HideDragHighlights();
+        HideDragHighlight();
         SelectFactory(null);   // grab mode fully exiting clears every grab-mode-scoped selection, same as the carry above
         _mode = Mode.Off;
         Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
@@ -1089,14 +1243,10 @@ public class GrabCursor : MonoBehaviour
     /// cref="BuildingIdentity"/>) and selects it -- clicking empty space,
     /// an enemy building, or a non-Factory building of the player's own
     /// all deselect, same "click elsewhere to clear selection" contract
-    /// as everything else that can be selected in this project.
-    ///
-    /// 2026-08 follow-up (Factory Build Queue / Order Clipboard): a
-    /// click that hits the Factory's own <see cref="FactoryClipboard"/>
-    /// prop instead opens the order popup (<see
-    /// cref="FactoryOrdersHud"/>) rather than the lightweight quick-
-    /// select highlight -- checked BEFORE the plain factory-body case
-    /// so the smaller, more specific target wins.</summary>
+    /// as everything else that can be selected in this project. (The
+    /// clipboard-click branch this method used to have is gone along
+    /// with the clipboard itself -- the Order Sheet opens via the C key
+    /// now, see <see cref="ToggleOrderSheetNearCursor"/>.)</summary>
     private void TryPickUp(Camera cam, Mouse mouse)
     {
         var hit = RaycastCursor(cam, mouse);
@@ -1115,97 +1265,36 @@ public class GrabCursor : MonoBehaviour
             return;
         }
 
-        var clipboard = hit.Value.collider.GetComponentInParent<FactoryClipboard>();
-        if (clipboard != null)
-        {
-            var cf = FindOwnFactoryById(clipboard.FactoryEntityId);
-            if (cf != null) OpenOrdersPopup?.Invoke(cf);
-            return;
-        }
-
         var building = hit.Value.collider.GetComponentInParent<BuildingIdentity>();
         SelectFactory(building != null ? FindOwnFactoryById(building.EntityId) : null);
     }
 
-    /// <summary>2026-08 (Factory Build Queue / Order Clipboard): fired by
-    /// `TryPickUp` when the clipboard collider is clicked -- <see
-    /// cref="FactoryOrdersHud"/> subscribes to open its popup on
-    /// whichever Factory was hit. A plain event (not a direct method
-    /// call/reference) so `GrabCursor` doesn't need to know that
-    /// `FactoryOrdersHud` exists, matching this project's existing
-    /// "HUDs read the data-owning script's public state; the data-owning
-    /// script doesn't reach back into a specific HUD" direction (see how
-    /// `ProductionQueueHud` already only ever reads FROM `GrabCursor`,
-    /// never the other way).</summary>
-    public event System.Action<SimBuilding> OpenOrdersPopup;
-
     /// <summary>`target`/`factory` are the SAME resolution `Update()`
     /// already computed this frame for the drag highlight (<see
-    /// cref="ResolveDropTarget"/>) -- passed straight through instead of
-    /// re-raycasting a second time (or, as an earlier draft of this
-    /// method did, re-resolving with a null camera, which silently
-    /// disabled clipboard detection since <see cref="RaycastCursor"/>
-    /// no-ops on a null Camera).</summary>
+    /// cref="ResolveDropTarget"/>) -- passed straight through rather than
+    /// re-resolving a second time. Delegates the actual queueing/roof-
+    /// display work to <see cref="DropMonsterAt"/>, shared with the
+    /// Order Sheet's own slot-drop path.</summary>
     private void Drop(DropTarget target, SimBuilding factory)
     {
         var agent = _carried;
         _carried = null;
         _carriedFromRoofFactory = null;
         _mode = Mode.Armed;   // stays armed -- pick up the next one right away
-        HideDragHighlights();
+        HideDragHighlight();
         if (agent == null) return;
-
-        if (factory != null)
-        {
-            var item = CloneOnto(factory, agent);
-
-            // creator direction: "when a new monster is dropped on a
-            // factory, the current monster is booted to the next
-            // parking spot closest to the factory and the new monster
-            // replaces the old one on the factory roof" -- whoever
-            // already holds this Factory's roof slot (if anyone, and
-            // if it isn't this same agent being re-dropped on its own
-            // spot) steps aside to the nearest open hex before the new
-            // arrival takes the roof (see EvictRoofOccupant's own doc
-            // comment for the shared parking search). Fires on EITHER
-            // target (clipboard or body) -- the roof DISPLAY specimen
-            // and the queue's own front-of-line are two different
-            // things (see PromoteToFront's own doc comment); only the
-            // active-build promotion below is Factory-body-only.
-            if (_roofOccupant.TryGetValue(factory.EntityId, out var evicted) && evicted != null && evicted != agent)
-                EvictRoofOccupant(factory, evicted);
-
-            // creator direction: "it should land on the roof and
-            // rotate slowly in the Y axis" -- the ORIGINAL creature
-            // (not consumed by cloning) settles on top of the Factory
-            // it was just dropped on, instead of hovering wherever
-            // the cursor happened to be.
-            var roofWorld = builder.WorldOf(factory.Hex);
-            var faction = bridge != null ? bridge.PlayerFaction(factory.PlayerIndex) : FactionId.Mixed;
-            roofWorld.y = builder.GroundHeightAt(roofWorld) + BaseDresser.RoofHeightFor(factory.Kind, faction);
-            agent.BeginRoofDisplay(roofWorld);
-            _roofOccupant[factory.EntityId] = agent;
-
-            // 2026-08 (Factory Build Queue / Order Clipboard, creator
-            // direction: "If an order is dropped onto the Factory
-            // itself, it is an immediate command"): only a Factory-BODY
-            // drop promotes to the active build -- a clipboard drop
-            // stays exactly the pre-existing "append/stack" behavior.
-            if (target == DropTarget.FactoryBody) PromoteToFront(factory, item);
-            return;
-        }
-        agent.EndHeld();
+        DropMonsterAt(factory, agent, target == DropTarget.FactoryBody);
     }
 
     /// <summary>Roof occupancy only ever changes at TWO real events -- a
     /// monster gets grabbed back off the roof (TryPickUp), or a fresh
-    /// drop bumps it (Drop, above) -- a roof-displaying monster never
-    /// leaves on its own (Update() early-returns for as long as
-    /// `_roofDisplay` is true, so idle target-acquisition/orders never
-    /// fire on it). Called from TryPickUp so a monster grabbed off one
-    /// Factory's roof and dropped somewhere else (a different Factory, or
-    /// nowhere at all) doesn't leave a stale reference behind that would
-    /// wrongly evict it a second time later.</summary>
+    /// drop bumps it (<see cref="DropMonsterAt"/>) -- a roof-displaying
+    /// monster never leaves on its own (Update() early-returns for as
+    /// long as `_roofDisplay` is true, so idle target-acquisition/orders
+    /// never fire on it). Called from TryPickUp so a monster grabbed off
+    /// one Factory's roof and dropped somewhere else (a different
+    /// Factory, or nowhere at all) doesn't leave a stale reference
+    /// behind that would wrongly evict it a second time later.</summary>
     private void RemoveFromRoofOccupancy(MonsterAgent agent)
     {
         uint? key = null;
@@ -1248,17 +1337,17 @@ public class GrabCursor : MonoBehaviour
         return null;
     }
 
-    /// <summary>Same ownership/kind/state filter <see
-    /// cref="FindOwnFactoryNear"/> already applies, just resolved by
-    /// `EntityId` (from a <see cref="BuildingIdentity"/>/<see
-    /// cref="FactoryClipboard"/> raycast hit, or a `_roofOccupant`
-    /// dictionary key) instead of hex proximity -- an enemy Factory, a
-    /// different building kind, or one still under construction all
-    /// resolve to null. Also used by `TickProduction`'s own per-Factory
-    /// loop (`EntityId -> live SimBuilding` -- match-core's own building
-    /// list never removes an entry, even a destroyed one, so this always
-    /// resolves for any Factory ever queued at, just possibly with
-    /// `State != Complete`).</summary>
+    /// <summary>Same ownership/kind filter <see cref="FindOwnFactoryNear"/>
+    /// already applies, just resolved by `EntityId` (from a <see
+    /// cref="BuildingIdentity"/> raycast hit, or a `_roofOccupant`/
+    /// `_factoryQueues` dictionary key) instead of hex proximity -- an
+    /// enemy Factory or a different building kind resolves to null.
+    /// Deliberately does NOT also require `State == Complete` here (used
+    /// by `TickProduction`'s own per-Factory loop too: `EntityId -> live
+    /// SimBuilding` -- match-core's own building list never removes an
+    /// entry, even a destroyed one, so this always resolves for any
+    /// Factory ever queued at, just possibly with `State != Complete`,
+    /// which THAT caller checks for itself).</summary>
     private SimBuilding FindOwnFactoryById(uint entityId)
     {
         if (bridge == null || !bridge.HasMatch) return null;
@@ -1347,13 +1436,11 @@ public class GrabCursor : MonoBehaviour
         AdjustQuantity(q, 0, increment);
     }
 
-    /// <summary>2026-08 (Factory Build Queue / Order Clipboard, "each
-    /// queued order should support increasing or decreasing its
-    /// quantity... changes must immediately update the queue and
-    /// popup"): the SAME per-item +/- logic <see
+    /// <summary>2026-08 ("the user can increase or decrease or delete the
+    /// order or the quantity"): the SAME per-item +/- logic <see
     /// cref="TickFactorySelectionKeys"/> already used for the front item
     /// only, generalized to any index -- <see cref="FactoryOrdersHud"/>'s
-    /// own per-row +/- buttons call this directly instead of duplicating
+    /// own per-slot +/- buttons call this directly instead of duplicating
     /// the SingleUnit/Battalion/LabBattalion branch a third time.</summary>
     private void AdjustQuantity(FactoryQueue q, int index, bool increment)
     {
@@ -1379,30 +1466,15 @@ public class GrabCursor : MonoBehaviour
         }
     }
 
-    // ---- FactoryOrdersHud entry points (2026-08, Factory Build Queue /
-    // Order Clipboard) ----------------------------------------------------
-
-    /// <summary>Read-only snapshot for <see cref="FactoryOrdersHud"/>'s
-    /// own popup -- index 0 is "NOW BUILDING," the rest is "QUEUE," in
-    /// priority order. Empty (not null) if `factory` has no queue at
-    /// all, so the popup can still render its own "nothing queued"
-    /// state cleanly.</summary>
-    public IReadOnlyList<(string Label, int Remaining, bool IsSingleUnit)> OrdersFor(SimBuilding factory)
-    {
-        var result = new List<(string, int, bool)>();
-        var q = FactoryQueueFor(factory, false);
-        if (q == null) return result;
-        foreach (var item in q.Items)
-            result.Add((item.Label, RemainingOf(item), item.Kind == QueueItemKind.SingleUnit));
-        return result;
-    }
+    // ---- FactoryOrdersHud entry points ------------------------------------
 
     /// <summary>2026-08 ("Allow queued orders to be moved up/down"): a
     /// plain index swap with its neighbor -- moving index 0 (the active
     /// build) down demotes it exactly the same way <see
     /// cref="PromoteToFront"/> demotes whatever WAS active on a fresh
-    /// Factory-body drop, so the active-build concept stays "whatever is
-    /// at index 0," never a separate flag to keep in sync.</summary>
+    /// Factory-body/slot-0 drop, so the active-build concept stays
+    /// "whatever is at index 0," never a separate flag to keep in
+    /// sync.</summary>
     public void MoveOrderUp(SimBuilding factory, int index)
     {
         var q = FactoryQueueFor(factory, false);
@@ -1443,8 +1515,9 @@ public class GrabCursor : MonoBehaviour
 
     /// <summary>2026-08 (Factory Build Queue / Order Clipboard, "Factory
     /// identity/name if the existing UI supports this"): the same
-    /// faction/kind lookup `Drop`/`HoverTargetFor` already do inline,
-    /// exposed for <see cref="FactoryOrdersHud"/>'s own header line.</summary>
+    /// faction/kind lookup `DropMonsterAt`/`HoverTargetFor` already do
+    /// inline, exposed for <see cref="FactoryOrdersHud"/>'s own header
+    /// line.</summary>
     public string FactoryDisplayName(SimBuilding factory)
     {
         if (factory == null) return "Factory";
@@ -1458,14 +1531,14 @@ public class GrabCursor : MonoBehaviour
     /// specifically -- the shared implementation behind BOTH the
     /// existing "Build" button (<see cref="BuildBattalionAtOwnFactory"/>,
     /// which resolves `factory` to <see cref="FindAnyOwnCompleteFactory"/>
-    /// to preserve its exact original behavior) and the new drag-and-
-    /// drop path (<see cref="DropCarriedOrder"/>, which already knows
-    /// the exact Factory that was dropped on). NOT deduped -- "build
-    /// that battalion GROUP" reads as reproducing the whole squad's own
-    /// composition/proportions, e.g. 3 Tetrapods + 2 Winged queues 3 more
-    /// Tetrapods + 2 more Winged, not just one of each distinct type.
-    /// Returns the created item (for `PromoteToFront`) or null if the
-    /// battalion is empty/all members have since died.</summary>
+    /// to preserve its exact original behavior) and the drag-and-drop/
+    /// slot-drop paths, which already know the exact Factory. NOT
+    /// deduped -- "build that battalion GROUP" reads as reproducing the
+    /// whole squad's own composition/proportions, e.g. 3 Tetrapods + 2
+    /// Winged queues 3 more Tetrapods + 2 more Winged, not just one of
+    /// each distinct type. Returns the created item (for
+    /// `PromoteToFront`) or null if the battalion is empty/all members
+    /// have since died.</summary>
     private QueueItem QueueBattalionAt(SimBuilding factory, IReadOnlyList<MonsterAgent> battalion)
     {
         if (battalion == null || battalion.Count == 0 || factory == null) return null;
@@ -1615,11 +1688,6 @@ public class GrabCursor : MonoBehaviour
         return null;
     }
 
-    /// <summary>Null-safe on `cam`/`mouse` -- defensive only (`Update()`
-    /// already early-returns before either caller, `TryPickUp`/<see
-    /// cref="ResolveDropTarget"/>, can run with either null), so a null
-    /// reference here reads as "no raycast this call," never a
-    /// crash.</summary>
     private static RaycastHit? RaycastCursor(Camera cam, Mouse mouse)
     {
         if (cam == null || mouse == null) return null;
@@ -1724,8 +1792,9 @@ public class GrabCursor : MonoBehaviour
     /// build"): the physical-monster counterpart to <see
     /// cref="QueueSingleUnit"/>'s Battalion siblings -- queues
     /// `_pendingBuildCount` clones of `original`'s own genome at
-    /// `factory` and returns the touched/created item so `Drop` can
-    /// promote it on a Factory-body target.</summary>
+    /// `factory` and returns the touched/created item so <see
+    /// cref="DropMonsterAt"/> can promote it on a Factory-body/slot-0
+    /// target.</summary>
     private QueueItem CloneOnto(SimBuilding factory, MonsterAgent original)
     {
         var creature = original.Creature;
