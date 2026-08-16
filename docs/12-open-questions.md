@@ -19392,3 +19392,53 @@ every new reference (`productionQueueHud`, `HoveredTileIndex`,
 together. No Unity Editor in this environment -- the fairness fix in
 particular can only be truly confirmed by running two Factories with
 simultaneous production against a limited Blood income live.
+
+## 2026-08 follow-up: roof shows a queued (not active) monster; queue tiles missing portraits
+
+Creator report, verbatim: "the monster on the roof must be the one
+currently being built no one in the cue. The cue is not showing a
+picture of the monster."
+
+**Roof-display bug (Unity, GrabCursor.cs):** `DropMonsterAt` -- the
+shared helper both the normal 3D-world drop and the Order Sheet's own
+slot-drop route through -- claimed the Factory's roof display
+UNCONDITIONALLY on every drop, regardless of `promoteToFront`. Once the
+Order Sheet made "drop into a non-zero slot" (append behind the current
+build, don't interrupt) possible, this meant a monster dropped into slot
+1+ would still immediately bump the roof specimen even though its own
+clone order hadn't started building yet -- exactly "the monster on the
+roof [was] one in the queue," not the active build. Traced to the
+extraction of `DropMonsterAt` during the clipboard-removal pivot: the
+original code (before that rewrite) only ever reached the roof-claiming
+branch for a Factory-body drop, which always promoted; consolidating
+both drop paths into one shared method dropped that implicit gating.
+Fixed by checking, AFTER any promotion, whether the dropped item is
+actually at index 0 of the Factory's queue (covers both an explicit
+promote and "the queue was empty, so it landed at the front on its
+own") before touching `_roofOccupant`/`BeginRoofDisplay` at all --
+appending behind an existing build now correctly leaves the roof alone
+and just ends the carried agent's hold in place.
+
+**Missing queue portraits (investigated, root cause is NOT Unity):** a
+full trace confirmed every layer between mutator-service and the Unity
+queue tiles is correct -- `GET /creature/:id` and `GET /creatures` both
+run the same `withPortrait` merge (no lighter list shape missing the
+field), the C# `StoredGenomeDto`/`RosterFetcher` parse and propagate it
+untouched through every spawn/clone/battalion path, and
+`PortraitTexture.cs`'s decode already logs every failure mode. The real
+gap is in the Lab (`site/main.js`): `syncPortrait` -- the only code path
+that ever PUTs a portrait to the server -- is called exclusively from
+`doSaveStable()`, which early-returns immediately for a creature already
+in the Stable. Any creature saved to the Stable BEFORE this portrait
+feature shipped (docs/12's earlier "Cross-stack" entry), or whose one-
+shot bake silently failed, has no `portraitPng` stored server-side at
+all and, before this fix, no way to ever get one -- every downstream
+layer was correctly showing "no portrait" for a creature that genuinely
+had none stored. Fixed with a session-scoped backfill in `renderStable()`:
+each Stable creature gets exactly one re-sync attempt per session
+(tracked via `portraitSyncAttempted`), harmless/idempotent for a
+creature that already has a portrait.
+
+Checked by hand: brace/paren balance on `GrabCursor.cs`; `node --check`
++ brace/paren balance on `site/main.js`. No Unity Editor or browser in
+this environment -- neither fix has been visually confirmed live.

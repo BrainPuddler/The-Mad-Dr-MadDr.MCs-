@@ -1048,6 +1048,28 @@ public class GrabCursor : MonoBehaviour
         if (factory == null) { agent.EndHeld(); return; }
 
         var item = CloneOnto(factory, agent);
+        if (promoteToFront) PromoteToFront(factory, item);
+
+        // 2026-08 bugfix (creator report, verbatim: "the monster on the
+        // roof must be the one currently being built no one in the
+        // cue"): this used to claim the roof UNCONDITIONALLY on every
+        // drop, regardless of `promoteToFront` -- so a monster appended
+        // behind an existing build (a non-zero Order Sheet slot drop)
+        // would immediately bump the roof display even though its own
+        // clone order hadn't started yet, misrepresenting what the
+        // Factory was actually producing. The roof specimen now only
+        // ever changes when THIS drop's own item is actually the active
+        // build afterward -- either because it was just promoted, or
+        // because the queue was empty and it landed at the front
+        // naturally (`QueueSingleUnit`'s own append-to-empty-list
+        // behavior). Appending behind an existing build leaves whatever
+        // is currently displayed untouched, and `agent` itself just ends
+        // its hold in place (never consumed -- see this method's own
+        // "original creature" note below), same as dropping outside any
+        // valid target.
+        var q = FactoryQueueFor(factory, false);
+        var isActiveBuild = item != null && q != null && q.Items.Count > 0 && q.Items[0] == item;
+        if (!isActiveBuild) { agent.EndHeld(); return; }
 
         // creator direction: "when a new monster is dropped on a
         // factory, the current monster is booted to the next parking
@@ -1057,9 +1079,7 @@ public class GrabCursor : MonoBehaviour
         // agent being re-dropped on its own spot) steps aside to the
         // nearest open hex before the new arrival takes the roof (see
         // EvictRoofOccupant's own doc comment for the shared parking
-        // search). Fires regardless of `promoteToFront` -- the roof
-        // DISPLAY specimen and the queue's own front-of-line are two
-        // different things (see PromoteToFront's own doc comment).
+        // search).
         if (_roofOccupant.TryGetValue(factory.EntityId, out var evicted) && evicted != null && evicted != agent)
             EvictRoofOccupant(factory, evicted);
 
@@ -1072,8 +1092,6 @@ public class GrabCursor : MonoBehaviour
         roofWorld.y = builder.GroundHeightAt(roofWorld) + BaseDresser.RoofHeightFor(factory.Kind, faction);
         agent.BeginRoofDisplay(roofWorld);
         _roofOccupant[factory.EntityId] = agent;
-
-        if (promoteToFront) PromoteToFront(factory, item);
     }
 
     /// <summary>The abstract-order counterpart to <see

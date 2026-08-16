@@ -1372,6 +1372,18 @@ function renderPortrait() {
 // for the full living portrait and stats. Thumbs are cached for the session.
 const thumbCache = {};
 
+// 2026-08 bugfix (creator report: "the cue is not showing a picture of
+// the monster" -- traced to `syncPortrait` only ever firing from inside
+// `doSaveStable`, which early-returns for a creature already in the
+// Stable: any creature saved to the Stable BEFORE this portrait feature
+// existed, or whose bake silently failed the one time it ran, has no
+// `portraitPng` stored server-side at all and no way to ever get one).
+// Tracks which Stable creatures this session has already attempted a
+// portrait sync for, so `renderStable`'s own backfill (below) fires
+// each one exactly once per session rather than on every re-render
+// (this view re-renders on every card click).
+const portraitSyncAttempted = new Set();
+
 function renderStable() {
   const grid = document.getElementById("stable-grid");
   const detail = document.getElementById("stable-detail");
@@ -1384,6 +1396,13 @@ function renderStable() {
   grid.innerHTML = saved.map(c => {
     const fac = factionOfCreature(c);
     if (!thumbCache[c.id]) { try { thumbCache[c.id] = renderThumbnail(c.genome, fac); } catch { thumbCache[c.id] = ""; } }
+    // backfill (see portraitSyncAttempted's own comment) -- the client
+    // has no way to know whether the SERVER already has a portrait for
+    // this creature (portraitPng is write-only from the Lab's own
+    // perspective, never fetched back), so this just re-syncs once per
+    // session; a creature that already has one server-side gets an
+    // idempotent overwrite with the same bytes, which is harmless.
+    if (!portraitSyncAttempted.has(c.id)) { portraitSyncAttempted.add(c.id); syncPortrait(c); }
     const harvesterMark = isHarvesterGenome(c.genome) ? `<span class="sc-harvester" title="Scavenger -- always searching for and harvesting body parts and salvage, then delivering to the factory and returning to search again">🪣</span>` : "";
     const picked = battalionSelection.has(c.id) ? " battalion-selected" : "";
     return `<div class="stable-card ${c.id === local.selectedId ? "selected" : ""}${picked}" data-id="${c.id}">
