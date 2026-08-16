@@ -19511,3 +19511,102 @@ Checked by hand: brace/paren balance on `GrabCursor.cs`,
 `FactoryOrdersHud.cs`, `ProductionQueueHud.cs`; grep sweep confirmed
 zero remaining references to `PromoteToFront`/`promoteToFront` anywhere
 in `unity-client/`. No Unity Editor in this environment to confirm live.
+
+## 2026-08: Area Attack + Psionic VFX
+
+Creator direction, full brief: "Add Strong Visual Representation for
+Area Attacks and Psionics" -- Area Attacks and Psionic abilities were
+mechanically functional (docs/26) but had little or no visible
+representation; requested a 1950s-70s B-movie sci-fi visual language
+(white-hot core + arcing blue electricity for Area Attacks; a radiating
+psychic sphere/ripple for Psionics), scaled by each ability's own real
+attack characteristics, performant at scale, URP-native, and built as a
+reusable resolver rather than bespoke per-monster VFX code.
+
+**Investigation first** (per the brief's own "inspect before coding"):
+confirmed there is no AttackType/DamageType enum marking a primary
+weapon as "area" -- the whole AoE/Psionic concept lives entirely in the
+docs/26 Special Attack system (`SpecialAttackDefinition`/
+`SpecialAttackResolver`/`WebAttackAbility`/`SecondaryAttackCatalog`),
+not in `packages/match-core` (which has zero AoE/special-attack concept
+at all -- a deliberate, previously-recorded scope decision, docs/26).
+"Psionic" existed only as one ability's flavor text ("Psionic Tractor
+Beam"), mechanically identical to a generic pull-AoE, with zero enum/
+flag distinguishing it. Both delivery paths
+(`WebAttackAbility.ResolveImpact` for projectile AoE,
+`SpecialAttackResolver.ResolveInstant` for instant AoE) already had an
+`ImpactVfxPrefab` hook that no definition had ever populated -- the
+clean, pre-existing extension point this work hooks into, unchanged.
+Also found (and fixed as part of this pass, since it's the single most
+glaring "little or no visible representation" gap): `WebAttackAbility.
+Launch`'s projectile bolt was a bare `GameObject` with no mesh/renderer
+at all -- completely invisible in flight, for BOTH Web Attack and
+Psionic Tractor Beam.
+
+**What changed:**
+- `SpecialAttackDefinition` gained one new field, `VfxStyle`
+  (`SpecialAttackVfxStyle.Area` or `.Psionic`) -- a visual-language tag
+  deliberately separate from the existing `EffectType` (Damage/Stun/
+  PullAndConsume/SlowStatus), since the two aren't 1:1: Flamethrower
+  Burst and Ground Stomp have different EffectTypes but should share
+  the Area look; a future Psionic ability might not be PullAndConsume.
+  Only `PsionicTractorBeam()` is tagged `Psionic` in `SecondaryAttackCatalog`
+  -- Flamethrower Burst and Ground Stomp both default to `Area`. This is
+  a deliberate scope choice, not an oversight: the brief describes
+  exactly two visual languages and doesn't ask for a fire-specific
+  reskin of Flamethrower Burst; adding one later is a one-line change
+  (tag it, add a case) thanks to `VfxStyle` being a per-definition tag.
+- New `SpecialAttackVfx.cs`: the resolver (`PlayImpact`, called from
+  both existing chokepoints in place of the always-null
+  `ImpactVfxPrefab` check; `AttachProjectileGlow`, called from
+  `WebAttackAbility.Launch` to fix the invisible-bolt gap) plus two
+  procedural effect components, `AreaAttackEffect` (white core -> blue
+  glow shell -> 3-5 irregular jittering electrical arcs -> a ground ring
+  sized to the ability's real `AreaOfEffect` -> fade) and
+  `PsionicRippleEffect` (a brightening core -> 3 staggered, differently-
+  scaled translucent ripple spheres expanding outward, no hard ground
+  ring -- "avoid making it look like a conventional explosion"). Both
+  scale off the definition's own real data: radius from `AreaOfEffect`
+  directly, an intensity scalar (`EstimateStrength01`) from whichever
+  magnitude field is meaningful for that `EffectType`, and a playback
+  duration (`EstimateDuration`) derived from `Cooldown` as a stand-in
+  for "how powerful/deliberate" the attack is -- this data model has no
+  literal charge-time field and adding one would be a real combat-
+  timing change, so a heavier-cooldown ability gets a longer/more
+  elaborate POST-resolve playback, never a pre-resolve delay (per the
+  brief's own "does not require changes to the underlying combat/damage
+  logic unless absolutely necessary" -- confirmed zero changes to
+  `TickSpecialAttack`, `TakeDamage`, `ApplyStun`, `Capture`, or any
+  other combat/damage code).
+
+**Performance choices, matching this codebase's own established
+conventions where one existed, and adding a small new one where none
+did:** no `ParticleSystem` anywhere (this project's firm, repeatedly-
+stated convention -- `DamageFx.cs`/`TeslaArc.cs`/`BrainJarBubbles.cs`
+all document the same choice); no real `Light` components (glow is
+emissive-material only); ONE shared `Material` per visual layer per
+style, never a `new Material` per attack, with every per-instance fade/
+color driven through `MaterialPropertyBlock` (the exact idiom
+`EerieChamberGlow`/`EmissiveAnimator`/`HumanCharacterKit` already use
+throughout this codebase, including the confirmed-correct `_BaseColor`/
+`_EmissionColor` URP property names). Object pooling (`VfxPool`, a
+small generic string-keyed pool) is new -- this codebase had NO
+GameObject-pooling precedent anywhere before this (`DamageFx`'s own
+effects spawn-and-self-destroy on a timer) -- scoped narrowly to these
+two new effect types only, not a retrofit of the existing damage-FX
+system.
+
+Checked by hand: brace/paren/bracket balance on every touched file
+(`SpecialAttackDefinition.cs`, `SecondaryAttackCatalog.cs`,
+`WebAttackAbility.cs`, `SpecialAttackResolver.cs`, `SpecialAttackVfx.cs`);
+confirmed no `.asmdef` files split this project into multiple
+assemblies (so the new file's `internal` cross-class members are
+actually visible to its own sibling effect classes); confirmed every
+method/property signature called against the real, just-read source
+(`SlowSpin.axis`/`degreesPerSecond`, `LabMeshBuilder.MakeTransparent`,
+`ShaderUtil.FindRenderableShader`, `Renderer.shadowCastingMode`,
+`LineRenderer` API); grep-confirmed no naming collisions with any
+existing class. No Unity Editor in this environment -- none of this has
+been visually confirmed live; in particular the exact colors/timing/
+arc behavior are a first pass meant to be tuned against a real render,
+not a claimed final look.

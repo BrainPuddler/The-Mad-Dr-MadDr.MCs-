@@ -72,6 +72,14 @@ public static class SecondaryAttackCatalog
             // than the other two.
             _psionicTractorBeam.BloodCost = 3;
             _psionicTractorBeam.BonesCost = 1;
+            // 2026-08 ("Add Strong Visual Representation for Area Attacks
+            // and Psionics"): the ONLY ability tagged Psionic today --
+            // see SpecialAttackVfxStyle's own doc comment for why this
+            // is a separate tag from EffectType rather than inferred
+            // from PullAndConsume (a future non-psionic PullAndConsume
+            // ability, e.g. a real Web Attack, would want the Area look
+            // instead).
+            _psionicTractorBeam.VfxStyle = SpecialAttackVfxStyle.Psionic;
         }
         return _psionicTractorBeam;
     }

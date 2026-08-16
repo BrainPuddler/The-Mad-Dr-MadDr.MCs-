@@ -62,6 +62,26 @@ public class SpecialAttackDefinition : ScriptableObject
     public GameObject ImpactVfxPrefab;
     public AudioClip CastSfx;
     public AudioClip ImpactSfx;
+    [Tooltip("Which procedural visual language SpecialAttackVfx uses when ImpactVfxPrefab isn't set (the normal case today -- no definition assigns one). See SpecialAttackVfx.cs's own header for the full design.")]
+    public SpecialAttackVfxStyle VfxStyle = SpecialAttackVfxStyle.Area;
+}
+
+/// <summary>2026-08 (creator direction: "Add Strong Visual Representation
+/// for Area Attacks and Psionics"): which procedural visual language
+/// `SpecialAttackVfx` resolves an ability's impact/projectile to.
+/// Deliberately separate from `SpecialAttackEffectType` -- that enum is
+/// what the ability MECHANICALLY does (Damage/Stun/PullAndConsume/
+/// SlowStatus), this one is purely how it LOOKS, and the two aren't
+/// 1:1 (Flamethrower Burst and Ground Stomp have different EffectTypes
+/// but the same Area look; a future Psionic ability with a different
+/// EffectType would still want the Psionic look). Extensible: a new
+/// visual language is one more enum value here plus one more case in
+/// `SpecialAttackVfx`'s style switch, no changes to the combat/damage
+/// resolvers themselves.</summary>
+public enum SpecialAttackVfxStyle
+{
+    Area,
+    Psionic,
 }
 
 /// <summary>Which unit categories a special attack can affect. [Flags] so

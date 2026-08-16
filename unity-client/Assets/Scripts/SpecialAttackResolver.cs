@@ -24,7 +24,11 @@ public static class SpecialAttackResolver
     {
         if (builder == null || caster == null || definition == null) return;
 
+        // 2026-08 ("Add Strong Visual Representation for Area Attacks and
+        // Psionics"): same fallback shape as WebAttackAbility.ResolveImpact
+        // -- a hand-authored prefab still wins if one's ever assigned.
         if (definition.ImpactVfxPrefab != null) Object.Instantiate(definition.ImpactVfxPrefab, originPoint, Quaternion.identity);
+        else SpecialAttackVfx.PlayImpact(definition, originPoint);
         if (definition.ImpactSfx != null) AudioSource.PlayClipAtPoint(definition.ImpactSfx, originPoint);
 
         var radius = Mathf.Max(0.01f, definition.AreaOfEffect);

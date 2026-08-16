@@ -63,6 +63,11 @@ public static class WebAttackAbility
         var boltSpeed = Mathf.Max(10f, definition.Range * 0.6f);
         projectile.Init(caster, null, targetPoint, 0f, boltSpeed);
         projectile.OnArrive = (impactPoint) => ResolveImpact(builder, caster, definition, impactPoint);
+        // 2026-08 ("Add Strong Visual Representation for Area Attacks and
+        // Psionics") -- this bolt was otherwise fully invisible in
+        // flight, see SpecialAttackVfx.AttachProjectileGlow's own doc
+        // comment.
+        SpecialAttackVfx.AttachProjectileGlow(go, definition);
 
         if (definition.CastSfx != null) AudioSource.PlayClipAtPoint(definition.CastSfx, muzzle);
     }
@@ -70,7 +75,13 @@ public static class WebAttackAbility
     private static void ResolveImpact(RuntimeCityBuilder builder, UnitCombat caster,
         SpecialAttackDefinition definition, Vector3 impactPoint)
     {
+        // 2026-08 ("Add Strong Visual Representation for Area Attacks and
+        // Psionics"): a hand-authored prefab (if a designer ever assigns
+        // one) still wins outright, same as before -- the procedural
+        // resolver only fills the gap for every definition that leaves
+        // this null, which today is all of them.
         if (definition.ImpactVfxPrefab != null) Object.Instantiate(definition.ImpactVfxPrefab, impactPoint, Quaternion.identity);
+        else SpecialAttackVfx.PlayImpact(definition, impactPoint);
         if (definition.ImpactSfx != null) AudioSource.PlayClipAtPoint(definition.ImpactSfx, impactPoint);
 
         var radius = Mathf.Max(0.01f, definition.AreaOfEffect);
