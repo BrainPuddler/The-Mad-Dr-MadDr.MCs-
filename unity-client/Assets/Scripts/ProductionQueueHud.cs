@@ -114,6 +114,18 @@ public class ProductionQueueHud : MonoBehaviour
     /// real panel height is known further down.</summary>
     public float TileRowTop { get; private set; }
 
+    /// <summary>2026-08 (creator direction: "I would also like to be able
+    /// to drop monster on the factory HUD display on the bottom right"):
+    /// which tile column the cursor is currently over -- mirrors <see
+    /// cref="FactoryOrdersHud.HoveredSlotIndex"/>'s own contract exactly
+    /// (-1 if not hovering a real tile, or this panel isn't even drawn
+    /// this frame). Index 0 is the SAME "current slot" concept the Order
+    /// Sheet already uses (a drop there promotes/interrupts); any other
+    /// index appends. <see cref="GrabCursor"/> reads this every frame
+    /// while Carrying, exactly like it already does for the Order
+    /// Sheet.</summary>
+    public int HoveredTileIndex { get; private set; } = -1;
+
     public void Init(GrabCursor grabCursorRef, RoofPortraitHologram roofHologramRef)
     {
         grabCursor = grabCursorRef;
@@ -144,6 +156,7 @@ public class ProductionQueueHud : MonoBehaviour
         if (!grabCursor.HasQueuedProduction && pendingCount <= 0 && !selectedBuild.HasSelection && !carryingOrder)
         {
             PointerOver = false;
+            HoveredTileIndex = -1;
             return;
         }
         if (_tex == null) _tex = Texture2D.whiteTexture;
@@ -160,7 +173,15 @@ public class ProductionQueueHud : MonoBehaviour
         if (carryingOrder) DrawCarriedOrderBadge(grabCursor.CarriedOrderLabel, grabCursor.CarriedOrderCount);
         if (selectedBuild.HasSelection) DrawSelectedFactoryBadge(selectedBuild.Label, selectedBuild.Count, selectedBuild.WorldPos);
 
-        if (!grabCursor.HasQueuedProduction) { PointerOver = false; return; }
+        // 2026-08 (creator direction: "I would also like to be able to
+        // drop monster on the factory HUD display on the bottom right"):
+        // the anchor Factory this tile row already shows (or would show)
+        // -- while actively carrying something, the panel stays drawn
+        // (with an extra empty placeholder tile if the real queue is
+        // currently empty) purely to give the drag a real Rect to drop
+        // onto, even before anything's actually queued here yet.
+        var dropTargetFactory = (pendingCount > 0 || carryingOrder) ? grabCursor.FindAnyOwnCompleteFactory() : null;
+        if (!grabCursor.HasQueuedProduction && dropTargetFactory == null) { PointerOver = false; HoveredTileIndex = -1; return; }
 
         var prevMatrix = UiScale.Begin();
 
@@ -168,7 +189,8 @@ public class ProductionQueueHud : MonoBehaviour
         var screenH = UiScale.Height;
 
         var items = new List<(string Label, int Remaining, float Progress, string PortraitPng)>(grabCursor.ProductionQueue);
-        var shown = Mathf.Min(items.Count, maxVisibleTiles);
+        var minShown = dropTargetFactory != null ? 1 : 0;
+        var shown = Mathf.Min(Mathf.Max(items.Count, minShown), maxVisibleTiles);
 
         var panelWidth = shown * tileSize + Mathf.Max(0, shown - 1) * tileGap;
         // 2026-08 (portrait tiles, "the battalion name underneath"): the
@@ -183,16 +205,27 @@ public class ProductionQueueHud : MonoBehaviour
         TileRowTop = panelY - dockGapPixels;
 
         var e = Event.current;
-        PointerOver = e != null && panelRect.Contains(e.mousePosition);
+        var mouse = e != null ? e.mousePosition : new Vector2(-1f, -1f);
+        PointerOver = e != null && panelRect.Contains(mouse);
 
         GUI.color = new Color(0.02f, 0.02f, 0.02f, 0.65f);
         GUI.DrawTexture(panelRect, _tex);
         GUI.color = Color.white;
 
+        var hoveredTile = -1;
         for (var i = 0; i < shown; i++)
         {
-            var item = items[i];
             var tileRect = new Rect(panelX + i * (tileSize + tileGap), panelY, tileSize, tileSize);
+            var hitRect = new Rect(tileRect.x, tileRect.y, tileSize, tileSize + labelStripHeight);
+            if (e != null && hitRect.Contains(mouse)) hoveredTile = i;
+
+            if (i >= items.Count)
+            {
+                DrawEmptyDropTile(tileRect);
+                continue;
+            }
+
+            var item = items[i];
             var portrait = PortraitTexture.For(item.PortraitPng);
 
             if (portrait != null)
@@ -235,12 +268,16 @@ public class ProductionQueueHud : MonoBehaviour
                 GUI.color = Color.white;
             }
         }
+        HoveredTileIndex = hoveredTile;
 
         if (items.Count > shown)
             GUI.Label(new Rect(panelX, panelY - 16f, panelWidth, 14f), "+" + (items.Count - shown) + " more");
 
-        var cancelRect = new Rect(panelX, panelY + tileSize + tileGap + labelStripHeight + ProgressBarHeight + tileGap, panelWidth, cancelButtonHeight);
-        if (GUI.Button(cancelRect, "Cancel All")) grabCursor.CancelAllProduction();
+        if (items.Count > 0)
+        {
+            var cancelRect = new Rect(panelX, panelY + tileSize + tileGap + labelStripHeight + ProgressBarHeight + tileGap, panelWidth, cancelButtonHeight);
+            if (GUI.Button(cancelRect, "Cancel All")) grabCursor.CancelAllProduction();
+        }
 
         // 2026-08 (creator direction: "the ui is not scaling properly to
         // screen sizes"): UiScale.End happens HERE, before the factory
@@ -251,8 +288,32 @@ public class ProductionQueueHud : MonoBehaviour
         // it from the Factory it's meant to float over -- see this
         // method's own note just below.
         UiScale.End(prevMatrix);
-        DrawFactoryBadge(items[0].Remaining);
-        DrawCurrentBuildAtRoof(items[0].Label, items[0].Progress);
+        if (items.Count > 0)
+        {
+            DrawFactoryBadge(items[0].Remaining);
+            DrawCurrentBuildAtRoof(items[0].Label, items[0].Progress);
+        }
+    }
+
+    /// <summary>2026-08 ("drop monster on the factory HUD display"): the
+    /// trailing empty tile drawn past the last real queued item whenever
+    /// something's being carried -- same "dashed-look outline with a
+    /// centered +" affordance <see cref="FactoryOrdersHud.DrawEmptySlot"/>
+    /// already established for its own trailing slot, so both drop
+    /// targets read as the same kind of thing.</summary>
+    private void DrawEmptyDropTile(Rect tileRect)
+    {
+        GUI.color = new Color(1f, 1f, 1f, 0.06f);
+        GUI.DrawTexture(tileRect, _tex);
+        GUI.color = new Color(1f, 1f, 1f, 0.35f);
+        var prevAlignment = GUI.skin.label.alignment;
+        var prevFontSize = GUI.skin.label.fontSize;
+        GUI.skin.label.alignment = TextAnchor.MiddleCenter;
+        GUI.skin.label.fontSize = 22;
+        GUI.Label(tileRect, "+");
+        GUI.skin.label.alignment = prevAlignment;
+        GUI.skin.label.fontSize = prevFontSize;
+        GUI.color = Color.white;
     }
 
     /// <summary>Billboards the front item's remaining count over the

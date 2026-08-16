@@ -669,6 +669,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var productionQueueHud = gameObject.GetComponent<ProductionQueueHud>();
         if (productionQueueHud == null) productionQueueHud = gameObject.AddComponent<ProductionQueueHud>();
         productionQueueHud.Init(grabCursor, roofPortraitHologram);
+        // 2026-08 (creator direction: "I would also like to be able to
+        // drop monster on the factory HUD display on the bottom right"):
+        // same reverse-reference reasoning as orderSheetHud just below --
+        // GrabCursor reads ProductionQueueHud.HoveredTileIndex every
+        // frame while Carrying.
+        grabCursor.productionQueueHud = productionQueueHud;
 
         // 2026-08 follow-up (creator report: "the clipboard interface
         // isn't working disable it. Replace it with... press the C key

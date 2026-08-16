@@ -116,6 +116,15 @@ public class GrabCursor : MonoBehaviour
     /// this project.</summary>
     public FactoryOrdersHud orderSheetHud;
 
+    /// <summary>2026-08 (creator direction: "I would also like to be able
+    /// to drop monster on the factory HUD display on the bottom right"):
+    /// same reverse-reference reasoning as <see cref="orderSheetHud"/> --
+    /// dropping onto the ALWAYS-VISIBLE tile row (no C key needed) reads
+    /// back <see cref="ProductionQueueHud.HoveredTileIndex"/> every frame
+    /// while Carrying. Wired by <see cref="RuntimeCityBuilder"/>'s own
+    /// HUD-setup block.</summary>
+    public ProductionQueueHud productionQueueHud;
+
     [Header("Cloning (v0.1 placeholder economy)")]
     [Tooltip("Blood spent per clone -- an invented v0.1 placeholder number (CLAUDE.md's standing policy for every unsourced cost in this project), not from any design doc.")]
     public int cloneCostBlood = 60;
@@ -295,6 +304,29 @@ public class GrabCursor : MonoBehaviour
 
     private readonly Dictionary<uint, FactoryQueue> _factoryQueues = new Dictionary<uint, FactoryQueue>();
 
+    /// <summary>2026-08 bugfix (creator report: "cued builds are not
+    /// completing... take a lot longer"): traced to `TickProduction`
+    /// always walking `_factoryQueues` in the SAME fixed order (a
+    /// `Dictionary`'s enumeration order is stable across calls absent
+    /// removals) -- once a Factory's queue is ready to spend Blood, it
+    /// reserves against the shared wallet (see
+    /// `RuntimeCityBuilder.EffectiveWallet`) BEFORE whichever Factory
+    /// happens to iterate after it that same frame even gets checked.
+    /// With only one shared queue (before the per-Factory split) this
+    /// never mattered -- there was only ever ONE spend attempt in
+    /// flight. With N Factories all producing in parallel, whichever
+    /// Factory's key landed first in this list would win the Blood race
+    /// EVERY single frame, forever, starving every other Factory's queue
+    /// for as long as the first one stayed busy -- exactly "not
+    /// completing... a lot longer" for anyone with more than one Factory
+    /// running production at once. This list mirrors `_factoryQueues`'
+    /// own keys (appended once, in <see cref="FactoryQueueFor"/>, never
+    /// reordered on its own) so `TickProduction` can rotate WHICH
+    /// Factory gets first crack at the wallet each frame instead of
+    /// favoring the same one indefinitely.</summary>
+    private readonly List<uint> _factoryQueueOrder = new List<uint>();
+    private int _productionRoundRobinCursor;
+
     /// <summary>Looks up (and, if `createIfMissing`, lazily creates) the
     /// `FactoryQueue` for `factory`. Every queue-mutating call site uses
     /// `createIfMissing: true`; every read-only call site (HUD draws,
@@ -308,6 +340,7 @@ public class GrabCursor : MonoBehaviour
         if (!createIfMissing) return null;
         q = new FactoryQueue();
         _factoryQueues[factory.EntityId] = q;
+        _factoryQueueOrder.Add(factory.EntityId);
         return q;
     }
 
@@ -421,6 +454,7 @@ public class GrabCursor : MonoBehaviour
     public void CancelAllProduction()
     {
         _factoryQueues.Clear();
+        _factoryQueueOrder.Clear();
     }
 
     /// <summary>Queues `count` more clones of `genome` at `factory` --
@@ -505,20 +539,33 @@ public class GrabCursor : MonoBehaviour
     /// clear, per-Factory, independently of every other Factory's own
     /// queue.
     ///
-    /// No per-frame allocation: iterates the existing `_factoryQueues`
-    /// dictionary directly (mutating each `FactoryQueue`'s OWN fields is
-    /// safe mid-enumeration; only adding/removing DICTIONARY ENTRIES
-    /// during enumeration isn't, so an emptied-out queue is simply left
-    /// as an inert dictionary entry rather than pruned -- bounded by
-    /// however many distinct Factories the player has ever queued
-    /// something at, never unbounded, not worth the extra bookkeeping to
-    /// avoid).</summary>
+    /// No per-frame allocation beyond the fixed-size `_factoryQueueOrder`
+    /// list itself (mutating each `FactoryQueue`'s OWN fields is safe
+    /// mid-enumeration; only adding/removing DICTIONARY ENTRIES during
+    /// enumeration isn't, so an emptied-out queue is simply left as an
+    /// inert dictionary entry rather than pruned -- bounded by however
+    /// many distinct Factories the player has ever queued something at,
+    /// never unbounded, not worth the extra bookkeeping to avoid).
+    ///
+    /// 2026-08 bugfix (creator report: "cued builds are not
+    /// completing... take a lot longer"): walks `_factoryQueueOrder`
+    /// starting from a cursor that ADVANCES BY ONE every call, instead of
+    /// always starting from the same Factory -- see
+    /// `_factoryQueueOrder`'s own doc comment for the starvation this
+    /// fixes. Over time every Factory with a live queue gets an equal
+    /// number of "first crack at the wallet" frames instead of the same
+    /// one winning every single frame.</summary>
     private void TickProduction(float dt)
     {
-        foreach (var kv in _factoryQueues)
+        var count = _factoryQueueOrder.Count;
+        if (count == 0) return;
+        _productionRoundRobinCursor %= count;
+
+        for (var offset = 0; offset < count; offset++)
         {
-            var factory = FindOwnFactoryById(kv.Key);
-            var q = kv.Value;
+            var key = _factoryQueueOrder[(_productionRoundRobinCursor + offset) % count];
+            if (!_factoryQueues.TryGetValue(key, out var q)) continue;   // defensive only -- every order-list key has a matching dictionary entry
+            var factory = FindOwnFactoryById(key);
             if (q.Items.Count == 0) { q.ProductionTimer = 0f; continue; }
             if (factory == null || factory.State != BuildingState.Complete) continue;   // destroyed/invalid -- stall, don't lose the order
 
@@ -570,6 +617,8 @@ public class GrabCursor : MonoBehaviour
                 }
             }
         }
+
+        _productionRoundRobinCursor++;
     }
 
     /// <summary>UnitCombat's own body-radius default (Fighter.Radius =
@@ -823,10 +872,41 @@ public class GrabCursor : MonoBehaviour
 
         if (_mode == Mode.Off) return;
 
+        // 2026-08 bugfix (creator reports: "new monster or battalion can
+        // be dropped in a slot" not actually working; "I would also like
+        // to be able to drop monster on the factory HUD display on the
+        // bottom right"): checked HERE, BEFORE the generic "OnGUI already
+        // claimed this click" guard just below -- hovering a real slot/
+        // tile necessarily makes that HUD's own `PointerOver` true too
+        // (the slot IS inside the panel), so if the guard ran first it
+        // would swallow the very click these two slot-drop systems exist
+        // to handle, and `HoveredSlotIndex`/`HoveredTileIndex` would
+        // simply never be read. Both are only ever >=0 when the cursor
+        // is precisely over a real slot/tile Rect (computed by that
+        // HUD's own OnGUI this same frame), so consuming the click here
+        // can never mask an accidental double-fire the guard further down
+        // is meant to prevent -- a click that ISN'T over a real slot/tile
+        // still falls through to that guard exactly as before.
+        if (_mode == Mode.Carrying)
+        {
+            if (orderSheetHud != null && orderSheetHud.OpenFactory != null && orderSheetHud.HoveredSlotIndex >= 0)
+            {
+                if (mouse.leftButton.wasPressedThisFrame)
+                    DropIntoSlot(orderSheetHud.OpenFactory, orderSheetHud.HoveredSlotIndex);
+                return;
+            }
+            if (productionQueueHud != null && ProductionQueueHud.PointerOver && productionQueueHud.HoveredTileIndex >= 0)
+            {
+                if (mouse.leftButton.wasPressedThisFrame)
+                    DropIntoSlot(FindAnyOwnCompleteFactory(), productionQueueHud.HoveredTileIndex);
+                return;
+            }
+        }
+
         // same "OnGUI already claimed this click" guard every other
         // click-handling script in this project applies for Minimap/
         // BuildMenuHud/BuildingNavHud/SelectionHud/FactoryOrdersHud.
-        if (Minimap.PointerOver || BuildingNavHud.PointerOver || SelectionHud.PointerOver || FactoryOrdersHud.PointerOver) return;
+        if (Minimap.PointerOver || BuildingNavHud.PointerOver || SelectionHud.PointerOver || FactoryOrdersHud.PointerOver || ProductionQueueHud.PointerOver) return;
 
         if (_mode == Mode.Armed)
         {
@@ -839,18 +919,6 @@ public class GrabCursor : MonoBehaviour
         if (_carriedOrderKind != CarriedOrderKind.None)
         {
             var orderGroundPoint = GroundUnderCursor(cam, mouse);
-
-            // 2026-08 (creator direction: "new monster or battalion can
-            // be dropped in a slot"): the OPEN Order Sheet's own hovered
-            // slot (if any) takes priority over the normal 3D-world
-            // Factory-body target -- see DropIntoSlot's own doc comment.
-            if (orderSheetHud != null && orderSheetHud.OpenFactory != null && orderSheetHud.HoveredSlotIndex >= 0)
-            {
-                if (mouse.leftButton.wasPressedThisFrame)
-                    DropIntoSlot(orderSheetHud.OpenFactory, orderSheetHud.HoveredSlotIndex);
-                return;
-            }
-
             var (target, factory) = ResolveDropTarget(orderGroundPoint);
             UpdateDragHighlight(target, factory);
             if (mouse.leftButton.wasPressedThisFrame) DropCarriedOrder(target, factory);
@@ -890,17 +958,6 @@ public class GrabCursor : MonoBehaviour
         }
 
         if (groundPoint.HasValue) _carried.TickHeld(HoverTargetFor(groundPoint.Value), Time.deltaTime);
-
-        // 2026-08 (creator direction: "new monster or battalion can be
-        // dropped in a slot"): the OPEN Order Sheet's own hovered slot
-        // takes priority for a carried MONSTER too, same as an abstract
-        // order above -- one shared slot-drop path either way.
-        if (orderSheetHud != null && orderSheetHud.OpenFactory != null && orderSheetHud.HoveredSlotIndex >= 0)
-        {
-            if (mouse.leftButton.wasPressedThisFrame)
-                DropIntoSlot(orderSheetHud.OpenFactory, orderSheetHud.HoveredSlotIndex);
-            return;
-        }
 
         // 2026-08 (drag-target highlight): resolved ONCE per frame and
         // reused for both the highlight AND (below) the actual drop --
@@ -1237,16 +1294,23 @@ public class GrabCursor : MonoBehaviour
 
     /// <summary>2026-08 (creator direction: "the user may also click on
     /// the factory highlighting it and press space or + or - keys to
-    /// increase or decrease the number of monsters to build"): a left-
-    /// click while Armed that DOESN'T hit a monster now also checks for
-    /// one of the player's own Complete Factories (via <see
-    /// cref="BuildingIdentity"/>) and selects it -- clicking empty space,
-    /// an enemy building, or a non-Factory building of the player's own
-    /// all deselect, same "click elsewhere to clear selection" contract
-    /// as everything else that can be selected in this project. (The
-    /// clipboard-click branch this method used to have is gone along
-    /// with the clipboard itself -- the Order Sheet opens via the C key
-    /// now, see <see cref="ToggleOrderSheetNearCursor"/>.)</summary>
+    /// increase or decrease the number of monsters to build"; follow-up:
+    /// "I should be able to click on the actual factory to pull that
+    /// up"): a left-click while Armed that DOESN'T hit a monster now
+    /// also checks for one of the player's own Complete Factories (via
+    /// <see cref="BuildingIdentity"/>) and both selects it (for the
+    /// Space/+/- quick-adjust below) AND toggles <see
+    /// cref="orderSheetHud"/> open for it -- the SAME <see
+    /// cref="FactoryOrdersHud.Toggle"/> call <see
+    /// cref="ToggleOrderSheetNearCursor"/>'s C-key path already uses, so
+    /// clicking the Factory body and pressing C near it are two
+    /// equivalent triggers for the identical toggle, never two different
+    /// behaviors to keep in sync. Clicking empty space, an enemy
+    /// building, or a non-Factory building of the player's own all
+    /// deselect (and leave the Order Sheet's own open/closed state
+    /// alone -- only an OWN FACTORY click ever toggles it), same "click
+    /// elsewhere to clear selection" contract as everything else
+    /// selectable in this project.</summary>
     private void TryPickUp(Camera cam, Mouse mouse)
     {
         var hit = RaycastCursor(cam, mouse);
@@ -1266,7 +1330,9 @@ public class GrabCursor : MonoBehaviour
         }
 
         var building = hit.Value.collider.GetComponentInParent<BuildingIdentity>();
-        SelectFactory(building != null ? FindOwnFactoryById(building.EntityId) : null);
+        var factory = building != null ? FindOwnFactoryById(building.EntityId) : null;
+        SelectFactory(factory);
+        if (factory != null && orderSheetHud != null) orderSheetHud.Toggle(factory);
     }
 
     /// <summary>`target`/`factory` are the SAME resolution `Update()`

@@ -19326,3 +19326,69 @@ for compilation, just cosmetic). No Unity Editor in this environment --
 same standing limitation as every other Unity change this session; the
 actual on-screen slot layout, portrait scaling, and click-through
 behavior can't be confirmed without a live Editor/Player render.
+
+## 2026-08 follow-up: build-queue starvation fix, click-to-open Order Sheet, drop onto the bottom-right HUD
+
+Creator report, verbatim: "I think the cued builds are not completing,
+Seem to take a lot longer. I would also like to be able to drop monster
+on the factory HUD display on the bottom right. I should be able to
+click on the actual factory to pull that up."
+
+**Root cause of "not completing... a lot longer":** `GrabCursor.
+TickProduction` walked `_factoryQueues` (a `Dictionary<uint,
+FactoryQueue>`) in whatever order the dictionary happened to enumerate
+in -- stable across calls, since nothing was ever removed from it. Under
+the single-shared-queue model this never mattered (only one Blood spend
+was ever in flight at a time); once production became genuinely
+per-Factory, N Factories can all become "ready to spend Blood" in the
+same frame, and the SAME Factory -- whichever landed first in
+enumeration order -- would win the shared wallet race every single
+frame, for as long as it stayed busy, starving every other Factory's
+queue indefinitely. Fixed by adding `_factoryQueueOrder` (a plain
+`List<uint>` mirroring the dictionary's keys) and walking it from a
+cursor that advances by one every call, so which Factory gets first
+crack at the wallet rotates instead of staying fixed.
+
+**Root cause of "drop onto the Order Sheet slot" not actually working
+(discovered while investigating the above):** `GrabCursor.Update()`'s
+own generic "an OnGUI panel already claimed this click" guard
+(`if (... || FactoryOrdersHud.PointerOver) return;`) fired BEFORE the
+code that reads `orderSheetHud.HoveredSlotIndex` -- since hovering a
+slot necessarily makes the whole panel's `PointerOver` true too (the
+slot IS inside the panel), the guard was swallowing the exact click the
+slot-drop system exists to handle, making `DropIntoSlot` unreachable
+whenever the cursor was actually over a slot. Fixed by moving both
+slot-drop checks (Order Sheet + the new bottom-right tile row, see
+below) to run BEFORE that guard -- safe because `HoveredSlotIndex`/
+`HoveredTileIndex` are only ever >=0 when the cursor is precisely over
+a real slot/tile Rect, so a click that isn't meant for a slot still
+falls through to the guard exactly as before.
+
+**New: click the Factory body to open the Order Sheet.** `TryPickUp`'s
+existing building-select branch (Space/+/- quick-adjust) now also calls
+`orderSheetHud.Toggle(factory)` -- the SAME toggle the C-key path
+already used, so clicking the Factory and pressing C near it are two
+equivalent triggers for one behavior, never two to keep in sync.
+
+**New: drop onto the always-visible bottom-right tile row, no C key
+needed.** `ProductionQueueHud` gained its own `HoveredTileIndex`
+(mirroring `FactoryOrdersHud.HoveredSlotIndex` exactly -- index 0
+promotes/interrupts, any other index appends) computed the same way
+during its own `OnGUI`. Previously this panel only drew once its
+anchor Factory's queue had something in it, which meant there was
+nothing to drop onto until a queue already existed; it now stays drawn
+-- with a trailing empty "+" placeholder tile, same look
+`FactoryOrdersHud`'s own trailing slot already uses -- whenever the
+player is actively carrying a monster or an abstract order, so there's
+always a real target Rect. `GrabCursor` gained a `public
+ProductionQueueHud productionQueueHud` reverse reference (wired in
+`RuntimeCityBuilder`, same pattern as `orderSheetHud`) to read it.
+
+Checked by hand: brace/paren balance on `GrabCursor.cs`,
+`ProductionQueueHud.cs`, `RuntimeCityBuilder.cs`; grep sweep confirmed
+every new reference (`productionQueueHud`, `HoveredTileIndex`,
+`_factoryQueueOrder`) resolves consistently across all three files, and
+`CancelAllProduction` clears both the dictionary and the new order list
+together. No Unity Editor in this environment -- the fairness fix in
+particular can only be truly confirmed by running two Factories with
+simultaneous production against a limited Blood income live.
