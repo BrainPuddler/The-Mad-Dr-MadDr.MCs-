@@ -28,7 +28,7 @@ export type SecondaryAttackEffect = "pull_and_consume" | "stun";
 export interface SecondaryAttackInfo {
   /** Stable id, matching the Unity catalog method name (camelCase there,
    * snake_case here per this file's own convention). */
-  readonly kind: "psionic_tractor_beam" | "ground_stomp";
+  readonly kind: "psionic_tractor_beam" | "ground_stomp" | "area_shock";
   readonly name: string;
   readonly description: string;
   readonly effect: SecondaryAttackEffect;
@@ -40,6 +40,14 @@ export interface SecondaryAttackInfo {
    * make it visible before the wallet even exists on this screen. */
   readonly bloodCost: number;
   readonly bonesCost: number;
+  /** `effect: "stun"` only -- how long a caught target is frozen.
+   * Undefined for "pull_and_consume" (no stun involved). Added
+   * alongside Area Shock so its own defining number (a much longer
+   * stun than Ground Stomp's) is actually visible in the Lab; backfilled
+   * onto Ground Stomp too rather than leaving it the only kind without
+   * one. Matches `SpecialAttackDefinition.StunDuration` in the Unity
+   * twin. */
+  readonly stunDurationSeconds?: number;
 }
 
 /** The exact three hand families the creator called out as alien tech
@@ -50,6 +58,11 @@ const ALIEN_HAND_FAMILIES: ReadonlySet<string> = new Set([
   "photon_blaster",
   "plasma_lance",
 ]);
+
+/** 2026-08 (creator direction: "add [an electric attack]... Area shock
+ * stuns enemy units for 10 seconds"): the fourth alien-tech hand family
+ * -- must match `SecondaryAttackCatalog.ForMonster`'s new case. */
+const ELECTRIC_ARC_HAND_FAMILY = "electric_arc";
 
 const PSIONIC_TRACTOR_BEAM: SecondaryAttackInfo = {
   kind: "psionic_tractor_beam",
@@ -72,19 +85,35 @@ const GROUND_STOMP: SecondaryAttackInfo = {
   areaOfEffect: 6,
   bloodCost: 2,
   bonesCost: 4,
+  stunDurationSeconds: 2,
+};
+
+const AREA_SHOCK: SecondaryAttackInfo = {
+  kind: "area_shock",
+  name: "Area Shock",
+  description: "A crackling discharge of electrical current that locks up anything caught within range.",
+  effect: "stun",
+  range: 0,
+  areaOfEffect: 5,
+  bloodCost: 4,
+  bonesCost: 2,
+  stunDurationSeconds: 10,
 };
 
 /** Which secondary attack a MONSTER is equipped with, derived purely
- * from its hand family -- alien-tech hands get the Psionic Tractor Beam
- * (literally the same pull-and-consume mechanic Web Attack uses, just a
- * shorter-range definition); everything else -- including a vestigial or
- * cut-off hand (chop-shop-safe: a stump reads the same as an unarmed
- * creature, since it's simply not in the alien set below) -- gets the
- * Mad Doctor's default, Ground Stomp. Mirrors
+ * from its hand family -- alien-tech hands (laser/photon/plasma) get the
+ * Psionic Tractor Beam (literally the same pull-and-consume mechanic Web
+ * Attack uses, just a shorter-range definition); the electric_arc hand
+ * gets Area Shock (its own much-longer stun); everything else --
+ * including a vestigial or cut-off hand (chop-shop-safe: a stump reads
+ * the same as an unarmed creature, since it's simply not in either set
+ * above) -- gets the Mad Doctor's default, Ground Stomp. Mirrors
  * `SecondaryAttackCatalog.ForMonster`'s switch exactly, same cases, same
  * default. */
 export function secondaryAttackFor(handFamily: string): SecondaryAttackInfo {
-  return ALIEN_HAND_FAMILIES.has(handFamily) ? PSIONIC_TRACTOR_BEAM : GROUND_STOMP;
+  if (ALIEN_HAND_FAMILIES.has(handFamily)) return PSIONIC_TRACTOR_BEAM;
+  if (handFamily === ELECTRIC_ARC_HAND_FAMILY) return AREA_SHOCK;
+  return GROUND_STOMP;
 }
 
 /** Convenience overload reading straight off a genome's hand slot. */

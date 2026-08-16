@@ -682,6 +682,7 @@ const BRAINP = [214, 150, 160];
 const ICHOR_N = [150, 235, 190];   // bioluminescent node
 const LASER_N  = [130, 220, 255];  // laser_array emitter glow -- cool cyan, reads distinct from plasma_lance's warm ICHOR/BLTGLO
 const PHOTON_N = [255, 235, 175];  // photon_blaster maw glow -- warm near-white, "stored light" rather than plasma or laser
+const ARC_N    = [140, 175, 255];  // electric_arc electrode glow -- pure electric blue, distinct from laser_array's cyan and plasma_lance's violet ICHOR
 
 function metalColorFn(base) {
   // brushed-metal: catches a hard chrome highlight up top, sinks dark below
@@ -1877,7 +1878,7 @@ function buildPart(mb, slot, family, params, side, sock, o) {
     claw_hand: ['warts', 0.45], pincer: ['chitin', 0.5], tentacle: ['slick', 0.8],
     rifle_arm: ['none', 0], plasma_lance: ['chitin', 0.6], hand_stump: ['warts', 0.3],
     chain_blade: ['none', 0], spore_launcher: ['chitin', 0.55],
-    laser_array: ['chitin', 0.5], photon_blaster: ['chitin', 0.6],
+    laser_array: ['chitin', 0.5], photon_blaster: ['chitin', 0.6], electric_arc: ['chitin', 0.55],
     lamprey_maw: ['slick', 0.85], bone_saw: ['none', 0], ichor_siphon: ['slick', 0.7],
     antenna: ['ridge', 0.35], horn: ['ridge', 0.55], sensor_mast: ['none', 0],
     storage_bladder: ['slick', 0.6], steel_tank: ['none', 0], tank_backpack: ['none', 0], amber_vesicle: ['slick', 0.5],
@@ -2043,6 +2044,37 @@ function buildPart(mb, slot, family, params, side, sock, o) {
       const irisScale = 0.6 + 0.4*orn;
       ellipsoid(mb, mawC, [podR*0.38*irisScale, podR*0.34*irisScale, podR*0.18], PHOTON_N, 0.5, 0.85 + 0.15*orn, 8);
       mb.glow(mawC, PHOTON_N, 14 + 10*orn);
+      break;
+    }
+    case 'electric_arc': {
+      // 2026-08 (creator direction: "a direct Electric arc attack on
+      // opponents and buildings"): the fourth alien-tech hand -- a
+      // fleshy arm coiling into a pair of jointed electrode prongs
+      // arcing a crackling discharge across the gap between their tips.
+      // Own silhouette among the alien-tech hands (not a recolor of
+      // plasma_lance's single lance, laser_array's rigid fan, or
+      // photon_blaster's broad maw) -- girth is canalized LOW for this
+      // family (lean, not bulky), curl HIGH (a tightly coiled conduit),
+      // so both drive real geometry here rather than sitting unused.
+      const wrist = armDrop(mb, S, side, 0.4*scale, scale, { skin: CHITIN, skinFn: null }, [len, girth, taper, curl], N, armCapLen);
+      const baseR = (0.3 + 0.25*girth) * scale;
+      ellipsoid(mb, wrist, [baseR, baseR*0.95, baseR], CHITIN, 0.35, 0, 8);
+      const armL = (1.3 + 1.1*len) * scale;
+      const forkBase = [wrist[0], wrist[1]+armL*0.8, wrist[2]+0.3*scale];
+      tube(mb, [wrist, forkBase], [baseR*0.6, baseR*0.4], CHITIN, 0.4, 0, 8);
+      const spread = (0.3 + 0.35*curl) * scale;   // a tighter coil kicks the prongs further apart
+      const prongL = (0.5 + 0.55*taper) * scale;
+      const tipA = [forkBase[0]-spread, forkBase[1]+prongL, forkBase[2]+prongL*0.4];
+      const tipB = [forkBase[0]+spread, forkBase[1]+prongL, forkBase[2]+prongL*0.4];
+      tube(mb, [forkBase, tipA], [0.09*scale, 0.03*scale], METDK, 0.6, 0.2, 6);
+      tube(mb, [forkBase, tipB], [0.09*scale, 0.03*scale], METDK, 0.6, 0.2, 6);
+      ellipsoid(mb, tipA, [0.07, 0.07, 0.07], ARC_N, 0.5, 1, 5);
+      ellipsoid(mb, tipB, [0.07, 0.07, 0.07], ARC_N, 0.5, 1, 5);
+      const gap = [(tipA[0]+tipB[0])/2, (tipA[1]+tipB[1])/2, (tipA[2]+tipB[2])/2];
+      ellipsoid(mb, gap, [0.1, 0.1, 0.1], ARC_N, 0.35, 0.9, 5);   // the crackling discharge between the prongs
+      mb.glow(tipA, ARC_N, 9);
+      mb.glow(tipB, ARC_N, 9);
+      mb.glow(gap, ARC_N, 14);
       break;
     }
     case 'lamprey_maw': {

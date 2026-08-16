@@ -19610,3 +19610,39 @@ existing class. No Unity Editor in this environment -- none of this has
 been visually confirmed live; in particular the exact colors/timing/
 arc behavior are a first pass meant to be tuned against a real render,
 not a claimed final look.
+
+## 2026-08: Electric Arc -- a 4th alien-tech hand family (Area Shock + a real Electric Arc weapon)
+
+Creator direction, verbatim: "add [an electric attack] into the lab...
+Area shock stuns enemy units for 10 seconds and a direct Electric arc
+attack on opponents and buildings." Full writeup lives in
+`docs/26-special-attacks-system.md` §7 (kept with the rest of the
+special-attacks system it extends, not duplicated here) -- short
+summary: a new genome-bred hand family, `electric_arc`, alongside
+`plasma_lance`/`laser_array`/`photon_blaster` (own silhouette: a coiled
+conduit ending in a pair of divergent electrode prongs with a crackling
+gap, own canalized bounds). Its PRIMARY weapon is a new `WeaponKind.Arc`
+(instant hitscan like Beam, but a jagged Perlin-jittered line instead of
+a clean one) -- building-targeting needed zero new code, confirmed
+already-generic since the 2026-07 AttackBuilding work. Its SECONDARY
+attack is `SecondaryAttackCatalog.AreaShock()` -- `StunDuration = 10f`,
+five times Ground Stomp's 2s, at a smaller radius and the heaviest
+cooldown of the four abilities (a real tradeoff, not a strict upgrade)
+-- and reuses the existing "Area" `VfxStyle` (already electric-themed
+from the prior Area-Attack-VFX pass) with zero new VFX code.
+
+Verified for real, not assumed: `packages/genome-core`'s full 58-test
+suite (including the golden RNG snapshot) run via `npm test` -- passes
+unchanged, and the golden digest turned out NOT sensitive to this
+specific new family (checked, not a blanket assumption). Rebuilt and
+re-vendored into `site/lib/` (`npm run build` + the standard `cp`);
+only `attacks.js`/`catalog.js` changed, confirming no unrelated drift.
+`node --check` clean on `site/main.js`/`site/creature-renderer.js`.
+Brace/paren balance checked on every touched C# file; the two
+pre-existing off-by-one imbalances found (`Weapon.cs`, `CreatureBuilder.cs`)
+were confirmed via `git show HEAD` to predate this change entirely
+(legitimate prose -- an interval-notation comment and a run-on parenthetical
+respectively), not something introduced here. C# test coverage added
+(`WeaponTests.cs`, `CreatureBuilderTests.cs`) but unverified -- no .NET
+SDK in this environment, same standing limitation as every other C#
+change this session.

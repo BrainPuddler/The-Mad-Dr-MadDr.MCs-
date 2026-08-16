@@ -597,6 +597,22 @@ public class MonsterBody : MonoBehaviour
                 Part(PrimitiveType.Sphere, _shoulder, new Vector3(0f, 0.25f * _bulkScale, 0.2f * _bulkScale),
                     Vector3.one * 0.5f * _bulkScale, Shade(ichor, 0.75f));
                 break;
+            case "electric_arc":
+                // 2026-08: a pair of divergent electrode prongs -- this
+                // primitive fallback path is effectively dead code today
+                // (CreatureBuilder.Build never returns null for a
+                // well-formed genome, see MonsterBody's own Init), kept
+                // in step with every other hand family for defensive
+                // consistency rather than left to fall through to the
+                // organic-arm default below.
+                Part(PrimitiveType.Sphere, _shoulder, Vector3.zero, Vector3.one * 0.3f * _bulkScale, Shade(ichor, 0.85f));
+                Part(PrimitiveType.Cylinder, _shoulder, new Vector3(-0.15f * _bulkScale, 0.35f * _bulkScale, 0.15f * _bulkScale),
+                    new Vector3(0.05f, 0.3f, 0.05f) * _bulkScale, new Color(0.55f, 0.69f, 1f))
+                    .localRotation = Quaternion.Euler(60f, 0f, -15f);
+                Part(PrimitiveType.Cylinder, _shoulder, new Vector3(0.15f * _bulkScale, 0.35f * _bulkScale, 0.15f * _bulkScale),
+                    new Vector3(0.05f, 0.3f, 0.05f) * _bulkScale, new Color(0.55f, 0.69f, 1f))
+                    .localRotation = Quaternion.Euler(60f, 0f, 15f);
+                break;
             case "hand_stump":
                 break; // healed over -- nothing to mount (the pivot stays, just empty)
             default: // claw_hand, pincer, tentacle: an organic arm nub + claw wedge

@@ -57,6 +57,22 @@ export const FAMILIES = {
         bounds: bounds({ girth: [0.4, 1.0], ornament: [0.3, 1.0] }),
         invariants: "a fleshy arm ending in a broad bioluminescent maw that pulses with stored photon charge",
     },
+    // 2026-08 (creator direction: "add [an electric attack] into the
+    // lab... a direct Electric arc attack on opponents and buildings"):
+    // the fourth alien-tech hand family, alongside plasma_lance/
+    // laser_array/photon_blaster. Own silhouette (a coiled conduit ending
+    // in a pair of divergent electrode prongs with a crackling gap
+    // between their tips), not a recolor of any sibling -- see docs/12's
+    // own "distinct silhouette, not a palette swap" rule for this alien-
+    // weapon family. Narrows curl HIGH (a tightly coiled conduit) and
+    // girth LOW (lean, not bulky) -- a combination none of the three
+    // siblings share (laser_array narrows curl LOW; photon_blaster
+    // narrows girth HIGH).
+    electric_arc: {
+        homolog: "hand", origin: "biotech",
+        bounds: bounds({ curl: [0.4, 1.0], girth: [0.0, 0.5] }),
+        invariants: "a fleshy arm coiling into a pair of jointed electrode prongs arcing a crackling discharge between their tips",
+    },
     chain_blade: {
         homolog: "hand", origin: "tech",
         bounds: bounds({ curl: [0.0, 0.25] }),

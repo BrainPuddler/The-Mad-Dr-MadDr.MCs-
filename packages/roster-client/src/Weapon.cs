@@ -13,6 +13,7 @@ namespace MadDr.RosterClient
         Bullet,  // rifle / tank cannon: a fast small projectile
         Spore,   // spore_launcher: a lobbed biotech round
         Flame,   // flamethrower: a short continuous cone
+        Arc,     // electric_arc: instant hitscan, jagged/crackling (not Beam's clean line)
     }
 
     /// <summary>A weapon's battlefield stats -- engine-agnostic so the
@@ -251,6 +252,19 @@ namespace MadDr.RosterClient
                 case "plasma_lance":
                     return new WeaponProfile(WeaponKind.Bolt, "Plasma lance", 34, Round1(22 + girth * 16), 1.1, 40, 0,
                         150, 85, 230);
+                case "electric_arc":
+                    // 2026-08 (creator direction: "a direct Electric arc
+                    // attack on opponents and buildings"): a crisp
+                    // electric-blue hitscan zap -- instant like laser_array
+                    // (WeaponKind.Arc, not Bolt), but visually jagged/
+                    // crackling rather than a clean line (see WeaponFx's
+                    // own Arc case). girth is canalized low for this
+                    // family (a lean conduit, see catalog.ts) -- still the
+                    // scaling axis here, same "narrowed axis drives the
+                    // stat" precedent laser_array/photon_blaster/
+                    // plasma_lance already follow.
+                    return new WeaponProfile(WeaponKind.Arc, "Electric arc", 50, Round1(16 + girth * 18), 0.6, 0, 0,
+                        140, 175, 255);
                 case "rifle_arm":
                     return new WeaponProfile(WeaponKind.Bullet, "Rifle", 56, Round1(6 + girth * 5), 0.25, 92, 0,
                         250, 230, 160);

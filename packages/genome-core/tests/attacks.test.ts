@@ -29,7 +29,17 @@ test("every other hand family, including unarmed, gets Ground Stomp", () => {
     const info = secondaryAttackFor(fam);
     assert.equal(info.kind, "ground_stomp");
     assert.equal(info.effect, "stun");
+    assert.equal(info.stunDurationSeconds, 2);
   }
+});
+
+test("electric_arc gets Area Shock -- a much longer stun than Ground Stomp", () => {
+  const info = secondaryAttackFor("electric_arc");
+  assert.equal(info.kind, "area_shock");
+  assert.equal(info.effect, "stun");
+  assert.equal(info.stunDurationSeconds, 10);
+  const groundStompStun = secondaryAttackFor("claw_hand").stunDurationSeconds!;
+  assert.ok(info.stunDurationSeconds! > groundStompStun, "Area Shock should stun longer than Ground Stomp");
 });
 
 test("Ground Stomp is self-centered (range 0) -- matches the Unity twin", () => {

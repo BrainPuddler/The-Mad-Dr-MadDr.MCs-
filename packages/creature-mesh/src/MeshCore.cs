@@ -440,6 +440,7 @@ namespace MadDr.CreatureMesh
         public static readonly Col GLASS = new Col(200, 228, 224);
         public static readonly Col LASER_N = new Col(130, 220, 255);
         public static readonly Col PHOTON_N = new Col(255, 235, 175);
+        public static readonly Col ARC_N = new Col(140, 175, 255);   // electric_arc electrode glow -- pure electric blue, distinct from laser_array's cyan and plasma_lance's violet ICHOR
         public static readonly Col ICHOR_N = new Col(150, 235, 190);
         public static readonly Col TONGUE = new Col(198, 62, 92);
         // planBlob's visible organs

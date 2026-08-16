@@ -432,6 +432,7 @@ public class CreatureBuilderTests
     [InlineData("spore_launcher")]
     [InlineData("laser_array")]
     [InlineData("photon_blaster")]
+    [InlineData("electric_arc")]
     [InlineData("hand_stump")]
     public void EveryHandFamilyAddsGeometry(string family)
     {
@@ -449,6 +450,7 @@ public class CreatureBuilderTests
         Assert.True(HasColor(CreatureBuilder.Build(Genome(hand: "photon_blaster"))!, Palette.PHOTON_N));
         Assert.True(HasColor(CreatureBuilder.Build(Genome(hand: "plasma_lance"))!, Palette.BLTGLO));
         Assert.True(HasColor(CreatureBuilder.Build(Genome(hand: "claw_hand"))!, Palette.CLAW));
+        Assert.True(HasColor(CreatureBuilder.Build(Genome(hand: "electric_arc"))!, Palette.ARC_N));
     }
 
     [Theory]

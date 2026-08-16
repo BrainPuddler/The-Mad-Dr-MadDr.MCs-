@@ -9,6 +9,7 @@ using UnityEngine;
 ///   Spore -> a lobbed biotech Projectile
 ///   Flame (tank flamethrower) -> a short cone of fire, damage now
 ///   Melee (claws/blades) -> a quick reach streak, damage now
+///   Arc   (electric_arc) -> instant jagged blue LineRenderer, damage now
 /// Instant kinds apply damage immediately; projectile kinds apply it on
 /// arrival (see Projectile). All FX are throwaway GameObjects that
 /// Destroy themselves on a timer -- no pooling yet (a perf pass, docs/08).
@@ -27,6 +28,10 @@ public static class WeaponFx
                 break;
             case WeaponKind.Melee:
                 Beam(muzzle, hit, Tint(w), 0.07f, 0.14f);   // a fast slash streak
+                target.TakeDamage((float)w.Damage, source);
+                break;
+            case WeaponKind.Arc:
+                Arc(muzzle, hit, Tint(w), 0.09f, 0.12f);
                 target.TakeDamage((float)w.Damage, source);
                 break;
             case WeaponKind.Flame:
@@ -49,6 +54,9 @@ public static class WeaponFx
             case WeaponKind.Beam:
             case WeaponKind.Melee:
                 Beam(muzzle, point, Tint(w), 0.10f, 0.09f);
+                break;
+            case WeaponKind.Arc:
+                Arc(muzzle, point, Tint(w), 0.09f, 0.12f);   // cosmetic: caller applies structural damage
                 break;
             case WeaponKind.Flame:
                 Flame(muzzle, point, Tint(w), (float)w.Range);
@@ -86,6 +94,52 @@ public static class WeaponFx
         lr.startWidth = width;
         lr.endWidth = width;
         lr.sharedMaterial = Glow(c, 1.8f);
+        lr.startColor = c;
+        lr.endColor = c;
+        Object.Destroy(go, life);
+    }
+
+    /// <summary>2026-08 (creator direction: "a direct Electric arc
+    /// attack"): the electric_arc weapon's own visual -- mechanically
+    /// identical to <see cref="Beam"/> (instant hit, same lifetime), but
+    /// a jagged multi-segment line instead of Beam's perfectly straight
+    /// 2-point one, so a laser_array beam and an electric_arc zap never
+    /// read as the same weapon with a different tint. Perlin noise (not
+    /// UnityEngine.Random) drives the jitter, same idiom TeslaArc.cs/
+    /// AreaAttackEffect already use -- seeded off the shot's own start/
+    /// end points plus Time.time so back-to-back shots from the same
+    /// muzzle still crackle differently. Precomputed ONCE (not an
+    /// Update()-driven jitter like TeslaArc's persistent building prop)
+    /// since this GameObject is destroyed in a fraction of a second,
+    /// same "throwaway GameObject on a timer" shape every other WeaponFx
+    /// primitive already uses.</summary>
+    private static void Arc(Vector3 a, Vector3 b, Color c, float width, float life)
+    {
+        const int segments = 5;
+        var go = new GameObject("Arc");
+        var lr = go.AddComponent<LineRenderer>();
+        lr.useWorldSpace = true;
+        lr.positionCount = segments + 1;
+        var len = (b - a).magnitude;
+        var jitterMag = Mathf.Min(len * 0.12f, 0.6f);
+        var seed = (a.x + b.z) * 13.7f + Time.time * 31f;
+        for (var i = 0; i <= segments; i++)
+        {
+            var t = i / (float)segments;
+            var p = Vector3.Lerp(a, b, t);
+            if (i > 0 && i < segments)
+            {
+                var s = seed + i * 4.1f;
+                p += new Vector3(
+                    Mathf.PerlinNoise(s, 0f) - 0.5f,
+                    Mathf.PerlinNoise(0f, s) - 0.5f,
+                    Mathf.PerlinNoise(s, s) - 0.5f) * jitterMag;
+            }
+            lr.SetPosition(i, p);
+        }
+        lr.startWidth = width;
+        lr.endWidth = width;
+        lr.sharedMaterial = Glow(c, 2.2f);
         lr.startColor = c;
         lr.endColor = c;
         Object.Destroy(go, life);

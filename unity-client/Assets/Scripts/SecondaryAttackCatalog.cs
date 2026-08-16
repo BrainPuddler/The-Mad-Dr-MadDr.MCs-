@@ -20,6 +20,7 @@ public static class SecondaryAttackCatalog
     private static SpecialAttackDefinition _flamethrower;
     private static SpecialAttackDefinition _psionicTractorBeam;
     private static SpecialAttackDefinition _groundStomp;
+    private static SpecialAttackDefinition _areaShock;
 
     /// <summary>Humans (Tank.cs): damage only, no pull/slow/stun --
     /// creator direction, 2026-07: "Humans get flamethrowers (damage
@@ -110,17 +111,52 @@ public static class SecondaryAttackCatalog
         return _groundStomp;
     }
 
-    /// <summary>docs/26 Phase 9: which secondary attack (if any) a MONSTER
-    /// is equipped with, derived purely from its existing genome-derived
+    /// <summary>2026-08 (creator direction, verbatim: "Area shock stuns
+    /// enemy units for 10 seconds"): the electric_arc hand family's own
+    /// secondary attack -- self-centered like Ground Stomp (a discharge
+    /// radiating out from the caster, not a thrown/aimed effect), but a
+    /// much longer stun (10s vs Ground Stomp's 2s) at a smaller radius,
+    /// so the tradeoff is real: a bigger area OR a much longer lockdown,
+    /// never both. `VfxStyle` is left at its default (`Area`) -- already
+    /// an explicit white-core/blue-electric look (SpecialAttackVfx.cs's
+    /// own header), which fits this ability without any new VFX
+    /// code.</summary>
+    public static SpecialAttackDefinition AreaShock()
+    {
+        if (_areaShock == null)
+        {
+            _areaShock = ScriptableObject.CreateInstance<SpecialAttackDefinition>();
+            _areaShock.AbilityName = "Area Shock";
+            _areaShock.Description = "A crackling discharge of electrical current that locks up anything caught within range.";
+            _areaShock.Cooldown = 18f;   // heaviest cooldown of the four -- the payoff is the longest stun in the game
+            _areaShock.Range = 0f;       // self-centered -- no approach distance to close
+            _areaShock.AreaOfEffect = 5f;
+            _areaShock.ValidTargets = TargetFilter.All;
+            _areaShock.EffectType = SpecialAttackEffectType.Stun;
+            _areaShock.StunDuration = 10f;
+            // an electrical discharge over physical mass -- heavier Blood
+            // draw than Bones, same reasoning Psionic Tractor Beam's own
+            // comment gives for "energy over physical material."
+            _areaShock.BloodCost = 4;
+            _areaShock.BonesCost = 2;
+        }
+        return _areaShock;
+    }
+
+    /// <summary>docs/26 Phase 9 (creator follow-up, verbatim: "add [an
+    /// electric attack] into the lab... Area shock stuns enemy units for
+    /// 10 seconds and a direct Electric arc attack on opponents and
+    /// buildings"): which secondary attack (if any) a MONSTER is
+    /// equipped with, derived purely from its existing genome-derived
     /// hand family -- no new gene. Mirrors `Combat.WeaponFor`'s own family
     /// switch (roster-client): the same hand families the creator called
     /// out as alien tech ("aliens laser and photonic blasters") read as
     /// alien-flavored here too, so a monster's weapon and its secondary
-    /// attack are always thematically consistent for free. Everything
-    /// else -- organic/biotech hands -- gets the Mad Doctor's default,
-    /// Ground Stomp. Extensible: a future hand family with its own
-    /// signature attack is one more case here, no other wiring
-    /// changes.</summary>
+    /// attack are always thematically consistent for free -- including
+    /// electric_arc's own Area Shock now. Everything else -- organic/
+    /// biotech hands -- gets the Mad Doctor's default, Ground Stomp.
+    /// Extensible: a future hand family with its own signature attack is
+    /// one more case here, no other wiring changes.</summary>
     public static SpecialAttackDefinition ForMonster(string handFamily)
     {
         switch (handFamily)
@@ -129,6 +165,8 @@ public static class SecondaryAttackCatalog
             case "photon_blaster":
             case "plasma_lance":
                 return PsionicTractorBeam();
+            case "electric_arc":
+                return AreaShock();
             default:
                 return GroundStomp();
         }

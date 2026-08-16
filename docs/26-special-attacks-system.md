@@ -733,6 +733,94 @@ direct chase-and-eat kill) on arrival if they're a `Citizen`.
   requested blood/bones; an overdraw clamps at exactly 0, never
   negative) -- both pass.
 
+## 7. Electric Arc (2026-08 follow-up)
+
+Creator direction, verbatim: "add [an electric attack] into the lab...
+Area shock stuns enemy units for 10 seconds and a direct Electric arc
+attack on opponents and buildings." A fourth alien-tech hand family,
+`electric_arc` (`packages/genome-core/src/catalog.ts`, `origin:
+"biotech"` alongside `plasma_lance`/`laser_array`/`photon_blaster`) --
+own silhouette (a coiled conduit ending in a pair of divergent electrode
+prongs with a crackling gap between their tips, per
+`maddr-aesthetic-preferences`'s "distinct silhouette, not a palette
+swap" rule for this family), own canalized bounds (`curl: [0.4, 1.0]`,
+`girth: [0.0, 0.5]` -- a combination none of the three siblings share).
+
+Two distinct abilities, matching the two halves of the creator's own
+sentence:
+
+- **"a direct Electric arc attack on opponents and buildings"** -- the
+  hand's PRIMARY weapon (`Combat.WeaponFor`, roster-client): a new
+  `WeaponKind.Arc`, mechanically identical to `Beam` (instant hitscan,
+  damage applied the same frame -- `WeaponFx.Fire`'s switch), but
+  visually a jagged multi-segment line (`WeaponFx.Arc`, Perlin-noise
+  jittered, precomputed once since the GameObject self-destroys in a
+  fraction of a second) instead of `Beam`'s perfectly straight one, so
+  it never reads as "a laser with a different tint." Building-targeting
+  needed ZERO new code -- confirmed by inspection that
+  `MonsterAgent.TickSpecialAttack`'s `AttackBuilding` path (docs/12,
+  2026-07) already reads `_fighter.Weapon.Damage` generically for
+  building damage, with no per-`WeaponKind` branch; this has been true
+  of every weapon kind since that feature shipped, `electric_arc` just
+  inherits it for free.
+- **"Area shock stuns enemy units for 10 seconds"** -- the hand's
+  SECONDARY attack (`SecondaryAttackCatalog.AreaShock()`): a 4th
+  `ForMonster` case alongside Psionic Tractor Beam/Ground Stomp,
+  `EffectType.Stun`, self-centered like Ground Stomp (`Range = 0`) but
+  `StunDuration = 10f` -- five times Ground Stomp's 2s -- at a smaller
+  `AreaOfEffect` (5 vs 6) and the heaviest `Cooldown` of the four (18s):
+  a real tradeoff (bigger area OR a much longer lockdown, never both),
+  not a strict upgrade. `VfxStyle` was left at its default (`Area`) --
+  already an explicit white-core/blue-electric look from the 2026-08
+  "Strong Visual Representation for Area Attacks and Psionics" pass
+  (`SpecialAttackVfx.cs`), so Area Shock needed no new VFX code at all,
+  just the ability definition.
+
+**Full checklist actually touched** (kept as a reference for the next
+hand family, per the docs/12 decision-log precedent this checklist
+itself was assembled from): `packages/genome-core/src/catalog.ts` (new
+`FAMILIES` entry) + `tests/catalog.test.ts`; `packages/genome-core/
+src/attacks.ts` (its own `ALIEN_HAND_FAMILIES`-style set, a new
+`AREA_SHOCK` const, a 3rd `SecondaryAttackInfo.kind` union literal, and
+a new optional `stunDurationSeconds` field backfilled onto Ground Stomp
+too rather than leaving it the only kind without one) +
+`tests/attacks.test.ts`; `site/creature-renderer.js`'s hand-geometry
+switch (no `default:` case exists there -- forgetting this would have
+drawn a silently invisible arm) + its `TEX_FAM` table; `packages/
+creature-mesh/src/CreatureBuilder.cs` (the switch Unity ACTUALLY
+renders from -- `MonsterBody.BuildWeapon`'s own primitive switch is
+effectively dead code today, `CreatureBuilder.Build` never returns null
+for a well-formed genome, but got a matching case anyway for defensive
+consistency) + a new `Palette.ARC_N`; `packages/roster-client/
+src/Weapon.cs` (`WeaponKind.Arc` + the `electric_arc` case) +
+`WeaponTests.cs`; `unity-client/Assets/Scripts/WeaponFx.cs` (the `Arc`
+visual) + `MonsterBody.cs` (the dead-but-kept-consistent fallback case);
+`SecondaryAttackCatalog.cs` (`AreaShock()` + the `ForMonster` case).
+Genuinely NOT needed, contrary to a literal read of CLAUDE.md's
+docs-06/07/08 "Normative-schema rule": those three docs describe the
+genome schema's SHAPE (slot structure, gene axes, tiers), not the part
+catalog's contents -- confirmed by direct precedent, the earlier
+`chain_blade`/`spore_launcher` catalog addition's own decision-log entry
+states outright "genome v2's schema shape is unchanged, so this is not
+a docs 06/07/08 schema co-change," and this addition is the identical
+shape of change.
+
+`packages/genome-core`'s full 58-test suite (including the golden RNG
+snapshot) passes unchanged -- verified by actually running `npm test`,
+not assumed; the golden digest for its one pinned seed (2026) turned out
+NOT sensitive to this specific new family (no `test:update-golden`
+regen needed this time, contrary to what the `chain_blade`/
+`spore_launcher` precedent's own "expect a deliberate RNG-stream break"
+note would suggest -- a real, checked fact for this addition, not a
+blanket rule that adding a family never affects the golden digest).
+`npm run build` + re-vendored into `site/lib/` per CLAUDE.md's own
+convention (only `attacks.js`/`catalog.js` changed, confirming a clean
+build with no unrelated drift). The C# side (`WeaponTests.cs`,
+`CreatureBuilderTests.cs`) gained matching coverage but is unverified in
+this environment -- no .NET SDK available here, same standing limitation
+as every other Unity/C# change; verified only by brace/paren balance and
+direct signature cross-checking against the real source.
+
 ## v0.1 tuning appendix
 
 To be filled in as playtesting begins: Web Attack cooldown/range/AoE radius.

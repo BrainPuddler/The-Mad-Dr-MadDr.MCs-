@@ -1579,6 +1579,39 @@ namespace MadDr.CreatureMesh
                         Palette.PHOTON_N, 0.5, 0.85 + 0.15 * orn, 8);
                     break;
                 }
+                case "electric_arc":
+                {
+                    // 2026-08 (creator direction: "a direct Electric arc
+                    // attack on opponents and buildings"): the fourth
+                    // alien-tech hand -- a fleshy arm coiling into a pair
+                    // of jointed electrode prongs arcing a crackling
+                    // discharge across the gap between their tips. Own
+                    // silhouette among the alien-tech hands (not a
+                    // recolor of plasma_lance's single lance,
+                    // laser_array's rigid fan, or photon_blaster's broad
+                    // maw). Kept in lockstep with site/creature-renderer.js's
+                    // own 'electric_arc' case -- girth is canalized LOW
+                    // for this family (lean, not bulky), curl HIGH (a
+                    // tightly coiled conduit), so both drive real
+                    // geometry here rather than sitting unused.
+                    var wrist = ArmDrop(mb, s, side, 0.4 * scale, scale, Palette.CHITIN, pg, n, capLen);
+                    var baseR = (0.3 + 0.25 * girth) * scale;
+                    Prims.Ellipsoid(mb, wrist, new Vec3(baseR, baseR * 0.95, baseR), Palette.CHITIN, 0.35, 0, 8);
+                    var armL = (1.3 + 1.1 * len) * scale;
+                    var forkBase = new Vec3(wrist.X, wrist.Y + armL * 0.8, wrist.Z + 0.3 * scale);
+                    Prims.Tube(mb, new[] { wrist, forkBase }, new[] { baseR * 0.6, baseR * 0.4 }, Palette.CHITIN, 0.4, 0, 8);
+                    var spread = (0.3 + 0.35 * curl) * scale;
+                    var prongL = (0.5 + 0.55 * taper) * scale;
+                    var tipA = new Vec3(forkBase.X - spread, forkBase.Y + prongL, forkBase.Z + prongL * 0.4);
+                    var tipB = new Vec3(forkBase.X + spread, forkBase.Y + prongL, forkBase.Z + prongL * 0.4);
+                    Prims.Tube(mb, new[] { forkBase, tipA }, new[] { 0.09 * scale, 0.03 * scale }, Palette.METDK, 0.6, 0.2, 6);
+                    Prims.Tube(mb, new[] { forkBase, tipB }, new[] { 0.09 * scale, 0.03 * scale }, Palette.METDK, 0.6, 0.2, 6);
+                    Prims.Ellipsoid(mb, tipA, new Vec3(0.07, 0.07, 0.07), Palette.ARC_N, 0.5, 1, 5);
+                    Prims.Ellipsoid(mb, tipB, new Vec3(0.07, 0.07, 0.07), Palette.ARC_N, 0.5, 1, 5);
+                    var gap = new Vec3((tipA.X + tipB.X) * 0.5, (tipA.Y + tipB.Y) * 0.5, (tipA.Z + tipB.Z) * 0.5);
+                    Prims.Ellipsoid(mb, gap, new Vec3(0.1, 0.1, 0.1), Palette.ARC_N, 0.35, 0.9, 5);
+                    break;
+                }
                 case "lamprey_maw":
                 {
                     // the harvest suction tool (docs/22): a fleshy hose-arm

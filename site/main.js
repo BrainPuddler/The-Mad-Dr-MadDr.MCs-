@@ -1042,7 +1042,9 @@ function _renderScreenInner(el) {
   // like every other hand-derived stat on this screen.
   const atk = secondaryAttackForGenome(g);
   const atkDelivery = atk.range > 0 ? `range ${atk.range}m` : "self-centered";
-  const atkEffect = atk.effect === "stun" ? "stun" : "pull & consume";
+  const atkEffect = atk.effect === "stun"
+    ? `stun ${atk.stunDurationSeconds ?? "?"}s`
+    : "pull & consume";
 
   el.innerHTML = `
     <h3>${c.alive ? "" : "💀 "}${esc(c.name)} — vital signs</h3>

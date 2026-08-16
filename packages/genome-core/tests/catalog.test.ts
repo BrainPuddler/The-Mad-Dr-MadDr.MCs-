@@ -21,14 +21,26 @@ test("laser_array and photon_blaster are biotech hand weapons, not vestigial", (
   }
 });
 
-test("the three alien hand weapons (plasma_lance, laser_array, photon_blaster) have distinct canalized bounds", () => {
+test("the four alien hand weapons (plasma_lance, laser_array, photon_blaster, electric_arc) have distinct canalized bounds", () => {
   const lance = FAMILIES.plasma_lance!.bounds;
   const array = FAMILIES.laser_array!.bounds;
   const blaster = FAMILIES.photon_blaster!.bounds;
+  const arc = FAMILIES.electric_arc!.bounds;
 
-  // Each narrows a different axis away from the full [0,1] range, so
-  // breeding one never silently drifts into looking like another.
+  // Each narrows a different axis (or combination) away from the full
+  // [0,1] range, so breeding one never silently drifts into looking
+  // like another.
   assert.notDeepEqual(lance, array);
   assert.notDeepEqual(lance, blaster);
+  assert.notDeepEqual(lance, arc);
   assert.notDeepEqual(array, blaster);
+  assert.notDeepEqual(array, arc);
+  assert.notDeepEqual(blaster, arc);
+});
+
+test("electric_arc is a biotech hand weapon, not vestigial", () => {
+  assert.equal(isKnownFamily("electric_arc"), true);
+  assert.equal(homologOf("electric_arc"), "hand");
+  assert.equal(originOf("electric_arc"), "biotech");
+  assert.equal(isVestigial("electric_arc"), false);
 });

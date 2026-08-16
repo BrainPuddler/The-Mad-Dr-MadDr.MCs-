@@ -25,6 +25,7 @@ public class WeaponTests
     [InlineData("laser_array", WeaponKind.Beam)]
     [InlineData("photon_blaster", WeaponKind.Bolt)]
     [InlineData("plasma_lance", WeaponKind.Bolt)]
+    [InlineData("electric_arc", WeaponKind.Arc)]
     [InlineData("rifle_arm", WeaponKind.Bullet)]
     [InlineData("spore_launcher", WeaponKind.Spore)]
     [InlineData("chain_blade", WeaponKind.Melee)]
@@ -41,7 +42,7 @@ public class WeaponTests
     [Fact]
     public void ArmedWeaponsHavePositiveRangeDamageCadence()
     {
-        foreach (var fam in new[] { "laser_array", "photon_blaster", "plasma_lance", "rifle_arm",
+        foreach (var fam in new[] { "laser_array", "photon_blaster", "plasma_lance", "electric_arc", "rifle_arm",
             "spore_launcher", "chain_blade", "claw_hand", "pincer", "tentacle" })
         {
             var w = Combat.WeaponFor(fam, Mid());
@@ -92,6 +93,30 @@ public class WeaponTests
         var fat = Mid(); fat[1] = 1.0;
         Assert.True(Combat.WeaponFor("photon_blaster", fat).Damage
             > Combat.WeaponFor("photon_blaster", thin).Damage);
+    }
+
+    /// <summary>2026-08 (creator direction: "a direct Electric arc
+    /// attack on opponents and buildings"): Arc is an instant hitscan
+    /// kind, same delivery shape as Beam/Melee (ProjectileSpeed == 0 --
+    /// see WeaponFx.Fire's own switch, which applies damage the same
+    /// frame for all three), not a travelling Projectile like
+    /// Bolt/Bullet/Spore. Building-targeting itself needs no dedicated
+    /// test here -- MonsterAgent.TickSpecialAttack's AttackBuilding path
+    /// already reads whatever WeaponProfile.Damage this returns
+    /// generically, with no per-WeaponKind branch (confirmed by
+    /// inspection).</summary>
+    [Fact]
+    public void ElectricArcIsInstantAndScalesWithGirth()
+    {
+        var arc = Combat.WeaponFor("electric_arc", Mid());
+        Assert.Equal(WeaponKind.Arc, arc.Kind);
+        Assert.Equal(0, arc.ProjectileSpeed);
+        Assert.True(arc.CanAttack);
+
+        var thin = Mid(); thin[1] = 0.0;   // girth
+        var fat = Mid(); fat[1] = 1.0;
+        Assert.True(Combat.WeaponFor("electric_arc", fat).Damage
+            > Combat.WeaponFor("electric_arc", thin).Damage);
     }
 
     [Fact]
