@@ -19025,3 +19025,47 @@ paths, not just the happy path; caught and fixed a real bug during
 review (`Drop()` used to re-resolve its own drop target with a null
 Camera, which would have silently disabled clipboard detection for
 every physical-monster drop) before it ever reached a commit.
+
+## 2026-08 follow-up: roof-displaying monsters excluded from battalion commands
+
+Creator direction, verbatim: "if a monster in the factory then it
+should be excluded from battalion commands."
+
+A battalion member currently resting/spinning on a Factory roof as the
+display specimen for what's being cloned there (`MonsterAgent.
+_roofDisplay`, set by `BeginRoofDisplay`) could still be selected and
+ordered right along with the rest of its battalion -- `SelectBattalion`
+(Alt+digit, or `BattalionHud`'s own "select" button before last
+session's drag-pickup change repurposed that row's plain click) fed the
+battalion's full member list straight into `SetSelection` with no
+filtering at all, and `BeginRoofDisplay`'s own doc comment already
+establishes "persists until a real order is issued" -- so a move/attack
+order given to the rest of the group would yank the display specimen
+off the roof mid-display too.
+
+**Fix**: new `MonsterAgent.IsRoofDisplaying` (a public read of the
+existing private `_roofDisplay` field -- no new state). `SelectBattalion`
+now builds its selection from only the NON-displaying members, leaving
+a displaying member out entirely -- `b.Members` itself is never
+mutated, so the specimen is still a real, permanent battalion member,
+just not swept into commands issued while it happens to be on display.
+A direct individual click on that same specimen still selects/orders it
+normally; this only affects the battalion-selection path.
+
+Deliberately NOT extended to marquee/click selection in general (a
+roof-displaying monster can still be lassoed or clicked directly, and
+then ordered) -- the creator's own wording scoped this to "battalion
+commands" specifically, and that's the one place this project's own
+vocabulary already uses that term (`SelectBattalion`/`BattalionHud`).
+`GrabCursor.BuildBattalionAtOwnFactory`/`BeginCarryingOrder` (which read
+the SAME `WaypointCommander.BattalionMembers`, unfiltered) are also
+untouched -- those are production actions, not commands, and the
+displaying specimen's own genome should still count toward "build more
+of this battalion."
+
+Checked by hand, no Unity Editor in this environment: confirmed
+`BattalionMembers`'s only two call sites are both production-related
+(`BuildBattalionAtOwnFactory`/`BeginCarryingOrder`, neither an order-
+issuing path) so leaving it unfiltered is correct, not an oversight;
+brace/paren balance on both touched files (`MonsterAgent.cs`,
+`WaypointCommander.cs`).

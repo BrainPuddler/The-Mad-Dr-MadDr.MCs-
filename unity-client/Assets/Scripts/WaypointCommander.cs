@@ -323,7 +323,24 @@ public class WaypointCommander : MonoBehaviour
         if (b == null) return;
         PruneBattalion(b);
         if (b.Members.Count == 0) { _battalions[slot] = null; return; }
-        SetSelection(b.Members);
+
+        // 2026-08 (creator direction: "if a monster in the factory then
+        // it should be excluded from battalion commands"): a member
+        // currently resting/spinning on a Factory roof as the display
+        // specimen for what's being cloned there (MonsterAgent.
+        // IsRoofDisplaying) is left OUT of the selection -- giving the
+        // rest of the battalion a move/attack order shouldn't also yank
+        // this one off the roof mid-display (BeginRoofDisplay's own doc
+        // comment already establishes "persists until a real order is
+        // issued," so simply never selecting it here is enough).
+        // b.Members ITSELF is never touched -- the specimen is still a
+        // real battalion member, just not swept into commands while
+        // displaying; a direct individual click/order on it still works.
+        var selectable = new List<MonsterAgent>(b.Members.Count);
+        foreach (var m in b.Members)
+            if (m != null && !m.IsRoofDisplaying) selectable.Add(m);
+        if (selectable.Count == 0) return;   // the whole battalion is currently on display -- nothing to select
+        SetSelection(selectable);
     }
 
     private static void PruneBattalion(Battalion b)

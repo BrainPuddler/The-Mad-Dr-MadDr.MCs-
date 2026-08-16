@@ -898,6 +898,17 @@ public class MonsterAgent : MonoBehaviour
     private const float RoofSpinDegPerSec = 40f;
     private GameObject _roofGlow;
 
+    /// <summary>2026-08 (creator direction: "if a monster in the factory
+    /// then it should be excluded from battalion commands"): whether
+    /// this specimen is currently resting/spinning on a Factory roof as
+    /// the display specimen for what's being cloned there (see <see
+    /// cref="BeginRoofDisplay"/>) -- <see
+    /// cref="WaypointCommander.SelectBattalion"/> reads this to leave a
+    /// displaying member out of the battalion's own selection, so a
+    /// move/attack order given to the rest of the group doesn't also
+    /// yank it off the roof mid-display.</summary>
+    public bool IsRoofDisplaying { get { return _roofDisplay; } }
+
     /// <summary>Creator direction: "When dropped into the factory, it
     /// should land on the roof and rotate slowly in the Y axis" -- AFTER
     /// resetting to normal orientation first (see <see cref="EndHeld"/>'s
