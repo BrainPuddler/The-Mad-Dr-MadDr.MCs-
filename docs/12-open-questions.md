@@ -19121,3 +19121,34 @@ four `SpawnFactoryClipboard` call sites are present; confirmed
 attached directly to the hit collider's own GameObject (not just an
 ancestor), so the new hit-zone object resolves the same way the old
 board-only identity did; brace/paren balance on `BaseDresser.cs`.
+
+## 2026-08 follow-up: the clipboard, made much bigger and actually clipboard-shaped
+
+Creator direction, verbatim: "make it much bigger and look like a clip
+board, and big enough so at a reasonable RTS distance it is easy to
+drop onto." Explicitly supersedes this feature's own original brief
+("do not make the clipboard unnecessarily large... medium-sized") --
+noted directly in `SpawnFactoryClipboard`'s own doc comment rather than
+silently dropped, since a real playtest is exactly the kind of finding
+that should override an untested design assumption.
+
+Board width/height roughly tripled (post height clamp raised from
+0.9-1.6 to 2.4-4.5, board dimensions scaled off that). A third
+primitive -- a `Steel()` band across the top of the board, protruding
+past its face -- gives the prop an actual clipboard SILHOUETTE (board +
+clip) instead of reading as a plain sign; reuses the same project-wide
+steel material every faction's own rivets already use, no new material.
+The invisible hit-zone from the previous pass now scales directly off
+the bigger board dimensions plus extra padding, so "easy to drop onto"
+grows right along with the visible geometry instead of needing a
+second independent tuning pass. Outward clearance from the building
+footprint raised (1.5 -> 2.4 units) to match the now-larger assembly.
+
+Checked by hand: caught and fixed a duplicate stacked `<summary>` XML
+doc comment left over mid-edit (the same class of mistake made and
+fixed earlier this session) before it reached a commit; brace/paren
+balance on `BaseDresser.cs`. No Unity Editor in this environment to
+confirm the new silhouette/size actually reads as "a clipboard" or is
+comfortably droppable at real RTS zoom -- worth a look the next time
+this can be played, same standing limit as everything else this
+session.

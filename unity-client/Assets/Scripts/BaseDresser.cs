@@ -2249,14 +2249,9 @@ public class BaseDresser : MonoBehaviour
     /// <summary>2026-08 (creator direction: "Implement and integrate a
     /// Factory Build Queue / Order Clipboard system... Add a medium-sized
     /// clipboard/order-form object physically attached to or positioned
-    /// on the Factory. The clipboard is the Factory's production
-    /// queue/order form... Do not make the clipboard unnecessarily
-    /// large... approximately medium-sized relative to the Factory and
-    /// easy to target without dominating the scene... Keep the clipboard
-    /// geometry extremely lightweight"): exactly TWO primitives -- a
-    /// short post plus a flat board -- positioned OUTSIDE the building's
-    /// own footprint, the same "beside the building, not overlapping the
-    /// body" convention the Doctor faction's own tank/pipes/housing/tube
+    /// on the Factory"): positioned OUTSIDE the building's own footprint,
+    /// the same "beside the building, not overlapping the body"
+    /// convention the Doctor faction's own tank/pipes/housing/tube
     /// already use for their own ground-level fixtures. Placed there
     /// deliberately rather than tucked into a specific corner: every
     /// faction's own roof/ground dressing already claims different
@@ -2269,8 +2264,8 @@ public class BaseDresser : MonoBehaviour
     /// Parented under the caller's own `trim` holder (identical reasoning
     /// to <see cref="SpawnRoofDisplayPlatform"/>'s own doc comment --
     /// `TintShape` only re-tints DIRECT children of `root`, so anything
-    /// under `trim` keeps its own real parchment/post color instead of
-    /// being flattened to the owner's faction tint) and tagged with a
+    /// under `trim` keeps its own real parchment/post/steel color instead
+    /// of being flattened to the owner's faction tint) and tagged with a
     /// <see cref="FactoryClipboard"/> identity component so
     /// `GrabCursor`'s raycast can tell "hit the clipboard" apart from
     /// "hit the rest of the Factory body" (<see
@@ -2278,22 +2273,39 @@ public class BaseDresser : MonoBehaviour
     /// `root`'s own <see cref="BuildingIdentity"/> (already attached by
     /// `BuildCompleteShape`'s caller before any `BuildXFactory` method
     /// runs) rather than threaded through every dispatch signature as a
-    /// new parameter.</summary>
+    /// new parameter.
+    ///
+    /// 2026-08 follow-up (creator direction, verbatim: "make it much
+    /// bigger and look like a clip board, and big enough so at a
+    /// reasonable RTS distance it is easy to drop onto"): explicitly
+    /// supersedes this method's own original "do not make the clipboard
+    /// unnecessarily large... medium-sized" brief above -- a real
+    /// playtest found medium too small to reliably use at all, so this
+    /// pass prioritizes "easy to drop onto" over "small and out of the
+    /// way." Board is roughly 3x wider/taller than the original size, and
+    /// a third primitive -- a `Steel()` clip band across the top, the
+    /// SAME project-wide steel material every other faction's rivets
+    /// already use -- gives it a real clipboard silhouette (board + clip)
+    /// instead of reading as a plain sign board.</summary>
     private void SpawnFactoryClipboard(Transform trim, Vector3 origin, Vector3 fullScale, GameObject root)
     {
         var identity = root.GetComponent<BuildingIdentity>();
         var entityId = identity != null ? identity.EntityId : 0u;
 
-        var postHeight = Mathf.Clamp(fullScale.y * 0.14f, 0.9f, 1.6f);
-        var postRadius = fullScale.x * 0.015f;
-        var boardWidth = postHeight * 0.55f;
-        var boardHeight = postHeight * 0.65f;
-        var boardThickness = postRadius * 3f;
+        var postHeight = Mathf.Clamp(fullScale.y * 0.22f, 2.4f, 4.5f);
+        var postRadius = fullScale.x * 0.022f;
+        var boardWidth = postHeight * 0.62f;
+        var boardHeight = postHeight * 0.78f;
+        var boardThickness = postRadius * 2.2f;
+        var clipWidth = boardWidth * 0.46f;
+        var clipHeight = boardHeight * 0.16f;
+        var clipThickness = boardThickness * 2.4f;   // protrudes past the board's own face -- the detail that actually reads as "a clip," not just a thicker board
 
         // outside the footprint, back-left -- clear of every faction's
         // own roof/corner/front-wall fixtures without needing to know
-        // what any of them are.
-        var basePos = origin + Vector3.back * (fullScale.z * 0.5f + 1.5f) + Vector3.left * (fullScale.x * 0.25f);
+        // what any of them are. Extra clearance vs. the original pass
+        // (1.5 -> 2.4) since the whole assembly is now visibly bigger.
+        var basePos = origin + Vector3.back * (fullScale.z * 0.5f + 2.4f) + Vector3.left * (fullScale.x * 0.25f);
 
         var post = builder.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (postHeight * 0.5f),
             new Vector3(postRadius * 2f, postHeight * 0.5f, postRadius * 2f), ClipboardPostMat(), trim);
@@ -2306,6 +2318,18 @@ public class BaseDresser : MonoBehaviour
         board.name = "FactoryClipboardBoard";
         DestroyColliderIfPresent(board);
 
+        // the clip -- a real metal band across the top of the board,
+        // protruding forward past the board's own face, the ONE detail
+        // that actually makes this read as "a clipboard" instead of "a
+        // sign." Reuses Steel() rather than a new one-off metal material.
+        var clipCenter = boardCenter
+            + Vector3.up * (boardHeight * 0.5f - clipHeight * 0.4f)
+            + Vector3.back * (boardThickness * 0.5f + clipThickness * 0.3f);
+        var clip = builder.SpawnPrim(PrimitiveType.Cube, clipCenter,
+            new Vector3(clipWidth, clipHeight, clipThickness), Steel(), trim);
+        clip.name = "FactoryClipboardClip";
+        DestroyColliderIfPresent(clip);
+
         // 2026-08 bugfix (creator report: "the snap takes effect before
         // I can reach the pink clipboard" -- traced to the board's own
         // default collider exactly matching its small VISIBLE mesh, so
@@ -2313,27 +2337,23 @@ public class BaseDresser : MonoBehaviour
         // landed precisely on it -- the much larger, always-succeeding
         // Factory-body hex-proximity fallback (GrabCursor.
         // ResolveDropTarget's own second check) won by default nearly
-        // every time, reading as "it snaps to build-now before I can
-        // even reach the clipboard"). A dedicated, INVISIBLE hit zone
-        // (collider only -- its own Renderer is destroyed right after
-        // spawning) generously covers post+board together, several
-        // times wider than what's actually drawn -- the same "the
-        // clickable area is bigger than the visible art" trick most
-        // real games use for small UI-adjacent world props, needed here
-        // because neither primitive's own auto-sized collider was ever
-        // going to be reliably hittable at normal zoom. Carries the ONE
-        // FactoryClipboard identity for the whole prop, so a hit
-        // anywhere in the padded zone around post OR board resolves the
-        // same way.
-        var hitZoneSize = Mathf.Max(boardWidth, boardHeight, postRadius * 2f) + 1.6f;
+        // every time). A dedicated, INVISIBLE hit zone (collider only --
+        // its own Renderer is destroyed right after spawning) generously
+        // covers the whole assembly -- sized off the NOW-bigger board, so
+        // it grows right along with the visible geometry this pass
+        // enlarges, plus extra padding on top of that per "big enough...
+        // easy to drop onto." Carries the ONE FactoryClipboard identity
+        // for the whole prop, so a hit anywhere in the padded zone around
+        // post, board, OR clip resolves the same way.
+        var hitZoneSize = Mathf.Max(boardWidth, boardHeight) + 2.5f;
         var hitZoneCenter = basePos + Vector3.up * (postHeight * 0.5f);
         var hitZone = builder.SpawnPrim(PrimitiveType.Cube, hitZoneCenter,
-            new Vector3(hitZoneSize, postHeight + 1f, hitZoneSize), Placeholder(), trim);
+            new Vector3(hitZoneSize, postHeight + 1.5f, hitZoneSize), Placeholder(), trim);
         hitZone.name = "FactoryClipboardHitZone";
         var hitZoneRenderer = hitZone.GetComponent<Renderer>();
         if (hitZoneRenderer != null) Destroy(hitZoneRenderer);
-        var clip = hitZone.AddComponent<FactoryClipboard>();
-        clip.FactoryEntityId = entityId;
+        var identityComponent = hitZone.AddComponent<FactoryClipboard>();
+        identityComponent.FactoryEntityId = entityId;
     }
 
     private static void DestroyColliderIfPresent(GameObject go)
