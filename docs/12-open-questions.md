@@ -19442,3 +19442,27 @@ creature that already has a portrait.
 Checked by hand: brace/paren balance on `GrabCursor.cs`; `node --check`
 + brace/paren balance on `site/main.js`. No Unity Editor or browser in
 this environment -- neither fix has been visually confirmed live.
+
+## 2026-08 follow-up: battalions show name + count, no portrait
+
+Creator direction, verbatim: "for a battalion just display the name of
+the battalion, some sort 1 or 10 counter."
+
+`GrabCursor.ProductionQueueFor` previously picked the FIRST still-
+remaining member's portrait as a "representative" image for a
+Battalion/LabBattalion queue item (`FirstPortrait`, added alongside the
+original portrait-export pass). A mixed battalion has no single true
+likeness, so this read as misleading rather than helpful -- a Battalion
+of "3 Tetrapods + 2 Winged" would show only the Tetrapod's face with no
+indication anything else was in it. Battalion/LabBattalion items now
+always report a null `PortraitPng`; every consumer (`ProductionQueueHud`'s
+tile row, `FactoryOrdersHud`'s Order Sheet slots, `RoofPortraitHologram`)
+already had a null-portrait fallback -- flat tile + text abbreviation +
+the full name underneath + the remaining-count corner badge -- so this
+needed no downstream changes, just no longer feeding those consumers a
+portrait for a battalion to begin with. `FirstPortrait` (now unused)
+was deleted.
+
+Checked by hand: brace/paren balance on `GrabCursor.cs`; grep confirmed
+no remaining references to `FirstPortrait`. No Unity Editor in this
+environment to visually confirm.

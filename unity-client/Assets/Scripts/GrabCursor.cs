@@ -365,12 +365,19 @@ public class GrabCursor : MonoBehaviour
     /// a failed client-side bake), which every consumer falls back to a
     /// text-abbreviation tile for, same "optional field, never a hard
     /// error" contract every other layer of this pipeline already
-    /// follows. A Battalion/LabBattalion item shows its FIRST still-
-    /// remaining member's portrait as representative of the whole group
-    /// -- there's no single "the" image for a mixed battalion, and the
-    /// first member is a stable, deterministic choice (not e.g.
-    /// "whichever happens to build next," which would flicker the
-    /// tile's own image as the queue drains).</summary>
+    /// follows.
+    ///
+    /// 2026-08 follow-up (creator direction, verbatim: "for a battalion
+    /// just display the name of the battalion, some sort 1 or 10
+    /// counter"): a Battalion/LabBattalion item ALWAYS reports a null
+    /// `PortraitPng` here, deliberately -- this used to show its first
+    /// still-remaining member's portrait as a "representative" image,
+    /// but a mixed battalion has no single true likeness, and picking
+    /// one member's face read as misleading rather than helpful. Every
+    /// consumer (queue tiles, the Order Sheet, the roof hologram) already
+    /// has a null-portrait fallback -- name + remaining-count badge, no
+    /// image -- so this needed no downstream changes, just no longer
+    /// feeding it a portrait to begin with.</summary>
     public IEnumerable<(string Label, int Remaining, float Progress, string PortraitPng)> ProductionQueueFor(SimBuilding factory)
     {
         var q = FactoryQueueFor(factory, false);
@@ -379,19 +386,7 @@ public class GrabCursor : MonoBehaviour
         {
             var item = q.Items[i];
             var remaining = RemainingOf(item);
-            string portraitPng;
-            if (item.Kind == QueueItemKind.SingleUnit)
-            {
-                portraitPng = item.SingleGenome?.PortraitPng;
-            }
-            else if (item.Kind == QueueItemKind.Battalion)
-            {
-                portraitPng = FirstPortrait(item.BattalionRemaining, m => m.Genome?.PortraitPng);
-            }
-            else
-            {
-                portraitPng = FirstPortrait(item.LabBattalionRemaining, g => g?.PortraitPng);
-            }
+            var portraitPng = item.Kind == QueueItemKind.SingleUnit ? item.SingleGenome?.PortraitPng : null;
             var progress = i == 0 ? Mathf.Clamp01(q.ProductionTimer / Mathf.Max(0.01f, productionSecondsPerUnit)) : 0f;
             yield return (item.Label, remaining, progress, portraitPng);
         }
@@ -408,22 +403,6 @@ public class GrabCursor : MonoBehaviour
     public IEnumerable<(string Label, int Remaining, float Progress, string PortraitPng)> ProductionQueue
     {
         get { return ProductionQueueFor(FindAnyOwnCompleteFactory()); }
-    }
-
-    /// <summary>First remaining member (in queue order) that actually
-    /// has a portrait -- see <see cref="ProductionQueueFor"/>'s own doc
-    /// for why index 0 alone isn't good enough for a multi-member item.
-    /// Null if none of the remaining members have one, same "optional
-    /// field, never a hard error" fallback every other portrait consumer
-    /// in this pipeline already uses.</summary>
-    private static string FirstPortrait<T>(List<T> members, System.Func<T, string> portraitOf)
-    {
-        foreach (var m in members)
-        {
-            var p = portraitOf(m);
-            if (!string.IsNullOrEmpty(p)) return p;
-        }
-        return null;
     }
 
     /// <summary>True if `FindAnyOwnCompleteFactory`'s own queue (the
