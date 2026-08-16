@@ -19466,3 +19466,48 @@ was deleted.
 Checked by hand: brace/paren balance on `GrabCursor.cs`; grep confirmed
 no remaining references to `FirstPortrait`. No Unity Editor in this
 environment to visually confirm.
+
+## 2026-08 follow-up: builds still not completing -- promote-on-drop removed entirely
+
+Creator report, verbatim: "Cued Monster are still NOT completing I
+think because any monster dropped on top of roof, becomes the current
+build and therefore stop the current one. Builds must be completed in
+order not pushed onto the stack but put at the bottom."
+
+Correct diagnosis. The original design (this feature's very first pass)
+made dropping directly onto a Factory's body/roof an "immediate
+command" -- it always promoted the new order to the front of the queue
+via `PromoteToFront`, which ALSO reset that Factory's `ProductionTimer`
+to 0 so the newly-promoted item started from a clean interval. Since
+dropping a monster onto the Factory roof is the single most natural way
+to queue something, repeatedly doing it (which is exactly what building
+up a queue looks like) kept interrupting and resetting whatever was
+already mid-build, over and over, before it could ever actually
+complete -- a direct, mechanical cause of "not completing," not a
+red herring.
+
+Per the creator's explicit new direction, promotion is gone entirely,
+not just narrowed: `PromoteToFront` itself is deleted, and every drop
+path -- the normal 3D-world Factory-body/roof drop (`Drop`/
+`DropCarriedOrder`), AND every Order Sheet slot including slot 0
+(`DropIntoSlot`) -- now always appends to the BOTTOM of the target
+Factory's queue via the same `QueueSingleUnit`/`QueueBattalionAt`/
+`QueueLabBattalionAt` it always used, never reordering or touching an
+already-building item's progress. The queue is now strictly FIFO; slot
+0 in the Order Sheet still DISPLAYS the active build (that's just
+whatever the queue's own front happens to be), it's simply no longer a
+special drop target -- the Order Sheet's own up/down buttons remain the
+only way to deliberately move something toward the front.
+
+This composes cleanly with the roof-display fix from the previous
+follow-up entry: since nothing promotes anymore, a fresh drop only ever
+claims the Factory's roof when the queue was completely empty
+beforehand (so the new item lands at the front naturally) -- appending
+behind an already-building item leaves the roof specimen untouched,
+exactly as that earlier fix intended, with no special-casing needed
+here at all.
+
+Checked by hand: brace/paren balance on `GrabCursor.cs`,
+`FactoryOrdersHud.cs`, `ProductionQueueHud.cs`; grep sweep confirmed
+zero remaining references to `PromoteToFront`/`promoteToFront` anywhere
+in `unity-client/`. No Unity Editor in this environment to confirm live.

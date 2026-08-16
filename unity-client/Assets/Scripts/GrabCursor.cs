@@ -443,8 +443,7 @@ public class GrabCursor : MonoBehaviour
     /// drops. `radius` is captured NOW (from whichever live agent is
     /// being dropped/queued), not re-derived from the genome later --
     /// see <see cref="QueueItem"/>'s own doc for why. Returns the
-    /// touched/created item so a direct Factory-body (or slot-0) drop
-    /// can promote it to the front (see <see cref="PromoteToFront"/>).</summary>
+    /// touched/created item.</summary>
     private QueueItem QueueSingleUnit(SimBuilding factory, StoredGenomeDto genome, float radius, int count)
     {
         if (genome == null || count <= 0) return null;
@@ -465,38 +464,6 @@ public class GrabCursor : MonoBehaviour
         };
         q.Items.Add(created);
         return created;
-    }
-
-    /// <summary>2026-08 (creator direction, verbatim: "If an order is
-    /// dropped onto the Factory itself, it is an immediate command...
-    /// [it] is interrupted/kicked out according to existing rules... [is]
-    /// parked nearby / otherwise preserved... [the new order] becomes
-    /// current build"; follow-up: "the current monster being built is in
-    /// the current slot"): moves `item` to index 0 of `factory`'s own
-    /// queue -- whatever WAS at index 0 simply shifts to index 1, its
-    /// `RemainingCount`/`BattalionRemaining` completely untouched, so
-    /// "kick the current build" is a plain reorder, never a deletion.
-    /// Used by both a direct Factory-body drop (<see cref="Drop"/>/<see
-    /// cref="DropCarriedOrder"/>) and a slot-0 drop in the Order Sheet
-    /// (<see cref="DropIntoSlot"/>) -- "the current slot" IS index 0,
-    /// the same concept either way. A no-op if `item` is null (nothing
-    /// was actually queued -- an empty battalion, a null genome) or
-    /// already at the front.</summary>
-    private void PromoteToFront(SimBuilding factory, QueueItem item)
-    {
-        if (item == null) return;
-        var q = FactoryQueueFor(factory, false);
-        if (q == null) return;
-        var idx = q.Items.IndexOf(item);
-        if (idx <= 0) return;
-        q.Items.RemoveAt(idx);
-        q.Items.Insert(0, item);
-        // a promoted SingleUnit item's timer would otherwise keep
-        // whatever fraction of a clone-interval the DISPLACED item had
-        // already banked -- reset it so the newly promoted order starts
-        // its own first clone from a clean interval, not a stolen partial
-        // one.
-        q.ProductionTimer = 0f;
     }
 
     /// <summary>One production tick per frame -- advances EVERY owned
@@ -972,24 +939,26 @@ public class GrabCursor : MonoBehaviour
 
     /// <summary>2026-08 (creator direction, verbatim: "the current
     /// monster being built is in the current slot and new monster or
-    /// battalion can be dropped in a slot"): whichever of `_carried`/the
-    /// abstract-order fields is actually active gets queued at
-    /// `factory`, exactly like a normal drop -- slot 0 ("the current
-    /// slot") promotes to the active build (<see
-    /// cref="PromoteToFront"/>), any other visible slot appends to the
-    /// queue, same "slot 0 interrupts, everything else queues" split a
-    /// direct Factory-body drop vs. the old clipboard already had.
-    /// Deliberately does NOT distinguish which specific non-zero slot
-    /// was targeted beyond that -- true positional insertion would need
-    /// to shift every later item, and the Order Sheet's own up/down
-    /// buttons already cover "put it exactly here" after the fact.
-    /// Shares <see cref="DropMonsterAt"/>/<see cref="DropOrderAt"/> with
-    /// the normal 3D-world drop paths (<see cref="Drop"/>/<see
-    /// cref="DropCarriedOrder"/>) so there's exactly one place each
-    /// actually queues something, not two copies that could drift.</summary>
+    /// battalion can be dropped in a slot"; follow-up, verbatim: "Cued
+    /// Monster are still NOT completing I think because any monster
+    /// dropped on top of roof, becomes the current build and therefore
+    /// stop the current one. Builds must be completed in order not
+    /// pushed onto the stack but put at the bottom"): whichever of
+    /// `_carried`/the abstract-order fields is actually active gets
+    /// queued at `factory`, always appended at the bottom regardless of
+    /// which slot (including slot 0, "the current slot") was targeted --
+    /// dropping never interrupts or reorders an already-building item
+    /// anymore, see <see cref="DropMonsterAt"/>'s own doc comment for why
+    /// that used to silently reset the active build's progress every
+    /// time. Doesn't distinguish which slot was targeted at all now --
+    /// the Order Sheet's own up/down buttons remain the only way to
+    /// deliberately reorder the queue. Shares <see cref="DropMonsterAt"/>/
+    /// <see cref="DropOrderAt"/> with the normal 3D-world drop paths
+    /// (<see cref="Drop"/>/<see cref="DropCarriedOrder"/>) so there's
+    /// exactly one place each actually queues something, not two copies
+    /// that could drift.</summary>
     private void DropIntoSlot(SimBuilding factory, int slotIndex)
     {
-        var promote = slotIndex == 0;
         if (_carried != null)
         {
             var agent = _carried;
@@ -997,7 +966,7 @@ public class GrabCursor : MonoBehaviour
             _carriedFromRoofFactory = null;
             _mode = Mode.Armed;
             HideDragHighlight();
-            DropMonsterAt(factory, agent, promote);
+            DropMonsterAt(factory, agent);
             return;
         }
         if (_carriedOrderKind != CarriedOrderKind.None)
@@ -1009,43 +978,54 @@ public class GrabCursor : MonoBehaviour
             EndCarryingOrder();
             _mode = Mode.Armed;
             HideDragHighlight();
-            DropOrderAt(factory, kind, members, labName, labIds, promote);
+            DropOrderAt(factory, kind, members, labName, labIds);
         }
     }
 
-    /// <summary>2026-08 (Factory Build Queue / Order Clipboard, "The
-    /// newly dropped Monster/Battalion becomes the Factory's current
-    /// build"): the actual queue+roof-display logic for dropping a
-    /// physical monster at `factory` -- shared by the normal world drop
-    /// (<see cref="Drop"/>) and the Order Sheet's own slot drop (<see
-    /// cref="DropIntoSlot"/>) so this exists in exactly one place. A
-    /// null `factory` just ends the hold in place (nothing to drop
-    /// onto), matching this method's own callers' existing "dropped
-    /// outside any valid target" behavior.</summary>
-    private void DropMonsterAt(SimBuilding factory, MonsterAgent agent, bool promoteToFront)
+    /// <summary>2026-08 (Factory Build Queue / Order Clipboard): the
+    /// actual queue+roof-display logic for dropping a physical monster at
+    /// `factory` -- shared by the normal world drop (<see cref="Drop"/>)
+    /// and the Order Sheet's own slot drop (<see cref="DropIntoSlot"/>)
+    /// so this exists in exactly one place. A null `factory` just ends
+    /// the hold in place (nothing to drop onto), matching this method's
+    /// own callers' existing "dropped outside any valid target" behavior.
+    ///
+    /// 2026-08 follow-up (creator report, verbatim: "Cued Monster are
+    /// still NOT completing I think because any monster dropped on top
+    /// of roof, becomes the current build and therefore stop the current
+    /// one. Builds must be completed in order not pushed onto the stack
+    /// but put at the bottom"): this used to always promote a fresh drop
+    /// to the front of the queue (an "immediate command," per the
+    /// original design) -- which, combined with the old promote's own
+    /// timer reset, meant repeatedly dropping monsters onto a Factory
+    /// (the single most natural way to queue) kept interrupting whatever
+    /// was already building before it could ever finish, so nothing ever
+    /// completed. There is no promotion anymore: every drop -- 3D-world
+    /// or any Order Sheet slot -- appends to the BOTTOM of the queue via
+    /// <see cref="QueueSingleUnit"/>/<see cref="QueueBattalionAt"/>/<see
+    /// cref="QueueLabBattalionAt"/>, same as always, and never reorders
+    /// or resets anything already in flight. The queue drains strictly
+    /// in order; the Order Sheet's own up/down buttons are the only way
+    /// to deliberately reorder it now.</summary>
+    private void DropMonsterAt(SimBuilding factory, MonsterAgent agent)
     {
         if (factory == null) { agent.EndHeld(); return; }
 
         var item = CloneOnto(factory, agent);
-        if (promoteToFront) PromoteToFront(factory, item);
 
-        // 2026-08 bugfix (creator report, verbatim: "the monster on the
-        // roof must be the one currently being built no one in the
-        // cue"): this used to claim the roof UNCONDITIONALLY on every
-        // drop, regardless of `promoteToFront` -- so a monster appended
-        // behind an existing build (a non-zero Order Sheet slot drop)
-        // would immediately bump the roof display even though its own
-        // clone order hadn't started yet, misrepresenting what the
-        // Factory was actually producing. The roof specimen now only
-        // ever changes when THIS drop's own item is actually the active
-        // build afterward -- either because it was just promoted, or
-        // because the queue was empty and it landed at the front
+        // the roof specimen only ever changes when THIS drop's own item
+        // actually ends up as the active (index 0) build -- which, now
+        // that nothing is ever promoted, only happens when the queue was
+        // empty before this drop, so the new item landed at the front
         // naturally (`QueueSingleUnit`'s own append-to-empty-list
         // behavior). Appending behind an existing build leaves whatever
-        // is currently displayed untouched, and `agent` itself just ends
-        // its hold in place (never consumed -- see this method's own
-        // "original creature" note below), same as dropping outside any
-        // valid target.
+        // is currently displayed on the roof untouched, and `agent`
+        // itself just ends its hold in place (never consumed -- see this
+        // method's own "original creature" note below), same as dropping
+        // outside any valid target. See docs/12's write-up (creator
+        // report: "the monster on the roof must be the one currently
+        // being built no one in the cue") for the earlier half of this
+        // fix.
         var q = FactoryQueueFor(factory, false);
         var isActiveBuild = item != null && q != null && q.Items.Count > 0 && q.Items[0] == item;
         if (!isActiveBuild) { agent.EndHeld(); return; }
@@ -1075,26 +1055,26 @@ public class GrabCursor : MonoBehaviour
 
     /// <summary>The abstract-order counterpart to <see
     /// cref="DropMonsterAt"/> -- queues a Battalion/LabBattalion at
-    /// `factory` and optionally promotes it, shared by <see
+    /// `factory`, appended at the bottom (see <see cref="DropMonsterAt"/>'s
+    /// own doc comment -- nothing ever promotes anymore), shared by <see
     /// cref="DropCarriedOrder"/> and <see cref="DropIntoSlot"/>. A null
     /// `factory` is a silent no-op (an abstract order has no physical
     /// presence to "leave behind" the way a monster does).</summary>
-    private void DropOrderAt(SimBuilding factory, CarriedOrderKind kind, IReadOnlyList<MonsterAgent> members, string labName, string[] labIds, bool promoteToFront)
+    private void DropOrderAt(SimBuilding factory, CarriedOrderKind kind, IReadOnlyList<MonsterAgent> members, string labName, string[] labIds)
     {
         if (factory == null) return;
-        QueueItem item = null;
-        if (kind == CarriedOrderKind.Battalion) item = QueueBattalionAt(factory, members);
-        else if (kind == CarriedOrderKind.LabBattalion) item = QueueLabBattalionAt(factory, labName, labIds);
-        if (promoteToFront) PromoteToFront(factory, item);
+        if (kind == CarriedOrderKind.Battalion) QueueBattalionAt(factory, members);
+        else if (kind == CarriedOrderKind.LabBattalion) QueueLabBattalionAt(factory, labName, labIds);
     }
 
     /// <summary>The abstract-order counterpart to <see cref="Drop"/> --
-    /// same direct-drop-promotes / dropped-outside-does-nothing shape,
-    /// just queueing a Battalion/LabBattalion instead of moving a
-    /// physical `MonsterAgent`. Dropping outside any valid target
-    /// (`DropTarget.None`) simply cancels the carry -- nothing was ever
-    /// "picked up" physically, so there's nothing to return to the
-    /// world.</summary>
+    /// same dropped-outside-does-nothing shape, just queueing a
+    /// Battalion/LabBattalion instead of moving a physical
+    /// `MonsterAgent`; appends at the bottom, same as every other drop
+    /// path now (see <see cref="DropMonsterAt"/>'s own doc comment).
+    /// Dropping outside any valid target (`DropTarget.None`) simply
+    /// cancels the carry -- nothing was ever "picked up" physically, so
+    /// there's nothing to return to the world.</summary>
     private void DropCarriedOrder(DropTarget target, SimBuilding factory)
     {
         var kind = _carriedOrderKind;
@@ -1106,7 +1086,7 @@ public class GrabCursor : MonoBehaviour
         HideDragHighlight();
 
         if (target == DropTarget.None || factory == null) return;
-        DropOrderAt(factory, kind, members, labName, labIds, target == DropTarget.FactoryBody);
+        DropOrderAt(factory, kind, members, labName, labIds);
     }
 
     /// <summary>2026-08 (creator direction, verbatim: "if a monster is
@@ -1332,12 +1312,16 @@ public class GrabCursor : MonoBehaviour
         if (factory != null && orderSheetHud != null) orderSheetHud.Toggle(factory);
     }
 
-    /// <summary>`target`/`factory` are the SAME resolution `Update()`
-    /// already computed this frame for the drag highlight (<see
+    /// <summary>`factory` is the SAME resolution `Update()` already
+    /// computed this frame for the drag highlight (<see
     /// cref="ResolveDropTarget"/>) -- passed straight through rather than
     /// re-resolving a second time. Delegates the actual queueing/roof-
     /// display work to <see cref="DropMonsterAt"/>, shared with the
-    /// Order Sheet's own slot-drop path.</summary>
+    /// Order Sheet's own slot-drop path. `target` no longer changes
+    /// anything here (there's only one non-None `DropTarget` left, and
+    /// dropping never promotes -- see `DropMonsterAt`'s own doc comment)
+    /// -- kept in the signature only because `Update()` already has both
+    /// halves of the same `ResolveDropTarget` tuple in hand.</summary>
     private void Drop(DropTarget target, SimBuilding factory)
     {
         var agent = _carried;
@@ -1346,7 +1330,7 @@ public class GrabCursor : MonoBehaviour
         _mode = Mode.Armed;   // stays armed -- pick up the next one right away
         HideDragHighlight();
         if (agent == null) return;
-        DropMonsterAt(factory, agent, target == DropTarget.FactoryBody);
+        DropMonsterAt(factory, agent);
     }
 
     /// <summary>Roof occupancy only ever changes at TWO real events -- a
@@ -1533,11 +1517,11 @@ public class GrabCursor : MonoBehaviour
 
     /// <summary>2026-08 ("Allow queued orders to be moved up/down"): a
     /// plain index swap with its neighbor -- moving index 0 (the active
-    /// build) down demotes it exactly the same way <see
-    /// cref="PromoteToFront"/> demotes whatever WAS active on a fresh
-    /// Factory-body/slot-0 drop, so the active-build concept stays
-    /// "whatever is at index 0," never a separate flag to keep in
-    /// sync.</summary>
+    /// build) down demotes it the same way a swap always does, so the
+    /// active-build concept stays "whatever is at index 0," never a
+    /// separate flag to keep in sync. Now that dropping never promotes
+    /// (see <see cref="DropMonsterAt"/>'s own doc comment), this pair is
+    /// the ONLY way to deliberately move an item toward the front.</summary>
     public void MoveOrderUp(SimBuilding factory, int index)
     {
         var q = FactoryQueueFor(factory, false);
@@ -1599,9 +1583,8 @@ public class GrabCursor : MonoBehaviour
     /// deduped -- "build that battalion GROUP" reads as reproducing the
     /// whole squad's own composition/proportions, e.g. 3 Tetrapods + 2
     /// Winged queues 3 more Tetrapods + 2 more Winged, not just one of
-    /// each distinct type. Returns the created item (for
-    /// `PromoteToFront`) or null if the battalion is empty/all members
-    /// have since died.</summary>
+    /// each distinct type. Returns the created item, or null if the
+    /// battalion is empty/all members have since died.</summary>
     private QueueItem QueueBattalionAt(SimBuilding factory, IReadOnlyList<MonsterAgent> battalion)
     {
         if (battalion == null || battalion.Count == 0 || factory == null) return null;
@@ -1643,7 +1626,7 @@ public class GrabCursor : MonoBehaviour
     /// template storage already takes; the rest of the battalion still
     /// builds. Duplicate ids resolve to duplicate queue entries (the
     /// template legitimately allows "3 Tetrapods + 2 Winged"). Returns
-    /// the created item (for `PromoteToFront`) or null.</summary>
+    /// the created item, or null.</summary>
     private QueueItem QueueLabBattalionAt(SimBuilding factory, string name, string[] creatureIds)
     {
         if (string.IsNullOrEmpty(name) || creatureIds == null || creatureIds.Length == 0 || builder == null || factory == null) return null;
@@ -1850,14 +1833,12 @@ public class GrabCursor : MonoBehaviour
         return tex;
     }
 
-    /// <summary>2026-08 (Factory Build Queue / Order Clipboard, "The
-    /// newly dropped Monster/Battalion becomes the Factory's current
-    /// build"): the physical-monster counterpart to <see
-    /// cref="QueueSingleUnit"/>'s Battalion siblings -- queues
-    /// `_pendingBuildCount` clones of `original`'s own genome at
-    /// `factory` and returns the touched/created item so <see
-    /// cref="DropMonsterAt"/> can promote it on a Factory-body/slot-0
-    /// target.</summary>
+    /// <summary>2026-08 (Factory Build Queue / Order Clipboard): the
+    /// physical-monster counterpart to <see cref="QueueSingleUnit"/>'s
+    /// Battalion siblings -- queues `_pendingBuildCount` clones of
+    /// `original`'s own genome at `factory` and returns the
+    /// touched/created item so <see cref="DropMonsterAt"/> can tell
+    /// whether it landed as the active build.</summary>
     private QueueItem CloneOnto(SimBuilding factory, MonsterAgent original)
     {
         var creature = original.Creature;

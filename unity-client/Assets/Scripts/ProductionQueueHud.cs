@@ -119,11 +119,11 @@ public class ProductionQueueHud : MonoBehaviour
     /// which tile column the cursor is currently over -- mirrors <see
     /// cref="FactoryOrdersHud.HoveredSlotIndex"/>'s own contract exactly
     /// (-1 if not hovering a real tile, or this panel isn't even drawn
-    /// this frame). Index 0 is the SAME "current slot" concept the Order
-    /// Sheet already uses (a drop there promotes/interrupts); any other
-    /// index appends. <see cref="GrabCursor"/> reads this every frame
-    /// while Carrying, exactly like it already does for the Order
-    /// Sheet.</summary>
+    /// this frame). Any index (including 0, "the current slot") appends
+    /// at the bottom of the queue -- dropping never promotes/interrupts
+    /// (see <see cref="GrabCursor.DropMonsterAt"/>'s own doc comment).
+    /// <see cref="GrabCursor"/> reads this every frame while Carrying,
+    /// exactly like it already does for the Order Sheet.</summary>
     public int HoveredTileIndex { get; private set; } = -1;
 
     public void Init(GrabCursor grabCursorRef, RoofPortraitHologram roofHologramRef)

@@ -22,9 +22,17 @@ using UnityEngine;
 /// current slot" (the active build, with its own live progress bar);
 /// every other filled slot is the queue, in build order; one extra empty
 /// "+" slot past the last filled one is always drawn as a direct drop
-/// target for a brand-new order (<see cref="GrabCursor.DropIntoSlot"/>
-/// treats it exactly like any other non-zero slot -- append, don't
-/// interrupt).
+/// target for a brand-new order.
+///
+/// 2026-08 follow-up (creator report, verbatim: "Cued Monster are still
+/// NOT completing I think because any monster dropped on top of roof,
+/// becomes the current build and therefore stop the current one. Builds
+/// must be completed in order not pushed onto the stack but put at the
+/// bottom"): dropping into ANY slot, including slot 0, now always
+/// appends at the bottom of the queue (<see cref="GrabCursor.DropIntoSlot"/>)
+/// -- it never interrupts or resets whatever is already building. Slot 0
+/// still shows the active build (that's just whatever the queue's own
+/// front happens to be), it's just no longer a special drop target.
 ///
 /// Docked directly ABOVE <see cref="ProductionQueueHud"/>'s own tile row
 /// (reading its live <see cref="ProductionQueueHud.TileRowTop"/>, same
