@@ -19152,3 +19152,63 @@ confirm the new silhouette/size actually reads as "a clipboard" or is
 comfortably droppable at real RTS zoom -- worth a look the next time
 this can be played, same standing limit as everything else this
 session.
+
+## 2026-08 follow-up: tall glowing pole -- the clipboard was invisible, not just hard to hit
+
+Creator report, verbatim: "I CAN NOT see the clipboard on any of the
+races. Put it on a Tall Pole next to the Factory and make it GLOW!"
+
+A stronger report than the previous "hard to reach" one -- this says
+the prop isn't visible at all, on any faction, not just imprecise to
+click. Re-verified the spawn wiring is genuinely present for all four
+factions (unchanged from the prior pass's own check) and could not find
+a code-level reason the geometry itself would fail to render (the
+board's material is built the same way as several other working
+flat-colored materials in this file) -- without a live Editor this
+can't be conclusively root-caused from static review alone, so this
+pass implements exactly what was asked for rather than guessing further
+at a rendering bug: a much taller, genuinely glowing pole that should
+be very hard to miss even if something subtler was wrong with the
+previous quieter version.
+
+**Tall pole**: post height clamp raised from 2.4-4.5 to 9-18 units --
+at or above the building's own roofline for most Factories, not
+waist-height. The board is now mounted near the TOP of the pole (was
+partway up), reading as a sign/beacon rather than a notice board planted
+at head height.
+
+**Glow**: `ClipboardBoardMat` now carries real base emission
+(`_EMISSION` + `_EmissionColor`, same pattern `DoctorGlowMat` already
+uses), and the board is wired into `SpawnPulseLight` -- the SAME real-
+time Point Light + pulsing-emission pairing every other glowing fixture
+in this file already uses (the Doctor faction's own glass tube, the
+Human mast lamp, the Alien crystal core). This is a genuine light
+source, not just a bright material, so the pole should read as a lit
+beacon well outside normal camera range, day or night -- "make it
+GLOW," read literally. Warm amber-gold, distinct from every faction's
+own accent lighting color (Doctor green, Alien purple, Human blue) so
+it never gets mistaken for faction dressing.
+
+**Hit zone** now spans the pole's FULL height (ground to top) instead of
+just the board near the top -- since the pole itself is now a large,
+hard-to-miss vertical shape, letting the whole thing be clickable (not
+only the small board at the very top) makes the actual click target
+far more forgiving too, compounding with the previous pass's own
+oversized invisible hit-zone fix.
+
+Checked by hand, no Unity Editor in this environment (the real
+limitation here -- this is the second report on the same prop, and
+static code review alone couldn't find a definitive rendering-bug root
+cause for total invisibility): confirmed `SpawnPulseLight`'s exact
+signature/parameter order against its own real declaration and several
+other working call sites in this same file, not assumed; confirmed
+`EerieChamberGlow.Init` reads its glow color from a per-renderer
+`MaterialPropertyBlock`, never mutating the shared cached `Material`
+asset, so multiple Factories' clipboards pulsing independently while
+sharing one material is safe; brace/paren balance on `BaseDresser.cs`.
+If the prop is STILL not visible after this pass, that would point
+away from "too subtle/small to notice" and toward a more fundamental
+issue (spawn order, a layer/culling setting, or something else this
+session's static review genuinely cannot diagnose without a live
+render) worth flagging explicitly rather than iterating on size/glow
+again.

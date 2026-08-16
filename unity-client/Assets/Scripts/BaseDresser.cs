@@ -2282,29 +2282,45 @@ public class BaseDresser : MonoBehaviour
     /// unnecessarily large... medium-sized" brief above -- a real
     /// playtest found medium too small to reliably use at all, so this
     /// pass prioritizes "easy to drop onto" over "small and out of the
-    /// way." Board is roughly 3x wider/taller than the original size, and
-    /// a third primitive -- a `Steel()` clip band across the top, the
-    /// SAME project-wide steel material every other faction's rivets
+    /// way." A third primitive -- a `Steel()` clip band across the top,
+    /// the SAME project-wide steel material every other faction's rivets
     /// already use -- gives it a real clipboard silhouette (board + clip)
-    /// instead of reading as a plain sign board.</summary>
+    /// instead of reading as a plain sign board.
+    ///
+    /// 2026-08 follow-up (creator report, verbatim: "I CAN NOT see the
+    /// clipboard on any of the races. Put it on a Tall Pole next to the
+    /// Factory and make it GLOW!"): the post is now a genuine tall pole
+    /// (clamped 9-18 units, at or above the building's own roofline in
+    /// most cases -- was 2.4-4.5, waist-height at best) with the board
+    /// mounted near its TOP rather than partway up, like a sign/beacon
+    /// rather than a notice board. `ClipboardBoardMat` now carries real
+    /// base emission, driven at runtime by <see cref="SpawnPulseLight"/>
+    /// (the SAME real-time Point Light + pulsing-emission pairing every
+    /// other glowing fixture in this file already uses, e.g. the Doctor
+    /// faction's own glass tube) -- a genuine light source, not just a
+    /// bright material, so the whole pole reads as a lit beacon from
+    /// well outside normal click range, day or night. The hit zone now
+    /// spans the pole's FULL height (not just the board near the top),
+    /// so the tall, hard-to-miss silhouette this pass adds is also a
+    /// forgiving click target top to bottom, not only right at the
+    /// board.</summary>
     private void SpawnFactoryClipboard(Transform trim, Vector3 origin, Vector3 fullScale, GameObject root)
     {
         var identity = root.GetComponent<BuildingIdentity>();
         var entityId = identity != null ? identity.EntityId : 0u;
 
-        var postHeight = Mathf.Clamp(fullScale.y * 0.22f, 2.4f, 4.5f);
-        var postRadius = fullScale.x * 0.022f;
-        var boardWidth = postHeight * 0.62f;
-        var boardHeight = postHeight * 0.78f;
-        var boardThickness = postRadius * 2.2f;
+        var postHeight = Mathf.Clamp(fullScale.y * 0.9f, 9f, 18f);
+        var postRadius = fullScale.x * 0.018f;
+        var boardWidth = Mathf.Clamp(fullScale.x * 0.12f, 2.6f, 4.6f);
+        var boardHeight = boardWidth * 1.25f;
+        var boardThickness = postRadius * 3f;
         var clipWidth = boardWidth * 0.46f;
         var clipHeight = boardHeight * 0.16f;
         var clipThickness = boardThickness * 2.4f;   // protrudes past the board's own face -- the detail that actually reads as "a clip," not just a thicker board
 
         // outside the footprint, back-left -- clear of every faction's
         // own roof/corner/front-wall fixtures without needing to know
-        // what any of them are. Extra clearance vs. the original pass
-        // (1.5 -> 2.4) since the whole assembly is now visibly bigger.
+        // what any of them are.
         var basePos = origin + Vector3.back * (fullScale.z * 0.5f + 2.4f) + Vector3.left * (fullScale.x * 0.25f);
 
         var post = builder.SpawnPrim(PrimitiveType.Cylinder, basePos + Vector3.up * (postHeight * 0.5f),
@@ -2312,11 +2328,20 @@ public class BaseDresser : MonoBehaviour
         post.name = "FactoryClipboardPost";
         DestroyColliderIfPresent(post);   // hit-testing goes through the dedicated zone below, not this thin post's own capsule
 
-        var boardCenter = basePos + Vector3.up * (postHeight - boardHeight * 0.35f);
+        // mounted near the TOP of the tall pole -- a beacon, not a
+        // waist-height notice board.
+        var boardCenter = basePos + Vector3.up * (postHeight - boardHeight * 0.6f);
         var board = builder.SpawnPrim(PrimitiveType.Cube, boardCenter,
             new Vector3(boardWidth, boardHeight, boardThickness), ClipboardBoardMat(), trim);
         board.name = "FactoryClipboardBoard";
         DestroyColliderIfPresent(board);
+
+        // real light, not just a bright material -- "make it GLOW,"
+        // read literally. Warm amber-gold, distinct from every faction's
+        // own accent lighting (Doctor green, Alien purple, Human blue),
+        // so a lit clipboard never gets mistaken for faction dressing.
+        SpawnPulseLight(trim, boardCenter, board,
+            new Color(1f, 0.82f, 0.4f), new Color(1f, 0.82f, 0.4f) * 1.6f, fullScale.x * 1.8f, 3.4f);
 
         // the clip -- a real metal band across the top of the board,
         // protruding forward past the board's own face, the ONE detail
@@ -2338,17 +2363,18 @@ public class BaseDresser : MonoBehaviour
         // Factory-body hex-proximity fallback (GrabCursor.
         // ResolveDropTarget's own second check) won by default nearly
         // every time). A dedicated, INVISIBLE hit zone (collider only --
-        // its own Renderer is destroyed right after spawning) generously
-        // covers the whole assembly -- sized off the NOW-bigger board, so
-        // it grows right along with the visible geometry this pass
-        // enlarges, plus extra padding on top of that per "big enough...
-        // easy to drop onto." Carries the ONE FactoryClipboard identity
-        // for the whole prop, so a hit anywhere in the padded zone around
+        // its own Renderer is destroyed right after spawning) now spans
+        // the WHOLE pole height (ground to top), not just the board near
+        // the top -- the tall pole itself is now a big, hard-to-miss
+        // visual target, so letting the player click anywhere along its
+        // length (not only right at the small board) makes it far more
+        // forgiving. Carries the ONE FactoryClipboard identity for the
+        // whole prop, so a hit anywhere in the padded zone around the
         // post, board, OR clip resolves the same way.
         var hitZoneSize = Mathf.Max(boardWidth, boardHeight) + 2.5f;
         var hitZoneCenter = basePos + Vector3.up * (postHeight * 0.5f);
         var hitZone = builder.SpawnPrim(PrimitiveType.Cube, hitZoneCenter,
-            new Vector3(hitZoneSize, postHeight + 1.5f, hitZoneSize), Placeholder(), trim);
+            new Vector3(hitZoneSize, postHeight + 2f, hitZoneSize), Placeholder(), trim);
         hitZone.name = "FactoryClipboardHitZone";
         var hitZoneRenderer = hitZone.GetComponent<Renderer>();
         if (hitZoneRenderer != null) Destroy(hitZoneRenderer);
@@ -2362,13 +2388,25 @@ public class BaseDresser : MonoBehaviour
         if (collider != null) Destroy(collider);
     }
 
+    /// <summary>2026-08 follow-up (creator report: "I CAN NOT see the
+    /// clipboard on any of the races... make it GLOW!"): base emission
+    /// (`_EMISSION` keyword + a base `_EmissionColor`) is set here, same
+    /// as `DoctorGlowMat`'s own pattern -- `SpawnPulseLight`/
+    /// `EerieChamberGlow` then modulate this renderer's emission
+    /// intensity at runtime via a per-instance `MaterialPropertyBlock`
+    /// (never touching the shared `Material` asset itself, so every
+    /// Factory's own clipboard pulses independently despite sharing one
+    /// cached material).</summary>
     private static Material _clipboardBoardMat;
     private static Material ClipboardBoardMat()
     {
         if (_clipboardBoardMat == null)
         {
             _clipboardBoardMat = new Material(ShaderUtil.FindRenderableShader());
-            _clipboardBoardMat.color = new Color(0.86f, 0.82f, 0.68f);   // pale parchment -- reads as "paper," distinct from every faction's own brass/steel/stone/aluminum palette
+            var glow = new Color(1f, 0.86f, 0.55f);   // warm amber-gold parchment glow -- reads as "an illuminated order form," distinct from every faction's own brass/steel/stone/aluminum palette
+            _clipboardBoardMat.color = glow;
+            _clipboardBoardMat.EnableKeyword("_EMISSION");
+            _clipboardBoardMat.SetColor("_EmissionColor", glow * 1.4f);
         }
         return _clipboardBoardMat;
     }
