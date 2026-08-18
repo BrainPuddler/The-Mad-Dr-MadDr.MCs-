@@ -113,6 +113,26 @@ function nameOf(id)     { return local.nameMap[id] ?? id.slice(-8); }
 function vword(v)       { return `load ${v.load.toFixed(1)} / cap ${v.capacity.toFixed(1)}`; }
 function pct(x)         { return `${Math.round(x * 100)}%`; }
 function esc(s)         { return String(s).replace(/[&<>"]/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[ch])); }
+
+// 2026-08 ("Expand Secondary Attack Variety Across Races" -- Lab
+// follow-up: "did that get rewritten in the lab as well?"): one short
+// human-readable phrase per SecondaryAttackEffect, reading whichever
+// magnitude field that effect actually carries (attacks.ts's own
+// SecondaryAttackInfo only populates the ONE field relevant to its own
+// effect -- everything else is undefined, never a fabricated number).
+function describeSecondaryEffect(atk) {
+  switch (atk.effect) {
+    case "stun": return `stun ${atk.stunDurationSeconds ?? "?"}s`;
+    case "fear": return `fear ${atk.fearDurationSeconds ?? "?"}s`;
+    case "weaken": return `weaken ${atk.tempoMultiplier ?? "?"}x for ${atk.tempoDurationSeconds ?? "?"}s`;
+    case "boost": return `self-boost ${atk.tempoMultiplier ?? "?"}x for ${atk.tempoDurationSeconds ?? "?"}s`;
+    case "possess": return `possess ${atk.possessChancePercent ?? "?"}% for ${atk.possessDurationSeconds ?? "?"}s`;
+    case "hazard": return `hazard, ${atk.hazardDurationSeconds ?? "?"}s`;
+    case "damage": return `${atk.damageAmount ?? "?"} damage`;
+    case "pull_and_consume": return "pull & consume";
+    default: return atk.effect;
+  }
+}
 function bar(x)         { return `<span class="bar"><i style="width:${Math.round(x*100)}%"></i></span>${pct(x)}`; }
 function ikey()         { return crypto.randomUUID(); }
 
@@ -1036,15 +1056,25 @@ function _renderScreenInner(el) {
   const bt = berserkThreshold(g.brain);
   const parents = (g.parentIds ?? []).map(p => esc(nameOf(p))).join(" × ") || "primordial (no parents)";
 
-  // docs/26 Phase 9/10: read straight off the hand slot, same as the
-  // Parts table above -- so a chop-shop stump (or a graft that swaps in
-  // an alien hand) is reflected here with no special-casing, exactly
-  // like every other hand-derived stat on this screen.
-  const atk = secondaryAttackForGenome(g);
-  const atkDelivery = atk.range > 0 ? `range ${atk.range}m` : "self-centered";
-  const atkEffect = atk.effect === "stun"
-    ? `stun ${atk.stunDurationSeconds ?? "?"}s`
-    : "pull & consume";
+  // docs/26 Phase 9/10 (2026-08 follow-up, "Expand Secondary Attack
+  // Variety Across Races"): read straight off the hand slot, same as
+  // the Parts table above -- so a chop-shop stump (or a graft that
+  // swaps in an alien hand) is reflected here with no special-casing,
+  // exactly like every other hand-derived stat on this screen.
+  // secondaryAttackForGenome now returns the FULL POOL (every ability
+  // that hand family is equipped with in Unity, not just one) -- see
+  // attacks.ts's own header for why this was a follow-up fix, not part
+  // of the original expansion pass.
+  const atkPool = secondaryAttackForGenome(g);
+  const atkRows = atkPool.map((atk) => {
+    const delivery = atk.range > 0 ? `range ${atk.range}m` : "self-centered";
+    const effect = describeSecondaryEffect(atk);
+    const tag = atk.isDefensive ? ` <span class="warn">(defensive)</span>` : "";
+    return `
+      <div class="k">${esc(atk.name)}${tag}</div><div>${esc(atk.description)}</div>
+      <div class="k"></div><div>${effect} · ${delivery} · AoE ${atk.areaOfEffect}m ·
+        <span class="blood">${atk.bloodCost} blood</span> · <span class="bones">${atk.bonesCost} bones</span></div>`;
+  }).join("");
 
   el.innerHTML = `
     <h3>${c.alive ? "" : "💀 "}${esc(c.name)} — vital signs</h3>
@@ -1060,12 +1090,8 @@ function _renderScreenInner(el) {
     <div class="kv">${bodyRows}</div>
     <h3>Parts</h3>
     <table><tr><th>slot</th><th>family</th><th>origin</th><th>energy</th></tr>${partRows}</table>
-    <h3>Secondary Attack</h3>
-    <div class="kv">
-      <div class="k">${esc(atk.name)}</div><div>${esc(atk.description)}</div>
-      <div class="k">delivery</div><div>${atkEffect} · ${atkDelivery} · AoE ${atk.areaOfEffect}m</div>
-      <div class="k">cast cost</div><div><span class="blood">${atk.bloodCost} blood</span> · <span class="bones">${atk.bonesCost} bones</span></div>
-    </div>
+    <h3>Secondary Attacks</h3>
+    <div class="kv">${atkRows}</div>
     <h3>Brain — ${esc(g.brain.tier)} (size ${brainSize(g.brain)})</h3>
     <div class="kv">${brainRows}</div>
     <h3>Behavior (expressed)</h3>
@@ -1174,14 +1200,20 @@ function renderChopSlab() {
   // any unarmed creature) with no special-casing needed, and a hand
   // freshly grafted from another specimen is reflected the instant the
   // graft lands, same as every other part-derived stat in this room.
-  const atk = secondaryAttackForGenome(g);
+  // 2026-08: secondaryAttackForGenome returns the full POOL now -- this
+  // compact one-line slab label shows the primary (first) ability plus
+  // a "+N more" count rather than cramming every ability in; the full
+  // pool is shown in the Lab's own detail panel (renderStableDetail).
+  const atkPool = secondaryAttackForGenome(g);
+  const atkPrimary = atkPool[0];
+  const atkMore = atkPool.length > 1 ? ` +${atkPool.length - 1} more` : "";
   wrap.innerHTML = `
     <canvas id="chop-canvas"></canvas>
     <div class="chop-slab-label">
       <div class="pl-name">${c.alive ? "" : "💀 "}${esc(c.name)}</div>
       <div class="pl-plan">${esc(g.body.plan)} · ${esc(g.brain.tier)} brain · ${esc(g.heart.tier)} heart</div>
       <div class="pl-stat ${vClass}">${c.alive ? v.state.toUpperCase() : "DEAD ON THE TABLE"}</div>
-      <div class="pl-atk">⚡ ${esc(atk.name)} — <span class="blood">${atk.bloodCost}🩸</span> <span class="bones">${atk.bonesCost}🦴</span></div>
+      <div class="pl-atk">⚡ ${esc(atkPrimary.name)}${esc(atkMore)} — <span class="blood">${atkPrimary.bloodCost}🩸</span> <span class="bones">${atkPrimary.bonesCost}🦴</span></div>
     </div>
     <div class="chop-slab-actions">
       <button id="btn-restore" title="${restoreTitle}" ${check.ok ? "" : "disabled"}>🩹 Restore original parts</button>

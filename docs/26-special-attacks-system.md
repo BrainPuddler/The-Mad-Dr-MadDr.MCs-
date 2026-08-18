@@ -1023,3 +1023,57 @@ exact numbers (cooldowns, durations, radii) are a first pass meant to
 be tuned against real playtesting, not a claimed final balance, and the
 context-aware AI selection thresholds (35% health, 3 nearby enemies,
 8m radius) are reasoned defaults, not measured against real combat.
+
+### 8a. Follow-up fix: the Lab was never updated (2026-08)
+
+Creator question, verbatim: "did that get rewritten in the lab as
+well?" — it hadn't been. The §8 pass above only touched the Unity side;
+`packages/genome-core/src/attacks.ts` (the TS twin `SecondaryAttackCatalog.cs`'s
+own header explicitly requires hand-keeping in sync — "There is no
+automated golden test for this one yet... must be hand-kept identical")
+was missed entirely, so the Lab kept showing exactly one ability per
+hand family — the pre-expansion state — while the real battlefield had
+already moved to pools of 5-6.
+
+Fixed: `secondaryAttackFor`/`secondaryAttackForGenome` now return the
+FULL POOL (`readonly SecondaryAttackInfo[]`) instead of a single
+`SecondaryAttackInfo`, mirroring `SecondaryAttackCatalog.ForMonster`'s
+real Unity return shape exactly — all three genome-side pools (Mad
+Doctor default, Alien, Electric) rebuilt with all 16 abilities'
+real numbers (Tanks still correctly excluded — "Humans... are NOT
+genome creatures... has no Lab representation," unchanged from before
+this whole feature). `SecondaryAttackEffect` gained `"fear" | "weaken" |
+"boost" | "possess" | "hazard" | "damage"` (six new literals — `damage`
+specifically had never needed Lab representation before this pass,
+since only Tank's Flamethrower ever used it, and Tanks were already
+out of scope; Arc Lance is the first GENOME-side Damage ability, which
+is what actually required adding it here) and `SecondaryAttackInfo`
+gained the matching optional magnitude fields
+(`fearDurationSeconds`/`tempoMultiplier`/`tempoDurationSeconds`/
+`possessChancePercent`/`possessDurationSeconds`/`hazardDurationSeconds`/
+`hazardTickIntervalSeconds`/`damageAmount`/`isDefensive`).
+
+`site/main.js`'s two consumers were updated for the new array shape:
+the Lab's own creature detail panel now renders every ability in the
+pool as its own row (name, description, a "(defensive)" tag reusing
+the existing `.warn` CSS class already used elsewhere on this same
+screen for "berserk threshold," and a `describeSecondaryEffect` helper
+formatting whichever magnitude field is actually populated for that
+effect); the Chop Shop slab's compact one-line label shows the pool's
+primary (first) ability plus a "+N more" count, keeping that tight
+label uncluttered rather than cramming 5-6 abilities into it.
+
+A real bug was caught and fixed during this pass, not shipped: Arc
+Lance was initially drafted with `effect: "weaken"` and a comment
+flagging it as "really Damage in Unity" — an actual mismatch with the
+C# twin, not a deliberate simplification. Caught by re-reading the
+draft before running tests; fixed by adding the missing `"damage"`
+literal and `damageAmount` field instead of mislabeling the effect.
+
+Verified for real: `packages/genome-core`'s full 60-test suite
+(4 more than the 56 baseline before this whole feature, then 60 after
+this fix's `attacks.test.ts` rewrite — every pool's exact membership
+and ordering is asserted, not just spot-checked) passes via `npm test`;
+`npm run build` + re-vendored into `site/lib/` (only `attacks.js`
+changed, confirming no unrelated drift); `node --check` clean on
+`site/main.js`.
