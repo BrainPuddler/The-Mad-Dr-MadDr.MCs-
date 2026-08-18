@@ -42,11 +42,21 @@ namespace MadDr.MatchCore
         public int PlayerIndex { get; }
         public CommanderPersonality Personality { get; }
 
+        /// <summary>2026-08 (creator direction: "scale the ai intelligence
+        /// for Difficulty") -- see <see cref="SkirmishCommander.Difficulty"/>'s
+        /// own doc comment; same skill-dial contract, applied to this
+        /// advisor's economic decisions instead of combat ones.</summary>
+        public AiDifficulty Difficulty { get; }
+
         /// <summary>Economic decisions don't need <see
         /// cref="SkirmishCommander"/>'s combat-reflex 2-20 tick cadence --
         /// v0.1 placeholder range (2-6s at <see
         /// cref="MatchState.TicksPerSecond"/>), flagged as invented like
-        /// every other tuning number in this project.</summary>
+        /// every other tuning number in this project. 2026-08: scaled by
+        /// <see cref="AiDifficultyProfile.ReactionMultiplier"/> same as
+        /// <see cref="SkirmishCommander.DecisionIntervalTicks"/> -- see
+        /// that property's own doc comment for the floor-only clamping
+        /// rationale.</summary>
         public const int MinDecisionIntervalTicks = 20;
         public const int MaxDecisionIntervalTicks = 60;
 
@@ -88,13 +98,16 @@ namespace MadDr.MatchCore
         /// <see cref="CommanderPersonality.Generate(SimRng)"/> already
         /// documents, so a replay reproduces this advisor's choices
         /// exactly.</summary>
-        public ProductionAdvisor(int playerIndex, CommanderPersonality personality, uint seed)
+        public ProductionAdvisor(int playerIndex, CommanderPersonality personality, uint seed, AiDifficulty difficulty = AiDifficulty.Normal)
         {
             if (playerIndex < 0) throw new ArgumentOutOfRangeException(nameof(playerIndex));
             PlayerIndex = playerIndex;
             Personality = personality;
+            Difficulty = difficulty;
             var span = MaxDecisionIntervalTicks - MinDecisionIntervalTicks;
-            DecisionIntervalTicks = MinDecisionIntervalTicks + (int)Math.Round(personality.Discipline * span);
+            var disciplineTicks = MinDecisionIntervalTicks + (int)Math.Round(personality.Discipline * span);
+            var scaled = (int)Math.Round(disciplineTicks * AiDifficultyProfile.Get(difficulty).ReactionMultiplier);
+            DecisionIntervalTicks = Math.Max(MinDecisionIntervalTicks, scaled);
             _rng = new SimRng(seed);
         }
 
@@ -165,7 +178,20 @@ namespace MadDr.MatchCore
             }
             var balanceFactor = 0.8 + Personality.Aggression * 0.4;
             var balanceTarget = (int)(humanUnitCount * balanceFactor);
-            var targetSupply = Math.Min(player.SupplyCap, Math.Max(capBasedTarget, balanceTarget));
+            var uncappedTarget = Math.Max(capBasedTarget, balanceTarget);
+
+            // 2026-08 (creator direction: "scale the ai intelligence for
+            // Difficulty... in tutorial and early levels players can get a
+            // sense of achievement"): the primary difficulty lever. Both
+            // the self-referential floor and the player-relative target
+            // above scale together by ArmySizeMultiplier, so a Tutorial
+            // opponent deliberately commits to a SMALLER army than even
+            // its own cap-based floor would otherwise field, and a Brutal
+            // one overcommits past what pure Aggression alone would ask
+            // for. Re-clamped to SupplyCap AFTER scaling -- Brutal's >1
+            // multiplier must never actually exceed the hard cap.
+            var targetSupply = Math.Min(player.SupplyCap,
+                (int)(uncappedTarget * AiDifficultyProfile.Get(Difficulty).ArmySizeMultiplier));
 
             // NOT player.SupplyUsed: nothing in match-core ever calls
             // PlayerState.AddSupplyUsed outside its own test file (a
@@ -241,7 +267,13 @@ namespace MadDr.MatchCore
             // rather than removed so a genuinely misconfigured faction
             // still fails soft (never trains) instead of crashing the
             // whole decision loop.
-            var spendFraction = 0.2 + Personality.Greed * 0.6;
+            // 2026-08 difficulty follow-up: EconomyMultiplier scales this
+            // same fraction, clamped to [0,1] (spending more than the
+            // whole wallet in one decision isn't meaningful) -- a Tutorial
+            // opponent commits a smaller slice of its wallet per decision
+            // and effectively hoards the rest, a Brutal one commits more.
+            var spendFraction = Math.Clamp(
+                (0.2 + Personality.Greed * 0.6) * AiDifficultyProfile.Get(Difficulty).EconomyMultiplier, 0.0, 1.0);
             var budget = new Dictionary<ResourceKind, int>(Resources.Count);
             for (var i = 0; i < Resources.Count; i++)
             {

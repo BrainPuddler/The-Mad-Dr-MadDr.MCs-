@@ -146,14 +146,28 @@ namespace MadDr.MatchCore
         /// field for the exact same reason.</summary>
         public CommanderPersonality? AiPersonality { get; }
 
+        /// <summary>2026-08 (creator direction: "scale the ai intelligence
+        /// for Difficulty"): the skill dial passed in via <see
+        /// cref="PlayerSetup.Difficulty"/> -- same "DATA, never simulation
+        /// state" category as <see cref="AiPersonality"/> just above (no
+        /// influence on <see cref="MatchState.Tick"/>'s own math, only on
+        /// how the external <see cref="AiMatchDriver"/> process behaves),
+        /// so it's omitted from <see cref="WriteTo"/> for the identical
+        /// reason. Meaningless for a human player but always has a value
+        /// (defaults to <see cref="AiDifficulty.Normal"/>), unlike the
+        /// nullable AiPersonality -- see <see cref="PlayerSetup.Difficulty"/>'s
+        /// own doc comment for why the nullability contract differs.</summary>
+        public AiDifficulty AiDifficulty { get; }
+
         public PlayerState(int playerIndex, FactionId faction, int supplyCap,
-            bool isAiControlled = false, CommanderPersonality? aiPersonality = null)
+            bool isAiControlled = false, CommanderPersonality? aiPersonality = null, AiDifficulty aiDifficulty = AiDifficulty.Normal)
         {
             PlayerIndex = playerIndex;
             Faction = faction;
             SupplyCap = supplyCap;
             IsAiControlled = isAiControlled;
             AiPersonality = aiPersonality;
+            AiDifficulty = aiDifficulty;
             for (var i = 0; i < _walletCap.Length; i++) _walletCap[i] = int.MaxValue;
         }
 
@@ -251,7 +265,7 @@ namespace MadDr.MatchCore
 
         public PlayerState Clone()
         {
-            var c = new PlayerState(PlayerIndex, Faction, SupplyCap, IsAiControlled, AiPersonality)
+            var c = new PlayerState(PlayerIndex, Faction, SupplyCap, IsAiControlled, AiPersonality, AiDifficulty)
             {
                 SupplyUsed = SupplyUsed,
                 SalvagedOrigins = SalvagedOrigins,

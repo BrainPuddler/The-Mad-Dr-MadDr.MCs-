@@ -27,6 +27,14 @@ using UnityEngine;
 /// cref="MixedFactionUnlock.IsUnlocked"/> for AI opponents too, same as
 /// the human's own race row just above -- an unearned unlock shouldn't
 /// let the player fight it before they can play it.
+///
+/// Each opponent slot also gets a Difficulty button (2026-08, creator
+/// direction: "scale the ai intelligence for Difficulty... in tutorial
+/// and early levels players can get a sense of achievement") -- a
+/// SKILL dial (<see cref="AiDifficulty"/>), separate from Personality's
+/// FLAVOR dial, so a "Reckless" opponent reads the same at every
+/// difficulty, just executed better or worse. Defaults to Normal, which
+/// reproduces every pre-2026-08 opponent's exact behavior.
 /// </summary>
 public class MatchSetupHud : MonoBehaviour
 {
@@ -59,6 +67,15 @@ public class MatchSetupHud : MonoBehaviour
     // slot this UI adds on top.
     private static readonly string[] PersonalityNames = { "Balanced", "Berserker", "Turtle", "Hoarder", "Warlord", "Opportunist", "Random" };
 
+    // 2026-08 (creator direction: "scale the ai intelligence for
+    // Difficulty"): same order as the AiDifficulty enum itself (Tutorial=0
+    // .. Brutal=4), deliberately -- DifficultyChoice casts straight to
+    // AiDifficulty with no translation table needed, one less place for
+    // the UI and the enum to drift apart. No trailing "Random" entry --
+    // unlike faction/personality, an AI opponent's SKILL isn't something
+    // a player picking difficulty would ever want left to chance.
+    private static readonly string[] DifficultyNames = { "Tutorial", "Easy", "Normal", "Hard", "Brutal" };
+
     private struct OpponentSlot
     {
         /// <summary>Index into <see cref="_aiFactionChoices"/>, or
@@ -67,6 +84,10 @@ public class MatchSetupHud : MonoBehaviour
         /// <summary>Index into <see cref="CommanderPersonality.Archetypes"/>,
         /// or that list's Count for "Random".</summary>
         public int PersonalityChoice;
+        /// <summary>Index into <see cref="DifficultyNames"/> -- casts
+        /// directly to <see cref="AiDifficulty"/>, see that array's own
+        /// comment.</summary>
+        public int DifficultyChoice;
     }
 
     public const int MinOpponents = 1;
@@ -90,10 +111,16 @@ public class MatchSetupHud : MonoBehaviour
             ? new[] { FactionId.HumanArmy, FactionId.AlienHive, FactionId.MadDoctor, FactionId.Mixed }
             : new[] { FactionId.HumanArmy, FactionId.AlienHive, FactionId.MadDoctor };
         _opponents.Clear();
-        _opponents.Add(new OpponentSlot { FactionChoice = 0, PersonalityChoice = 0 }); // one HumanArmy/Balanced slot to start
+        // one HumanArmy/Balanced/Normal slot to start -- DifficultyChoice
+        // 2 is AiDifficulty.Normal, same "index == enum value" contract
+        // DifficultyNames documents.
+        _opponents.Add(new OpponentSlot { FactionChoice = 0, PersonalityChoice = 0, DifficultyChoice = (int)AiDifficulty.Normal });
     }
 
-    private const float PanelWidth = 460f;
+    // 2026-08: widened from 460 to fit the new per-opponent Difficulty
+    // button (see the opponent-row layout below) without cramping the
+    // existing Faction/Personality buttons.
+    private const float PanelWidth = 560f;
     private const float RowHeight = 40f;
     private const float ButtonHeight = 30f;
     private const float Gap = 8f;
@@ -164,10 +191,11 @@ public class MatchSetupHud : MonoBehaviour
             var slot = _opponents[i];
             var rowRect = new Rect(panelRect.x + Gap, y, PanelWidth - Gap * 2f, RowHeight);
 
-            var labelWidth = 80f;
-            var factionWidth = 140f;
-            var personalityWidth = 150f;
-            var removeWidth = rowRect.width - labelWidth - factionWidth - personalityWidth - Gap * 3f;
+            var labelWidth = 70f;
+            var factionWidth = 120f;
+            var personalityWidth = 130f;
+            var difficultyWidth = 110f;
+            var removeWidth = rowRect.width - labelWidth - factionWidth - personalityWidth - difficultyWidth - Gap * 4f;
 
             GUI.Label(new Rect(rowRect.x, rowRect.y + 6f, labelWidth, RowHeight), $"Opponent {i + 1}:");
 
@@ -182,10 +210,14 @@ public class MatchSetupHud : MonoBehaviour
             if (GUI.Button(personalityRect, PersonalityNames[slot.PersonalityChoice]))
                 slot.PersonalityChoice = (slot.PersonalityChoice + 1) % PersonalityNames.Length;
 
+            var difficultyRect = new Rect(personalityRect.xMax + Gap, rowRect.y, difficultyWidth, RowHeight);
+            if (GUI.Button(difficultyRect, DifficultyNames[slot.DifficultyChoice]))
+                slot.DifficultyChoice = (slot.DifficultyChoice + 1) % DifficultyNames.Length;
+
             _opponents[i] = slot;
 
             GUI.enabled = _opponents.Count > MinOpponents;
-            var removeRect = new Rect(personalityRect.xMax + Gap, rowRect.y, removeWidth, RowHeight);
+            var removeRect = new Rect(difficultyRect.xMax + Gap, rowRect.y, removeWidth, RowHeight);
             if (GUI.Button(removeRect, "-")) { _opponents.RemoveAt(i); GUI.enabled = true; break; }
             GUI.enabled = true;
 
@@ -194,7 +226,7 @@ public class MatchSetupHud : MonoBehaviour
 
         GUI.enabled = _opponents.Count < MaxOpponents;
         var addRect = new Rect(panelRect.x + Gap, y, PanelWidth - Gap * 2f, ButtonHeight);
-        if (GUI.Button(addRect, "+ Add Opponent")) _opponents.Add(new OpponentSlot { FactionChoice = 0, PersonalityChoice = 0 });
+        if (GUI.Button(addRect, "+ Add Opponent")) _opponents.Add(new OpponentSlot { FactionChoice = 0, PersonalityChoice = 0, DifficultyChoice = (int)AiDifficulty.Normal });
         GUI.enabled = true;
         y += ButtonHeight + Gap + SectionGap;
 
@@ -234,7 +266,9 @@ public class MatchSetupHud : MonoBehaviour
                 ? CommanderPersonality.Archetypes[slot.PersonalityChoice]
                 : CommanderPersonality.Generate(slotSeed);
 
-            _builder.aiOpponents.Add(new RuntimeCityBuilder.AiOpponentConfig(faction, personality));
+            var difficulty = (AiDifficulty)slot.DifficultyChoice;
+
+            _builder.aiOpponents.Add(new RuntimeCityBuilder.AiOpponentConfig(faction, personality, difficulty));
         }
 
         // Same chaining shape every prior picker in this family already

@@ -57,10 +57,13 @@ namespace MadDr.MatchCore
     ///   discipline governs the TICK path; a command source sits outside
     ///   it, the same way Unity's mouse-click handler does).
     ///
-    /// Decisions themselves are deterministic given (state, personality):
-    /// no RNG at all, and every scan runs in entity-ID order with ties
-    /// broken by the lower entity ID, so two runs of the same match
-    /// produce byte-identical command streams.
+    /// Decisions themselves are deterministic given (state, personality,
+    /// difficulty): no RNG at all, and every scan runs in entity-ID order
+    /// with ties broken by the lower entity ID, so two runs of the same
+    /// match produce byte-identical command streams. <see
+    /// cref="Difficulty"/> (2026-08) doesn't change this -- it's a fixed
+    /// multiplier read once at construction, not a source of
+    /// randomness.
     ///
     /// **Personality is the whole design.** Every action below is scored
     /// by the same formula for every commander; only the
@@ -86,6 +89,14 @@ namespace MadDr.MatchCore
         public int PlayerIndex { get; }
         public CommanderPersonality Personality { get; }
 
+        /// <summary>2026-08 (creator direction: "scale the ai intelligence
+        /// for Difficulty"): the skill dial, orthogonal to <see
+        /// cref="Personality"/> -- see <see cref="AiDifficulty"/>'s own
+        /// header. Read once at construction (never mid-match), same
+        /// "setup data, not simulation state" category as <see
+        /// cref="Personality"/> itself.</summary>
+        public AiDifficulty Difficulty { get; }
+
         /// <summary>How often this commander re-evaluates, in ticks --
         /// derived from <see cref="CommanderTrait.Discipline"/> rather
         /// than configured separately, because "how long do you commit to
@@ -96,19 +107,33 @@ namespace MadDr.MatchCore
         /// 1) locks in for <see cref="MaxDecisionIntervalTicks"/> and
         /// plays the plan out. Both are real, legible weaknesses -- the
         /// twitchy one never finishes anything, the stubborn one is slow
-        /// to react.</summary>
+        /// to react.
+        ///
+        /// 2026-08: the discipline-derived value above is then scaled by
+        /// <see cref="AiDifficultyProfile.ReactionMultiplier"/> -- a
+        /// Tutorial opponent notices a changed battlefield meaningfully
+        /// LATER than its own personality alone would suggest, a Brutal
+        /// one meaningfully SOONER. Only floor-clamped at <see
+        /// cref="MinDecisionIntervalTicks"/> (never a division-by-zero or
+        /// negative interval); deliberately NOT ceiling-clamped back down
+        /// to <see cref="MaxDecisionIntervalTicks"/>, or Tutorial's slow-
+        /// down would read identically to a merely-methodical Normal
+        /// commander.</summary>
         public int DecisionIntervalTicks { get; }
 
         public const int MinDecisionIntervalTicks = 2;
         public const int MaxDecisionIntervalTicks = 20;
 
-        public SkirmishCommander(int playerIndex, CommanderPersonality personality)
+        public SkirmishCommander(int playerIndex, CommanderPersonality personality, AiDifficulty difficulty = AiDifficulty.Normal)
         {
             if (playerIndex < 0) throw new ArgumentOutOfRangeException(nameof(playerIndex));
             PlayerIndex = playerIndex;
             Personality = personality;
+            Difficulty = difficulty;
             var span = MaxDecisionIntervalTicks - MinDecisionIntervalTicks;
-            DecisionIntervalTicks = MinDecisionIntervalTicks + (int)Math.Round(personality.Discipline * span);
+            var disciplineTicks = MinDecisionIntervalTicks + (int)Math.Round(personality.Discipline * span);
+            var scaled = (int)Math.Round(disciplineTicks * AiDifficultyProfile.Get(difficulty).ReactionMultiplier);
+            DecisionIntervalTicks = Math.Max(MinDecisionIntervalTicks, scaled);
         }
 
         /// <summary>True on frames this commander actually thinks. Exposed

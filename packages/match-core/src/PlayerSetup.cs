@@ -17,13 +17,25 @@ namespace MadDr.MatchCore
         public readonly bool IsAiControlled;
         public readonly CommanderPersonality? Personality;
 
-        public PlayerSetup(FactionId faction, bool isAiControlled = false, CommanderPersonality? personality = null)
+        /// <summary>2026-08 (creator direction: "scale the ai intelligence
+        /// for Difficulty"): the skill dial, orthogonal to <see
+        /// cref="Personality"/> -- see <see cref="AiDifficulty"/>'s own
+        /// header for the personality-vs-difficulty distinction. Unlike
+        /// Personality, this is never null and never required: it's
+        /// meaningless for a human slot (simply unread) and defaults to
+        /// <see cref="AiDifficulty.Normal"/> for an AI slot that doesn't
+        /// specify one, which reproduces every pre-2026-08 AI opponent's
+        /// exact behavior (Normal's multipliers are all 1.0).</summary>
+        public readonly AiDifficulty Difficulty;
+
+        public PlayerSetup(FactionId faction, bool isAiControlled = false, CommanderPersonality? personality = null, AiDifficulty difficulty = AiDifficulty.Normal)
         {
             if (isAiControlled && personality == null)
                 throw new ArgumentException("an AI-controlled slot needs a CommanderPersonality", nameof(personality));
             Faction = faction;
             IsAiControlled = isAiControlled;
             Personality = personality;
+            Difficulty = difficulty;
         }
 
         /// <summary>A human-controlled slot -- no personality, since
@@ -35,8 +47,13 @@ namespace MadDr.MatchCore
         /// so a caller can never silently field a bland opponent by
         /// forgetting to pick one -- <see cref="AiMatchDriver"/> itself
         /// still falls back to Balanced defensively, but the setup-time API
-        /// makes the omission a compile-time-visible choice instead.</summary>
-        public static PlayerSetup Ai(FactionId faction, CommanderPersonality personality) =>
-            new PlayerSetup(faction, true, personality);
+        /// makes the omission a compile-time-visible choice instead.
+        /// `difficulty` defaults to <see cref="AiDifficulty.Normal"/> --
+        /// unlike personality, silently defaulting here is fine (Normal is
+        /// a genuinely reasonable default, not a "not recommended" one the
+        /// way <see cref="CommanderPersonality.Balanced"/> is for
+        /// personality).</summary>
+        public static PlayerSetup Ai(FactionId faction, CommanderPersonality personality, AiDifficulty difficulty = AiDifficulty.Normal) =>
+            new PlayerSetup(faction, true, personality, difficulty);
     }
 }

@@ -19797,3 +19797,55 @@ environment** -- verified by manual review (brace/paren balance, full
 re-read against real call signatures), not a real `dotnet test` run;
 flagged as the first thing to confirm once a working SDK is
 available.
+
+## AI difficulty: a real skill axis, separate from personality (2026-08)
+
+Creator direction, verbatim: *"Make sure we can scale the ai
+intelligence for Difficulty. So that in tutorial and early levels
+players can get a sense of achievement, and accomplishments, this needs
+to be challenging enough without being too easy."* Full design writeup:
+docs/30 §10.
+
+Closes a gap docs/30 §7 explicitly flagged as unbuilt when the AI-
+opponent epic shipped: `CommanderPersonality` is a flavor dial (what a
+commander WANTS to do), never a skill dial (how WELL it executes).
+`AiDifficulty` (`Tutorial < Easy < Normal < Hard < Brutal`, new file
+`AiDifficulty.cs`) is that second axis, threaded through the exact same
+pipeline `CommanderPersonality` already uses (`PlayerSetup.Ai` ->
+`PlayerState.AiDifficulty` -> `AiMatchDriver` -> `SkirmishCommander`/
+`ProductionAdvisor`). Four multipliers, deliberately narrow (same
+"don't invent an unused mapping" discipline `ArmyGenerator`'s own header
+already states): reaction speed (both commanders' discipline-derived
+decision interval), economic efficiency (`ProductionAdvisor`'s per-
+decision wallet-spend fraction), target army size (both the SupplyCap-
+fraction floor and the 2026-08 player-relative balance target), and
+starting-army budget (Unity-side, `RuntimeCityBuilder`). Combat stats
+and personality's own scoring weights are untouched at every difficulty
+-- a Tutorial opponent's units hit exactly as hard as a Brutal
+opponent's, they're just fewer and slower to arrive, which is the
+direct mechanism for the brief's own "challenging enough without being
+too easy": a real, reacting, beatable opponent, never the historically
+inert "AI opponent sits and does nothing" bug docs/30 §0 first
+documented.
+
+A real, separate bug found and fixed while touching this code, not part
+of the feature's own scope: `SpawnStartingBases`'s call to
+`SpawnOpponentStartingArmy` was still gated to HumanArmy/AlienHive only
+-- a leftover from before the all-races pass above (that pass widened
+`ArmyGenerator` itself but missed this separate Unity-side guard).
+MadDoctor/Mixed AI opponents were getting no starting army at all until
+this fix, despite `MatchSetupHud` and `ArmyGenerator` both already
+claiming to support them.
+
+`MatchSetupHud` gained a fourth per-opponent button (difficulty, no
+"Random" option -- unlike faction/personality, a player choosing
+difficulty should never want it left to chance), panel widened 460px ->
+560px to fit it.
+
+Verified via new `AiDifficultyTests.cs` plus new coverage in
+`CommanderTests.cs`/`ProductionAdvisorTests.cs` (Normal reproduces the
+pre-2026-08 default exactly; reaction speed and army size both order
+correctly Tutorial-to-Brutal for a fixed personality, with real margin,
+not just a non-strict ordering). **No .NET SDK in this environment** --
+verified by manual review, not a real `dotnet test` run; same standing
+flag as every other match-core entry this session.

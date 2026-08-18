@@ -95,6 +95,54 @@ public class CommanderTests
         Assert.Equal(expectedInterval, new SkirmishCommander(0, p).DecisionIntervalTicks);
     }
 
+    // 2026-08 (creator direction: "scale the ai intelligence for
+    // Difficulty"): Difficulty is a second, ORTHOGONAL axis on top of
+    // Discipline -- these pin that Normal reproduces the pre-2026-08
+    // behavior exactly, and that the reaction-speed ordering across every
+    // level matches AiDifficulty's own low-to-high intent (Tutorial
+    // slowest, Brutal fastest), independent of whatever Discipline says.
+
+    [Fact]
+    public void Normal_difficulty_reproduces_the_discipline_only_interval_exactly()
+    {
+        var p = CommanderPersonality.Balanced().With(CommanderTrait.Discipline, 0.7);
+        var withoutDifficulty = new SkirmishCommander(0, p).DecisionIntervalTicks;
+        var withNormal = new SkirmishCommander(0, p, AiDifficulty.Normal).DecisionIntervalTicks;
+        Assert.Equal(withoutDifficulty, withNormal);
+    }
+
+    [Fact]
+    public void Higher_difficulty_reacts_no_slower_than_a_lower_one_for_the_same_personality()
+    {
+        var p = CommanderPersonality.Balanced();
+        var levels = new[] { AiDifficulty.Tutorial, AiDifficulty.Easy, AiDifficulty.Normal, AiDifficulty.Hard, AiDifficulty.Brutal };
+        var intervals = new int[levels.Length];
+        for (var i = 0; i < levels.Length; i++)
+            intervals[i] = new SkirmishCommander(0, p, levels[i]).DecisionIntervalTicks;
+
+        for (var i = 1; i < intervals.Length; i++)
+            Assert.True(intervals[i] <= intervals[i - 1],
+                $"{levels[i]} ({intervals[i]} ticks) should react at least as fast as {levels[i - 1]} ({intervals[i - 1]} ticks)");
+        // Not just non-increasing -- Tutorial and Brutal must be genuinely
+        // different, not merely tied at the floor.
+        Assert.True(intervals[0] > intervals[intervals.Length - 1]);
+    }
+
+    [Fact]
+    public void Tutorial_difficulty_never_reacts_faster_than_MinDecisionIntervalTicks()
+    {
+        // The floor-only clamp (see SkirmishCommander's own doc comment)
+        // still has to hold at the SLOW end for every OTHER level, and at
+        // the fast end for Brutal -- this just confirms nothing produces
+        // a zero/negative interval regardless of how extreme the
+        // multiplier gets.
+        foreach (AiDifficulty level in Enum.GetValues(typeof(AiDifficulty)))
+        {
+            var interval = new SkirmishCommander(0, CommanderPersonality.Balanced(), level).DecisionIntervalTicks;
+            Assert.True(interval >= SkirmishCommander.MinDecisionIntervalTicks, $"{level}: interval {interval} below the floor");
+        }
+    }
+
     // =====================================================================
     // CommanderPersonality: procedural generation
     // =====================================================================

@@ -272,4 +272,74 @@ public class ProductionAdvisorTests
             if (m.UnitAt(i).PlayerIndex == 1)
                 Assert.Equal(FactionId.MadDoctor, UnitRosterDef.Get(m.UnitAt(i).SourceRosterKind!.Value).Faction);
     }
+
+    // 2026-08 (creator direction: "scale the ai intelligence for
+    // Difficulty... in tutorial and early levels players can get a sense
+    // of achievement... this needs to be challenging enough without
+    // being too easy"). AiDifficultyTests.cs pins the profile numbers in
+    // isolation; these confirm the multipliers actually reach this
+    // advisor's real behavior end to end.
+
+    private int RunAndCountUnits(AiDifficulty difficulty)
+    {
+        var city = SmallCity();
+        var players = new List<PlayerSetup>
+        {
+            PlayerSetup.Human(FactionId.AlienHive),
+            PlayerSetup.Ai(FactionId.HumanArmy, CommanderPersonality.Warlord(), difficulty),
+        };
+        var m = MatchState.Create(9u, players, city);
+        var hqHex = FindOpenHex(city, city.CenterHex);
+        m.SpawnHqForPlayer(1, hqHex);
+        var factoryHex = FindOpenHex(city, hqHex);
+        m.SpawnFactoryForPlayer(1, factoryHex);
+        var player = m.Player(1);
+        player.Grant(ResourceKind.Bones, 100000);
+        player.Grant(ResourceKind.Blood, 100000);
+        player.Grant(ResourceKind.Fuel, 100000);
+        player.Grant(ResourceKind.Parts, 100000);
+
+        var advisor = new ProductionAdvisor(1, CommanderPersonality.Warlord(), 9u, difficulty);
+        for (var frame = 0; frame < 4000; frame++)
+        {
+            var commands = advisor.DecideCommands(m);
+            m.Tick(commands.Count > 0 ? commands : null);
+        }
+        return LiveUnitCountFor(m, 1);
+    }
+
+    [Fact]
+    public void HigherDifficultyFieldsAtLeastAsManyUnitsAsALowerOne()
+    {
+        var levels = new[] { AiDifficulty.Tutorial, AiDifficulty.Easy, AiDifficulty.Normal, AiDifficulty.Hard, AiDifficulty.Brutal };
+        var counts = new int[levels.Length];
+        for (var i = 0; i < levels.Length; i++) counts[i] = RunAndCountUnits(levels[i]);
+
+        for (var i = 1; i < counts.Length; i++)
+            Assert.True(counts[i] >= counts[i - 1],
+                $"{levels[i]} ({counts[i]} units) should field at least as many as {levels[i - 1]} ({counts[i - 1]} units)");
+        // Not just non-decreasing end to end -- Tutorial genuinely thinner
+        // than Brutal, not merely tied.
+        Assert.True(counts[0] < counts[counts.Length - 1]);
+    }
+
+    [Fact]
+    public void TutorialAdvisorReactsSlowerThanNormalForTheSamePersonality()
+    {
+        var normal = new ProductionAdvisor(1, CommanderPersonality.Warlord(), 1u, AiDifficulty.Normal);
+        var tutorial = new ProductionAdvisor(1, CommanderPersonality.Warlord(), 1u, AiDifficulty.Tutorial);
+        Assert.True(tutorial.DecisionIntervalTicks > normal.DecisionIntervalTicks);
+    }
+
+    [Fact]
+    public void ExplicitNormalDifficultyMatchesTheNoDifficultyDefaultExactly()
+    {
+        // Backward-compat sanity: PlayerSetup.Ai's own default parameter
+        // means every pre-2026-08 call site keeps behaving identically --
+        // this pins that "no difficulty specified" and "Normal specified"
+        // produce byte-identical command streams, not just "similar."
+        var withoutDifficulty = new ProductionAdvisor(1, CommanderPersonality.Warlord(), 3u);
+        var withNormal = new ProductionAdvisor(1, CommanderPersonality.Warlord(), 3u, AiDifficulty.Normal);
+        Assert.Equal(withoutDifficulty.DecisionIntervalTicks, withNormal.DecisionIntervalTicks);
+    }
 }

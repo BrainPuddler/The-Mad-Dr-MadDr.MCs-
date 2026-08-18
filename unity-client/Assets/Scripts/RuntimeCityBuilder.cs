@@ -87,10 +87,18 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         public FactionId Faction;
         public CommanderPersonality Personality;
 
-        public AiOpponentConfig(FactionId faction, CommanderPersonality personality)
+        /// <summary>2026-08 (creator direction: "scale the ai intelligence
+        /// for Difficulty"): defaults to <see cref="AiDifficulty.Normal"/>
+        /// so every pre-2026-08 call site that only ever constructed this
+        /// struct with (faction, personality) keeps behaving exactly as
+        /// before.</summary>
+        public AiDifficulty Difficulty;
+
+        public AiOpponentConfig(FactionId faction, CommanderPersonality personality, AiDifficulty difficulty = AiDifficulty.Normal)
         {
             Faction = faction;
             Personality = personality;
+            Difficulty = difficulty;
         }
     }
 
@@ -448,7 +456,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         foreach (var ai in opponents)
         {
             factions.Add(ai.Faction);
-            playerSetups.Add(PlayerSetup.Ai(ai.Faction, ai.Personality));
+            playerSetups.Add(PlayerSetup.Ai(ai.Faction, ai.Personality, ai.Difficulty));
         }
 
         _simBridge.StartMatch(unchecked((uint)seed), playerSetups, _city);
@@ -3552,8 +3560,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             _engagementCenters.Add(factory); // docs/12 Tier 3
 
             var faction = opponents[i].Faction;
-            if (faction == FactionId.HumanArmy || faction == FactionId.AlienHive)
-                SpawnOpponentStartingArmy(playerIndex, faction, opponents[i].Personality, hq, blocked, claimed);
+            // 2026-08: used to be gated to HumanArmy/AlienHive only, back
+            // when ArmyGenerator had no roster for MadDoctor/Mixed (see
+            // docs/30 §9) -- stale now that it does, so this fires for
+            // every faction unconditionally.
+            SpawnOpponentStartingArmy(playerIndex, faction, opponents[i].Personality, opponents[i].Difficulty, hq, blocked, claimed);
 
             // 2026-08 (creator direction: "Human Army is from army
             // barracks -- part of the basic kit for Human army"): every
@@ -3893,12 +3904,24 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// itself uses for its own per-player RNG streams. Each unit gets its
     /// own <see cref="FindOpenHexWide"/> placement, claimed into the same
     /// set the HQ/Factory hexes above already use, so a big army can't
-    /// stack units on top of each other or the bases.</summary>
+    /// stack units on top of each other or the bases.
+    ///
+    /// 2026-08 (creator direction: "scale the ai intelligence for
+    /// Difficulty"): `difficulty` scales <see
+    /// cref="OpponentStartingArmyBudget"/> by <see
+    /// cref="AiDifficultyProfile.StartingArmyMultiplier"/> before handing
+    /// it to <see cref="ArmyGenerator.Generate"/> -- same "the ONE place
+    /// this value is decided" discipline the personality paragraph above
+    /// already establishes, just for the opening-force size instead of
+    /// its composition.</summary>
     private void SpawnOpponentStartingArmy(int playerIndex, FactionId opponentFaction, CommanderPersonality personality,
-        HexCoord aroundHex, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
+        AiDifficulty difficulty, HexCoord aroundHex, HashSet<HexCoord> blocked, HashSet<HexCoord> claimed)
     {
         var rngSeed = unchecked((uint)seed) ^ unchecked((uint)(playerIndex * 0x9E3779B1));
-        var composition = ArmyGenerator.Generate(opponentFaction, personality, OpponentStartingArmyBudget, new SimRng(rngSeed));
+        var multiplier = AiDifficultyProfile.Get(difficulty).StartingArmyMultiplier;
+        var budget = new Dictionary<ResourceKind, int>(OpponentStartingArmyBudget.Count);
+        foreach (var kv in OpponentStartingArmyBudget) budget[kv.Key] = (int)(kv.Value * multiplier);
+        var composition = ArmyGenerator.Generate(opponentFaction, personality, budget, new SimRng(rngSeed));
         foreach (var (kind, count) in composition)
         {
             for (var i = 0; i < count; i++)

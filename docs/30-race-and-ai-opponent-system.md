@@ -363,3 +363,95 @@ careful manual review (brace/paren balance, full re-read of every
 touched method against real call signatures) rather than a real test
 run. The next session with a working `dotnet test` should run
 `MatchCore.Tests.csproj` before trusting this pass fully green.
+
+## 10. Follow-up (2026-08): a real Difficulty axis
+
+Creator direction, verbatim: *"Make sure we can scale the ai
+intelligence for Difficulty. So that in tutorial and early levels
+players can get a sense of achievement, and accomplishments, this needs
+to be challenging enough without being too easy."* This is the exact gap
+§7 flagged when the AI-opponent epic first shipped — *"No difficulty
+axis. `CommanderPersonality` is a flavor/style dial (Berserker vs.
+Turtle), not a skill dial... a genuinely 'easier' or 'harder' AI
+opponent is a separate, unbuilt feature"* — now built.
+
+**New type, `packages/match-core/src/AiDifficulty.cs`.** `AiDifficulty`
+(`Tutorial < Easy < Normal < Hard < Brutal`) plus `AiDifficultyProfile`,
+a static per-level lookup table (`AiDifficultyProfile.Get(level)`, same
+"static data, `Get` by enum" convention as `FactionDef`/`UnitRosterDef`)
+of four multipliers:
+
+| Multiplier | Applies to | Direction |
+| --- | --- | --- |
+| `ReactionMultiplier` | `SkirmishCommander`/`ProductionAdvisor`'s discipline-derived decision interval | >1 slower, <1 faster |
+| `EconomyMultiplier` | `ProductionAdvisor`'s per-decision wallet-spend fraction | scales Greed's 0.2-0.8 range, clamped to [0,1] |
+| `ArmySizeMultiplier` | `ProductionAdvisor`'s final target standing-army size (both the SupplyCap-fraction floor and the player-relative balance target added in §9) | re-clamped to SupplyCap after scaling |
+| `StartingArmyMultiplier` | `RuntimeCityBuilder.OpponentStartingArmyBudget` | scales the opening-force budget before `ArmyGenerator.Generate` sees it |
+
+Normal is the identity (every multiplier 1.0) — a difficulty-unaware
+call site behaves byte-identically to before this feature existed.
+Deliberately narrow, matching `ArmyGenerator`'s own "only touch what has
+a real translation, leave the rest alone" discipline: **Difficulty never
+touches `CombatStats`** (a Tutorial opponent's units hit exactly as hard
+and die at exactly the same health as a Brutal opponent's — the
+difference is entirely in how FEW of them there are and how SLOWLY they
+show up, never a hidden stat nerf) **and never touches personality's own
+scoring weights** (a "Reckless" opponent reads as reckless at every
+difficulty, just executed better or worse). This is the direct answer to
+the brief's "challenging enough without being too easy": Tutorial is
+still a live, reacting opponent — it trains, expands, and fights back —
+just visibly slower and thinner, never the inert do-nothing bug §0
+documents from before this whole epic existed.
+
+**Threading, mirroring exactly how `CommanderPersonality` already
+threads through this same pipeline:** `PlayerSetup.Ai(faction,
+personality, difficulty = Normal)` -> `PlayerState.AiDifficulty` (never
+hashed, same "setup data, not simulation state" category as
+`AiPersonality`/`IsAiControlled`) -> `AiMatchDriver` passes it to both
+`new SkirmishCommander(i, personality, difficulty)` and `new
+ProductionAdvisor(i, personality, seed, difficulty)`. Unlike
+`AiPersonality` (nullable, required-when-AI), `AiDifficulty` is a plain
+non-nullable field defaulting to Normal everywhere — silently defaulting
+is fine here (Normal is a genuinely reasonable default, unlike
+`CommanderPersonality.Balanced`, which is explicitly "not recommended as
+an opponent").
+
+**Reaction speed** (`SkirmishCommander.DecisionIntervalTicks`/
+`ProductionAdvisor.DecisionIntervalTicks`): both already derived their
+interval from `Discipline`; the difficulty multiplier now scales that
+result, floor-clamped at each class's own `MinDecisionIntervalTicks` but
+deliberately NOT ceiling-clamped back down to the old personality-only
+`MaxDecisionIntervalTicks` — Tutorial needs real headroom above that
+ceiling to read as meaningfully slow rather than merely "as slow as a
+methodical Normal commander already was."
+
+**Unity side:** `RuntimeCityBuilder.AiOpponentConfig` gained a
+`Difficulty` field (defaults to Normal, additive to every existing call
+site); `SpawnOpponentStartingArmy` scales `OpponentStartingArmyBudget`
+by it before generating. `MatchSetupHud` gained a fourth per-opponent-row
+button (Tutorial/Easy/Normal/Hard/Brutal, no "Random" — unlike
+faction/personality, a player picking a difficulty would never want it
+left to chance), panel widened 460->560 to fit it without cramping the
+existing Faction/Personality buttons.
+
+**A real, separate bug found and fixed in passing, not part of this
+feature's own scope:** `SpawnStartingBases`'s call to
+`SpawnOpponentStartingArmy` was still gated `if (faction == HumanArmy ||
+faction == AlienHive)` — a leftover from before §9's all-races pass,
+which made ArmyGenerator support all four factions but never noticed
+this SEPARATE Unity-side guard still excluded MadDoctor/Mixed opponents
+from ever getting a starting army at all. Removed; every faction now
+gets one, unconditionally, matching what §9 already claimed was
+possible.
+
+Verified via new `AiDifficultyTests.cs` (profile numbers: Normal is the
+identity, every level distinct, monotonic ordering in the direction the
+enum name implies) plus new coverage in `CommanderTests.cs`
+(Normal-with-explicit-difficulty reproduces the no-difficulty default
+exactly; reaction speed orders correctly across all five levels for a
+fixed personality) and `ProductionAdvisorTests.cs` (a Brutal advisor
+fields at least as many units as a Tutorial one, genuinely more, not
+just tied; reaction-speed and default-reproduction checks mirroring
+`CommanderTests.cs`). **No dotnet SDK in this environment** — same
+standing limitation as every other match-core change this session,
+verified by manual review, not a real test run.

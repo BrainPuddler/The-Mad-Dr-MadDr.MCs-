@@ -164,7 +164,7 @@ namespace MadDr.MatchCore
             var arr = new PlayerState[players.Count];
             for (var i = 0; i < players.Count; i++)
                 arr[i] = new PlayerState(i, players[i].Faction, DefaultSupplyCap,
-                    players[i].IsAiControlled, players[i].Personality);
+                    players[i].IsAiControlled, players[i].Personality, players[i].Difficulty);
 
             return new MatchState(arr, new SimRng(seed), city);
         }

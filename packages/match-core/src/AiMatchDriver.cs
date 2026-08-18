@@ -29,11 +29,14 @@ namespace MadDr.MatchCore
         /// player's own <see cref="PlayerState.AiPersonality"/> (falling
         /// back to <see cref="CommanderPersonality.Balanced"/> only
         /// defensively -- every real caller sets one via <see
-        /// cref="PlayerSetup.Ai"/>, which requires it). `seed` is folded
-        /// per player index so each AI player's <see
-        /// cref="ProductionAdvisor"/> draws from its own decorrelated
-        /// stream (see that class's own constructor doc comment) rather
-        /// than all AI players sharing one draw sequence.</summary>
+        /// cref="PlayerSetup.Ai"/>, which requires it) and <see
+        /// cref="PlayerState.AiDifficulty"/> (2026-08, always has a real
+        /// value -- see that property's own doc comment for why it's
+        /// never null the way AiPersonality is). `seed` is folded per
+        /// player index so each AI player's <see cref="ProductionAdvisor"/>
+        /// draws from its own decorrelated stream (see that class's own
+        /// constructor doc comment) rather than all AI players sharing one
+        /// draw sequence.</summary>
         public AiMatchDriver(MatchState match, uint seed)
         {
             for (var i = 0; i < match.PlayerCount; i++)
@@ -41,8 +44,8 @@ namespace MadDr.MatchCore
                 var p = match.Player(i);
                 if (!p.IsAiControlled) continue;
                 var personality = p.AiPersonality ?? CommanderPersonality.Balanced();
-                _commanders[i] = new SkirmishCommander(i, personality);
-                _advisors[i] = new ProductionAdvisor(i, personality, unchecked(seed ^ (uint)(i * 0x9E3779B1)));
+                _commanders[i] = new SkirmishCommander(i, personality, p.AiDifficulty);
+                _advisors[i] = new ProductionAdvisor(i, personality, unchecked(seed ^ (uint)(i * 0x9E3779B1)), p.AiDifficulty);
             }
         }
 
