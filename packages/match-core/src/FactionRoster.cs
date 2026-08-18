@@ -6,11 +6,24 @@ namespace MadDr.MatchCore
     /// faction rosters as genome data" -- Human Army and Alien Hive, the
     /// unit archetypes docs/23 §6 itself names ("Army: riflemen squads,
     /// the existing Tank, half-tracks, a zeppelin gunship; Hive: drones,
-    /// spitters, a floater queen"). `FactionId.MadDoctor` gets no roster
-    /// here at all -- the Doctor's whole identity is fielding CUSTOM bred
-    /// creatures through the Mutator (docs/06), never a fixed unit list,
-    /// so there is nothing for a roster table to enumerate for that
-    /// faction.</summary>
+    /// spitters, a floater queen").
+    ///
+    /// 2026-08 follow-up (creator direction: "the roster needs to be able
+    /// to generate enemies for all races"): `FactionId.MadDoctor` now has
+    /// a roster too (<see cref="ShamblingGrunt"/>/<see
+    /// cref="SporeBrute"/>/<see cref="Abomination"/>) -- but it is a
+    /// deliberate, flagged v0.1 STAND-IN, not the Doctor's real identity.
+    /// The Doctor's actual creatures are CUSTOM bred through the Mutator
+    /// (docs/06/07), a real genome -> match-core stat bridge that does not
+    /// exist yet (match-core has zero reference to genome-core, a repo
+    /// invariant -- see <see cref="UnitRosterDef"/>'s own header). Building
+    /// that bridge is a separate, larger job. Until it lands, an AI-
+    /// controlled Mad Doctor opponent needs SOMETHING to field, so this
+    /// enum gets three generic "off-the-rack" horrors with the same
+    /// cheap-swarm/mid-line/heavy shape every other faction's roster
+    /// already has -- same standing "invented placeholder, not claimed
+    /// balanced or canon" policy as every number in <see
+    /// cref="UnitRosterDef"/>.</summary>
     public enum RosterUnitKind
     {
         // -- Human Army (FactionId.HumanArmy) --
@@ -38,6 +51,21 @@ namespace MadDr.MatchCore
         /// HumanCombatProfile.cs's own header for why the two layers
         /// stay split).</summary>
         FlamethrowerTrooper = 7,
+
+        // -- Mad Doctor (FactionId.MadDoctor) -- generic placeholder
+        // stand-ins for real bred creatures, see this enum's own header.
+
+        /// <summary>Cheap, disposable stitched-together grunt -- the Mad
+        /// Doctor's answer to Rifleman/Drone.</summary>
+        ShamblingGrunt = 8,
+        /// <summary>Mid-tier bred horror -- the Mad Doctor's answer to
+        /// HalfTrack/Spitter.</summary>
+        SporeBrute = 9,
+        /// <summary>One precious heavy creation -- the Mad Doctor's
+        /// answer to Tank/FloaterQueen. MUST stay the LAST entry in this
+        /// enum -- <see cref="UnitRosterDef.Get"/> indexes directly by
+        /// (int)kind.</summary>
+        Abomination = 10,
     }
 
     /// <summary>Static per-roster-unit data (docs/23 §13 amendment D's own
@@ -207,16 +235,43 @@ namespace MadDr.MatchCore
             // a continuous stream reads as frequent small hits, not one
             // slow heavy swing like Tank's). Fuel-heavy cost (this
             // weapon's own resource, a deliberate flavor tie-in) rather
-            // than Rifleman's lighter Bones-leaning line. MUST stay the
-            // LAST entry in this array -- Get(kind) indexes directly by
-            // (int)kind, and FlamethrowerTrooper = 7 is the highest
-            // RosterUnitKind value.
+            // than Rifleman's lighter Bones-leaning line.
             new UnitRosterDef(RosterUnitKind.FlamethrowerTrooper, FactionId.HumanArmy, "Flamethrower Trooper",
                 speed: 2.8, radius: 1.0,
                 combat: new CombatStats(maxVitality: 70, power: 10, armor: 1, reach: 1, ferocity: 2.5, cunningPercent: 0, affinity: NoLumenCoupling),
                 salvageValue: 25,
                 cost: new[] { (ResourceKind.Bones, 15), (ResourceKind.Fuel, 20) }, trainTimeTicks: 50,
                 producer: BuildingKind.Barracks),
+
+            // -- Mad Doctor: generic bred-horror stand-ins (see
+            // RosterUnitKind's own header -- NOT the real genome-bred
+            // creatures, a flagged v0.1 placeholder only). Blood-leaning
+            // cost, same "organic origin drinks Blood" rule CLAUDE.md
+            // states for the whole faction; Bones as the secondary line
+            // (raw material for stitching), mirroring Rifleman's own
+            // Bones+Fuel two-line shape. Producer defaults to Factory --
+            // the Mad Doctor has no Barracks-equivalent second producer.
+
+            new UnitRosterDef(RosterUnitKind.ShamblingGrunt, FactionId.MadDoctor, "Shambling Grunt",
+                speed: 2.5, radius: 1.0,
+                combat: new CombatStats(maxVitality: 55, power: 9, armor: 0, reach: 1, ferocity: 1.2, cunningPercent: 0, affinity: NoLumenCoupling),
+                salvageValue: 20,
+                cost: new[] { (ResourceKind.Blood, 15), (ResourceKind.Bones, 5) }, trainTimeTicks: 35),
+
+            new UnitRosterDef(RosterUnitKind.SporeBrute, FactionId.MadDoctor, "Spore Brute",
+                speed: 2.0, radius: 1.6,
+                combat: new CombatStats(maxVitality: 180, power: 16, armor: 2, reach: 2, ferocity: 0.9, cunningPercent: 0, affinity: NoLumenCoupling),
+                salvageValue: 70,
+                cost: new[] { (ResourceKind.Blood, 30), (ResourceKind.Bones, 10) }, trainTimeTicks: 90),
+
+            // MUST stay the LAST entry in this array -- Get(kind) indexes
+            // directly by (int)kind, and Abomination = 10 is the highest
+            // RosterUnitKind value.
+            new UnitRosterDef(RosterUnitKind.Abomination, FactionId.MadDoctor, "Abomination",
+                speed: 1.5, radius: 3.0,
+                combat: new CombatStats(maxVitality: 600, power: 28, armor: 6, reach: 2, ferocity: 0.7, cunningPercent: 0, affinity: NoLumenCoupling),
+                salvageValue: 250,
+                cost: new[] { (ResourceKind.Blood, 90), (ResourceKind.Bones, 20) }, trainTimeTicks: 180),
         };
 
         public static UnitRosterDef Get(RosterUnitKind kind) => All[(int)kind];

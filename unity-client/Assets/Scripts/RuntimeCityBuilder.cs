@@ -3862,9 +3862,15 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// "flag the invented number, don't pretend it's balanced" policy,
     /// same status as every other tuning number in this codebase) -- big
     /// enough that <see cref="ArmyGenerator"/> fields a real, multi-unit
-    /// opening force for either roster, not a token single unit.</summary>
+    /// opening force for any of the four rosters, not a token single
+    /// unit. Carries a line for every <see cref="ResourceKind"/> (Blood
+    /// included, 2026-08) since an opponent's faction -- and therefore
+    /// which currency its roster actually costs in -- isn't known until
+    /// this budget is already handed to <see
+    /// cref="ArmyGenerator.Generate"/>.</summary>
     private static readonly Dictionary<ResourceKind, int> OpponentStartingArmyBudget = new Dictionary<ResourceKind, int>
     {
+        { ResourceKind.Blood, 200 },
         { ResourceKind.Bones, 200 },
         { ResourceKind.Fuel, 200 },
         { ResourceKind.Ichor, 200 },

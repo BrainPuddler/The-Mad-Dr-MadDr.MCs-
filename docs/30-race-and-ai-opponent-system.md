@@ -270,3 +270,96 @@ RNG-seed caveat in §4.
   exists in this environment — this is the same standing limitation every
   prior Unity-side change this session has carried, stated explicitly
   rather than claimed.
+
+## 9. Follow-up (2026-08): all four races + player-relative army sizing
+
+Creator direction, verbatim: *"the roster needs to be able to generate
+enemies for all races. They should take the number of units from the
+player, so armies are fairly balanced amongst all ai units and players."*
+Two closely related but separate gaps, both closed in this pass:
+
+**All four races now have real roster data.** `ArmyGenerator`/
+`FactionRoster.cs` previously only supported HumanArmy/AlienHive — a
+MadDoctor or Mixed AI opponent could never generate a starting army or
+make training decisions, and §5/§6 above documented that as a real,
+pre-existing constraint rather than an oversight. It's closed now:
+
+- `FactionRoster.cs` gained three new `RosterUnitKind` entries for
+  MadDoctor (`ShamblingGrunt`/`SporeBrute`/`Abomination`, Blood+Bones
+  costed, same cheap-swarm/mid-line/heavy shape every other roster
+  already has). **These are a flagged v0.1 stand-in, not the Doctor's
+  real identity** — the Doctor's actual creatures are custom bred
+  through the Mutator (docs/06/07), and match-core has zero reference to
+  genome-core (a repo invariant). A real genome → match-core stat bridge
+  is a separate, larger job; until it exists, an AI-controlled Mad
+  Doctor opponent needed SOMETHING to field, so it gets three generic
+  "off-the-rack" horrors instead.
+- `ArmyGenerator.RosterFor` now returns the UNION of every faction's
+  roster for `FactionId.Mixed`, reusing (not duplicating) the exact
+  per-unit `RaceOverride` contract `MatchState.SpawnRosterUnit`/
+  `CanTrainUnit` already gave a human Mixed player (`MixedFactionTests.cs`,
+  §1 in this doc's own §1 predates this AI-side use). `Generate`'s own
+  knapsack loop needed zero changes — it always treated "the roster" as
+  an opaque list.
+- `MatchSetupHud.AiFactionChoices` (now an instance field,
+  `_aiFactionChoices`, built in `Init()`) widened from HumanArmy/AlienHive
+  to all four, with Mixed gated behind `MixedFactionUnlock.IsUnlocked`
+  for AI opponents too, matching the human's own race row.
+- `RuntimeCityBuilder.OpponentStartingArmyBudget` gained a Blood line
+  (previously Bones/Fuel/Ichor only) so a MadDoctor/Mixed opponent's
+  starting-army budget can actually afford its own roster's currency.
+
+**AI army sizing now reads the human player's live unit count, not just
+a fraction of the AI's own SupplyCap.** `ProductionAdvisor.DecideCommands`
+used to compute its target standing-army size purely from
+`player.SupplyCap * (0.4 + Aggression * 0.5)` — self-referential, blind
+to what anyone else had actually fielded. It now also computes the
+strongest non-AI player's live unit count and folds that in:
+`targetSupply = min(SupplyCap, max(capBasedTarget, humanUnitCount *
+(0.8 + Aggression * 0.4)))` — a Turtle personality merely matches the
+human's count, a Berserker overshoots it by up to 40%, and the result is
+always still clamped to the AI's own SupplyCap.
+
+**A real bug surfaced and fixed along the way, not a new one
+introduced**: `PlayerState.SupplyUsed` — the field the old target-supply
+gate checked against — turned out to be permanently 0. Nothing in
+match-core outside its own test file ever calls
+`PlayerState.AddSupplyUsed`; units join a player's army without ever
+touching that counter. This meant the OLD gate (`SupplyUsed <
+targetSupply`) was a silent no-op that could never actually stop
+training, regardless of army size — the "don't claim the full cap"
+design intent §3/§6 describe was never really enforced. Rather than wire
+up sim-wide supply accounting (a larger, separate job touching every
+spawn/death path), `ProductionAdvisor` gained a narrow `LiveUnitCount`
+helper (a plain scan of `MatchState.UnitAt`, filtered by `PlayerIndex`
+and `IsAlive`) and uses that for BOTH the new human-relative target and
+its own gate — the same real number, not the dead field. Flagged, not
+silently left broken.
+
+**Known limitation, disclosed rather than solved here**: this balancing
+only sees whatever is actually registered as a `SimUnit` in match-core.
+Today, a human Mad Doctor player's own creatures — spawned through
+`RuntimeCityBuilder.SpawnMonster`/`GrabCursor`'s clone-drag mechanic —
+are pure Unity `MonsterAgent` GameObjects and are never registered into
+match-core's `SimUnit` list at all (the same gap §7's "CommandKind.
+TrainUnit still has zero human call sites" already flagged, one level
+deeper). Until that mirroring exists, `humanUnitCount` degrades
+gracefully to 0 for a human playing Mad Doctor specifically, and the AI
+falls back to the pre-existing cap-based target — never worse than
+before this pass, just not yet balanced against that specific case.
+HumanArmy/AlienHive/Mixed roster units trained through the real Command
+pipeline (today: only AI does this) are counted correctly.
+
+Verified via `packages/match-core/Tests~/ArmyGeneratorTests.cs` (new
+MadDoctor/Mixed coverage: budget respected, faction purity, Mixed spans
+multiple real factions across seeds) and
+`packages/match-core/Tests~/ProductionAdvisorTests.cs` (new: MadDoctor
+advisor fields real units when funded in Blood/Bones; an AI trains
+toward a LARGER target when the human already has more units fielded;
+the SupplyUsed-tautology test replaced with a real live-count
+assertion). **No dotnet SDK in this environment** — same standing
+limitation as every other match-core change this session; verified by
+careful manual review (brace/paren balance, full re-read of every
+touched method against real call signatures) rather than a real test
+run. The next session with a working `dotnet test` should run
+`MatchCore.Tests.csproj` before trusting this pass fully green.

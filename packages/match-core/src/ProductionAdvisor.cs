@@ -107,9 +107,10 @@ namespace MadDr.MatchCore
         /// this frame -- at most one per decision (either one expansion or
         /// one training push across this player's idle production
         /// buildings), never both in the same call. Empty on a
-        /// non-decision frame or if this player's faction has no army
-        /// roster at all (<see cref="ArmyGenerator"/> only supports
-        /// HumanArmy/AlienHive -- see that class's own header).</summary>
+        /// non-decision frame, or (defensively -- see <see
+        /// cref="ArmyGenerator"/>'s own header, all four factions have real
+        /// roster data as of 2026-08) if this player's faction somehow has
+        /// no army roster at all.</summary>
         public IReadOnlyList<Command> DecideCommands(MatchState state)
         {
             if (state == null) throw new ArgumentNullException(nameof(state));
@@ -131,8 +132,50 @@ namespace MadDr.MatchCore
             // this deliberately never claims the full cap, leaving room
             // for the "don't spam" ceiling that range already implies).
             var targetSupplyFraction = 0.4 + Personality.Aggression * 0.5;
-            var targetSupply = (int)(player.SupplyCap * targetSupplyFraction);
-            if (player.SupplyUsed < targetSupply)
+            var capBasedTarget = (int)(player.SupplyCap * targetSupplyFraction);
+
+            // 2026-08 (creator direction: "the roster needs to be able to
+            // generate enemies for all races. They should take the number
+            // of units from the player, so armies are fairly balanced
+            // amongst all ai units and players"): the cap-based target
+            // above is purely self-referential -- it never looked at what
+            // anyone ELSE actually has fielded, so a human who outgrew
+            // their own early build order could run circles around an AI
+            // still capped at a fraction of a fixed constant. `SupplyUsed`
+            // doesn't track live unit count on its own (see
+            // <see cref="LiveUnitCount"/>'s own doc comment), so this
+            // reads the real, current unit tally off `state` directly --
+            // the strongest HUMAN player's count (there is normally
+            // exactly one; the max guards a hypothetical future multi-
+            // human match the same way <see cref="ArmyGenerator"/>'s own
+            // faction handling stays generic rather than assuming a
+            // single opponent). `balanceFactor` lets Aggression still mean
+            // something even once this floor is in play: a Turtle
+            // (Aggression 0) merely matches the human's count, a Berserker
+            // (Aggression 1) overshoots it by up to 40% -- never a blowout
+            // in either direction, and always still clamped to this
+            // player's OWN SupplyCap just like the cap-based target always
+            // was.
+            var humanUnitCount = 0;
+            for (var i = 0; i < state.PlayerCount; i++)
+            {
+                if (i == PlayerIndex || state.Player(i).IsAiControlled) continue;
+                var count = LiveUnitCount(state, i);
+                if (count > humanUnitCount) humanUnitCount = count;
+            }
+            var balanceFactor = 0.8 + Personality.Aggression * 0.4;
+            var balanceTarget = (int)(humanUnitCount * balanceFactor);
+            var targetSupply = Math.Min(player.SupplyCap, Math.Max(capBasedTarget, balanceTarget));
+
+            // NOT player.SupplyUsed: nothing in match-core ever calls
+            // PlayerState.AddSupplyUsed outside its own test file (a
+            // pre-existing gap, confirmed by grep -- units currently join
+            // a player's army without ever touching that counter), so it
+            // sits permanently at 0 and this gate would otherwise never
+            // bind. LiveUnitCount reuses the exact same real, live tally
+            // this method just computed humanUnitCount from, applied to
+            // this AI's own army instead.
+            if (LiveUnitCount(state, PlayerIndex) < targetSupply)
                 TryQueueTraining(state, player, commands);
 
             return commands;
@@ -192,11 +235,12 @@ namespace MadDr.MatchCore
             if (idleProducers == null) return;
 
             // Greed -> how much of the current wallet this decision commits
-            // to a shopping list. ArmyGenerator.Generate throws for
-            // MadDoctor/Mixed (no roster) -- caught, not guarded against in
-            // advance, so the failure reason stays exactly what
-            // ArmyGenerator itself already documents rather than a
-            // silently-duplicated check here.
+            // to a shopping list. All four factions have real roster data
+            // now (2026-08, see ArmyGenerator's own header) so this catch
+            // is defensive-only rather than an expected path -- kept
+            // rather than removed so a genuinely misconfigured faction
+            // still fails soft (never trains) instead of crashing the
+            // whole decision loop.
             var spendFraction = 0.2 + Personality.Greed * 0.6;
             var budget = new Dictionary<ResourceKind, int>(Resources.Count);
             for (var i = 0; i < Resources.Count; i++)
@@ -234,6 +278,31 @@ namespace MadDr.MatchCore
                     break;
                 }
             }
+        }
+
+        /// <summary>2026-08 (player-relative army balancing): the real,
+        /// current count of `playerIndex`'s living units in `state` --
+        /// counts every <see cref="SimUnit"/> with a matching <see
+        /// cref="SimUnit.PlayerIndex"/> and <see cref="SimUnit.IsAlive"/>
+        /// true. Deliberately NOT <see cref="PlayerState.SupplyUsed"/>:
+        /// that field exists and is even hashed, but nothing in match-core
+        /// outside its own test file ever calls <see
+        /// cref="PlayerState.AddSupplyUsed"/>, so it sits at 0 for the
+        /// entire match today -- a real, pre-existing gap this method
+        /// works around rather than silently trusting. A plain O(units)
+        /// scan, called at most once per decision-frame per AI player
+        /// (<see cref="MinDecisionIntervalTicks"/>+ ticks apart, never
+        /// per-tick), the same cost class <see cref="TryQueueTraining"/>'s
+        /// own idle-producer scan already pays every decision.</summary>
+        private static int LiveUnitCount(MatchState state, int playerIndex)
+        {
+            var count = 0;
+            for (var i = 0; i < state.UnitCount; i++)
+            {
+                var u = state.UnitAt(i);
+                if (u.PlayerIndex == playerIndex && u.IsAlive) count++;
+            }
+            return count;
         }
 
         private HexCoord? FindOwnHq(MatchState state)

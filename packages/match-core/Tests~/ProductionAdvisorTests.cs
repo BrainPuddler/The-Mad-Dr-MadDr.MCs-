@@ -74,9 +74,35 @@ public class ProductionAdvisorTests
         Assert.True(m.UnitCount > 0, "advisor should have fielded at least one unit given a generous wallet");
     }
 
-    [Fact]
-    public void NeverPushesSupplyUsedPastCap()
+    /// <summary>counts a player's currently-living units directly off
+    /// `MatchState`'s public surface -- the same query <see
+    /// cref="ProductionAdvisor"/>'s own private `LiveUnitCount` runs
+    /// internally, duplicated here (not exposed for testing) since a test
+    /// asserting the real invariant needs the real number, not the
+    /// permanently-zero <see cref="PlayerState.SupplyUsed"/> the OLD
+    /// version of this test used to check (see this method's own call
+    /// site for why that was a tautology, not a real assertion).</summary>
+    private static int LiveUnitCountFor(MatchState state, int playerIndex)
     {
+        var count = 0;
+        for (var i = 0; i < state.UnitCount; i++)
+        {
+            var u = state.UnitAt(i);
+            if (u.PlayerIndex == playerIndex && u.IsAlive) count++;
+        }
+        return count;
+    }
+
+    [Fact]
+    public void NeverPushesLiveUnitCountPastSupplyCap()
+    {
+        // 2026-08: this used to assert player.SupplyUsed <= SupplyCap --
+        // a tautology, since nothing in match-core ever calls
+        // PlayerState.AddSupplyUsed outside its own test file, so
+        // SupplyUsed sits at 0 forever and the assertion could never
+        // fail regardless of what the advisor actually did. Replaced
+        // with the REAL live count ProductionAdvisor's own gate now
+        // reads (see its DecideCommands' own doc comment).
         var m = AiHumanArmyMatch(3u, out var advisor);
         var player = m.Player(1);
         player.Grant(ResourceKind.Bones, 100000);
@@ -88,8 +114,67 @@ public class ProductionAdvisorTests
         {
             var commands = advisor.DecideCommands(m);
             m.Tick(commands.Count > 0 ? commands : null);
-            Assert.True(player.SupplyUsed <= player.SupplyCap, $"frame {frame}: SupplyUsed {player.SupplyUsed} > SupplyCap {player.SupplyCap}");
+            var liveCount = LiveUnitCountFor(m, 1);
+            Assert.True(liveCount <= player.SupplyCap, $"frame {frame}: live unit count {liveCount} > SupplyCap {player.SupplyCap}");
         }
+    }
+
+    [Fact]
+    public void TargetsALargerArmyWhenTheHumanPlayerAlreadyHasMoreUnits()
+    {
+        // 2026-08 (creator direction: "the roster needs to be able to
+        // generate enemies for all races. They should take the number
+        // of units from the player, so armies are fairly balanced
+        // amongst all ai units and players"): the core new behavior --
+        // an AI facing a human with a real standing army should train up
+        // toward that army's size, not just a fixed fraction of its own
+        // SupplyCap. Same personality/budget/seed/frame-count both runs,
+        // the only difference is whether player 0 (human, AlienHive)
+        // already has a pile of Drones fielded before the advisor gets
+        // to decide anything.
+        int RunAndCountAiUnits(bool seedHumanArmy)
+        {
+            var city = SmallCity();
+            var players = new List<PlayerSetup>
+            {
+                PlayerSetup.Human(FactionId.AlienHive),
+                PlayerSetup.Ai(FactionId.HumanArmy, CommanderPersonality.Warlord()),
+            };
+            var m = MatchState.Create(6u, players, city);
+            var hqHex = FindOpenHex(city, city.CenterHex);
+            m.SpawnHqForPlayer(1, hqHex);
+            var factoryHex = FindOpenHex(city, hqHex);
+            m.SpawnFactoryForPlayer(1, factoryHex);
+
+            if (seedHumanArmy)
+            {
+                // 55 -- comfortably above Warlord's cap-based floor (60
+                // SupplyCap * (0.4 + 0.65 aggression * 0.5) = ~43) so the
+                // balance target actually becomes the binding constraint,
+                // not just noise under the pre-existing floor.
+                var humanHex = FindOpenHex(city, city.CenterHex);
+                for (var i = 0; i < 55; i++) m.SpawnRosterUnit(0, humanHex, RosterUnitKind.Drone);
+            }
+
+            var advisor = new ProductionAdvisor(1, CommanderPersonality.Warlord(), 6u);
+            var player = m.Player(1);
+            player.Grant(ResourceKind.Bones, 100000);
+            player.Grant(ResourceKind.Blood, 100000);
+            player.Grant(ResourceKind.Fuel, 100000);
+            player.Grant(ResourceKind.Parts, 100000);
+
+            for (var frame = 0; frame < 4000; frame++)
+            {
+                var commands = advisor.DecideCommands(m);
+                m.Tick(commands.Count > 0 ? commands : null);
+            }
+            return LiveUnitCountFor(m, 1);
+        }
+
+        var withoutHumanArmy = RunAndCountAiUnits(false);
+        var withHumanArmy = RunAndCountAiUnits(true);
+        Assert.True(withHumanArmy > withoutHumanArmy,
+            $"expected the AI to field MORE units facing a human with a real standing army (got {withHumanArmy} vs {withoutHumanArmy})");
     }
 
     [Fact]
@@ -124,10 +209,12 @@ public class ProductionAdvisorTests
     }
 
     [Fact]
-    public void MadDoctorAdvisorNeverThrows_justFieldsNoUnits()
+    public void MadDoctorAdvisorNeverThrows_evenUnfunded()
     {
-        // ArmyGenerator has no roster for MadDoctor -- ProductionAdvisor
-        // must catch that, not propagate it, and simply never train.
+        // Funded with the WRONG currencies (Brains/Parts) -- MadDoctor's
+        // real roster (2026-08) costs Blood+Bones, so this AI still can't
+        // afford anything, but it must fail soft (never train) rather
+        // than throw, same contract as any other underfunded AI player.
         var city = SmallCity();
         var players = new List<PlayerSetup>
         {
@@ -148,6 +235,41 @@ public class ProductionAdvisorTests
             var commands = advisor.DecideCommands(m);
             m.Tick(commands.Count > 0 ? commands : null);
         }
-        Assert.Equal(0, m.UnitCount); // no roster to train from -- correctly never fields anything, never throws
+        Assert.Equal(0, m.UnitCount); // wrong currencies funded -- correctly never fields anything, never throws
+    }
+
+    [Fact]
+    public void MadDoctorAdvisorFieldsRealUnitsWhenProperlyFunded()
+    {
+        // 2026-08 follow-up (creator direction: "the roster needs to be
+        // able to generate enemies for all races"): the actual new
+        // capability -- funded with the CORRECT currencies this time
+        // (Blood+Bones, see FactionRoster.cs's own MadDoctor entries),
+        // a MadDoctor AI now really trains and fields units, where it
+        // used to be structurally incapable of ever doing so.
+        var city = SmallCity();
+        var players = new List<PlayerSetup>
+        {
+            PlayerSetup.Human(FactionId.HumanArmy),
+            PlayerSetup.Ai(FactionId.MadDoctor, CommanderPersonality.Warlord()),
+        };
+        var m = MatchState.Create(5u, players, city);
+        var hqHex = FindOpenHex(city, city.CenterHex);
+        m.SpawnHqForPlayer(1, hqHex);
+        var factoryHex = FindOpenHex(city, hqHex);
+        m.SpawnFactoryForPlayer(1, factoryHex);
+        m.Player(1).Grant(ResourceKind.Blood, 10000);
+        m.Player(1).Grant(ResourceKind.Bones, 10000);
+
+        var advisor = new ProductionAdvisor(1, CommanderPersonality.Warlord(), 5u);
+        for (var frame = 0; frame < 3000; frame++)
+        {
+            var commands = advisor.DecideCommands(m);
+            m.Tick(commands.Count > 0 ? commands : null);
+        }
+        Assert.True(m.UnitCount > 0, "a funded MadDoctor advisor should field real units now that a roster exists for it");
+        for (var i = 0; i < m.UnitCount; i++)
+            if (m.UnitAt(i).PlayerIndex == 1)
+                Assert.Equal(FactionId.MadDoctor, UnitRosterDef.Get(m.UnitAt(i).SourceRosterKind!.Value).Faction);
     }
 }

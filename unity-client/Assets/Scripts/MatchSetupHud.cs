@@ -17,14 +17,16 @@ using UnityEngine;
 /// straight to <see cref="RuntimeCityBuilder.BeginMatch"/> on confirm, same
 /// as <see cref="RegionPickerHud"/>/the old faction pickers did.
 ///
-/// AI opponent races are restricted to HumanArmy/AlienHive (plus Random,
-/// which only ever resolves to one of those two) -- <see
-/// cref="ArmyGenerator"/> has no unit-roster data for MadDoctor (bred
-/// creatures, never a fixed list) or Mixed (resolves race per-unit a
-/// different way), so an AI opponent fielded as either could never
-/// generate a starting army or make production decisions. A pre-existing
-/// constraint this menu surfaces honestly rather than offering an option
-/// that would silently do nothing.
+/// AI opponents can now be any of the four races (2026-08, creator
+/// direction: "the roster needs to be able to generate enemies for all
+/// races") -- <see cref="ArmyGenerator"/> gained real roster data for
+/// MadDoctor (a flagged generic-creature placeholder, not the real
+/// bred-creature pipeline) and Mixed (the union of every faction's
+/// roster, reusing the same per-unit RaceOverride resolution a Mixed
+/// HUMAN player already gets). Mixed is still gated behind <see
+/// cref="MixedFactionUnlock.IsUnlocked"/> for AI opponents too, same as
+/// the human's own race row just above -- an unearned unlock shouldn't
+/// let the player fight it before they can play it.
 /// </summary>
 public class MatchSetupHud : MonoBehaviour
 {
@@ -45,9 +47,13 @@ public class MatchSetupHud : MonoBehaviour
         new RaceOption(FactionId.Mixed, "Field any race's units -- each keeps ITS OWN bonuses/handicaps. No faction-wide bonus of its own."),
     };
 
-    // AI opponents only ever get HumanArmy/AlienHive/Random -- see this
-    // file's own header for why MadDoctor/Mixed aren't offered here.
-    private static readonly FactionId[] AiFactionChoices = { FactionId.HumanArmy, FactionId.AlienHive };
+    // All 4 real choices when Mixed is unlocked; MadDoctor/HumanArmy/
+    // AlienHive only otherwise -- Mixed AI opponents are gated the same
+    // way the human's own Mixed race row is (see this file's own
+    // header). Built once per Init() (a fresh match-setup screen), not a
+    // static field any more, since the unlock state can change between
+    // sessions.
+    private FactionId[] _aiFactionChoices;
 
     // CommanderPersonality.Archetypes() order, plus a trailing "Random"
     // slot this UI adds on top.
@@ -55,8 +61,8 @@ public class MatchSetupHud : MonoBehaviour
 
     private struct OpponentSlot
     {
-        /// <summary>Index into <see cref="AiFactionChoices"/>, or
-        /// <see cref="AiFactionChoices"/>.Length for "Random".</summary>
+        /// <summary>Index into <see cref="_aiFactionChoices"/>, or
+        /// <see cref="_aiFactionChoices"/>.Length for "Random".</summary>
         public int FactionChoice;
         /// <summary>Index into <see cref="CommanderPersonality.Archetypes"/>,
         /// or that list's Count for "Random".</summary>
@@ -76,6 +82,13 @@ public class MatchSetupHud : MonoBehaviour
         _builder = builder;
         _confirmed = false;
         _ownRace = builder.chosenFaction;
+        // HumanArmy stays index 0 (existing default-slot behavior below
+        // relies on it); MadDoctor/Mixed appended after so a save/replay
+        // of an old 2-choice config still resolves the same faction at
+        // the same index.
+        _aiFactionChoices = MixedFactionUnlock.IsUnlocked
+            ? new[] { FactionId.HumanArmy, FactionId.AlienHive, FactionId.MadDoctor, FactionId.Mixed }
+            : new[] { FactionId.HumanArmy, FactionId.AlienHive, FactionId.MadDoctor };
         _opponents.Clear();
         _opponents.Add(new OpponentSlot { FactionChoice = 0, PersonalityChoice = 0 }); // one HumanArmy/Balanced slot to start
     }
@@ -159,11 +172,11 @@ public class MatchSetupHud : MonoBehaviour
             GUI.Label(new Rect(rowRect.x, rowRect.y + 6f, labelWidth, RowHeight), $"Opponent {i + 1}:");
 
             var factionRect = new Rect(rowRect.x + labelWidth + Gap, rowRect.y, factionWidth, RowHeight);
-            var factionLabel = slot.FactionChoice < AiFactionChoices.Length
-                ? FactionDef.Get(AiFactionChoices[slot.FactionChoice]).DisplayName
+            var factionLabel = slot.FactionChoice < _aiFactionChoices.Length
+                ? FactionDef.Get(_aiFactionChoices[slot.FactionChoice]).DisplayName
                 : "Random";
             if (GUI.Button(factionRect, factionLabel))
-                slot.FactionChoice = (slot.FactionChoice + 1) % (AiFactionChoices.Length + 1);
+                slot.FactionChoice = (slot.FactionChoice + 1) % (_aiFactionChoices.Length + 1);
 
             var personalityRect = new Rect(factionRect.xMax + Gap, rowRect.y, personalityWidth, RowHeight);
             if (GUI.Button(personalityRect, PersonalityNames[slot.PersonalityChoice]))
@@ -213,9 +226,9 @@ public class MatchSetupHud : MonoBehaviour
             // use for their own per-player streams.
             var slotSeed = unchecked((uint)_builder.seed) ^ unchecked((uint)((i + 1) * 0x9E3779B1));
 
-            var faction = slot.FactionChoice < AiFactionChoices.Length
-                ? AiFactionChoices[slot.FactionChoice]
-                : AiFactionChoices[new SimRng(slotSeed).IntRange(AiFactionChoices.Length)];
+            var faction = slot.FactionChoice < _aiFactionChoices.Length
+                ? _aiFactionChoices[slot.FactionChoice]
+                : _aiFactionChoices[new SimRng(slotSeed).IntRange(_aiFactionChoices.Length)];
 
             var personality = slot.PersonalityChoice < CommanderPersonality.Archetypes.Count
                 ? CommanderPersonality.Archetypes[slot.PersonalityChoice]

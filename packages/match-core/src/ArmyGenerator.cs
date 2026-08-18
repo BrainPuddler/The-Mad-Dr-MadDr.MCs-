@@ -24,14 +24,22 @@ namespace MadDr.MatchCore
     /// FindOpenHexWide` in Unity); mixing "how many Tanks" with "which hex"
     /// would make this untestable without a live city.
     ///
-    /// **`MadDoctor`/`Mixed` are not supported and never will be by THIS
-    /// class**: `UnitRosterDef.AllDefs` has no entries for either (the
-    /// Mad Doctor fields custom-bred creatures via the Mutator, never a
-    /// fixed list -- see `FactionRoster.cs`'s own header; Mixed resolves
-    /// its per-unit race a different way entirely, see `MixedFactionTests`).
-    /// A budget for a faction with no roster has nothing to spend on, so
-    /// <see cref="Generate"/> throws rather than silently returning
-    /// empty.</summary>
+    /// 2026-08 follow-up (creator direction: "the roster needs to be able
+    /// to generate enemies for all races"): **all four factions are now
+    /// supported.** `MadDoctor` draws from `FactionRoster.cs`'s new
+    /// generic placeholder trio (`ShamblingGrunt`/`SporeBrute`/
+    /// `Abomination` -- a flagged v0.1 stand-in, NOT the real genome-bred
+    /// creature pipeline, see that enum's own header). `Mixed` draws from
+    /// the UNION of every faction's roster -- `MatchState.SpawnRosterUnit`
+    /// and `MatchState.CanTrainUnit` already special-case a Mixed player
+    /// to field ANY faction's roster kind, each tagged with its own
+    /// `SimUnit.RaceOverride` (`MixedFactionTests.cs`); this class reuses
+    /// that exact contract rather than inventing a second one. `RosterFor`
+    /// is the only method that changed to make this true -- <see
+    /// cref="Generate"/>'s own knapsack loop already treated "the roster"
+    /// as an opaque list, so it needed no changes. The throw below is now
+    /// a pure defensive backstop (every faction has a non-empty roster as
+    /// of this pass) rather than an expected path.</summary>
     public static class ArmyGenerator
     {
         /// <summary>Hard ceiling on total units returned, independent of
@@ -90,9 +98,9 @@ namespace MadDr.MatchCore
             var roster = RosterFor(faction);
             if (roster.Count == 0)
                 throw new ArgumentException(
-                    $"ArmyGenerator has no roster for {faction} -- MadDoctor fields bred creatures, " +
-                    "never a fixed list, and Mixed resolves race per-unit a different way. " +
-                    "Only HumanArmy/AlienHive are supported.",
+                    $"ArmyGenerator has no roster data at all for {faction} -- every FactionId should " +
+                    "have at least one UnitRosterDef entry (or, for Mixed, the union should be " +
+                    "non-empty). This should be unreachable; check FactionRoster.cs.",
                     nameof(faction));
 
             var remaining = new Dictionary<ResourceKind, int>();
@@ -134,11 +142,17 @@ namespace MadDr.MatchCore
             return result;
         }
 
+        /// <summary>`Mixed` gets the union of every faction's roster --
+        /// not filtered by `def.Faction == faction` at all -- matching
+        /// `MatchState.SpawnRosterUnit`/`CanTrainUnit`'s own "a Mixed
+        /// player can field/train ANY faction's roster kind" contract
+        /// (`MixedFactionTests.cs`). Every other faction keeps the exact
+        /// same single-faction filter as before.</summary>
         private static List<UnitRosterDef> RosterFor(FactionId faction)
         {
             var list = new List<UnitRosterDef>();
             foreach (var def in UnitRosterDef.AllDefs)
-                if (def.Faction == faction) list.Add(def);
+                if (faction == FactionId.Mixed || def.Faction == faction) list.Add(def);
             return list;
         }
 

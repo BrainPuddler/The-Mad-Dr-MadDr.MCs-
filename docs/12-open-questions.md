@@ -19745,3 +19745,55 @@ main promptly" workflow already documented at the top of this repo's
 CLAUDE.md, or fix `pages.yml` to stop listing the feature branch (it's
 currently misleading: it looks like a working autodeploy trigger and
 isn't).
+
+## AI roster: all four races + player-relative army sizing (2026-08)
+
+Creator direction, verbatim: *"the roster needs to be able to generate
+enemies for all races. They should take the number of units from the
+player, so armies are fairly balanced amongst all ai units and
+players."* Full design writeup: docs/30 §9.
+
+Two gaps, both pre-existing and both explicitly flagged by docs/30 §5/§6
+as "not offered here" / "restricted," closed in one pass: `ArmyGenerator`
+now supports MadDoctor (three new generic placeholder `RosterUnitKind`
+entries in `FactionRoster.cs` -- `ShamblingGrunt`/`SporeBrute`/
+`Abomination`, flagged v0.1 stand-ins for the real genome-bred-creature
+pipeline, which doesn't exist yet and is a separate, larger job) and
+Mixed (the union of every faction's roster, reusing the exact per-unit
+`RaceOverride` contract `MixedFactionTests.cs` already established for a
+human Mixed player -- no new mechanic invented). `MatchSetupHud`'s AI
+opponent race choices widened to match, Mixed gated behind the same
+`MixedFactionUnlock` the human's own race picker uses.
+
+`ProductionAdvisor`'s target-army-size calculation now also reads the
+strongest non-AI player's live unit count (a new `LiveUnitCount` helper,
+scanning `MatchState.UnitAt` for `PlayerIndex`+`IsAlive`) and folds it in
+alongside the pre-existing SupplyCap-fraction floor, so an AI actually
+trains toward roughly matching a human's real army size rather than a
+fixed self-referential constant. Investigating this surfaced a real,
+separate pre-existing bug: `PlayerState.SupplyUsed` -- the field the OLD
+target-supply gate checked -- is never incremented by anything in
+match-core outside its own test file, so it sat at 0 for the entire
+match and the old gate could never actually bind. Fixed by having the
+gate read the same new live-count helper instead of the dead field,
+rather than left broken alongside the new feature.
+
+Disclosed, not solved, limitation: this only balances against whatever
+is actually registered as a `SimUnit` in match-core. A human Mad Doctor
+player's own creatures (`RuntimeCityBuilder.SpawnMonster`/
+`GrabCursor`'s clone-drag path) are pure Unity `MonsterAgent` objects,
+never mirrored into match-core's `SimUnit` list -- the same "human
+production never goes through the real Command pipeline" gap docs/30 §7
+already flagged, one level deeper. Until that mirroring exists, this
+balancing degrades gracefully (falls back to the pre-existing cap-based
+target) rather than misbehaving for that specific case.
+
+Verified via new coverage in `ArmyGeneratorTests.cs`/
+`ProductionAdvisorTests.cs` (MadDoctor/Mixed budget/faction-purity
+tests, a MadDoctor-advisor-fields-real-units test, an AI-targets-a-
+larger-army-facing-a-bigger-human-army test, the SupplyUsed-tautology
+test replaced with a real assertion). **No .NET SDK in this
+environment** -- verified by manual review (brace/paren balance, full
+re-read against real call signatures), not a real `dotnet test` run;
+flagged as the first thing to confirm once a working SDK is
+available.

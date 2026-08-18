@@ -8,11 +8,17 @@ namespace MadDr.MatchCore.Tests;
 /// <summary>2026-08 (creator direction: "Create a faction based army
 /// generator. To start making opponents for the game"). Covers
 /// `ArmyGenerator.Generate`'s own contract: deterministic, budget-
-/// respecting, faction-pure, MadDoctor/Mixed rejected, and that
+/// respecting, faction-pure (Mixed excepted -- see below), and that
 /// Aggression/Caution actually move the composition (not just decorative
 /// parameters). Does NOT cover placement (deliberately not this class's
 /// job -- see ArmyGenerator.cs's own header) or Unity wiring (no Editor
-/// in this environment to run it).</summary>
+/// in this environment to run it).
+///
+/// 2026-08 follow-up (creator direction: "the roster needs to be able to
+/// generate enemies for all races"): MadDoctor/Mixed used to be an
+/// explicit "rejected" test -- see git history for the version this
+/// replaced. They now have real coverage below, alongside the two
+/// pre-existing factions.</summary>
 public class ArmyGeneratorTests
 {
     private static IReadOnlyDictionary<ResourceKind, int> ArmyBudget(int bones, int fuel) =>
@@ -20,6 +26,16 @@ public class ArmyGeneratorTests
 
     private static IReadOnlyDictionary<ResourceKind, int> HiveBudget(int ichor) =>
         new Dictionary<ResourceKind, int> { { ResourceKind.Ichor, ichor } };
+
+    private static IReadOnlyDictionary<ResourceKind, int> MadDoctorBudget(int blood, int bones) =>
+        new Dictionary<ResourceKind, int> { { ResourceKind.Blood, blood }, { ResourceKind.Bones, bones } };
+
+    private static IReadOnlyDictionary<ResourceKind, int> MixedBudget(int blood, int bones, int fuel, int ichor) =>
+        new Dictionary<ResourceKind, int>
+        {
+            { ResourceKind.Blood, blood }, { ResourceKind.Bones, bones },
+            { ResourceKind.Fuel, fuel }, { ResourceKind.Ichor, ichor },
+        };
 
     private static int TotalCost(IReadOnlyList<(RosterUnitKind Kind, int Count)> army, ResourceKind resource)
     {
@@ -98,13 +114,58 @@ public class ArmyGeneratorTests
             Assert.Equal(FactionId.AlienHive, UnitRosterDef.Get(kind).Faction);
     }
 
-    [Theory]
-    [InlineData(FactionId.MadDoctor)]
-    [InlineData(FactionId.Mixed)]
-    public void Factions_with_no_fixed_roster_are_rejected(FactionId faction)
+    [Fact]
+    public void MadDoctor_composition_never_exceeds_its_budget()
     {
-        Assert.Throws<ArgumentException>(() =>
-            ArmyGenerator.Generate(faction, CommanderPersonality.Balanced(), ArmyBudget(1000, 1000), new SimRng(1u)));
+        var budget = MadDoctorBudget(413, 121);
+        for (uint seed = 1; seed <= 20; seed++)
+        {
+            var army = ArmyGenerator.Generate(FactionId.MadDoctor, CommanderPersonality.Generate(seed), budget, new SimRng(seed));
+            Assert.True(TotalCost(army, ResourceKind.Blood) <= budget[ResourceKind.Blood]);
+            Assert.True(TotalCost(army, ResourceKind.Bones) <= budget[ResourceKind.Bones]);
+        }
+    }
+
+    [Fact]
+    public void MadDoctor_budget_only_ever_yields_MadDoctor_kinds()
+    {
+        var army = ArmyGenerator.Generate(FactionId.MadDoctor, CommanderPersonality.Berserker(), MadDoctorBudget(1000, 1000), new SimRng(11u));
+        Assert.NotEmpty(army);
+        foreach (var (kind, _) in army)
+            Assert.Equal(FactionId.MadDoctor, UnitRosterDef.Get(kind).Faction);
+    }
+
+    [Fact]
+    public void Mixed_budget_can_yield_kinds_from_every_faction_across_enough_draws()
+    {
+        // A single Generate() call draws one seeded composition -- it
+        // won't necessarily touch all three real factions itself. This
+        // sweeps many seeds and asserts the UNION of everything drawn
+        // spans more than one faction, proving RosterFor's union really
+        // reaches every roster for Mixed, not just whichever happens to
+        // win one weighted draw.
+        var seenFactions = new HashSet<FactionId>();
+        var budget = MixedBudget(300, 300, 300, 300);
+        for (uint seed = 1; seed <= 40; seed++)
+        {
+            var army = ArmyGenerator.Generate(FactionId.Mixed, CommanderPersonality.Generate(seed), budget, new SimRng(seed));
+            foreach (var (kind, _) in army)
+                seenFactions.Add(UnitRosterDef.Get(kind).Faction);
+        }
+        Assert.True(seenFactions.Count > 1, $"expected units from more than one faction, saw: {string.Join(",", seenFactions)}");
+        Assert.DoesNotContain(FactionId.Mixed, seenFactions); // every unit keeps its OWN real faction, never "Mixed" itself
+    }
+
+    [Fact]
+    public void Mixed_composition_never_exceeds_its_per_resource_budget()
+    {
+        var budget = MixedBudget(250, 180, 220, 260);
+        for (uint seed = 1; seed <= 20; seed++)
+        {
+            var army = ArmyGenerator.Generate(FactionId.Mixed, CommanderPersonality.Generate(seed), budget, new SimRng(seed));
+            foreach (var resource in new[] { ResourceKind.Blood, ResourceKind.Bones, ResourceKind.Fuel, ResourceKind.Ichor })
+                Assert.True(TotalCost(army, resource) <= budget[resource]);
+        }
     }
 
     [Fact]
