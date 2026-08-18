@@ -19703,3 +19703,45 @@ property) is never directly assigned anywhere outside `UnitCombat.cs`
 itself. No Unity Editor in this environment -- none of this has been
 seen running, and the balance numbers/AI thresholds are a first pass
 for real playtesting to tune, not a claimed final result.
+
+Follow-up the same day: the creator reported the live Lab still showing
+the OLD single-Ground-Stomp template after this pass shipped. Two real
+bugs, found by direct comparison rather than assumption:
+
+1. `packages/genome-core/src/attacks.ts` (the Lab's TypeScript twin of
+   `SecondaryAttackCatalog.cs`) had never been touched -- the whole
+   expansion above only ever reached the Unity side. Fixed by rewriting
+   `attacks.ts` to the same 21-ability, per-race-pool shape
+   (`secondaryAttackFor`/`secondaryAttackForGenome` now return an
+   array, a breaking API change), rewriting `tests/attacks.test.ts` to
+   match (60/60 passing), rebuilding, and re-vendoring to `site/lib/`
+   per the normal build pipeline. `site/main.js` updated to render the
+   full pool (plural "Secondary Attacks" heading, one block per
+   ability, a "+N more" hint on the Chop Shop slab).
+2. Even after (1) was committed and pushed, the creator still saw stale
+   content -- because all of this session's work was stranded on the
+   `claude/mad-doctors-game-design-wacvlu` branch and had never reached
+   `main`, which is what GitHub Pages actually serves. Checked via the
+   GitHub Actions run history (`mcp__github__actions_list`) rather than
+   assumed: **every Pages run triggered by a push to the feature branch
+   has failed**, even though `pages.yml`'s own `on.push.branches` list
+   includes it. Root cause: the `deploy` job targets
+   `environment: { name: github-pages }`, and GitHub's auto-created
+   `github-pages` environment restricts deployments to the repository's
+   default branch (`main`) regardless of what the workflow's own push
+   trigger lists -- the run fires (matches the YAML), then the job is
+   rejected by the environment's branch policy in ~2 seconds, before
+   any build step runs. So feature-branch pushes have **never**
+   auto-published, silently, this whole time. Fixed for this incident
+   by fast-forward-merging the branch into `main`
+   (`cefa0f6..dee1347`, verified conflict-free first); run
+   `32180645999` on `main` completed successfully.
+
+**Standing implication for every future session**: pushing to the
+`claude/mad-doctors-game-design-wacvlu` branch alone will never update
+the live Lab, no matter what `pages.yml` appears to say -- only a push
+that lands on `main` does. Either fold that into the normal "merge to
+main promptly" workflow already documented at the top of this repo's
+CLAUDE.md, or fix `pages.yml` to stop listing the feature branch (it's
+currently misleading: it looks like a working autodeploy trigger and
+isn't).

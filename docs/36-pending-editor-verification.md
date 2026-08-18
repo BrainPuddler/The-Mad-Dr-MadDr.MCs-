@@ -148,6 +148,17 @@ docs/26 §8 and docs/12's matching entry for full design/reasoning.
   `WebAttackAbility.ShouldCatchCombatant`'s own same-faction exclusion,
   which was explicitly written to handle this case already).
 
+- **Deployment gotcha (found, not a code bug):** if you push a fix to
+  `claude/mad-doctors-game-design-wacvlu` and the live Lab still looks
+  stale, don't assume the code is wrong first -- check whether the
+  change actually reached `main`. `pages.yml` lists the feature branch
+  in its `on.push.branches` trigger, but the `deploy` job's
+  `environment: github-pages` silently rejects every run from a
+  non-default branch (~2s failure, no build steps run). Confirmed via
+  GitHub Actions run history 2026-08-18: every feature-branch Pages run
+  has failed; only pushes landing on `main` publish. See docs/12's
+  matching entry for the full root-cause writeup.
+
 ## 6. Known latent issues found but NOT fixed
 
 Deliberately left alone, flagged rather than silently touched:
