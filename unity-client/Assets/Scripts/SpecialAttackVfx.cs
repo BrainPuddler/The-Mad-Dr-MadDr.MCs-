@@ -99,15 +99,32 @@ public static class SpecialAttackVfx
         var strength = EstimateStrength01(definition);
         var duration = EstimateDuration(definition);
 
-        if (definition.VfxStyle == SpecialAttackVfxStyle.Psionic)
+        switch (definition.VfxStyle)
         {
-            var go = VfxPool.Get(PsionicKey, BuildPsionicRoot);
-            go.GetComponent<PsionicRippleEffect>().Begin(point, radius, strength, duration);
-        }
-        else
-        {
-            var go = VfxPool.Get(AreaKey, BuildAreaRoot);
-            go.GetComponent<AreaAttackEffect>().Begin(point, radius, strength, duration);
+            case SpecialAttackVfxStyle.Psionic:
+            {
+                var go = VfxPool.Get(PsionicKey, BuildPsionicRoot);
+                go.GetComponent<PsionicRippleEffect>().Begin(point, radius, strength, duration);
+                break;
+            }
+            case SpecialAttackVfxStyle.Organic:
+            {
+                var go = VfxPool.Get(OrganicKey, BuildOrganicRoot);
+                go.GetComponent<OrganicCloudEffect>().Begin(point, radius, strength, duration);
+                break;
+            }
+            case SpecialAttackVfxStyle.Disruption:
+            {
+                var go = VfxPool.Get(DisruptionKey, BuildDisruptionRoot);
+                go.GetComponent<DisruptionPulseEffect>().Begin(point, radius, strength, duration);
+                break;
+            }
+            default:
+            {
+                var go = VfxPool.Get(AreaKey, BuildAreaRoot);
+                go.GetComponent<AreaAttackEffect>().Begin(point, radius, strength, duration);
+                break;
+            }
         }
     }
 
@@ -203,16 +220,33 @@ public static class SpecialAttackVfx
     internal static readonly Color PsionicCoreColor = new Color(0.85f, 0.72f, 1f);
     internal static readonly Color PsionicRippleColor = new Color(0.55f, 0.28f, 0.88f);
 
+    // 2026-08 ("Expand Secondary Attack Variety Across Races"): sickly
+    // yellow-green -- a biological/toxic read, distinct from Area's
+    // blue-white and Psionic's violet, and from HazardZoneEffect's own
+    // pure green (a lingering GROUND patch reads differently from a
+    // drifting AIR cloud, so a slightly different hue keeps the two
+    // "biological" effects visually distinguishable from each other).
+    internal static readonly Color OrganicCoreColor = new Color(0.7f, 0.85f, 0.4f);
+    internal static readonly Color OrganicCloudColor = new Color(0.55f, 0.72f, 0.32f);
+
+    // Pale, stark yellow-white -- a "scream/psychic shock" read, sharp
+    // and punchy rather than glowing, distinct from every other style.
+    internal static readonly Color DisruptionColor = new Color(1f, 0.95f, 0.65f);
+
     internal const float AreaCoreEmission = 6f;
     internal const float AreaGlowEmission = 1.6f;
     internal const float AreaArcEmission = 3f;
     internal const float AreaRingEmission = 1.2f;
     internal const float PsionicCoreEmission = 5f;
     internal const float PsionicRippleEmission = 2.2f;
+    internal const float OrganicCoreEmission = 2.4f;
+    internal const float OrganicCloudEmission = 1f;
+    internal const float DisruptionEmission = 4.5f;
 
     private static Material _areaCoreMat, _areaGlowMat, _areaArcMat, _areaRingMat;
     private static Material _psionicCoreMat, _psionicRippleMat;
     private static Material _areaBoltMat, _psionicBoltMat;
+    private static Material _organicCoreMat, _organicCloudMat, _disruptionMat;
 
     internal static Material AreaCoreMaterial { get { return _areaCoreMat ?? (_areaCoreMat = MakeGlowMaterial(AreaCoreColor, AreaCoreEmission, 3002)); } }
     internal static Material AreaGlowMaterial { get { return _areaGlowMat ?? (_areaGlowMat = MakeGlowMaterial(AreaGlowColor, AreaGlowEmission, 3001)); } }
@@ -220,6 +254,9 @@ public static class SpecialAttackVfx
     internal static Material AreaRingMaterial { get { return _areaRingMat ?? (_areaRingMat = MakeGlowMaterial(AreaRingColor, AreaRingEmission, 3000)); } }
     internal static Material PsionicCoreMaterial { get { return _psionicCoreMat ?? (_psionicCoreMat = MakeGlowMaterial(PsionicCoreColor, PsionicCoreEmission, 3002)); } }
     internal static Material PsionicRippleMaterial { get { return _psionicRippleMat ?? (_psionicRippleMat = MakeGlowMaterial(PsionicRippleColor, PsionicRippleEmission, 3001)); } }
+    internal static Material OrganicCoreMaterial { get { return _organicCoreMat ?? (_organicCoreMat = MakeGlowMaterial(OrganicCoreColor, OrganicCoreEmission, 3002)); } }
+    internal static Material OrganicCloudMaterial { get { return _organicCloudMat ?? (_organicCloudMat = MakeGlowMaterial(OrganicCloudColor, OrganicCloudEmission, 3001)); } }
+    internal static Material DisruptionMaterial { get { return _disruptionMat ?? (_disruptionMat = MakeGlowMaterial(DisruptionColor, DisruptionEmission, 3002)); } }
     private static Material AreaBoltMaterial { get { return _areaBoltMat ?? (_areaBoltMat = MakeGlowMaterial(AreaArcColor, 2.2f, 3002)); } }
     private static Material PsionicBoltMaterial { get { return _psionicBoltMat ?? (_psionicBoltMat = MakeGlowMaterial(PsionicCoreColor, 2.2f, 3002)); } }
 
@@ -274,6 +311,8 @@ public static class SpecialAttackVfx
 
     internal const string AreaKey = "SpecialAttackVfx.Area";
     internal const string PsionicKey = "SpecialAttackVfx.Psionic";
+    internal const string OrganicKey = "SpecialAttackVfx.Organic";
+    internal const string DisruptionKey = "SpecialAttackVfx.Disruption";
 
     private static GameObject BuildAreaRoot()
     {
@@ -286,6 +325,20 @@ public static class SpecialAttackVfx
     {
         var go = new GameObject("PsionicVfx");
         go.AddComponent<PsionicRippleEffect>();
+        return go;
+    }
+
+    private static GameObject BuildOrganicRoot()
+    {
+        var go = new GameObject("OrganicCloudVfx");
+        go.AddComponent<OrganicCloudEffect>();
+        return go;
+    }
+
+    private static GameObject BuildDisruptionRoot()
+    {
+        var go = new GameObject("DisruptionPulseVfx");
+        go.AddComponent<DisruptionPulseEffect>();
         return go;
     }
 }
@@ -555,5 +608,145 @@ public class PsionicRippleEffect : MonoBehaviour
         }
 
         if (t >= 1f) VfxPool.Release(SpecialAttackVfx.PsionicKey, gameObject);
+    }
+}
+
+/// <summary>2026-08 ("Expand Secondary Attack Variety Across Races" --
+/// Spore Cloud/Defensive Spore Burst/Toxic Sac's own burst moment): a
+/// small central core plus 3 translucent puffs that drift outward on
+/// independent, slightly wandering paths (Perlin-noise lateral offset,
+/// not a straight radial line) -- "an expanding translucent particulate
+/// cloud... organic drifting motion," per the brief. Deliberately only
+/// 3 puffs ("avoid excessive particle counts") rather than a real
+/// particle-system emitter.</summary>
+public class OrganicCloudEffect : MonoBehaviour
+{
+    private const int PuffCount = 3;
+
+    private Transform _coreT;
+    private Renderer _coreR;
+    private MaterialPropertyBlock _coreBlock;
+    private readonly Transform[] _puffT = new Transform[PuffCount];
+    private readonly Renderer[] _puffR = new Renderer[PuffCount];
+    private readonly MaterialPropertyBlock[] _puffBlock = new MaterialPropertyBlock[PuffCount];
+    private readonly Vector3[] _puffDir = new Vector3[PuffCount];
+    private readonly float[] _puffPhase = new float[PuffCount];
+    private readonly float[] _puffReach = new float[PuffCount];
+
+    private float _age, _duration, _radius, _strength;
+    private System.Random _rng;
+
+    private void Awake()
+    {
+        _coreT = SpecialAttackVfx.MakePrimitiveChild(transform, PrimitiveType.Sphere, "Core", SpecialAttackVfx.OrganicCoreMaterial);
+        _coreR = _coreT.GetComponent<Renderer>();
+        _coreBlock = new MaterialPropertyBlock();
+
+        for (var i = 0; i < PuffCount; i++)
+        {
+            _puffT[i] = SpecialAttackVfx.MakePrimitiveChild(transform, PrimitiveType.Sphere, "Puff", SpecialAttackVfx.OrganicCloudMaterial);
+            _puffR[i] = _puffT[i].GetComponent<Renderer>();
+            _puffBlock[i] = new MaterialPropertyBlock();
+        }
+    }
+
+    public void Begin(Vector3 point, float radius, float strength01, float duration)
+    {
+        transform.position = point;
+        _radius = radius;
+        _strength = strength01;
+        _duration = Mathf.Max(0.05f, duration);
+        _age = 0f;
+        // reseeded each use (pooled instance) -- same "mix in Time.time,
+        // never touch the shared/gameplay RNG stream" posture
+        // AreaAttackEffect.Begin already documents.
+        _rng = new System.Random((GetInstanceID() * 397) ^ Mathf.RoundToInt(Time.time * 1000f));
+        for (var i = 0; i < PuffCount; i++)
+        {
+            var angle = (float)(_rng.NextDouble() * Mathf.PI * 2f);
+            var elevation = (float)(_rng.NextDouble() * 0.5f);
+            _puffDir[i] = new Vector3(Mathf.Cos(angle), elevation, Mathf.Sin(angle)).normalized;
+            _puffPhase[i] = (float)(_rng.NextDouble() * 10f);
+            _puffReach[i] = 0.65f + (float)_rng.NextDouble() * 0.35f;
+        }
+        gameObject.SetActive(true);
+    }
+
+    private void Update()
+    {
+        _age += Time.deltaTime;
+        var t = Mathf.Clamp01(_age / _duration);
+
+        var coreScale = Mathf.Lerp(_radius * 0.15f, _radius * 0.3f, Mathf.SmoothStep(0f, 1f, t)) * (1f + _strength * 0.3f);
+        _coreT.localScale = Vector3.one * coreScale;
+        SpecialAttackVfx.SetAlpha(_coreR, _coreBlock, SpecialAttackVfx.OrganicCoreColor, Mathf.Lerp(0.7f, 0f, t), SpecialAttackVfx.OrganicCoreEmission);
+
+        var expand = Mathf.SmoothStep(0f, 1f, t);
+        for (var i = 0; i < PuffCount; i++)
+        {
+            var wander = Mathf.PerlinNoise(_age * 0.6f + _puffPhase[i], 0f) - 0.5f;
+            var travel = expand * _radius * _puffReach[i];
+            _puffT[i].localPosition = _puffDir[i] * travel + Vector3.up * (wander * _radius * 0.15f);
+            _puffT[i].localScale = Vector3.one * Mathf.Lerp(_radius * 0.2f, _radius * 0.45f, t);
+            var alpha = Mathf.Sin(Mathf.Clamp01(t) * Mathf.PI) * 0.45f;   // fades in, peaks mid-life, fades out
+            SpecialAttackVfx.SetAlpha(_puffR[i], _puffBlock[i], SpecialAttackVfx.OrganicCloudColor, alpha, SpecialAttackVfx.OrganicCloudEmission);
+        }
+
+        if (t >= 1f) VfxPool.Release(SpecialAttackVfx.OrganicKey, gameObject);
+    }
+}
+
+/// <summary>2026-08 ("Expand Secondary Attack Variety Across Races" --
+/// Panic Shriek/Neural Disruption/Mutagenic Pulse): a fast, sharp
+/// central flash plus one quickly-expanding thin ring -- "strong
+/// audiovisual feedback, but keep the implementation performant" and
+/// "concentric/radiating energy waves" per the brief. Deliberately much
+/// shorter-lived than the other three styles (capped well under a
+/// second) -- a shriek/disruption reads as instantaneous, not a
+/// lingering effect.</summary>
+public class DisruptionPulseEffect : MonoBehaviour
+{
+    private Transform _flashT, _ringT;
+    private Renderer _flashR, _ringR;
+    private MaterialPropertyBlock _flashBlock, _ringBlock;
+
+    private float _age, _duration, _radius, _strength;
+
+    private void Awake()
+    {
+        _flashT = SpecialAttackVfx.MakePrimitiveChild(transform, PrimitiveType.Sphere, "Flash", SpecialAttackVfx.DisruptionMaterial);
+        _flashR = _flashT.GetComponent<Renderer>();
+        _flashBlock = new MaterialPropertyBlock();
+
+        _ringT = SpecialAttackVfx.MakePrimitiveChild(transform, PrimitiveType.Cylinder, "Ring", SpecialAttackVfx.DisruptionMaterial);
+        _ringR = _ringT.GetComponent<Renderer>();
+        _ringBlock = new MaterialPropertyBlock();
+    }
+
+    public void Begin(Vector3 point, float radius, float strength01, float duration)
+    {
+        transform.position = point;
+        _radius = radius;
+        _strength = strength01;
+        _duration = Mathf.Clamp(duration * 0.5f, 0.15f, 0.5f);
+        _age = 0f;
+        gameObject.SetActive(true);
+    }
+
+    private void Update()
+    {
+        _age += Time.deltaTime;
+        var t = Mathf.Clamp01(_age / _duration);
+
+        var flashT = Mathf.Clamp01(t / 0.3f);
+        var flashScale = Mathf.Lerp(_radius * 0.25f, _radius * 0.05f, flashT) * (1f + _strength * 0.5f);
+        _flashT.localScale = Vector3.one * flashScale;
+        SpecialAttackVfx.SetAlpha(_flashR, _flashBlock, SpecialAttackVfx.DisruptionColor, Mathf.Lerp(1f, 0f, flashT), SpecialAttackVfx.DisruptionEmission);
+
+        var ringScale = Mathf.Lerp(_radius * 0.1f, _radius * 2f, Mathf.SmoothStep(0f, 1f, t));
+        _ringT.localScale = new Vector3(ringScale, 0.03f, ringScale);
+        SpecialAttackVfx.SetAlpha(_ringR, _ringBlock, SpecialAttackVfx.DisruptionColor, Mathf.Lerp(0.6f, 0f, t), SpecialAttackVfx.DisruptionEmission * 0.6f);
+
+        if (t >= 1f) VfxPool.Release(SpecialAttackVfx.DisruptionKey, gameObject);
     }
 }

@@ -19646,3 +19646,60 @@ respectively), not something introduced here. C# test coverage added
 (`WeaponTests.cs`, `CreatureBuilderTests.cs`) but unverified -- no .NET
 SDK in this environment, same standing limitation as every other C#
 change this session.
+
+## 2026-08: Secondary Attack Variety Expansion (four races, 21 abilities total)
+
+Creator direction, verbatim: "Expand Secondary Attack Variety Across
+Races — Starting with Lab Gnome. We currently have too much repetition
+around SECONDARY ATTACK behavior... each race has at least 4-5
+additional secondary abilities, rather than every race repeatedly
+relying on the same Ground Stomp-style interaction." Full writeup lives
+in `docs/26-special-attacks-system.md` §8 (kept with the rest of the
+special-attacks system it extends, not duplicated here).
+
+Short summary: "Lab Gnome" turned out to be the creator's own nickname
+for "the Mad Doctor's default creature" (non-alien-handed genome-bred
+monsters) — no separate entity exists in the codebase, confirmed by a
+repo-wide search before writing any code. Every race that already had a
+secondary attack (Mad Doctor default, alien-tech hands, the electric_arc
+hand, Human Army Tanks) went from exactly ONE equipped ability to a pool
+of 5-6, competing via the SAME `EvaluateBestAbility` scoring loop that
+already existed (it had been built to handle multiple candidates since
+docs/26 Phase 8, just never actually given more than one to choose
+from). Five new effect types (Fear, Weaken, Boost, Possess, Hazard) each
+reuse or extend `UnitCombat`'s existing status-effect shape rather than
+building parallel systems -- Weaken and Boost in particular are the
+exact same new mechanic (a fire-rate multiplier) applied in opposite
+directions to an enemy vs. the caster. Two new pooled VFX styles
+(Organic, Disruption) extend the existing `SpecialAttackVfx` resolver
+built in the prior VFX pass. Ability selection is now context-aware
+(threatened -> prefer a defensive ability outright, before the normal
+catch-count competition) using the same spatial query every offensive
+candidate already ran, not a new AI system.
+
+Several scope decisions were made deliberately and documented
+transparently rather than silently dropped or half-built: no new
+accuracy/miss-roll mechanic (this engine has none to extend safely), no
+real flee-pathing for Fear (movement-only disruption instead), no
+faction-swap AI takeover for Possess (disorientation +
+AoE-vulnerability instead, reusing an inert flag docs/26 Phase 5 had
+already reserved for exactly this), no movement-speed component on
+Boost (would have required loosening `SpeedMultiplier`'s existing
+`Clamp01`, read by every mover in the game), no ally-wide "Rally" buff
+(the existing AoE targeting deliberately excludes same-faction units;
+building a second targeting mode was out of scope), and
+`HumanoidCombatant` units (Soldier/Armed Civilian/Grandma, docs/35) were
+left untouched since none of them use the secondary-attack system today
+-- the brief's own scope was expanding what already existed, not adding
+the mechanic to new unit categories.
+
+Checked by hand: brace/paren balance on all 8 touched/new files; `git
+diff` confirmed `WeaponFx.cs` (primary-attack visuals/damage) has zero
+changes; grep swept for every new `SpecialAttackEffectType` value to
+confirm each is both produced somewhere in the catalog and consumed
+somewhere in the resolver (no silently-inert enum value); confirmed
+`IsPossessed` (converted from an inert public field to a real computed
+property) is never directly assigned anywhere outside `UnitCombat.cs`
+itself. No Unity Editor in this environment -- none of this has been
+seen running, and the balance numbers/AI thresholds are a first pass
+for real playtesting to tune, not a claimed final result.

@@ -836,3 +836,190 @@ wallet, soft/never-blocking): Flamethrower 4 blood / 2 bones, Psionic
 Tractor Beam 3 blood / 1 bones, Ground Stomp 2 blood / 4 bones. All
 placeholders until playtested, per this repo's general v0.1 numbers
 policy.
+
+## 8. Secondary Attack Variety Expansion (2026-08)
+
+Creator direction, verbatim: "Expand Secondary Attack Variety Across
+Races — Starting with Lab Gnome. We currently have too much repetition
+around SECONDARY ATTACK behavior... I want to expand the secondary-
+attack system so that each race has at least 4-5 additional secondary
+abilities, rather than every race repeatedly relying on the same Ground
+Stomp-style interaction."
+
+### Investigation (per the brief's own "inspect before coding" instruction)
+
+**"Lab Gnome" does not exist as a distinct entity anywhere in this
+codebase** — a repo-wide case-insensitive search for "gnome" (excluding
+"genome") returned zero hits. Cross-referencing the brief's own
+description ("currently uses Ground Stomp") against `SecondaryAttackCatalog.
+GroundStomp()`'s existing doc comment — "The Mad Doctor's default
+creature (every monster whose hand family isn't alien tech): creator
+direction, 2026-07: 'mad dr Ground stomp stun effect'" — confirms "Lab
+Gnome" is the creator's own informal nickname for that default,
+non-alien-handed, Lab-bred Mad Doctor creature, not a separate class.
+
+**`UnitCombat.Abilities` was already `List<SpecialAttackInstance>`**,
+and `MonsterAgent.EvaluateBestAbility` (docs/26 Phase 8) already
+competed among however many abilities were equipped — only the CATALOG
+side ever equipped exactly one. This meant the "extend the existing
+architecture, not replace it" instruction had a very literal answer:
+change `SecondaryAttackCatalog`'s per-race methods to return a POOL
+instead of a single definition, and change `MonsterAgent.Init`/
+`Tank.Init` to loop over it — no new equip mechanism, no new
+competition mechanism, both already existed and had simply never been
+exercised with more than one real candidate.
+
+**Existing status-effect infrastructure found on `UnitCombat`**:
+`ApplyStun`/`IsStunned` (binary freeze), `ApplySlow`/`SpeedMultiplier`
+(movement), `Capture`/`IsCaptured`/`TickCapture` (drag-toward-captor,
+consume), and a genuinely inert `IsPossessed` field — docs/26 Phase 5
+had added it as a forward-declared hook ("nothing sets this yet") so
+`WebAttackAbility.ShouldCatchCombatant`'s same-faction exclusion could
+already special-case a possessed "ally" as a valid AoE target, years
+before any ability would ever set it. This pass is the first thing that
+actually sets it.
+
+### What was built
+
+**Five new `SpecialAttackEffectType` values**, each reusing/extending
+`UnitCombat`'s existing status-effect shape rather than inventing a
+parallel one:
+- `Fear` — `UnitCombat.ApplyFear`, a "can't fire" timer, deliberately
+  lighter than Stun (movement untouched).
+- `Weaken`/`Boost` — `UnitCombat.ApplyTempoModifier`, ONE new field pair
+  (`_tempoMultiplier`/`_tempoRemaining`) multiplying `Weapon.Cadence` in
+  `TryFire`/`TryFireAtPoint`'s existing cooldown-set line. `Weaken`
+  (>1, applied to a caught enemy) and `Boost` (<1, applied to the
+  caster itself) are the SAME mechanic in both directions — a slower or
+  faster fire rate — not two separate systems.
+- `Possess` — `UnitCombat.ApplyPossession`, finally giving the old inert
+  `IsPossessed` field a real decaying timer behind it. Rolled per-target
+  via `UnityEngine.Random` (this combat layer is entirely client-side —
+  docs/26's own header — so it carries none of match-core's
+  replay-determinism requirement; this project's "avoid
+  UnityEngine.Random" convention is specifically about not consuming a
+  shared stream for cosmetic VFX jitter, not a blanket ban on gameplay
+  randomness).
+- `Hazard` — spawns a new `HazardZoneEffect` (a pooled, persistent
+  ground patch that periodically re-applies `Weaken` to whoever's
+  standing inside it) instead of an instant per-target effect.
+
+**Two new `SpecialAttackVfxStyle` values** (`Organic` — a translucent
+drifting cloud, spore/toxic abilities; `Disruption` — a fast sharp
+radiating pulse, shriek/neural/mutagenic abilities), each a new pooled
+effect component matching `AreaAttackEffect`/`PsionicRippleEffect`'s
+existing shape (shared materials, `MaterialPropertyBlock`-driven fades,
+`VfxPool`).
+
+**Context-aware selection** (creator: "Low health -> Defensive ability...
+Gnome isolated -> defensive/escape ability"): `SpecialAttackDefinition`
+gained `IsDefensive`. `EvaluateBestAbility` now checks first whether the
+caster is THREATENED (health <= 35%, or 3+ enemies within 8m — reusing
+the same `QueryCombatantsInRadius` entry point every candidate ability
+already called, not a new per-frame cost) and, if so, short-circuits
+straight to a ready `IsDefensive` ability — which never otherwise
+competes in the normal catch-count scoring, and vice versa. This is the
+same existing loop/list, extended with one more axis, not a new AI
+system. The pre-existing Stun-only self-centered special case was also
+generalized to "any ability with `Range <= 0`" (the same signal Ground
+Stomp/Area Shock's own definitions already used), since Fear/Weaken/
+Possess/Hazard/Boost abilities are self-centered too without sharing
+Stun's `EffectType`.
+
+**Four expanded pools** (full per-ability numbers/reasoning live as doc
+comments directly on each factory method in `SecondaryAttackCatalog.cs`
+— not duplicated here):
+
+| Race | Pool (existing ability first) |
+| --- | --- |
+| Mad Doctor default ("Lab Gnome") | Ground Stomp (Stun) + Spore Cloud (Possess) + Defensive Spore Burst (Fear, defensive) + Toxic Sac (Hazard) + Panic Shriek (Fear) + Mutagenic Pulse (Weaken) |
+| Alien/Psionic hands | Psionic Tractor Beam (PullAndConsume) + Psychic Pulse (Weaken) + Neural Disruption (Fear) + Psychic Shield (Fear, defensive) + Mind Control (Possess) |
+| Electric/Tech hand | Area Shock (Stun) + EMP Pulse (Weaken) + Discharge Burst (Fear, defensive) + Arc Lance (Damage) + Magnetic Tether (PullAndConsume) |
+| Human Army (Tank) | Flamethrower Burst (Damage) + Smoke Grenade (Fear, defensive) + Suppressive Fire (Weaken) + Combat Stim (Boost, defensive) + Frag Grenade (Damage) |
+
+Every race spans a genuine mixture of the brief's own requested
+categories (offense, crowd control, debuff, buff, area denial,
+possession, defense/escape) rather than every ability being "press
+secondary, deal area damage" — no two abilities in the same pool share
+both the same `EffectType` and the same tactical role.
+
+### Deliberate scope decisions (transparent, not silent cuts)
+
+- **No accuracy/miss-chance mechanic.** This engine has no existing
+  hit-roll anywhere — every `TryFire` always connects. The brief listed
+  "reduced movement speed, attack speed, OR accuracy" as options (an
+  "or," not all three mandatory); this pass scoped Weaken/Boost to fire
+  rate only (an existing, safe axis) rather than inventing a new
+  miss-chance system that would touch the shared damage-application
+  path used by every weapon in the game.
+- **No real flee-pathing.** `Fear` blocks firing but doesn't force
+  movement — this codebase has no flee-steering to reuse, and building
+  one is a genuinely separate, larger feature. "Briefly stagger... lose
+  their current attack target" is delivered as "can't act offensively
+  for a few seconds," which in practice already reads as disruption.
+- **No real AI-takeover possession.** `Possess` disorients (can't fire/
+  re-target) and makes the target newly vulnerable to same-faction AoE
+  (via the now-real `IsPossessed`) — it does NOT swap faction or make
+  the unit attack its own allies. A full mind-control takeover would
+  touch faction/ownership logic well beyond this system's existing
+  footprint, for an effect the brief itself frames as minor ("1-5%
+  chance... 2-4 seconds... do not make this a guaranteed effect").
+- **No move-speed component on Boost.** `SpeedMultiplier`'s existing
+  clamp (`Mathf.Clamp01`) only supports slowing, not speeding up, and
+  extending it risked touching a value read by every mover in the game
+  (`MonsterAgent.RunOrWalkSpeed`, `Tank.Update`) for a buff whose brief
+  itself only asked for "attack speed OR accuracy," not necessarily
+  movement.
+- **No ally-wide buffs ("Rally").** `ShouldCatchCombatant` deliberately
+  excludes same-faction targets (no friendly-fire capture); a
+  "buff nearby allies" ability would need a genuinely new targeting
+  branch. `Combat Stim` is scoped to a SELF-buff instead — still a real,
+  new tactical option (the brief's own "Buffs" category), just not
+  squad-wide.
+- **`WeaponFx.cs` is untouched** (verified: `git diff` on that file is
+  empty) — every Weaken/Boost effect works by adjusting HOW OFTEN a
+  unit's existing `_cooldown` reloads (`UnitCombat.TryFire`/
+  `TryFireAtPoint`'s own line), never touching per-shot damage/visual
+  code. Primary attacks are unchanged.
+- **`HumanoidCombatant`/`HumanCombatProfile` units (Soldier/Armed
+  Civilian/Grandma, docs/35) were left out of scope** — confirmed by
+  inspection that none of them ever call into `SpecialAttackCatalog`/
+  `Abilities` today. The brief's own scope was "every race/monster
+  currently using SECONDARY ATTACK" (Mad Doctor monsters, alien-handed
+  monsters, electric_arc-handed monsters, Tanks); adding the whole
+  system to a category of units that never had it is a different,
+  larger ask than "expand what's already there."
+
+### Balance assumptions
+
+No overall power increase intended — existing cooldowns/damage/duration
+numbers for the four PRE-EXISTING abilities (Ground Stomp, Psionic
+Tractor Beam, Area Shock, Flamethrower Burst) are completely unchanged.
+Every new ability's own cooldown/cost was picked to sit in the SAME
+range as its race's existing sibling(s) (10-18s cooldowns, 1-4 Blood/
+Bones costs, matching the pre-existing spread) rather than reasoning
+about them in isolation. Defensive abilities lean toward shorter
+cooldowns (11-12s) than offensive control abilities (13-18s) — they're
+meant to be a genuinely available reaction to danger, not a rare
+panic button. `MinTargetsInArea` is deliberately NOT enforced for
+defensive picks (see `EvaluateBestAbility`'s own doc comment) — a
+threatened unit should reach for its escape option regardless of how
+many enemies are actually close enough to "catch."
+
+### Verification
+
+Checked by hand: brace/paren balance on every touched file
+(`SpecialAttackDefinition.cs`, `UnitCombat.cs`, `SpecialAttackResolver.cs`,
+new `HazardZoneEffect.cs`, `SpecialAttackVfx.cs`, `MonsterAgent.cs`,
+`SecondaryAttackCatalog.cs`, `Tank.cs`); grep-confirmed `IsPossessed` is
+never assigned directly anywhere (the old public field is fully
+replaced by a computed property, only ever read); grep-confirmed
+`WeaponFx.cs` has zero diff; grep-confirmed every new
+`SpecialAttackEffectType` value is both produced by at least one
+catalog entry and consumed by at least one resolver case (no orphaned
+enum value that would silently do nothing). No Unity Editor in this
+environment — none of this has been seen running; in particular the
+exact numbers (cooldowns, durations, radii) are a first pass meant to
+be tuned against real playtesting, not a claimed final balance, and the
+context-aware AI selection thresholds (35% health, 3 nearby enemies,
+8m radius) are reasoned defaults, not measured against real combat.

@@ -85,14 +85,6 @@ public class UnitCombat : MonoBehaviour
     /// common case) means no escalation is active.</summary>
     public float PushThroughUntil;
 
-    /// <summary>docs/26 Phase 5: true for a unit under (future) mind-
-    /// control -- nothing sets this yet (no possession mechanic exists),
-    /// but the field exists now so friendly-fire exclusions have
-    /// somewhere to check "is this actually still an ally?" without a
-    /// later breaking change. Default false is fully behavior-inert.
-    /// See docs/26 "Possessed units and friendly fire."</summary>
-    public bool IsPossessed;
-
     private float _cooldown;
     private float _battleTimer;           // > 0 = "in battle" (fired or hit recently)
     private Action _onDied;
@@ -120,6 +112,37 @@ public class UnitCombat : MonoBehaviour
     /// ApplySlow) and also halts FIRING, not just movement, which a slow
     /// never does.</summary>
     private float _stunRemaining;
+
+    /// <summary>2026-08 (creator direction: "Expand Secondary Attack
+    /// Variety Across Races" -- Panic Shriek/Defensive Spore Burst):
+    /// a "can't fire" timer, deliberately lighter than <see
+    /// cref="_stunRemaining"/> -- movement is untouched (see
+    /// <see cref="IsFeared"/>'s own doc comment for why no flee-pathing
+    /// exists here yet), so this reads as "startled into holding fire,"
+    /// not a hard freeze.</summary>
+    private float _fearRemaining;
+
+    /// <summary>2026-08 (Weaken/Boost): a fire-INTERVAL multiplier
+    /// timer, mirroring `_slowRemaining`/`_slowMultiplier`'s exact
+    /// shape but for cadence rather than movement speed. Deliberately
+    /// one shared field pair for both directions (Weaken sets it >1 on
+    /// a caught enemy, Boost sets it &lt;1 on the caster itself) -- see
+    /// `ApplyTempoModifier`'s own doc comment for why they don't need
+    /// separate min/max reconciliation the way ApplySlow does.</summary>
+    private float _tempoRemaining;
+    private float _tempoMultiplier = 1f;
+
+    /// <summary>2026-08 (Spore Cloud/Mind Control): backs the public
+    /// `IsPossessed` property below with a real decaying timer -- was a
+    /// permanently-false, nothing-ever-sets-it placeholder field before
+    /// this pass (docs/26 Phase 5's own "future mind-control" note).
+    /// Deliberately NOT a real AI-takeover/faction-swap (see
+    /// SpecialAttackResolver's own doc comment for why) -- while this is
+    /// live the unit simply can't fire/re-target (mirrors Fear) AND
+    /// reads as vulnerable to same-faction AoE via the public
+    /// `IsPossessed` flag, which `WebAttackAbility.ShouldCatchCombatant`
+    /// already checks (that exclusion predates this pass).</summary>
+    private float _possessedRemaining;
 
     // 2026-08 (creator report: "the indicator on the monsters should be
     // attached to body not to ground indicator... especially important
@@ -194,6 +217,68 @@ public class UnitCombat : MonoBehaviour
         }
     }
 
+    /// <summary>2026-08 (Panic Shriek/Defensive Spore Burst/Smoke
+    /// Grenade/Neural Disruption): true while a Fear effect blocks
+    /// firing (see <see cref="ReadyToFire"/>). Deliberately does NOT
+    /// touch movement/steering or force a flee direction -- this
+    /// codebase has no flee-pathing to reuse, and building one is a
+    /// separate, larger feature than this pass (see docs/12's own entry
+    /// for the full scope note). "Briefly stagger, or lose their
+    /// current attack target" (the creator's own phrasing) is delivered
+    /// as "can't act offensively for a few seconds," which in practice
+    /// already reads as disruption -- the target may well have moved or
+    /// died by the time firing resumes.</summary>
+    public bool IsFeared { get { return _fearRemaining > 0f; } }
+
+    /// <summary>Apply (or refresh) a Fear. Binary duration, same
+    /// reapplication rule as ApplyStun (no "weaker fear" concept).</summary>
+    public void ApplyFear(float duration)
+    {
+        _fearRemaining = Mathf.Max(_fearRemaining, duration);
+    }
+
+    /// <summary>2026-08 (EMP Pulse/Suppressive Fire/Combat Stim/Mutagenic
+    /// Pulse/Overcharge): multiplies `Weapon.Cadence` (seconds between
+    /// shots) via <see cref="TryFire"/>/<see cref="TryFireAtPoint"/>'s
+    /// own cooldown-set line -- &gt;1 reads as Weaken (slower reload,
+    /// applied to a caught ENEMY), &lt;1 reads as Boost (faster reload,
+    /// applied to the CASTER itself by <see cref="SpecialAttackResolver"/>'s
+    /// own Boost branch). Deliberately never touches `WeaponFx`'s
+    /// per-shot damage math -- a primary attack's damage-per-hit is
+    /// identical whether this is active or not, only how OFTEN it fires
+    /// changes (verified: WeaponFx.cs is untouched by this whole pass).
+    /// One shared field pair for both directions rather than Weaken/
+    /// Boost-specific ones -- reapplying just takes whichever call came
+    /// last (unlike ApplySlow's min/max reconciliation, which only makes
+    /// sense when every caller pushes the SAME direction); a unit that's
+    /// simultaneously Weakened by an enemy and Boosted by an ally is a
+    /// genuinely rare v0.1 edge case, not worth extra bookkeeping for.</summary>
+    public float FireIntervalMultiplier { get { return _tempoRemaining > 0f ? _tempoMultiplier : 1f; } }
+
+    public void ApplyTempoModifier(float multiplier, float duration)
+    {
+        _tempoMultiplier = Mathf.Max(0.05f, multiplier);
+        _tempoRemaining = duration;
+    }
+
+    /// <summary>2026-08 (Spore Cloud/Mind Control): true while a
+    /// Possess effect is live -- see `_possessedRemaining`'s own doc
+    /// comment for exactly what this does (and deliberately does NOT
+    /// do). A plain computed property now, replacing the old
+    /// permanently-false public field docs/26 Phase 5 left as a
+    /// forward-declared hook.</summary>
+    public bool IsPossessed { get { return _possessedRemaining > 0f; } }
+
+    /// <summary>Apply (or refresh) a Possession. Binary duration, same
+    /// reapplication rule as ApplyStun/ApplyFear. Callers roll the
+    /// percent-chance themselves (see `SpecialAttackResolver`'s own
+    /// Possess case) -- this method always applies once called, it
+    /// doesn't re-roll.</summary>
+    public void ApplyPossession(float duration)
+    {
+        _possessedRemaining = Mathf.Max(_possessedRemaining, duration);
+    }
+
     /// <summary>True while this unit is being dragged toward a captor
     /// (e.g. a web attack's non-heavy branch). The owning mover
     /// (MonsterAgent/Tank) checks this at the top of its own Update() and
@@ -241,7 +326,7 @@ public class UnitCombat : MonoBehaviour
         _dead = false;
     }
 
-    public bool ReadyToFire { get { return _cooldown <= 0f && !IsStunned && Weapon != null && Weapon.CanAttack; } }
+    public bool ReadyToFire { get { return _cooldown <= 0f && !IsStunned && !IsFeared && !IsPossessed && Weapon != null && Weapon.CanAttack; } }
 
     public bool InRange(Vector3 point)
     {
@@ -259,7 +344,7 @@ public class UnitCombat : MonoBehaviour
         if (!ReadyToFire || target == null || !target.Alive) return false;
         if (!InRange(target.AimPoint)) return false;
         WeaponFx.Fire(this, target, muzzle);
-        _cooldown = (float)Weapon.Cadence;
+        _cooldown = (float)Weapon.Cadence * FireIntervalMultiplier;
         _battleTimer = 4f;
         return true;
     }
@@ -272,7 +357,7 @@ public class UnitCombat : MonoBehaviour
         if (!ReadyToFire) return false;
         if (!InRange(point)) return false;
         WeaponFx.FireAtPoint(this, point, muzzle);
-        _cooldown = (float)Weapon.Cadence;
+        _cooldown = (float)Weapon.Cadence * FireIntervalMultiplier;
         _battleTimer = 4f;
         return true;
     }
@@ -298,6 +383,9 @@ public class UnitCombat : MonoBehaviour
         if (_battleTimer > 0f) _battleTimer -= dt;
         if (_slowRemaining > 0f) { _slowRemaining -= dt; if (_slowRemaining <= 0f) _slowMultiplier = 1f; }
         if (_stunRemaining > 0f) _stunRemaining -= dt;
+        if (_fearRemaining > 0f) _fearRemaining -= dt;
+        if (_tempoRemaining > 0f) { _tempoRemaining -= dt; if (_tempoRemaining <= 0f) _tempoMultiplier = 1f; }
+        if (_possessedRemaining > 0f) _possessedRemaining -= dt;
         for (var i = 0; i < Abilities.Count; i++) Abilities[i].Tick(dt);
     }
 }

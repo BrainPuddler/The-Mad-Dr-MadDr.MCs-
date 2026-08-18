@@ -486,12 +486,16 @@ public class MonsterAgent : MonoBehaviour
         var aim = Mathf.Max(1f, _body.BodyHeight);
         _fighter.Configure("monster", (float)prof.MaxHealth, Mathf.Max(1f, _body.BodyHeight * 0.55f),
             aim, prof.Weapon, OnDied);
-        // docs/26 Phase 9: every monster carries a secondary attack too,
-        // chosen purely from its existing hand-family gene (no new
-        // gene) -- alien-tech hands get the Psionic Tractor Beam, every
-        // other creature (the Mad Doctor's default) gets Ground Stomp.
-        _fighter.Abilities.Add(new SpecialAttackInstance(
-            SecondaryAttackCatalog.ForMonster(creature.Genome.Slots.Hand.Family)));
+        // docs/26 Phase 9 (2026-08 follow-up: "Expand Secondary Attack
+        // Variety Across Races"): every monster carries a POOL of
+        // secondary attacks, chosen purely from its existing hand-family
+        // gene (no new gene) -- alien-tech hands get the alien pool,
+        // electric_arc gets the electric pool, every other creature (the
+        // Mad Doctor's default) gets that pool. EvaluateBestAbility
+        // already competes among however many are equipped.
+        var pool = SecondaryAttackCatalog.ForMonster(creature.Genome.Slots.Hand.Family);
+        for (var i = 0; i < pool.Count; i++)
+            _fighter.Abilities.Add(new SpecialAttackInstance(pool[i]));
 
         // selection ring: a flat disc at the feet, toggled by the commander
         var ring = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -1541,32 +1545,74 @@ public class MonsterAgent : MonoBehaviour
     /// highest-scoring ability+anchor across every equipped ability
     /// wins.
     ///
-    /// docs/26 Phase 9: a SELF-CENTERED ability (Stun -- e.g. Ground
-    /// Stomp, which resolves at this unit's own feet, not a target's) is
-    /// scored differently: there's no target position to anchor on, so
-    /// it's scored once against this unit's OWN position and, if it
-    /// passes, `anchor` is set to `_fighter` itself -- not a real target,
-    /// just a non-null UnitCombat so `OrderSpecialAttack`'s existing
-    /// contract (which requires one) is satisfied. `TickSpecialAttack`'s
-    /// approach-distance check against `_targetSpecialAttackUnit` then
-    /// naturally reads as "already in range" (distance to self is
-    /// zero) and fires immediately, with no separate no-travel-needed
-    /// special case required there.</summary>
+    /// docs/26 Phase 9: a SELF-CENTERED ability (`Definition.Range &lt;=
+    /// 0` -- e.g. Ground Stomp, which resolves at this unit's own feet,
+    /// not a target's) is scored differently: there's no target
+    /// position to anchor on, so it's scored once against this unit's
+    /// OWN position and, if it passes, `anchor` is set to `_fighter`
+    /// itself -- not a real target, just a non-null UnitCombat so
+    /// `OrderSpecialAttack`'s existing contract (which requires one) is
+    /// satisfied. `TickSpecialAttack`'s approach-distance check against
+    /// `_targetSpecialAttackUnit` then naturally reads as "already in
+    /// range" (distance to self is zero) and fires immediately, with no
+    /// separate no-travel-needed special case required there.
+    /// (2026-08: generalized from a Stun-specific check to any
+    /// self-centered `Range &lt;= 0` ability -- Spore Cloud/Panic
+    /// Shriek/Mutagenic Pulse/Discharge Burst/Combat Stim are all
+    /// self-centered too, per their own catalog definitions, without
+    /// sharing Ground Stomp's EffectType.)
+    ///
+    /// 2026-08 follow-up (creator direction: "Expand Secondary Attack
+    /// Variety Across Races... make secondary attacks context-aware...
+    /// Low health -> Defensive ability... Gnome isolated -> defensive/
+    /// escape ability"): a THREATENED check runs FIRST, before the
+    /// normal offensive catch-count competition below, and short-
+    /// circuits straight to a ready `IsDefensive` ability if one exists
+    /// -- a defensive/escape ability often scores LOW on "how many
+    /// enemies would this catch" even when it's exactly the right call,
+    /// so it could never win that competition on its own terms; it has
+    /// to be considered on a different axis entirely (still the SAME
+    /// existing `_fighter.Abilities` list and `QueryCombatantsInRadius`
+    /// entry point every candidate already used, not a new AI system).
+    /// `IsDefensive` abilities never enter the offensive loop at all
+    /// (see that field's own doc comment) -- an offensive ability can
+    /// never be picked "instead of" a ready defensive one while
+    /// threatened, and a defensive one never competes for an offensive
+    /// pick while not.</summary>
+    private const float ThreatenedCheckRadius = 8f;
+    private const int ThreatenedNearbyEnemyCount = 3;
+    private const float ThreatenedHealthFraction = 0.35f;
+
     private bool EvaluateBestAbility(out SpecialAttackInstance ability, out UnitCombat anchor)
     {
         ability = null;
         anchor = null;
         if (_fighter == null || _builder == null) return false;
 
-        var bestScore = 0;
         var nearby = new List<UnitCombat>();
+
+        _builder.QueryCombatantsInRadius(transform.position, ThreatenedCheckRadius, nearby);
+        var threatened = _fighter.HealthFraction <= ThreatenedHealthFraction || nearby.Count >= ThreatenedNearbyEnemyCount;
+        if (threatened)
+        {
+            for (var i = 0; i < _fighter.Abilities.Count; i++)
+            {
+                var candidate = _fighter.Abilities[i];
+                if (candidate == null || !candidate.IsReady || candidate.Definition == null || !candidate.Definition.IsDefensive) continue;
+                ability = candidate;
+                anchor = _fighter;   // every defensive ability in this pool is self-centered (Range <= 0)
+                return true;
+            }
+        }
+
+        var bestScore = 0;
         for (var i = 0; i < _fighter.Abilities.Count; i++)
         {
             var candidate = _fighter.Abilities[i];
-            if (candidate == null || !candidate.IsReady || candidate.Definition == null) continue;
+            if (candidate == null || !candidate.IsReady || candidate.Definition == null || candidate.Definition.IsDefensive) continue;
             var def = candidate.Definition;
 
-            if (def.EffectType == SpecialAttackEffectType.Stun)
+            if (def.Range <= 0f)
             {
                 var selfScore = WebAttackAbility.CountCatchable(_builder, _fighter, def, transform.position);
                 if (selfScore > bestScore && selfScore >= def.MinTargetsInArea)
@@ -2299,21 +2345,24 @@ public class MonsterAgent : MonoBehaviour
             // UnitCombat.TryFire only reloading _cooldown once a shot
             // actually goes out. Which resolver runs is keyed on
             // Definition.EffectType: PullAndConsume (Web Attack, Psionic
-            // Tractor Beam) launches a travelling projectile that resolves
-            // on arrival; Damage (Flamethrower) and Stun (Ground Stomp)
-            // resolve INSTANTLY, no projectile -- Stun centers on this
-            // unit's own position (a stomp happens at the caster's feet,
-            // not the target's), everything else centers on the target's.
-            // An unrecognised EffectType still consumes the cooldown (the
-            // cast attempt happened) but has no effect, rather than
-            // silently doing nothing forever.
+            // Tractor Beam, Magnetic Tether) launches a travelling
+            // projectile that resolves on arrival; everything else
+            // (Damage/Stun/Fear/Weaken/Boost/Possess/Hazard) resolves
+            // INSTANTLY, no projectile, via the SAME ResolveInstant --
+            // that resolver's own EffectType switch handles all of them,
+            // including short-circuiting Hazard/Boost before the normal
+            // per-target loop (see its own doc comment). A self-centered
+            // ability (`Range &lt;= 0` -- a stomp/burst/pulse/buff at the
+            // caster's own feet, not the target's -- same signal
+            // EvaluateBestAbility already uses) resolves at THIS unit's
+            // own position; everything else resolves at the target's.
             var def = _activeSpecialAttack.Definition;
             if (def.EffectType == SpecialAttackEffectType.PullAndConsume)
                 WebAttackAbility.Launch(_builder, _fighter, def, _targetSpecialAttackUnit.transform.position, Muzzle());
-            else if (def.EffectType == SpecialAttackEffectType.Damage)
-                SpecialAttackResolver.ResolveInstant(_builder, _fighter, def, _targetSpecialAttackUnit.transform.position);
-            else if (def.EffectType == SpecialAttackEffectType.Stun)
+            else if (def.Range <= 0f)
                 SpecialAttackResolver.ResolveInstant(_builder, _fighter, def, transform.position);
+            else
+                SpecialAttackResolver.ResolveInstant(_builder, _fighter, def, _targetSpecialAttackUnit.transform.position);
             // docs/26 Phase 10: every cast draws down the wallet -- soft,
             // never blocks the cast itself (see SpendWalletForCast).
             if (_builder != null) _builder.SpendWalletForCast(def.BloodCost, def.BonesCost);

@@ -1,12 +1,12 @@
-# Pending live verification — 2026-08 session (Order Sheet, VFX, Electric Arc)
+# Pending live verification — 2026-08 sessions (Order Sheet, VFX, Electric Arc, Secondary Attack Variety)
 
 Everything below is **implemented, committed, and pushed** on
 `claude/mad-doctors-game-design-wacvlu`, but **none of it has been seen
-running**: the agent environment for this session had no Unity Editor,
-no browser, and no .NET SDK. TypeScript was genuinely verified (real
-`npm test`, 58 tests, real `npm run build`); everything C# and visual
-was verified only by brace/paren balance, grep sweeps, and direct
-signature cross-checking against the real source.
+running**: the agent environments used for this work had no Unity
+Editor, no browser, and no .NET SDK. TypeScript was genuinely verified
+(real `npm test`, real `npm run build`); everything C# and visual was
+verified only by brace/paren balance, grep sweeps, and direct signature
+cross-checking against the real source.
 
 This file is the checklist for the next session that DOES have an
 Editor. Delete or trim entries as they're confirmed.
@@ -102,7 +102,53 @@ sync, then check the in-game queue tiles show portraits.** Creatures
 saved before the portrait feature existed should heal themselves the
 first time the Stable is viewed.
 
-## 5. Known latent issues found but NOT fixed
+## 5. Secondary Attack Variety Expansion (4 races, 21 abilities)
+
+No single commit yet (in progress as this section is written) — see
+docs/26 §8 and docs/12's matching entry for full design/reasoning.
+
+- **Every race now has 5-6 secondary abilities, not 1.** Watch a Mad
+  Doctor monster, an alien-handed one, an electric_arc-handed one, and
+  a Tank in real combat for a while each — confirm each one actually
+  uses MORE than just Ground Stomp/Psionic Tractor Beam/Area Shock/
+  Flamethrower Burst over time, not always the same single ability
+  every equipped unit had before this pass.
+- **Context-aware selection**: drop a Mad Doctor monster to low health
+  or surround it with several enemies, confirm it reaches for a
+  flagged-defensive ability (Defensive Spore Burst) rather than
+  continuing to compete on offensive catch-count. Also confirm a
+  HEALTHY, unsurrounded monster never fires a defensive ability
+  (`IsDefensive` abilities are excluded from the normal offensive
+  competition entirely — see `EvaluateBestAbility`'s own doc comment).
+- **Fear** (Defensive Spore Burst, Panic Shriek, Psychic Shield,
+  Neural Disruption, Discharge Burst, Smoke Grenade): confirm a feared
+  unit genuinely can't fire for the duration, then resumes normally —
+  and that it does NOT get stuck permanently unable to fire (the timer
+  must actually expire).
+- **Weaken/Boost** (Mutagenic Pulse, Psychic Pulse, EMP Pulse,
+  Suppressive Fire, Combat Stim): confirm a Weakened unit's own attacks
+  visibly slow down (longer gap between shots) and a Boosted unit's
+  speed up — and confirm `WeaponFx.cs`'s actual per-shot damage/visual
+  is IDENTICAL either way (only the rate should change, never the
+  damage-per-hit).
+- **Possess** (Spore Cloud, Mind Control): this is a LOW-percentage
+  roll (3-5% per caught target) — may take several casts to actually
+  observe. When it lands, confirm the possessed unit goes quiet
+  (doesn't fire/re-target) for its duration, then resumes normally.
+- **Toxic Sac's `HazardZoneEffect`**: confirm the thrown sac lands,
+  a visible pulsing green patch persists for several seconds, and
+  anyone standing in it gets periodically Weakened (not just once on
+  landing). Confirm the patch actually disappears/returns to the pool
+  after its duration — it should never linger forever or accumulate
+  unboundedly if cast repeatedly.
+- **`IsPossessed` behavior change**: this field used to be permanently
+  `false` (docs/26 Phase 5's own inert placeholder) and is now REAL —
+  double-check nothing elsewhere in the game was quietly relying on it
+  always reading false (the only other reader found by grep is
+  `WebAttackAbility.ShouldCatchCombatant`'s own same-faction exclusion,
+  which was explicitly written to handle this case already).
+
+## 6. Known latent issues found but NOT fixed
 
 Deliberately left alone, flagged rather than silently touched:
 

@@ -40,6 +40,24 @@ public class SpecialAttackDefinition : ScriptableObject
     public float DamageAmount = 20f;
     [Tooltip("Stun effect type only -- seconds a caught target is frozen (can't move or fire).")]
     public float StunDuration = 2f;
+    [Tooltip("Fear effect type only -- seconds a caught target can't fire. Deliberately lighter than Stun: movement is untouched (no flee-pathing exists yet -- see SpecialAttackResolver's own doc comment), so this reads as \"startled, holding fire\" rather than a hard freeze.")]
+    public float FearDuration = 3f;
+    [Tooltip("Weaken/Boost effect types -- multiplies the affected unit's fire INTERVAL (seconds between shots), read by UnitCombat.FireIntervalMultiplier. >1 = slower (Weaken, applied to a caught enemy). <1 = faster (Boost, applied to the caster itself). Never touches WeaponFx's own per-shot damage math -- primary attacks deal exactly the same damage per hit either way, just at a different cadence for the duration.")]
+    public float TempoMultiplier = 1.5f;
+    [Tooltip("See TempoMultiplier.")]
+    public float TempoDuration = 4f;
+    [Tooltip("Possess effect type only -- 0..100 percent chance PER CAUGHT TARGET (roll independently for each). Deliberately usually small -- see PossessDuration.")]
+    public float PossessChancePercent = 3f;
+    [Tooltip("Possess effect type only -- seconds a possessed target is disoriented (won't fire or re-acquire a target). Not a real AI-takeover/faction-swap (see SpecialAttackResolver's own doc comment for why) -- a possessed target IS newly vulnerable to same-faction AoE for the duration, via UnitCombat.IsPossessed, which every ability's ShouldCatchCombatant check already reads.")]
+    public float PossessDuration = 3f;
+    [Tooltip("Hazard effect type only -- how long the spawned zone (HazardZoneEffect) persists once it lands.")]
+    public float HazardDuration = 6f;
+    [Tooltip("Hazard effect type only -- seconds between the zone's own periodic re-check of who's currently standing inside it.")]
+    public float HazardTickInterval = 0.6f;
+
+    [Header("AI role")]
+    [Tooltip("If true, MonsterAgent.EvaluateBestAbility only considers this ability when the caster itself is under threat (low health or surrounded) -- it never competes with offensive abilities on catch-count, and an offensive ability never gets picked instead of a ready defensive one while threatened. See that method's own doc comment for the exact thresholds.")]
+    public bool IsDefensive = false;
 
     [Header("Cast cost (docs/26 Phase 10, docs/22 economy)")]
     [Tooltip("Drawn from the session wallet on cast via RuntimeCityBuilder.SpendWalletForCast -- soft, never blocks the cast (docs/22 'Floors, not stalls': an empty wallet just means no more free lunch, never an out-of-ammo lockout). v0.1 placeholder, per this repo's general numbers policy.")]
@@ -77,11 +95,19 @@ public class SpecialAttackDefinition : ScriptableObject
 /// EffectType would still want the Psionic look). Extensible: a new
 /// visual language is one more enum value here plus one more case in
 /// `SpecialAttackVfx`'s style switch, no changes to the combat/damage
-/// resolvers themselves.</summary>
+/// resolvers themselves.
+///
+/// 2026-08 follow-up (creator direction: "Expand Secondary Attack
+/// Variety Across Races"): `Organic` (a translucent drifting cloud --
+/// spore/toxic-biological abilities) and `Disruption` (a fast, sharp
+/// radiating pulse ring -- shriek/neural/mutagenic abilities) added
+/// alongside the original two.</summary>
 public enum SpecialAttackVfxStyle
 {
     Area,
     Psionic,
+    Organic,
+    Disruption,
 }
 
 /// <summary>Which unit categories a special attack can affect. [Flags] so
@@ -112,11 +138,42 @@ public enum TargetFilter
 /// `SpecialAttackResolver.ApplyEffect`, and (if it needs new tunable
 /// numbers) a field on `SpecialAttackDefinition` above -- no new
 /// ability class required unless the delivery mechanism itself differs
-/// (projectile vs instant).</summary>
+/// (projectile vs instant).
+///
+/// 2026-08 follow-up (creator direction: "Expand Secondary Attack
+/// Variety Across Races... do not make every secondary attack simply
+/// 'press secondary -> deal damage in an area'"): five more kinds,
+/// each reusing existing `UnitCombat` status-effect infrastructure
+/// (docs/12's own entry for this pass has the full reasoning for each
+/// scope decision below):
+/// - `Fear`: `UnitCombat.ApplyFear` -- can't fire for a duration
+///   (movement untouched -- no flee-pathing exists in this codebase to
+///   reuse, and building one is out of scope for this pass).
+/// - `Weaken`: `UnitCombat.ApplyTempoModifier` with a >1 multiplier,
+///   applied to a caught ENEMY -- slower fire rate for a duration.
+/// - `Boost`: the SAME `ApplyTempoModifier`, a &lt;1 multiplier, applied
+///   to the CASTER itself (self-buff) -- `SpecialAttackResolver`
+///   short-circuits the normal per-target enemy loop for this one, see
+///   its own doc comment.
+/// - `Possess`: `UnitCombat.ApplyPossession`, itself a per-target
+///   percent-chance roll (`SpecialAttackDefinition.PossessChancePercent`)
+///   -- NOT a real AI-takeover/faction-swap, a possessed unit is simply
+///   disoriented (can't fire/re-target) for a duration and newly
+///   vulnerable to same-faction AoE (`ShouldCatchCombatant` already
+///   reads `IsPossessed` for exactly this).
+/// - `Hazard`: spawns a `HazardZoneEffect` at the resolved point instead
+///   of an instant per-target application -- `SpecialAttackResolver`
+///   short-circuits the per-target loop for this one too, see its own
+///   doc comment.</summary>
 public enum SpecialAttackEffectType
 {
     Damage,
     PullAndConsume,
     SlowStatus,
     Stun,
+    Fear,
+    Weaken,
+    Boost,
+    Possess,
+    Hazard,
 }
