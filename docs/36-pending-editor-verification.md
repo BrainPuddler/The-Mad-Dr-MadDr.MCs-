@@ -188,7 +188,31 @@ docs/12's matching entry for full design/reasoning.
   that the territory-score reason text reads sensibly given whatever
   state the map is actually in by then.
 
-## 8. Known latent issues found but NOT fixed
+## 8. Win-progress HUD above the minimap (docs/37 §6)
+
+New `WinProgressHud.cs` -- never seen rendering.
+
+- **Docking**: confirm the panel actually sits flush directly above
+  `Minimap`'s own frame (it reads `Minimap.ScreenRect` live, same
+  convention `SelectionHud`/`RecallHud` already use) at every corner
+  preset the minimap itself supports, and at different `UiScale`
+  reference resolutions/aspect ratios -- not just the default
+  bottom-left placement.
+- **Legibility**: three rows (Army/Dominion/Territory), bold red/green
+  percentage text -- confirm it's actually readable against a busy city
+  background, and that the shadow-label technique reads cleanly at real
+  HUD scale.
+- **Live values feel meaningful**: watch all three percentages during an
+  actual match against a real AI opponent (docs/30) and confirm they
+  move in directions that make sense -- Army % should track visibly
+  losing/winning fights, Dominion % should jump to a real nonzero value
+  the moment 60% emitter control is captured and reset the instant it's
+  lost, Territory % should track building/emitter swings. These are
+  flagged heuristics (docs/37 §6), not a claimed-accurate win-probability
+  model -- the check here is "does it feel informative," not "is the math
+  provably optimal."
+
+## 9. Known latent issues found but NOT fixed
 
 Deliberately left alone, flagged rather than silently touched:
 

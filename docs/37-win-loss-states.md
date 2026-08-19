@@ -175,3 +175,57 @@ than a real `dotnet test` run. **No Unity Editor in this environment** —
 `MatchEndHud`'s actual on-screen appearance, layout, and the "Play Again"
 scene-reload button are unverified beyond compile-level review; see
 docs/36's own pending-verification checklist, which gained a matching entry.
+
+## 6. Follow-up (2026-08): a live win-progress HUD
+
+Creator direction, verbatim: *"Provide a hud above the mini map showing
+win game % as red and green text. For all three win game states."*
+`MatchEndHud` (§3) only appears once a match is already decided --
+nothing showed the player how they were doing on any of the three
+conditions WHILE the match was still live. New `WinProgressHud.cs`
+closes that: three rows (Army / Dominion / Territory), docked directly
+above `Minimap`'s own live `ScreenRect` (same "read a neighbour's rect,
+dock against it" convention `SelectionHud`/`RecallHud` already use for
+that corner), each a percentage in bold red-or-green text.
+
+**None of these are a real modeled win probability** -- no AI/statistical
+model exists anywhere in this project for that, and this pass didn't
+invent one. Each is a simple, honest SHARE metric built entirely from
+state `MatchState`/`SimBridge` already expose, same "flagged v0.1
+heuristic, not claimed balanced" policy as `TerritoryScore`'s own
+weighting (§1):
+
+- **Army %** (an Elimination proxy): the local player's own live unit
+  count as a share of (itself + the single strongest opponent's live
+  unit count) -- the same intuition as any RTS "army value" comparison.
+  Computed client-side in the HUD itself, tallying `SimBridge.UnitAt`
+  by `PlayerIndex`/`IsAlive` -- no new match-core surface needed, since
+  unit iteration was already public.
+- **Dominion %**: `PlayerState.DominionStreakTicks` as a share of the
+  full `LumenClock.CycleTicks` hold a Dominion win requires. Reads 0%
+  the instant the local player drops under 60% emitter control -- the
+  streak itself resets then (§1), not a display bug. New `SimBridge.
+  PlayerDominionStreakTicks(playerIndex)` accessor, mirroring the
+  existing `PlayerMana` pattern exactly.
+- **Territory %**: the local player's own `MatchState.TerritoryScore`
+  (already exposed via `SimBridge.TerritoryScore`, §3) as a share of
+  (itself + the strongest opponent's) -- same shape as Army %, but the
+  actual number that decides the time cap.
+
+A new `SimBridge.PlayerCount` accessor (mirroring the bounds-check
+`PlayerFaction` already did internally) lets the HUD loop every opponent
+to find the strongest one for both share metrics. 50% is the neutral
+default whenever a share's denominator is exactly 0 (e.g. before either
+side has fielded a unit or captured any territory) -- reads as neither
+meaningfully green nor red, which is the honest state of "no data yet"
+rather than an arbitrary pick.
+
+Invisible once `SimBridge.IsMatchOver` goes true -- `MatchEndHud` takes
+over at that point, and a live "still climbing toward Dominion" readout
+stops meaning anything once the match is already decided.
+
+**No Unity Editor in this environment** -- `WinProgressHud`'s actual
+on-screen docking against a real `Minimap.ScreenRect`, its readability
+at real HUD scale, and whether the three percentages feel meaningful in
+an actual match are all unverified beyond compile-level review. Added to
+docs/36's pending-verification checklist.

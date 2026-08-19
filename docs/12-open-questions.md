@@ -19894,3 +19894,27 @@ verified by manual review, not a real `dotnet test` run. **No Unity
 Editor** -- `MatchEndHud`'s actual appearance is unverified beyond
 compile-level review; added to docs/36's pending-verification
 checklist.
+
+## Win-progress HUD above the minimap (2026-08)
+
+Creator direction, verbatim: *"Provide a hud above the mini map showing
+win game % as red and green text. For all three win game states."* Full
+writeup: docs/37 §6.
+
+New `WinProgressHud.cs`, docked directly above `Minimap.ScreenRect`
+(same convention `SelectionHud`/`RecallHud` already use to dock against
+the minimap's live position) -- three rows, one per docs/02 victory
+condition, red/green bold percentage text. All three are flagged v0.1
+heuristics, not a real win-probability model (none exists anywhere in
+this project): Army % (Elimination proxy -- live unit count share vs.
+the strongest opponent), Dominion % (`DominionStreakTicks` as a share of
+the full hold duration a Dominion win needs), Territory % (`TerritoryScore`
+share vs. the strongest opponent). `SimBridge` gained two small new
+accessors to support this (`PlayerCount`, `PlayerDominionStreakTicks`),
+mirroring existing patterns (`PlayerFaction`'s own bounds check,
+`PlayerMana`'s own shape) rather than inventing new ones. Invisible once
+the match is over -- `MatchEndHud` takes over from there.
+
+**No Unity Editor in this environment** -- the actual on-screen docking,
+scale, and readability are unverified beyond compile-level review; added
+to docs/36's pending-verification checklist.

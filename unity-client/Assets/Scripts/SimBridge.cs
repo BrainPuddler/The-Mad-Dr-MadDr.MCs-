@@ -199,6 +199,23 @@ public class SimBridge : MonoBehaviour
     /// placeholder) weighting. 0 if no match is running.</summary>
     public int TerritoryScore(int playerIndex) => _match?.TerritoryScore(playerIndex) ?? 0;
 
+    /// <summary>2026-08 (win-progress HUD): how many player slots this
+    /// match has -- lets a caller loop every opponent to find e.g. the
+    /// strongest one, the same way <see cref="PlayerFaction"/>'s own
+    /// bounds check already reads this internally. 0 if no match is
+    /// running.</summary>
+    public int PlayerCount => _match?.PlayerCount ?? 0;
+
+    /// <summary>docs/02/docs/03 Dominion -- consecutive ticks this
+    /// player has held &gt;=60% of the map's emitters right now (see
+    /// <see cref="PlayerState.DominionStreakTicks"/>'s own doc comment).
+    /// 0 if no match is running.</summary>
+    public int PlayerDominionStreakTicks(int playerIndex)
+    {
+        var p = _match?.Player(playerIndex);
+        return p?.DominionStreakTicks ?? 0;
+    }
+
     /// <summary>The live Lumen phase (docs/03), or Dawn -- the match's own
     /// start phase -- if no match is running yet.</summary>
     public LumenPhase CurrentLumenPhase => _match?.CurrentLumenPhase ?? LumenPhase.Dawn;
