@@ -238,7 +238,42 @@ New "Match Length" row in `MatchSetupHud` -- never seen rendering.
   original, unchanged 15-minute-cap behavior for every scene that never
   shows this menu at all.
 
-## 10. Known latent issues found but NOT fixed
+## 10. Worker orphan-rescue (docs/12)
+
+New `RuntimeCityBuilder.NearestOrphanedConstructionSite`/
+`Worker.StationedBuildingId` -- never seen running.
+
+- **The core guarantee**: queue several buildings at once with too few
+  Workers to staff them all immediately, then either let debris keep
+  distracting every idle Worker OR let the one Worker en route die
+  mid-walk, and confirm every site eventually gets a Worker within
+  roughly `RuntimeCityBuilder.OrphanRescueSeconds` (12s) of going
+  unstaffed -- not sooner by luck, not never.
+- **No redundant double-dispatch**: while a Worker is legitimately
+  walking toward a site (`SeekBuild`), confirm no SECOND Worker also
+  gets pulled toward the same site once the 12s mark passes (`Worker.
+  StationedBuildingId`'s whole job).
+- **Ordinary debris-first behavior unaffected**: confirm normal play
+  (a site staffed well within 12s by the ordinary idle-priority cadence)
+  looks and feels exactly like before this change -- the rescue path
+  should be invisible unless something has genuinely gone wrong.
+
+## 11. Minimap blip zoom-scaling (docs/12)
+
+`Minimap.cs`'s `BlipSizePixels` -- never seen rendering.
+
+- **Actually scales**: zoom the minimap in and out and confirm unit/
+  citizen/traffic dots visibly grow/shrink in step with the terrain
+  features around them, rather than staying a fixed pixel size.
+- **Readability at both extremes**: confirm `MinBlipPixels`/
+  `MaxBlipPixels` (1.5/24) keep a dot visible at max zoom-out and
+  non-obnoxious at max zoom-in -- these are invented v0.1 numbers, not
+  tuned against a real screen.
+- **`unitBlipWorldMeters`/`crowdBlipWorldMeters`** (8m/4m) -- confirm
+  these read as sensible relative sizes against real building/hex scale
+  (`HexCoord.HexMeters` = 20m) rather than needing retuning once seen.
+
+## 12. Known latent issues found but NOT fixed
 
 Deliberately left alone, flagged rather than silently touched:
 

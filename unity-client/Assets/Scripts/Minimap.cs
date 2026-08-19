@@ -81,8 +81,38 @@ public class Minimap : MonoBehaviour
     public bool showFogOfWar = true;
 
     [Header("Blips")]
-    public float unitBlipPixels = 4f;
-    public float crowdBlipPixels = 2f;
+    // 2026-08 (creator report: "the green dots on the minimap... are not
+    // tied to zoom size and float. Everything on the minimap should
+    // remain in proportion to the map and locked and in sync"): these
+    // used to be a flat SCREEN-pixel size (4f/2f), completely independent
+    // of `zoom` -- every terrain feature and the camera-frustum indicator
+    // (DrawCameraFrustum, below) already scale with zoom because they're
+    // sized in WORLD meters and converted through the current view span
+    // every frame; blips were the one thing on this map that didn't, so
+    // they visually disagreed with everything around them the instant
+    // zoom moved off 1 (undersized zoomed out, oversized zoomed in,
+    // reading as "floating" independent of the map's own scale). Now
+    // world-meter sizes, converted the same way via BlipSizePixels --
+    // still floor/ceiling-clamped in screen pixels (MinBlipPixels/
+    // MaxBlipPixels) purely so an extreme zoom can't make a blip vanish
+    // to nothing or balloon into an unreadable blob, not to defeat the
+    // proportional scaling itself.
+    public float unitBlipWorldMeters = 8f;
+    public float crowdBlipWorldMeters = 4f;
+    private const float MinBlipPixels = 1.5f;
+    private const float MaxBlipPixels = 24f;
+
+    /// <summary>World-meter size -> current on-screen pixel size, the
+    /// SAME conversion <see cref="DrawCameraFrustum"/> already uses for
+    /// its own footprint box -- one shared formula so every zoom-aware
+    /// size on this map agrees with the others by construction, not by
+    /// coincidence.</summary>
+    private float BlipSizePixels(float worldMeters, Rect rect, Rect texCoords)
+    {
+        var worldSpan = (_maxX - _minX) * texCoords.width;
+        var px = worldMeters / Mathf.Max(1f, worldSpan) * rect.width;
+        return Mathf.Clamp(px, MinBlipPixels, MaxBlipPixels);
+    }
 
     /// <summary>True while the pointer sits over the minimap this frame
     /// -- WaypointCommander checks this before its own world-space
@@ -564,6 +594,13 @@ public class Minimap : MonoBehaviour
 
     private void DrawBlips(Rect rect, Rect texCoords)
     {
+        // Computed ONCE per call (not per-unit) -- rect/texCoords are the
+        // same for every blip drawn this frame, so the conversion only
+        // needs to happen twice (unit-scale, crowd-scale), not once per
+        // combatant/citizen/car.
+        var unitBlipSize = BlipSizePixels(unitBlipWorldMeters, rect, texCoords);
+        var crowdBlipSize = BlipSizePixels(crowdBlipWorldMeters, rect, texCoords);
+
         foreach (var c in _builder.Combatants)
         {
             if (c == null || !c.Alive) continue;
@@ -572,7 +609,7 @@ public class Minimap : MonoBehaviour
             var p = WorldToMinimapPoint(c.transform.position, rect, texCoords);
             if (!p.HasValue) continue;
             GUI.color = isPlayerUnit ? new Color(0.35f, 0.95f, 0.4f) : new Color(0.9f, 0.25f, 0.2f);
-            var s = unitBlipPixels;
+            var s = unitBlipSize;
             GUI.DrawTexture(new Rect(p.Value.x - s * 0.5f, p.Value.y - s * 0.5f, s, s), Texture2D.whiteTexture);
         }
 
@@ -583,7 +620,7 @@ public class Minimap : MonoBehaviour
             var p = WorldToMinimapPoint(z.transform.position, rect, texCoords);
             if (!p.HasValue) continue;
             GUI.color = new Color(0.9f, 0.85f, 0.5f, 0.85f);
-            var s = crowdBlipPixels;
+            var s = crowdBlipSize;
             GUI.DrawTexture(new Rect(p.Value.x - s * 0.5f, p.Value.y - s * 0.5f, s, s), Texture2D.whiteTexture);
         }
 
@@ -594,7 +631,7 @@ public class Minimap : MonoBehaviour
             var p = WorldToMinimapPoint(t.transform.position, rect, texCoords);
             if (!p.HasValue) continue;
             GUI.color = new Color(0.6f, 0.6f, 0.65f, 0.85f);
-            var s = crowdBlipPixels;
+            var s = crowdBlipSize;
             GUI.DrawTexture(new Rect(p.Value.x - s * 0.5f, p.Value.y - s * 0.5f, s, s), Texture2D.whiteTexture);
         }
         GUI.color = Color.white;

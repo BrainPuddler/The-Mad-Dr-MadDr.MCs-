@@ -19968,3 +19968,82 @@ placing future UI -- is now a standing rule, not just this file's fix:
 added to CLAUDE.md's Invariants section ("Unity HUD placement") so
 future sessions see it automatically rather than relying on this
 decision-log entry being found.
+
+## Worker orphan-rescue: guarantee a queued build always gets staffed (2026-08)
+
+Creator direction, verbatim: *"find the code related to worker and make
+sure that whenever a build is cued to be built that it does not get
+orphaned, and at least one or more workers are assigned to it."*
+
+Investigation (via a background research agent, then direct file
+reads) found a real, confirmed gap: `SimBuilding.IsStaffed` defaults
+true match-core-side, but Unity's own `RuntimeCityBuilder.
+TickConstructionStaffing` immediately pauses every fresh player-0
+building (`IsStaffed = false`), and the ONLY thing that un-pauses one
+is a Worker's own `TickSeekBuild` arriving. Per creator direction from
+an earlier pass ("workers need to be searching for and gathering
+resources, unless called back to build a building"), `Worker.
+TryFindRealWork` deliberately checks scavengeable debris BEFORE an
+unstaffed construction site -- meaning a site could, in principle, sit
+paused indefinitely if debris kept being available for every Worker
+that went idle, or if the one Worker en route died mid-staff (`OnDied`
+correctly unstaffs, but nothing then re-claims the site except the
+same passive, lower-priority check). `PlayerState.TryOccupyWorker`
+only decrements an abstract counter at placement time -- it never
+reserves a SPECIFIC physical Worker for a SPECIFIC building, so
+satisfying that gate says nothing about whether an actual Worker will
+ever show up.
+
+Fixed with a bounded "orphan rescue" escalation, deliberately NOT a
+reversal of the debris-first creator direction (still fully honored
+for the ordinary case): `RuntimeCityBuilder.TickConstructionStaffing`
+now also accumulates how long each unstaffed player-0 site has waited
+(`_unstaffedSeconds`, reset the instant a site gets staffed or leaves
+`UnderConstruction`). A new `NearestOrphanedConstructionSite` returns
+one only once it's waited past `OrphanRescueSeconds` (12s, flagged v0.1)
+AND no Worker is already en route (`Worker.StationedBuildingId`, a new
+accessor so the rescue query never redundantly yanks a second Worker
+toward a site already being handled). `Worker.TryFindRealWork` checks
+this FIRST, ahead of scavenging -- the one narrow, bounded exception to
+"gather first," returning non-null only after real waiting has already
+happened. Deliberately unbounded by search radius (unlike the ordinary
+convenience search) since the whole point is a guarantee regardless of
+how far away the nearest idle Worker happens to be.
+
+No dedicated test suite exists for `unity-client` (no Unity Editor in
+this environment, same standing limitation as every prior Unity change
+this session) -- verified by manual review: brace/paren balance, and
+tracing every new method against the real call sites and state-machine
+transitions `Worker.cs`'s own `ZombieState` already defines.
+
+## Minimap blip size now scales with zoom (2026-08)
+
+Creator direction, verbatim (mid-turn, addressed alongside the Worker
+fix above): *"whatever the green dots on the minimap are they are not
+tied to zoom size and float. Everything on the minimap should remain in
+proportion to the map and locked and in sync."*
+
+Root cause: `Minimap.DrawBlips`'s unit/citizen/traffic dots
+(`unitBlipPixels`/`crowdBlipPixels`) were a flat SCREEN-pixel size,
+completely independent of the minimap's own `zoom` field -- every
+OTHER zoom-aware element on the map (the baked terrain texture via
+`texCoords`, and `DrawCameraFrustum`'s own footprint box) is sized in
+WORLD meters and converted through the current view span every frame,
+so blips were the one thing that visually disagreed with the map's own
+scale the instant zoom moved off 1.
+
+Fixed by converting blips to the same world-meters-to-screen-pixels
+formula `DrawCameraFrustum` already used for its footprint box, factored
+into a shared `BlipSizePixels` helper so both stay provably in agreement
+rather than two independently-hand-tuned numbers drifting apart later.
+`unitBlipPixels`/`crowdBlipPixels` (screen pixels) became
+`unitBlipWorldMeters`/`crowdBlipWorldMeters` (8m/4m, v0.1 flagged
+placeholders) -- still floor/ceiling-clamped in screen pixels
+(`MinBlipPixels`/`MaxBlipPixels`) purely so an extreme zoom can't shrink
+a blip to nothing or balloon it into an unreadable blob, not to defeat
+the proportional scaling itself.
+
+**No Unity Editor in this environment** -- verified by manual review
+(brace/paren balance, confirming no other file reads the renamed public
+Inspector fields) rather than actually watching a blip's size track
+zoom on screen.

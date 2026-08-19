@@ -44,6 +44,20 @@ using UnityEngine;
 /// gathering runs dry, which is what "called back" means here: nothing
 /// pulls a Worker off scavenging early, it just naturally falls through
 /// to building once there's nothing nearby left to scavenge.
+///
+/// 2026-08 follow-up (creator direction: "make sure that whenever a
+/// build is cued to be built that it does not get orphaned, and at
+/// least one or more workers are assigned to it"): ONE narrow, bounded
+/// exception to "gather first" above -- see <see
+/// cref="TryFindRealWork"/>'s own comment and <see
+/// cref="RuntimeCityBuilder.NearestOrphanedConstructionSite"/>. A site
+/// that's genuinely waited too long with nobody physically coming
+/// (`RuntimeCityBuilder.OrphanRescueSeconds`) escalates ahead of
+/// scavenging for the next Worker that goes idle -- a real guarantee,
+/// not just the same passive fallback: debris-first still governs every
+/// ordinary decision, this only overrides it once the normal cadence has
+/// already had a fair, bounded chance and failed.
+///
 /// Combat is auto-aggro within a short leash (<see cref="AggroRadius"/>,
 /// same `NearestEnemyOf`/`TryFire` pattern <see cref="Tank"/> already
 /// uses) -- zombie-horde mindless violence overrides economic work the
@@ -136,6 +150,20 @@ public class Worker : MonoBehaviour
     private uint? _stationedBuildingId;
     private Building _scavengeTarget;
     private float _scavengeTickTimer;
+
+    /// <summary>2026-08 (creator direction: "make sure that whenever a
+    /// build is cued to be built that it does not get orphaned, and at
+    /// least one or more workers are assigned to it"): the construction
+    /// site this Worker is currently walking toward OR actively
+    /// staffing, or null in every other state -- exposed so <see
+    /// cref="RuntimeCityBuilder.NearestOrphanedConstructionSite"/> can
+    /// tell "a Worker is already handling this one" apart from
+    /// "genuinely nobody is coming," without duplicating this Worker's
+    /// own state machine.</summary>
+    public uint? StationedBuildingId
+    {
+        get { return (_state == ZombieState.SeekBuild || _state == ZombieState.Staffing) ? _stationedBuildingId : null; }
+    }
 
     // 2026-08 (creator direction: "Add a herding behaviour to the
     // workers. in groups of 3 to 10 and a wander toggle enabled if there
@@ -413,6 +441,25 @@ public class Worker : MonoBehaviour
     /// do).</summary>
     private bool TryFindRealWork()
     {
+        // 2026-08 (creator direction: "make sure that whenever a build
+        // is cued to be built that it does not get orphaned, and at
+        // least one or more workers are assigned to it"): the ONE
+        // exception to this method's own "gather first" priority below
+        // -- a site that's waited past RuntimeCityBuilder.
+        // OrphanRescueSeconds with genuinely nobody coming (see
+        // NearestOrphanedConstructionSite's own doc comment) jumps the
+        // queue ahead of scavenging. Checked first, but returns null on
+        // almost every call (only non-null after real, bounded waiting
+        // with no Worker already en route), so the ordinary debris-first
+        // cadence just below is unaffected until it's actually needed.
+        var orphan = _builder.NearestOrphanedConstructionSite(transform.position);
+        if (orphan != null)
+        {
+            _stationedBuildingId = orphan.EntityId;
+            _state = ZombieState.SeekBuild;
+            return true;
+        }
+
         var debris = _builder.NearestScavengeableBuildingTo(transform.position, SearchRadius);
         if (debris != null)
         {

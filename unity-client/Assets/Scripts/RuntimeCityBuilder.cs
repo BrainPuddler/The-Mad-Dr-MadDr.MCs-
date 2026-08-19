@@ -342,6 +342,29 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     // frame forever).
     private readonly HashSet<uint> _constructionPauseHandled = new HashSet<uint>();
 
+    // 2026-08 (creator direction: "make sure that whenever a build is
+    // cued to be built that it does not get orphaned, and at least one
+    // or more workers are assigned to it"): how long each unstaffed
+    // player-0 UnderConstruction building has sat with nobody actually
+    // coming, accumulated by TickConstructionStaffing every frame and
+    // reset the instant a building leaves UnderConstruction OR becomes
+    // staffed. See NearestOrphanedConstructionSite's own doc comment for
+    // what this feeds.
+    private readonly Dictionary<uint, float> _unstaffedSeconds = new Dictionary<uint, float>();
+
+    /// <summary>How long an unstaffed construction site waits before the
+    /// orphan-rescue escalation (<see cref="NearestOrphanedConstructionSite"/>)
+    /// starts overriding <see cref="Worker.TryFindRealWork"/>'s normal
+    /// "gather first" priority for it -- long enough that the ordinary
+    /// debris-first cadence gets a fair, bounded chance to pick a site up
+    /// on its own first (a Worker naturally cycles back through Idle
+    /// between almost every task), short enough that a genuinely
+    /// orphaned site (its Worker died mid-staff, or every Worker stayed
+    /// perpetually busy with something else) gets rescued well within a
+    /// player's likely patience. A real, flagged v0.1 number (CLAUDE.md's
+    /// standing policy) -- not claimed balanced against anything.</summary>
+    public const float OrphanRescueSeconds = 12f;
+
     /// <summary>Every fighting unit -- monsters and tanks. The health-bar
     /// HUD, enemy targeting, and no-overlap separation all read this.</summary>
     public IReadOnlyList<UnitCombat> Combatants { get { return _combatants; } }
@@ -3282,17 +3305,83 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// (<see cref="Worker.TickSeekBuild"/>) then un-pauses it once one
     /// physically arrives. AI opponents (any other PlayerIndex) never
     /// receive this command at all, so their construction is completely
-    /// unaffected.</summary>
+    /// unaffected.
+    ///
+    /// 2026-08 follow-up (creator direction: "make sure that whenever a
+    /// build is cued to be built that it does not get orphaned, and at
+    /// least one or more workers are assigned to it"): also accumulates
+    /// <see cref="_unstaffedSeconds"/> for every still-unstaffed site
+    /// every frame, and prunes any entry the instant its building either
+    /// gets staffed or leaves <c>UnderConstruction</c> -- the elapsed-
+    /// wait data <see cref="NearestOrphanedConstructionSite"/>'s rescue
+    /// escalation reads.</summary>
     private void TickConstructionStaffing()
     {
         if (_simBridge == null || !_simBridge.HasMatch) return;
+        var dt = Time.deltaTime;
         for (var i = 0; i < _simBridge.BuildingCount; i++)
         {
             var b = _simBridge.BuildingAt(i);
-            if (b.PlayerIndex != 0 || b.State != BuildingState.UnderConstruction) continue;
-            if (!_constructionPauseHandled.Add(b.EntityId)) continue;
-            _simBridge.QueueSetBuildingStaffedCommand(0, b.EntityId, false);
+            if (b.PlayerIndex != 0) continue;
+
+            if (b.State != BuildingState.UnderConstruction)
+            {
+                _unstaffedSeconds.Remove(b.EntityId);
+                continue;
+            }
+
+            if (_constructionPauseHandled.Add(b.EntityId))
+                _simBridge.QueueSetBuildingStaffedCommand(0, b.EntityId, false);
+
+            if (b.IsStaffed) { _unstaffedSeconds.Remove(b.EntityId); continue; }
+            _unstaffedSeconds.TryGetValue(b.EntityId, out var waited);
+            _unstaffedSeconds[b.EntityId] = waited + dt;
         }
+    }
+
+    /// <summary>2026-08 (creator direction: "make sure that whenever a
+    /// build is cued to be built that it does not get orphaned, and at
+    /// least one or more workers are assigned to it"): the local human
+    /// player's own <c>UnderConstruction</c> site that has sat unstaffed
+    /// for at least <see cref="OrphanRescueSeconds"/> AND has no Worker
+    /// already heading to it (<see cref="Worker.StationedBuildingId"/>) --
+    /// the rescue escalation <see cref="Worker.TryFindRealWork"/> checks
+    /// ahead of its normal debris-first priority. Deliberately UNBOUNDED
+    /// by search radius (unlike <see cref="NearestUnstaffedConstructionSite"/>'s
+    /// own nearby-convenience search) -- the whole point is a GUARANTEE,
+    /// not "whichever Worker happens to already be close": a genuinely
+    /// orphaned site (its Worker died mid-staff, or every Worker stayed
+    /// perpetually busy with something else) must eventually get rescued
+    /// regardless of how far away the nearest idle Worker is. Null while
+    /// nothing has waited long enough, OR while some Worker is already
+    /// legitimately en route -- so the ordinary "gather first" cadence
+    /// (<see cref="Worker.TryFindRealWork"/>'s own header) gets a fair,
+    /// bounded chance to pick up every site on its own first, and this
+    /// never redundantly pulls a SECOND Worker off other work toward a
+    /// site that's already being handled.</summary>
+    public SimBuilding NearestOrphanedConstructionSite(Vector3 position)
+    {
+        if (_simBridge == null || !_simBridge.HasMatch) return null;
+        SimBuilding best = null;
+        var bestSq = float.MaxValue;
+        for (var i = 0; i < _simBridge.BuildingCount; i++)
+        {
+            var b = _simBridge.BuildingAt(i);
+            if (b.PlayerIndex != 0 || b.State != BuildingState.UnderConstruction || b.IsStaffed) continue;
+            if (!_unstaffedSeconds.TryGetValue(b.EntityId, out var waited) || waited < OrphanRescueSeconds) continue;
+            if (IsAnyWorkerHeadingTo(b.EntityId)) continue;
+            var d = WorldOf(b.Hex) - position;
+            d.y = 0f;
+            if (d.sqrMagnitude < bestSq) { bestSq = d.sqrMagnitude; best = b; }
+        }
+        return best;
+    }
+
+    private bool IsAnyWorkerHeadingTo(uint buildingEntityId)
+    {
+        foreach (var w in _workers)
+            if (w != null && w.StationedBuildingId == buildingEntityId) return true;
+        return false;
     }
 
     /// <summary>docs/12 follow-up: the reclaim-eligibility gate for a
