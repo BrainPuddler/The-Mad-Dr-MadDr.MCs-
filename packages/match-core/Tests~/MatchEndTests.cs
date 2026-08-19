@@ -251,7 +251,7 @@ public class MatchEndTests
         // this test actually wants to make.
         m.SpawnFactoryForPlayer(0, hex);
 
-        for (var frame = m.Frame; frame < MatchState.TimeCapTicks; frame++)
+        for (var frame = m.Frame; frame < MatchState.DefaultTimeCapTicks; frame++)
         {
             m.Tick(null);
             if (m.IsMatchOver) break;
@@ -272,7 +272,7 @@ public class MatchEndTests
         // Neither player captures anything, builds anything, or fields
         // anyone -- both TerritoryScore(0) and TerritoryScore(1) are
         // exactly 0, a guaranteed tie regardless of the weighting.
-        for (var frame = 0; frame < MatchState.TimeCapTicks; frame++)
+        for (var frame = 0; frame < MatchState.DefaultTimeCapTicks; frame++)
         {
             m.Tick(null);
             if (m.IsMatchOver) break;
@@ -281,6 +281,54 @@ public class MatchEndTests
         Assert.True(m.IsMatchOver);
         Assert.Equal(MatchEndReason.TimeCap, m.EndReason);
         Assert.Null(m.WinnerPlayerIndex);
+    }
+
+    // ---- Match duration (2026-08: "add a game duration selector 15,30,45
+    // minutes or unlimited") ----
+
+    [Fact]
+    public void ACustomShorterDurationCapsTheMatchAtItsOwnTickCount()
+    {
+        var city = SmallCity();
+        var players = new List<FactionId> { FactionId.HumanArmy, FactionId.AlienHive };
+        var fiveMinuteTicks = 5 * 60 * MatchState.TicksPerSecond;
+        var m = MatchState.Create(10u, players, city, timeCapTicks: fiveMinuteTicks);
+        Assert.Equal(fiveMinuteTicks, m.TimeCapTicks);
+
+        // Tick right up to (but not across) the boundary -- CheckMatchEnd
+        // fires on Frame >= TimeCapTicks, so fiveMinuteTicks-1 ticks land
+        // on Frame == fiveMinuteTicks-1, still comfortably below it.
+        for (var frame = 0; frame < fiveMinuteTicks - 1; frame++)
+        {
+            m.Tick(null);
+            Assert.False(m.IsMatchOver, $"frame {m.Frame}: must not end before its own {fiveMinuteTicks}-tick cap");
+        }
+        Assert.Equal(fiveMinuteTicks - 1, m.Frame);
+
+        m.Tick(null);   // the ONE tick that actually crosses Frame >= fiveMinuteTicks
+
+        Assert.True(m.IsMatchOver);
+        Assert.Equal(MatchEndReason.TimeCap, m.EndReason);
+        // Nowhere near MatchState.DefaultTimeCapTicks (9000) -- proves the
+        // custom duration actually took effect rather than silently
+        // falling back to the 15-minute default.
+        Assert.True(m.Frame < MatchState.DefaultTimeCapTicks);
+    }
+
+    [Fact]
+    public void UnlimitedDurationNeverTimeCaps()
+    {
+        var city = SmallCity();
+        var players = new List<FactionId> { FactionId.HumanArmy, FactionId.AlienHive };
+        var m = MatchState.Create(11u, players, city, timeCapTicks: null);
+        Assert.Null(m.TimeCapTicks);
+
+        // Run comfortably PAST where the old fixed 15-minute cap
+        // (DefaultTimeCapTicks) would have fired.
+        for (var frame = 0; frame < MatchState.DefaultTimeCapTicks + 500; frame++) m.Tick(null);
+
+        Assert.False(m.IsMatchOver);
+        Assert.Equal(MatchEndReason.None, m.EndReason);
     }
 
     // ---- Determinism ----

@@ -59,11 +59,11 @@ public class SimBridge : MonoBehaviour
     /// caller compiles and behaves byte-identically, same "old overload
     /// wraps the new one" shape <see cref="MatchState.Create(uint,IReadOnlyList{FactionId},CityModel)"/>
     /// itself already uses.</summary>
-    public void StartMatch(uint seed, IReadOnlyList<FactionId> factions, CityModel city)
+    public void StartMatch(uint seed, IReadOnlyList<FactionId> factions, CityModel city, int? timeCapTicks = MatchState.DefaultTimeCapTicks)
     {
         var setups = new PlayerSetup[factions.Count];
         for (var i = 0; i < factions.Count; i++) setups[i] = PlayerSetup.Human(factions[i]);
-        StartMatch(seed, setups, city);
+        StartMatch(seed, setups, city, timeCapTicks);
     }
 
     /// <summary>docs/30 (selectable races + AI opponents): start a fresh
@@ -72,10 +72,13 @@ public class SimBridge : MonoBehaviour
     /// for commands from the very first tick -- an all-human `players` list
     /// still builds one (cheap: <see cref="AiMatchDriver.HasAnyAi"/> is
     /// false, so <see cref="Pump"/>'s per-tick check is a single bool
-    /// read).</summary>
-    public void StartMatch(uint seed, IReadOnlyList<PlayerSetup> players, CityModel city)
+    /// read). <paramref name="timeCapTicks"/> (2026-08, creator direction:
+    /// "add a game duration selector 15,30,45 minutes or unlimited")
+    /// passes straight through to <see cref="MatchState.Create(uint,IReadOnlyList{PlayerSetup},CityModel,int?)"/>
+    /// -- defaults to the original 15-minute cap, null for Unlimited.</summary>
+    public void StartMatch(uint seed, IReadOnlyList<PlayerSetup> players, CityModel city, int? timeCapTicks = MatchState.DefaultTimeCapTicks)
     {
-        _match = MatchState.Create(seed, players, city);
+        _match = MatchState.Create(seed, players, city, timeCapTicks);
         _aiDriver = new AiMatchDriver(_match, seed);
         _pending.Clear();
         _views.Clear();

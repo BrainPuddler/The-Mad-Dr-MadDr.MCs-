@@ -35,6 +35,15 @@ using UnityEngine;
 /// FLAVOR dial, so a "Reckless" opponent reads the same at every
 /// difficulty, just executed better or worse. Defaults to Normal, which
 /// reproduces every pre-2026-08 opponent's exact behavior.
+///
+/// A Match Length row (2026-08, creator direction: "Start of game add a
+/// game duration selector 15,30,45 minutes or unlimited") sits with "own
+/// race" -- a MATCH-level setting, not per-opponent -- cycling
+/// <see cref="RuntimeCityBuilder.matchDurationMinutes"/> through 15/30/45/
+/// Unlimited (0 = Unlimited, matching that field's own sentinel), which
+/// <see cref="RuntimeCityBuilder.BeginMatch"/> converts to <see
+/// cref="MatchState.TimeCapTicks"/> (null for Unlimited) before starting
+/// the match.
 /// </summary>
 public class MatchSetupHud : MonoBehaviour
 {
@@ -76,6 +85,16 @@ public class MatchSetupHud : MonoBehaviour
     // a player picking difficulty would ever want left to chance.
     private static readonly string[] DifficultyNames = { "Tutorial", "Easy", "Normal", "Hard", "Brutal" };
 
+    // 2026-08 (creator direction: "Start of game add a game duration
+    // selector 15,30,45 minutes or unlimited"): a MATCH-level setting
+    // (one choice for the whole match, not per-opponent), so it lives in
+    // the top section alongside "own race" rather than inside the
+    // per-opponent row loop below. Index-parallel with DurationMinutes --
+    // 0 there is RuntimeCityBuilder.matchDurationMinutes's own "Unlimited"
+    // sentinel (see that field's own doc comment).
+    private static readonly string[] DurationNames = { "15 min", "30 min", "45 min", "Unlimited" };
+    private static readonly int[] DurationMinutes = { 15, 30, 45, 0 };
+
     private struct OpponentSlot
     {
         /// <summary>Index into <see cref="_aiFactionChoices"/>, or
@@ -96,6 +115,7 @@ public class MatchSetupHud : MonoBehaviour
     private RuntimeCityBuilder _builder;
     private bool _confirmed;
     private FactionId _ownRace = FactionId.MadDoctor;
+    private int _durationChoice;
     private readonly List<OpponentSlot> _opponents = new List<OpponentSlot>();
 
     public void Init(RuntimeCityBuilder builder)
@@ -103,6 +123,15 @@ public class MatchSetupHud : MonoBehaviour
         _builder = builder;
         _confirmed = false;
         _ownRace = builder.chosenFaction;
+        // Resolve builder.matchDurationMinutes to its own index in
+        // DurationMinutes -- falls back to index 0 (15 min) if the
+        // Inspector value doesn't exactly match one of the four menu
+        // options (e.g. a developer typed a custom number directly),
+        // same "menu wins outright once it's shown" contract every other
+        // field in this class already has via Init's own overwrite.
+        _durationChoice = 0;
+        for (var i = 0; i < DurationMinutes.Length; i++)
+            if (DurationMinutes[i] == builder.matchDurationMinutes) { _durationChoice = i; break; }
         // HumanArmy stays index 0 (existing default-slot behavior below
         // relies on it); MadDoctor/Mixed appended after so a save/replay
         // of an old 2-choice config still resolves the same faction at
@@ -136,11 +165,13 @@ public class MatchSetupHud : MonoBehaviour
         var screenW = UiScale.Width;
         var screenH = UiScale.Height;
 
-        // own race (1 row of 4 buttons) + AI opponents header + up to 4
-        // opponent rows + add/remove row + Begin Match button.
+        // own race (1 row of 4 buttons) + match-length row + AI opponents
+        // header + up to 4 opponent rows + add/remove row + Begin Match
+        // button.
         var opponentRows = _opponents.Count * (RowHeight + Gap);
         var panelHeight = TitleHeight + SectionGap
-            + RowHeight + Gap + SectionGap        // own race row
+            + RowHeight + Gap                       // own race row
+            + RowHeight + Gap + SectionGap          // match-length row
             + TitleHeight + opponentRows            // "AI Opponents" + slots
             + ButtonHeight + Gap                    // add/remove row
             + SectionGap + ButtonHeight + Gap * 2f;  // Begin Match
@@ -179,6 +210,17 @@ public class MatchSetupHud : MonoBehaviour
 
             x += raceButtonWidth + Gap;
         }
+        y += RowHeight + Gap;
+
+        // ---- match length (2026-08: "add a game duration selector
+        // 15,30,45 minutes or unlimited") -- a whole-match setting, so it
+        // sits here with "own race" rather than per-opponent below. ----
+        var durationLabelWidth = 110f;
+        var durationLabelRect = new Rect(panelRect.x + Gap, y + 6f, durationLabelWidth, RowHeight);
+        GUI.Label(durationLabelRect, "Match Length:");
+        var durationButtonRect = new Rect(durationLabelRect.xMax, y, PanelWidth - durationLabelWidth - Gap * 2f, RowHeight);
+        if (GUI.Button(durationButtonRect, DurationNames[_durationChoice]))
+            _durationChoice = (_durationChoice + 1) % DurationNames.Length;
         y += RowHeight + SectionGap;
 
         // ---- AI opponent slots ----
@@ -248,6 +290,7 @@ public class MatchSetupHud : MonoBehaviour
         _confirmed = true;
 
         _builder.chosenFaction = _ownRace;
+        _builder.matchDurationMinutes = DurationMinutes[_durationChoice];
         _builder.aiOpponents.Clear();
         for (var i = 0; i < _opponents.Count; i++)
         {

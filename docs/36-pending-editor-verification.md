@@ -212,7 +212,29 @@ New `WinProgressHud.cs` -- never seen rendering.
   model -- the check here is "does it feel informative," not "is the math
   provably optimal."
 
-## 9. Known latent issues found but NOT fixed
+## 9. Match duration selector (docs/37 §7)
+
+New "Match Length" row in `MatchSetupHud` -- never seen rendering.
+
+- **The button itself**: confirm it appears correctly alongside the own-
+  race row (not overlapping/cramped now that the panel grew a row
+  taller), cycles 15 min -> 30 min -> 45 min -> Unlimited -> back to
+  15 min on repeated clicks, and that the panel's own background/height
+  actually accounts for the extra row (no visual overflow/clipping).
+- **Each option actually changes match behavior**: pick each of the
+  four durations in turn, start a real match, and confirm the time cap
+  genuinely fires at the chosen length (or never, for Unlimited) --
+  the match-core test suite proves the tick-counting math is correct in
+  isolation; it says nothing about whether the value picked in the menu
+  actually reaches `MatchState.Create` correctly through the real
+  `RuntimeCityBuilder.BeginMatch` -> `SimBridge.StartMatch` call chain
+  in a live scene.
+- **`showMatchSetupHud` off (default scenes)**: confirm
+  `matchDurationMinutes`'s own Inspector default (15) still produces the
+  original, unchanged 15-minute-cap behavior for every scene that never
+  shows this menu at all.
+
+## 10. Known latent issues found but NOT fixed
 
 Deliberately left alone, flagged rather than silently touched:
 

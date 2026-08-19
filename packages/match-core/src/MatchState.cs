@@ -30,10 +30,16 @@ namespace MadDr.MatchCore
         public const int DefaultSupplyCap = 60;   // docs/23 §13-E
         private const double DtSeconds = 1.0 / TicksPerSecond;
 
-        /// <summary>docs/02 "Victory conditions" #3: the 15-minute time
-        /// cap, in ticks. Reached alongside <see cref="TerritoryScore"/>
-        /// by <see cref="CheckMatchEnd"/>.</summary>
-        public const int TimeCapTicks = 15 * 60 * TicksPerSecond;   // 9000
+        /// <summary>docs/02 "Victory conditions" #3's own original number
+        /// (15 minutes) -- now just the DEFAULT for <see
+        /// cref="TimeCapTicks"/>, not the only possible value. 2026-08
+        /// (creator direction: "Start of game add a game duration
+        /// selector 15,30,45 minutes or unlimited"): match length became
+        /// a real per-match setting, picked at <see cref="Create"/> time,
+        /// same "constructor-time choice, not a hardcoded rule" shape
+        /// <see cref="PlayerSetup.Difficulty"/> already established for
+        /// AI skill.</summary>
+        public const int DefaultTimeCapTicks = 15 * 60 * TicksPerSecond;   // 9000
 
         /// <summary>docs/02/docs/03 Dominion threshold -- expressed as
         /// integer numerator/denominator (60/100), never a float compare,
@@ -153,6 +159,16 @@ namespace MadDr.MatchCore
         /// still running.</summary>
         public MatchEndReason EndReason { get; private set; } = MatchEndReason.None;
 
+        /// <summary>2026-08 (creator direction: "Start of game add a game
+        /// duration selector 15,30,45 minutes or unlimited"): the actual
+        /// time cap this MATCH uses, set once at <see cref="Create"/> and
+        /// never changed after -- null means Unlimited, no time-cap check
+        /// ever fires (see <see cref="CheckMatchEnd"/>'s own doc comment).
+        /// Defaults to <see cref="DefaultTimeCapTicks"/> so a caller that
+        /// never picks a duration explicitly (every existing test/scene)
+        /// keeps the original 15-minute behavior unchanged.</summary>
+        public int? TimeCapTicks { get; }
+
         /// <summary>Monotonic entity-ID source. IDs are never reused within
         /// a match, are allocated only inside Tick (so allocation order is
         /// part of the deterministic stream), and start at 1 -- 0 is the
@@ -164,13 +180,14 @@ namespace MadDr.MatchCore
         /// clients (part of the hash).</summary>
         public long CommandsProcessed { get; private set; }
 
-        private MatchState(PlayerState[] players, SimRng rng, CityModel? city)
+        private MatchState(PlayerState[] players, SimRng rng, CityModel? city, int? timeCapTicks)
         {
             _players = players;
             _rng = rng;
             _city = city;
             _blockedToGround = city != null ? BattlefieldState.FreshFrom(city).BlockedToGround() : null;
             _roadHexes = city != null ? new HashSet<HexCoord>(city.Roads) : null;
+            TimeCapTicks = timeCapTicks;
 
             if (city != null)
                 foreach (var landmark in city.Landmarks)
@@ -185,8 +202,11 @@ namespace MadDr.MatchCore
         /// a thin wrapper over this one. Seed drives the whole match's RNG.
         /// <paramref name="city"/> is optional -- a match with no city (e.g.
         /// Phase 1's empty-match determinism proof) simply can't spawn/path
-        /// units yet.</summary>
-        public static MatchState Create(uint seed, IReadOnlyList<PlayerSetup> players, CityModel? city = null)
+        /// units yet. <paramref name="timeCapTicks"/> (2026-08, creator
+        /// direction: "add a game duration selector 15,30,45 minutes or
+        /// unlimited") defaults to <see cref="DefaultTimeCapTicks"/> (15
+        /// min); pass null for Unlimited.</summary>
+        public static MatchState Create(uint seed, IReadOnlyList<PlayerSetup> players, CityModel? city = null, int? timeCapTicks = DefaultTimeCapTicks)
         {
             if (players == null) throw new ArgumentNullException(nameof(players));
             if (players.Count < 2 || players.Count > 8)
@@ -197,7 +217,7 @@ namespace MadDr.MatchCore
                 arr[i] = new PlayerState(i, players[i].Faction, DefaultSupplyCap,
                     players[i].IsAiControlled, players[i].Personality, players[i].Difficulty);
 
-            return new MatchState(arr, new SimRng(seed), city);
+            return new MatchState(arr, new SimRng(seed), city, timeCapTicks);
         }
 
         /// <summary>Start a fresh match of all-human players. <paramref
@@ -209,13 +229,13 @@ namespace MadDr.MatchCore
         /// <see cref="PlayerSetup.Human"/>, so nothing about a match built
         /// this way is any different from before <see cref="PlayerSetup"/>
         /// existed.</summary>
-        public static MatchState Create(uint seed, IReadOnlyList<FactionId> factions, CityModel? city = null)
+        public static MatchState Create(uint seed, IReadOnlyList<FactionId> factions, CityModel? city = null, int? timeCapTicks = DefaultTimeCapTicks)
         {
             if (factions == null) throw new ArgumentNullException(nameof(factions));
             var setups = new PlayerSetup[factions.Count];
             for (var i = 0; i < factions.Count; i++)
                 setups[i] = PlayerSetup.Human(factions[i]);
-            return Create(seed, setups, city);
+            return Create(seed, setups, city, timeCapTicks);
         }
 
         public int PlayerCount => _players.Length;
@@ -1994,9 +2014,12 @@ namespace MadDr.MatchCore
         ///    <see cref="SimEmitter.Tick"/>) wins outright. Two DIFFERENT
         ///    players can never both cross 60% of the same fixed total at
         ///    once (60+60 &gt; 100), so this can never produce a tie.
-        /// 3. **Time cap** (docs/02): at <see cref="TimeCapTicks"/>
-        ///    (15 minutes), the active player with the higher <see
-        ///    cref="TerritoryScore"/> wins; an exact tie is a draw.
+        /// 3. **Time cap** (docs/02): at <see cref="TimeCapTicks"/> (a
+        ///    real per-match setting since 2026-08, 15 min by default),
+        ///    the active player with the higher <see
+        ///    cref="TerritoryScore"/> wins; an exact tie is a draw. Never
+        ///    fires at all if <see cref="TimeCapTicks"/> is null
+        ///    (Unlimited was picked at match setup).
         ///
         /// A match with no <see cref="BuildingKind.Hq"/> ever spawned for
         /// ANY player (most unit tests, which construct a <see
@@ -2048,7 +2071,12 @@ namespace MadDr.MatchCore
             }
 
             // ---- 3. Time cap ----
-            if (Frame >= TimeCapTicks)
+            // TimeCapTicks.HasValue explicitly, not just `Frame >=
+            // TimeCapTicks` relying on the lifted comparison operator's
+            // "null compares false" behavior -- correct either way, but
+            // explicit here since the WHOLE point of this branch is
+            // "Unlimited genuinely never fires."
+            if (TimeCapTicks.HasValue && Frame >= TimeCapTicks.Value)
             {
                 var bestScore = -1;
                 int? bestPlayer = null;

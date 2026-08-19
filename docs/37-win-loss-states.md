@@ -229,3 +229,49 @@ on-screen docking against a real `Minimap.ScreenRect`, its readability
 at real HUD scale, and whether the three percentages feel meaningful in
 an actual match are all unverified beyond compile-level review. Added to
 docs/36's pending-verification checklist.
+
+## 7. Follow-up (2026-08): a real match-duration selector
+
+Creator direction, verbatim: *"Start of game add a game duration
+selector 15,30,45 minutes or unlimited. Match length."* Until this pass,
+docs/02's own 15-minute time cap was a hardcoded `const` -- every match
+used exactly 15 minutes, with no way to choose otherwise.
+
+**`MatchState.TimeCapTicks` is now a real per-match setting, not a
+constant.** The old `public const int TimeCapTicks` became `public const
+int DefaultTimeCapTicks` (same 15-minute value, kept as the actual
+default) plus a new instance property `public int? TimeCapTicks { get;
+}`, set once at `Create` time and never changed after -- **null means
+Unlimited**, and `CheckMatchEnd`'s time-cap branch (§1) now checks
+`TimeCapTicks.HasValue` explicitly before ever comparing `Frame` against
+it, so an Unlimited match genuinely never time-caps, not just "caps at a
+very large number." Both `MatchState.Create` overloads gained an
+optional `int? timeCapTicks = DefaultTimeCapTicks` parameter -- every
+pre-2026-08 call site (every existing test, every scene that never picks
+a duration explicitly) keeps its exact original 15-minute behavior with
+zero code changes, same "new optional parameter, old behavior
+unchanged" shape `AiDifficulty`'s own threading already established.
+
+**Threaded straight through the existing setup pipeline, no new
+concept:** `SimBridge.StartMatch` (both overloads) gained the identical
+optional parameter and forwards it to `MatchState.Create` unchanged.
+`RuntimeCityBuilder` gained a new Inspector field, `matchDurationMinutes`
+(default 15; **0 means Unlimited**, converted to `null` right before the
+`StartMatch` call -- a plain int sentinel rather than a C# nullable
+Inspector field, since Unity's Inspector has no clean built-in way to
+edit `int?`). `MatchSetupHud` gained a "Match Length" row -- a single
+cycle button through 15 min / 30 min / 45 min / Unlimited -- sitting
+alongside "own race" rather than inside the per-opponent slot loop,
+since match length is a whole-match setting, not something that varies
+per AI opponent.
+
+Verified via new `MatchEndTests.cs` coverage: a custom (5-minute) cap
+fires at its own tick count, not the 15-minute default; an Unlimited
+match runs comfortably past where the old fixed cap would have fired and
+never ends. **No .NET SDK in this environment** -- same standing
+limitation as the rest of docs/37, verified by manual review rather than
+a real `dotnet test` run. **No Unity Editor** -- the new "Match Length"
+button's actual appearance and whether picking each of the four options
+genuinely changes match behavior in a live game are unverified beyond
+compile-level review; added to docs/36's pending-verification
+checklist.

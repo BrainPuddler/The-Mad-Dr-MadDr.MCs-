@@ -19918,3 +19918,30 @@ the match is over -- `MatchEndHud` takes over from there.
 **No Unity Editor in this environment** -- the actual on-screen docking,
 scale, and readability are unverified beyond compile-level review; added
 to docs/36's pending-verification checklist.
+
+## Match duration selector: 15/30/45/Unlimited (2026-08)
+
+Creator direction, verbatim: *"Start of game add a game duration
+selector 15,30,45 minutes or unlimited. Match length."* Full writeup:
+docs/37 §7.
+
+`MatchState`'s 15-minute time cap was a hardcoded `const` -- this made
+it a real per-match setting. `TimeCapTicks` is now an instance property
+(`int?`, null = Unlimited, genuinely never fires -- `CheckMatchEnd`
+checks `.HasValue` explicitly rather than relying on nullable-comparison
+semantics), set once at `MatchState.Create` via a new optional parameter
+that defaults to the original 15-minute value (`DefaultTimeCapTicks`),
+so every pre-existing call site keeps behaving byte-identically.
+Threaded through `SimBridge.StartMatch` unchanged. `RuntimeCityBuilder`
+gained a `matchDurationMinutes` Inspector field (0 = Unlimited, a plain
+int sentinel rather than a nullable field Unity's Inspector can't edit
+cleanly). `MatchSetupHud` gained a "Match Length" cycle button (15/30/45
+min/Unlimited) alongside the human's own race row -- a whole-match
+setting, not per-opponent.
+
+Verified via new `MatchEndTests.cs` coverage: a custom 5-minute cap
+fires at its own tick count (not the 15-minute default), and an
+Unlimited match runs well past where the old fixed cap would have
+fired and never ends. **No .NET SDK / no Unity Editor in this
+environment** -- verified by manual review; added to docs/36's
+pending-verification checklist.

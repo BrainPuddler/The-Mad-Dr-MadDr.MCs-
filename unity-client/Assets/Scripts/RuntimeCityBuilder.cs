@@ -65,6 +65,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     [Tooltip("The human player's faction. Set by MatchSetupHud when showMatchSetupHud is on; otherwise this Inspector value is used directly -- same 'Inspector field is the source of truth until a picker opts in' pattern as `preset`.")]
     public FactionId chosenFaction = FactionId.MadDoctor;
 
+    [Header("Match duration (docs/02/docs/37 win/loss states)")]
+    [Tooltip("2026-08 (creator direction: \"Start of game add a game duration selector 15,30,45 minutes or unlimited\"): the time-cap victory condition's own length, in minutes. 0 means Unlimited -- the time-cap check never fires at all (see MatchState.TimeCapTicks). Set by MatchSetupHud when showMatchSetupHud is on; otherwise this Inspector value is used directly, same 'Inspector field is the source of truth until a picker opts in' pattern as chosenFaction just above.")]
+    public int matchDurationMinutes = 15;
+
     [Header("Match setup menu (docs/30, off by default -- unchanged behavior)")]
     [Tooltip("Shows the combined 'choose your race + AI opponents' menu (MatchSetupHud) before generation -- own race, 1-4 AI opponents each with a race and personality, then Begin Match. Off by default so every existing scene keeps working byte-for-byte unchanged. Supersedes the old separate FactionPickerHud/OpponentFactionPickerHud screens (docs/30). Shown BEFORE the region picker when both are on, same ordering rationale the old faction pickers already established (both are 'which faction(s)' questions, naturally grouped before 'which city').")]
     public bool showMatchSetupHud = false;
@@ -459,7 +463,16 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             playerSetups.Add(PlayerSetup.Ai(ai.Faction, ai.Personality, ai.Difficulty));
         }
 
-        _simBridge.StartMatch(unchecked((uint)seed), playerSetups, _city);
+        // 2026-08 (creator direction: "Start of game add a game duration
+        // selector 15,30,45 minutes or unlimited"): matchDurationMinutes
+        // <= 0 means Unlimited (null -- see MatchState.TimeCapTicks's own
+        // doc comment), otherwise convert to ticks once here so both
+        // match-core and any future Unity-side reader agree on the
+        // conversion.
+        int? timeCapTicks = matchDurationMinutes > 0
+            ? matchDurationMinutes * 60 * MatchState.TicksPerSecond
+            : (int?)null;
+        _simBridge.StartMatch(unchecked((uint)seed), playerSetups, _city, timeCapTicks);
         SpawnStartingBases(factions, opponents);
 
         // the moon-dial/mana/capture-progress HUD, the build-menu/ghost-
