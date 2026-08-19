@@ -159,6 +159,39 @@ namespace MadDr.MatchCore
         /// own doc comment for why the nullability contract differs.</summary>
         public AiDifficulty AiDifficulty { get; }
 
+        /// <summary>2026-08 (win/loss states): set once, permanently, by
+        /// <see cref="MatchState.CheckMatchEnd"/> the instant this
+        /// player's <see cref="BuildingKind.Hq"/> is found <see
+        /// cref="BuildingState.Destroyed"/>. Unlike <see
+        /// cref="AiPersonality"/>/<see cref="AiDifficulty"/>, this IS real
+        /// simulation-derived state (a match-end verdict depends on it),
+        /// so <see cref="WriteTo"/> hashes it.</summary>
+        public bool IsEliminated { get; private set; }
+
+        /// <summary>2026-08 (win/loss states, docs/02/docs/03 Dominion):
+        /// consecutive ticks this player has held &gt;=60% of the map's
+        /// emitters -- see <see cref="MatchState.CheckMatchEnd"/>'s own
+        /// doc comment for the exact threshold math and why this RESETS
+        /// on a drop rather than freezing (a different rule from <see
+        /// cref="SimEmitter"/>'s own per-emitter capture-contest freeze,
+        /// easy to conflate with this one). Real simulation state, hashed
+        /// for the same reason <see cref="IsEliminated"/> is.</summary>
+        public int DominionStreakTicks { get; private set; }
+
+        /// <summary>Permanent -- once eliminated, always eliminated, same
+        /// "raise/set-only, no undo" shape <see cref="RaiseSupplyCap"/>/
+        /// <see cref="RaiseWalletCap"/> already establish for other
+        /// one-directional facts about a player.</summary>
+        public void Eliminate() => IsEliminated = true;
+
+        /// <summary>One tick of Dominion-streak bookkeeping -- `active`
+        /// true increments, false resets to 0. Called unconditionally for
+        /// every player every tick by <see
+        /// cref="MatchState.CheckMatchEnd"/> (including eliminated ones,
+        /// who simply always tick `false` and stay pinned at 0) so this
+        /// method itself needs no elimination special-case.</summary>
+        public void TickDominionStreak(bool active) => DominionStreakTicks = active ? DominionStreakTicks + 1 : 0;
+
         public PlayerState(int playerIndex, FactionId faction, int supplyCap,
             bool isAiControlled = false, CommanderPersonality? aiPersonality = null, AiDifficulty aiDifficulty = AiDifficulty.Normal)
         {
@@ -272,6 +305,8 @@ namespace MadDr.MatchCore
                 Mana = Mana,
                 WorkerCount = WorkerCount,
                 BusyWorkers = BusyWorkers,
+                IsEliminated = IsEliminated,
+                DominionStreakTicks = DominionStreakTicks,
             };
             Array.Copy(_wallet, c._wallet, _wallet.Length);
             Array.Copy(_walletCap, c._walletCap, _walletCap.Length);
@@ -293,6 +328,8 @@ namespace MadDr.MatchCore
             h.Add(Mana);
             h.Add(WorkerCount);
             h.Add(BusyWorkers);
+            h.Add(IsEliminated ? 1 : 0);
+            h.Add(DominionStreakTicks);
         }
     }
 }

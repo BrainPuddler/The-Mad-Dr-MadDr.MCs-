@@ -30,6 +30,19 @@ namespace MadDr.MatchCore
         public const int DefaultSupplyCap = 60;   // docs/23 §13-E
         private const double DtSeconds = 1.0 / TicksPerSecond;
 
+        /// <summary>docs/02 "Victory conditions" #3: the 15-minute time
+        /// cap, in ticks. Reached alongside <see cref="TerritoryScore"/>
+        /// by <see cref="CheckMatchEnd"/>.</summary>
+        public const int TimeCapTicks = 15 * 60 * TicksPerSecond;   // 9000
+
+        /// <summary>docs/02/docs/03 Dominion threshold -- expressed as
+        /// integer numerator/denominator (60/100), never a float compare,
+        /// matching docs/23 §0's integer-math discipline for anything that
+        /// feeds a deterministic decision. See <see
+        /// cref="CheckMatchEnd"/>.</summary>
+        private const int DominionThresholdNumerator = 60;
+        private const int DominionThresholdDenominator = 100;
+
         /// <summary>docs/27 Phase C: fallback body radius for a spawn call
         /// that doesn't supply one -- matches Unity's own
         /// <c>UnitCombat.Radius</c> default (1.5f) so a caller that never
@@ -121,6 +134,24 @@ namespace MadDr.MatchCore
 
         /// <summary>The tick this state is AT -- 0 before the first Tick.</summary>
         public int Frame { get; private set; }
+
+        /// <summary>2026-08 (win/loss states, docs/02): true once <see
+        /// cref="CheckMatchEnd"/> has found one of the three documented
+        /// victory conditions. Permanent -- once true, <see cref="Tick"/>
+        /// becomes a no-op (checked first thing, before even processing
+        /// commands) so no further simulation happens after the match is
+        /// decided.</summary>
+        public bool IsMatchOver { get; private set; }
+
+        /// <summary>Which player won, or null for a draw (simultaneous
+        /// mutual elimination, or a tied <see cref="TerritoryScore"/> at
+        /// the time cap) -- meaningless while <see cref="IsMatchOver"/> is
+        /// false.</summary>
+        public int? WinnerPlayerIndex { get; private set; }
+
+        /// <summary><see cref="MatchEndReason.None"/> while the match is
+        /// still running.</summary>
+        public MatchEndReason EndReason { get; private set; } = MatchEndReason.None;
 
         /// <summary>Monotonic entity-ID source. IDs are never reused within
         /// a match, are allocated only inside Tick (so allocation order is
@@ -1243,6 +1274,12 @@ namespace MadDr.MatchCore
         /// order.</summary>
         public void Tick(IReadOnlyList<Command>? commands)
         {
+            // 2026-08 (win/loss states): once the match is decided, every
+            // further Tick call is a no-op -- no commands processed, no
+            // Frame advance, nothing. A caller (SimBridge's own Pump loop)
+            // can keep calling this harmlessly forever after game-over.
+            if (IsMatchOver) return;
+
             if (commands != null)
             {
                 foreach (var cmd in commands)
@@ -1416,6 +1453,13 @@ namespace MadDr.MatchCore
             // above, since Brains are meant to be scarce/high-value, not
             // a whole-second trickle.
             if (Frame % HarvestPostIncomeIntervalTicks == 0) GrantHarvestPostIncome();
+
+            // 2026-08 (win/loss states): last thing every tick, once this
+            // tick's combat/emitter/frame-advance work is fully settled --
+            // see CheckMatchEnd's own doc comment for why elimination,
+            // Dominion, and the time cap are each checked in that
+            // priority order.
+            CheckMatchEnd();
         }
 
         private void ApplyCommand(Command cmd)
@@ -1925,6 +1969,140 @@ namespace MadDr.MatchCore
             return best;
         }
 
+        /// <summary>docs/02 "Victory conditions": the three documented
+        /// ways a match ends, checked in this fixed priority order every
+        /// tick (last step of <see cref="Tick"/>, after this tick's
+        /// combat/emitter/frame-advance work is fully settled):
+        ///
+        /// 1. **Elimination** (docs/02's "Vat destruction," generalized
+        ///    for N-player FFA -- docs/23 §11's 2-8 player range): a
+        ///    player is eliminated the instant their own <see
+        ///    cref="BuildingKind.Hq"/> is found <see
+        ///    cref="BuildingState.Destroyed"/>. The match ends the moment
+        ///    only one non-eliminated player remains (that player wins)
+        ///    or zero remain (a draw, from a simultaneous mutual
+        ///    wipeout). Checked FIRST because it's the most final of the
+        ///    three -- a wiped-out player can't meaningfully "win" a
+        ///    Dominion or time-cap check that happens to trigger the same
+        ///    tick.
+        /// 2. **Dominion** (docs/02/docs/03): a player who has held
+        ///    &gt;=60% of the map's emitters for <see
+        ///    cref="LumenClock.CycleTicks"/> CONSECUTIVE ticks (<see
+        ///    cref="PlayerState.DominionStreakTicks"/>, reset to 0 the
+        ///    instant they drop below the threshold -- NOT the same rule
+        ///    as an individual emitter's own capture-contest freeze, see
+        ///    <see cref="SimEmitter.Tick"/>) wins outright. Two DIFFERENT
+        ///    players can never both cross 60% of the same fixed total at
+        ///    once (60+60 &gt; 100), so this can never produce a tie.
+        /// 3. **Time cap** (docs/02): at <see cref="TimeCapTicks"/>
+        ///    (15 minutes), the active player with the higher <see
+        ///    cref="TerritoryScore"/> wins; an exact tie is a draw.
+        ///
+        /// A match with no <see cref="BuildingKind.Hq"/> ever spawned for
+        /// ANY player (most unit tests, which construct a <see
+        /// cref="MatchState"/> directly without calling <see
+        /// cref="SpawnHqForPlayer"/>) simply never satisfies condition 1 --
+        /// nothing here requires an Hq to exist, it only reacts if one
+        /// that existed got destroyed.</summary>
+        private void CheckMatchEnd()
+        {
+            // ---- 1. Elimination ----
+            for (var i = 0; i < _players.Length; i++)
+            {
+                var p = _players[i];
+                if (p.IsEliminated) continue;
+                if (PlayerHqIsDestroyed(i)) p.Eliminate();
+            }
+
+            var activePlayers = new List<int>();
+            for (var i = 0; i < _players.Length; i++)
+                if (!_players[i].IsEliminated) activePlayers.Add(i);
+
+            if (activePlayers.Count <= 1)
+            {
+                IsMatchOver = true;
+                EndReason = MatchEndReason.Elimination;
+                WinnerPlayerIndex = activePlayers.Count == 1 ? activePlayers[0] : (int?)null;
+                return;
+            }
+
+            // ---- 2. Dominion ----
+            int? dominionWinner = null;
+            for (var i = 0; i < _players.Length; i++)
+            {
+                var owned = 0;
+                for (var e = 0; e < _emitters.Count; e++)
+                    if (_emitters[e].Owner == i) owned++;
+
+                var active = !_players[i].IsEliminated && _emitters.Count > 0
+                    && owned * DominionThresholdDenominator >= _emitters.Count * DominionThresholdNumerator;
+                _players[i].TickDominionStreak(active);
+                if (active && _players[i].DominionStreakTicks >= LumenClock.CycleTicks) dominionWinner = i;
+            }
+            if (dominionWinner.HasValue)
+            {
+                IsMatchOver = true;
+                EndReason = MatchEndReason.Dominion;
+                WinnerPlayerIndex = dominionWinner;
+                return;
+            }
+
+            // ---- 3. Time cap ----
+            if (Frame >= TimeCapTicks)
+            {
+                var bestScore = -1;
+                int? bestPlayer = null;
+                var tied = false;
+                foreach (var i in activePlayers)
+                {
+                    var score = TerritoryScore(i);
+                    if (score > bestScore) { bestScore = score; bestPlayer = i; tied = false; }
+                    else if (score == bestScore) tied = true;
+                }
+                IsMatchOver = true;
+                EndReason = MatchEndReason.TimeCap;
+                WinnerPlayerIndex = tied ? null : bestPlayer;
+            }
+        }
+
+        private bool PlayerHqIsDestroyed(int playerIndex)
+        {
+            for (var i = 0; i < _buildingsInOrder.Count; i++)
+            {
+                var b = _buildingsInOrder[i];
+                if (b.PlayerIndex == playerIndex && b.Kind == BuildingKind.Hq)
+                    return b.State == BuildingState.Destroyed;
+            }
+            return false;   // never had one -- nothing to react to
+        }
+
+        /// <summary>docs/02's time-cap tiebreak: "higher territory score
+        /// (hexes controlled + emitters held, weighted) wins." This
+        /// project has no hex-ownership grid at all (only building/unit
+        /// positions and emitter capture exist as trackable "territory"),
+        /// and docs/02 never gives an exact weight -- so, same v0.1
+        /// "invented placeholder, flagged, not claimed balanced" policy as
+        /// every other unsourced number in this codebase: an emitter held
+        /// counts 3x a Complete building, since Dominion's own 60%-of-
+        /// emitters rule already establishes emitters as this design's
+        /// real "important" territory unit. Exposed public (not just an
+        /// internal step of <see cref="CheckMatchEnd"/>) so a live HUD can
+        /// show a running territory readout before the time cap actually
+        /// fires.</summary>
+        public int TerritoryScore(int playerIndex)
+        {
+            var owned = 0;
+            for (var e = 0; e < _emitters.Count; e++)
+                if (_emitters[e].Owner == playerIndex) owned++;
+            var score = owned * 3;
+            for (var i = 0; i < _buildingsInOrder.Count; i++)
+            {
+                var b = _buildingsInOrder[i];
+                if (b.PlayerIndex == playerIndex && b.State == BuildingState.Complete) score++;
+            }
+            return score;
+        }
+
         /// <summary>Canonical 64-bit digest of the entire simulation state,
         /// in a FIXED field order (docs/23 §13-J). Two clients in the same
         /// state produce the same value; the relay compares these every N
@@ -1951,6 +2129,13 @@ namespace MadDr.MatchCore
             for (var i = 0; i < _emitters.Count; i++) _emitters[i].WriteTo(h);
             h.Add(_anomaliesInOrder.Count);
             for (var i = 0; i < _anomaliesInOrder.Count; i++) _anomaliesInOrder[i].WriteTo(h);
+            // 2026-08 (win/loss states): the final verdict is real
+            // simulation state -- a replay reaching the same tick must
+            // recompute the identical winner, so it's hashed like
+            // everything else here.
+            h.Add(IsMatchOver ? 1 : 0);
+            h.Add(WinnerPlayerIndex ?? -1);
+            h.Add((int)EndReason);
             return h.Value;
         }
     }

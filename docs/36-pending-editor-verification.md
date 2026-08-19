@@ -159,7 +159,36 @@ docs/26 §8 and docs/12's matching entry for full design/reasoning.
   has failed; only pushes landing on `main` publish. See docs/12's
   matching entry for the full root-cause writeup.
 
-## 6. Known latent issues found but NOT fixed
+## 7. Win/loss states (docs/37)
+
+No commit hash yet as this section is written -- see docs/37 and
+docs/12's matching entry for full design/reasoning.
+
+- **The `MatchEndHud` overlay itself** -- never seen rendering. Play a
+  match to a real conclusion (easiest: let an AI opponent's Hq fall, or
+  destroy the human's own via the Editor/debug tools) and confirm: the
+  dark modal actually appears and is readable, VICTORY/DEFEAT/DRAW
+  colors read correctly from the human player's own perspective, the
+  reason line matches what actually happened, and "Play Again" genuinely
+  reloads the scene into a clean, playable fresh match (not a half-reset
+  state with leftover GameObjects from the finished one).
+- **Elimination via real combat**, not just direct `ApplyBuildingDamage`
+  calls (all match-core coverage uses those) -- confirm a Hq actually
+  dying to normal unit/building combat in a live match triggers the
+  overlay, and that `SimBridge.Pump` genuinely stops advancing the sim
+  afterward (units should freeze in place, not keep fighting).
+- **Dominion in a real match**: hold ≥60% of a real map's emitters for a
+  full 4-minute Lumen Cycle and confirm the overlay fires with the right
+  reason text. The match-core test suite proves the tick-counting math;
+  it says nothing about whether a human can actually plausibly hold that
+  much map in a real game, which is a genuine balance question this pass
+  never claimed to answer.
+- **The 15-minute time cap** in practice -- confirm a match that runs
+  the full 15 minutes actually ends rather than running forever, and
+  that the territory-score reason text reads sensibly given whatever
+  state the map is actually in by then.
+
+## 8. Known latent issues found but NOT fixed
 
 Deliberately left alone, flagged rather than silently touched:
 

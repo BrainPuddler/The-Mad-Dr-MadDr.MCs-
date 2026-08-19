@@ -19849,3 +19849,48 @@ correctly Tutorial-to-Brutal for a fixed personality, with real margin,
 not just a non-strict ordering). **No .NET SDK in this environment** --
 verified by manual review, not a real `dotnet test` run; same standing
 flag as every other match-core entry this session.
+
+## Win/loss states: a real end-condition system, finally (2026-08)
+
+Creator question, then direction: **"What is the win/loose states?"**,
+followed by a status audit (no assumptions -- read the code) finding
+zero win/loss system anywhere: `MatchState.Tick` never checked for a
+winner, destroying a player's Hq had no gameplay consequence, and Unity
+had no game-over screen. This was already a known, dated gap --
+docs/23's own Phase 3.5 status note says outright "the Dominion victory
+timer -- needs a match end-condition system that doesn't exist at all."
+Creator direction: **"Yes do that."** Full design writeup: docs/37.
+
+`MatchState.CheckMatchEnd` (last step of every `Tick()`) now implements
+all three of docs/02's documented victory conditions in a fixed priority
+order: **Elimination** (Hq destruction, generalized for N-player FFA
+rather than assuming exactly two -- a player is eliminated when their
+own Hq is found Destroyed, the match ends once only one non-eliminated
+player remains), **Dominion** (a new `PlayerState.DominionStreakTicks`
+counter, incremented while holding >=60% of the map's emitters, RESET
+(not frozen) on any drop below the threshold -- deliberately a different
+rule from an individual emitter's own capture-contest freeze, easy to
+conflate with this one), and the **15-minute time cap** (higher
+`TerritoryScore` wins; tied is a draw). `TerritoryScore` is a flagged
+v0.1 placeholder weighting (emitters held count 3x a Complete building)
+since this project has no hex-ownership grid and docs/02 never gives an
+exact number.
+
+Unity gained a `MatchEndHud` -- invisible the whole match, then a
+full-screen VICTORY/DEFEAT/DRAW overlay the instant the match ends, with
+a plain-language reason and a "Play Again" button that reloads the
+active scene (the first use of `UnityEngine.SceneManagement` anywhere in
+this project, deliberately chosen over hand-writing a manual reset path
+through dozens of components with no `Reset()` method of their own).
+
+Verified via new `packages/match-core/Tests~/MatchEndTests.cs` (2-player
+and 3-player-FFA elimination, simultaneous mutual elimination as a
+draw, matches that never spawn an Hq never spuriously eliminate anyone,
+`Tick` becomes a true no-op once over, a real Dominion win via actual
+emitter capture, a genuine ownership hand-off proving the streak resets
+rather than freezes, a time-cap win and a tied time-cap draw, and a
+Hash()-level determinism check). **No .NET SDK in this environment** --
+verified by manual review, not a real `dotnet test` run. **No Unity
+Editor** -- `MatchEndHud`'s actual appearance is unverified beyond
+compile-level review; added to docs/36's pending-verification
+checklist.

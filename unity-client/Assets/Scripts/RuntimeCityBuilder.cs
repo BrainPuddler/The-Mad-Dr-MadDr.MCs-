@@ -498,6 +498,13 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (resourceHud == null) resourceHud = gameObject.AddComponent<ResourceHud>();
         resourceHud.Init(_simBridge, playerIndex: 0);
 
+        // 2026-08 (win/loss states, docs/02): invisible until
+        // SimBridge.IsMatchOver goes true, then the one place the player
+        // actually finds out the match ended and why.
+        var matchEndHud = gameObject.GetComponent<MatchEndHud>();
+        if (matchEndHud == null) matchEndHud = gameObject.AddComponent<MatchEndHud>();
+        matchEndHud.Init(_simBridge, localPlayerIndex: 0);
+
         var buildingNavHud = gameObject.GetComponent<BuildingNavHud>();
         if (buildingNavHud == null) buildingNavHud = gameObject.AddComponent<BuildingNavHud>();
         buildingNavHud.Init(_simBridge, this, playerIndex: 0);

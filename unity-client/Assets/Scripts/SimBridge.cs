@@ -180,6 +180,25 @@ public class SimBridge : MonoBehaviour
     /// <see cref="HasMatch"/> rather than treat 0 as meaningful.</summary>
     public int CurrentFrame => _match?.Frame ?? 0;
 
+    /// <summary>2026-08 (win/loss states, docs/02 "Victory conditions"):
+    /// true once <see cref="MatchState.CheckMatchEnd"/> has found
+    /// Elimination, Dominion, or the time cap. False (never true) if no
+    /// match is running.</summary>
+    public bool IsMatchOver => _match?.IsMatchOver ?? false;
+
+    /// <summary>Which player won, or null for a draw -- meaningless while
+    /// <see cref="IsMatchOver"/> is false.</summary>
+    public int? WinnerPlayerIndex => _match?.WinnerPlayerIndex;
+
+    /// <summary><see cref="MatchEndReason.None"/> if no match is running
+    /// or it hasn't ended yet.</summary>
+    public MatchEndReason EndReason => _match?.EndReason ?? MatchEndReason.None;
+
+    /// <summary>docs/02's time-cap tiebreak score, live -- see <see
+    /// cref="MatchState.TerritoryScore"/> for the exact (flagged
+    /// placeholder) weighting. 0 if no match is running.</summary>
+    public int TerritoryScore(int playerIndex) => _match?.TerritoryScore(playerIndex) ?? 0;
+
     /// <summary>The live Lumen phase (docs/03), or Dawn -- the match's own
     /// start phase -- if no match is running yet.</summary>
     public LumenPhase CurrentLumenPhase => _match?.CurrentLumenPhase ?? LumenPhase.Dawn;
@@ -426,6 +445,13 @@ public class SimBridge : MonoBehaviour
     public void Pump(float dt)
     {
         if (_match == null) return;
+        // 2026-08 (win/loss states): MatchState.Tick itself already no-ops
+        // once the match is over (checked first thing, before even
+        // processing commands), so this early return isn't required for
+        // correctness -- just avoids burning the fixed-timestep loop below
+        // on ticks that would do nothing anyway, every frame, forever
+        // after game-over.
+        if (_match.IsMatchOver) return;
 
         _tickAccumulator += dt;
         var ticksRun = 0;
