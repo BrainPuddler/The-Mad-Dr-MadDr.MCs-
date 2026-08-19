@@ -19945,3 +19945,26 @@ Unlimited match runs well past where the old fixed cap would have
 fired and never ends. **No .NET SDK / no Unity Editor in this
 environment** -- verified by manual review; added to docs/36's
 pending-verification checklist.
+
+## WinProgressHud moved top-center, one line + a standing UI-overlap rule (2026-08)
+
+Creator direction, verbatim: *"move the WinProgressHud to the top of
+the screen Centered make it one line. When you add UI in the future
+make sure it does not overlap areas already used in the HUD and UI
+buttons and other displays."* Full writeup: docs/37 §8.
+
+Moved from docking above `Minimap` to self-positioning top-center
+(`UiScale.Width * 0.5f`, y=16px); three segments (Army/Dominion/
+Territory) now lay out left-to-right on one row instead of three
+stacked rows. Before placing it there, actually verified (not just
+estimated) that top-center is clear: the top-left stack (`HudStatus`/
+`WindowLightsHud`/`BuildMenuHud`/etc.) sits in a narrow ~12-260px
+column, `AnalogClockHud`/`ResourceHud` sit from ~x1684 at a 1920px-wide
+canvas, and `HudStatus`'s own centered help popup only appears on
+demand and starts well below this panel's y-range.
+
+The creator's second instruction -- always check for overlap before
+placing future UI -- is now a standing rule, not just this file's fix:
+added to CLAUDE.md's Invariants section ("Unity HUD placement") so
+future sessions see it automatically rather than relying on this
+decision-log entry being found.

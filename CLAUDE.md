@@ -85,6 +85,14 @@ twice, must match).
   (retry returns same result, charges once); per-op server seed logged;
   genomes HMAC-signed. Validation = "failed experiment", never silent
   clamping.
+- **Unity HUD placement (creator direction, 2026-08):** every panel is
+  IMGUI (`OnGUI`, `UiScale`-scaled reference canvas — see `UiScale.cs`).
+  Before anchoring any new or moved HUD element to a screen edge/corner,
+  check what already lives there — grep for `ScreenCorner`, hardcoded
+  small x/y offsets, and `topOffsetPixels`-style clearance fields — and
+  ideally verify the actual Rect math directly rather than trusting a
+  rough summary. Never place a new element where it would overlap an
+  existing HUD panel or button row.
 
 ## Workflow
 

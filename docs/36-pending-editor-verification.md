@@ -188,20 +188,24 @@ docs/12's matching entry for full design/reasoning.
   that the territory-score reason text reads sensibly given whatever
   state the map is actually in by then.
 
-## 8. Win-progress HUD above the minimap (docs/37 §6)
+## 8. Win-progress HUD, top-center one-liner (docs/37 §6-§8)
 
-New `WinProgressHud.cs` -- never seen rendering.
+New `WinProgressHud.cs` -- never seen rendering. Moved (§8) from
+docking above the minimap to a self-positioned top-center panel; the
+checklist below reflects the CURRENT (top-center) placement.
 
-- **Docking**: confirm the panel actually sits flush directly above
-  `Minimap`'s own frame (it reads `Minimap.ScreenRect` live, same
-  convention `SelectionHud`/`RecallHud` already use) at every corner
-  preset the minimap itself supports, and at different `UiScale`
-  reference resolutions/aspect ratios -- not just the default
-  bottom-left placement.
-- **Legibility**: three rows (Army/Dominion/Territory), bold red/green
-  percentage text -- confirm it's actually readable against a busy city
-  background, and that the shadow-label technique reads cleanly at real
-  HUD scale.
+- **Positioning**: confirm the panel actually sits centered at the top
+  of the screen (`UiScale.Width * 0.5f`, y=16px) at different `UiScale`
+  reference resolutions/aspect ratios, and that it genuinely does NOT
+  overlap `HudStatus`'s top-left lines, `AnalogClockHud`/`ResourceHud`'s
+  top-right column, or `HudStatus`'s own centered help popup when
+  opened -- this was verified by reading the real Rect math (docs/37
+  §8), not by eye, so the actual on-screen check is the thing that's
+  genuinely still outstanding.
+- **Legibility**: one row, three segments (Army/Dominion/Territory),
+  bold red/green percentage text -- confirm it's actually readable
+  against a busy city background at real HUD scale, and that the three
+  segments don't feel cramped or misaligned on one line.
 - **Live values feel meaningful**: watch all three percentages during an
   actual match against a real AI opponent (docs/30) and confirm they
   move in directions that make sense -- Army % should track visibly

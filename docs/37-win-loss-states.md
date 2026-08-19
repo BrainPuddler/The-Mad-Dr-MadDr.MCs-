@@ -275,3 +275,43 @@ button's actual appearance and whether picking each of the four options
 genuinely changes match behavior in a live game are unverified beyond
 compile-level review; added to docs/36's pending-verification
 checklist.
+
+## 8. Follow-up (2026-08): WinProgressHud moved to top-center, one line
+
+Creator direction, verbatim: *"move the WinProgressHud to the top of
+the screen Centered make it one line. When you add UI in the future
+make sure it does not overlap areas already used in the HUD and UI
+buttons and other displays."*
+
+**Placement**: `WinProgressHud` used to dock above `Minimap` (bottom-
+left by default). It now self-positions at top-center
+(`UiScale.Width * 0.5f`, `y = 16px`), no longer taking a `Minimap`
+reference at all (`Init` dropped that parameter). Before moving it, the
+top of the screen was surveyed for existing occupants: `HudStatus`'s
+live status lines and the `WindowLightsHud`/`BuildMenuHud`/
+`CollectorLabHud`/`LabBattalionHud` chain sit at the LEFT edge (x from
+12, a narrow ~200-260px column, verified directly against
+`BuildMenuHud`'s own `tileSize`/`columns` math, not just estimated);
+`AnalogClockHud`/`ResourceHud` sit at the RIGHT edge (x from ~1684 at a
+1920px-wide canvas). `HudStatus`'s own help popup ("(i)" button) IS
+centered, but only appears on demand and starts at y=60 -- well below
+this panel's y=16-40 range, so even that transient overlay never
+overlaps it. Top-center at y=16-40 is genuinely, verifiably clear on
+both axes.
+
+**Layout**: three segments (Army/Dominion/Territory) laid out left-to-
+right on ONE row instead of three stacked rows -- same percentages,
+same red/&gt;=50%-green color rule, just horizontal instead of vertical.
+
+This creator direction's second half -- *"make sure it does not overlap
+... in the future"* -- is now a standing project rule, not just a one-
+off fix for this file: added to CLAUDE.md's own Invariants section
+("Unity HUD placement") so it persists across sessions, not just as a
+comment in this one file.
+
+**No Unity Editor in this environment** -- the actual on-screen
+centering, single-line legibility, and whether the verified-clear
+placement genuinely reads as non-overlapping at real HUD scale (rather
+than just by the numbers) are unverified beyond compile-level review;
+docs/36's own WinProgressHud entry updated to reflect the new
+placement.

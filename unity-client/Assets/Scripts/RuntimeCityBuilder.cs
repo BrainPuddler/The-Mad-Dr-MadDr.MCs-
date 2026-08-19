@@ -656,13 +656,15 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (minimap == null) minimap = gameObject.AddComponent<Minimap>();
         minimap.Init(this, commander, fog);
 
-        // 2026-08 (creator direction: "a hud above the mini map showing
-        // win game % ... for all three win game states"): docks against
-        // minimap's own live ScreenRect, same idiom selectionHud/
-        // recallHud already use just below.
+        // 2026-08 (creator direction: "a hud ... showing win game % ...
+        // for all three win game states", then "move the WinProgressHud
+        // to the top of the screen Centered make it one line"): top-
+        // center, self-positioned -- no longer docks against minimap
+        // (see WinProgressHud's own header for the top-of-screen
+        // occupancy survey that placement is based on).
         var winProgressHud = gameObject.GetComponent<WinProgressHud>();
         if (winProgressHud == null) winProgressHud = gameObject.AddComponent<WinProgressHud>();
-        winProgressHud.Init(_simBridge, minimap, localPlayerIndex: 0);
+        winProgressHud.Init(_simBridge, localPlayerIndex: 0);
 
         var selectionHud = gameObject.GetComponent<SelectionHud>();
         if (selectionHud == null) selectionHud = gameObject.AddComponent<SelectionHud>();
