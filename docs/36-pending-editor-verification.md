@@ -292,3 +292,29 @@ Deliberately left alone, flagged rather than silently touched:
 - **`Citizen.cs` is the last capsule holdout** (docs/34 §0) — still
   waiting on the Civilian Victims work before it moves onto
   `HumanCharacterKit`.
+
+## 13. Grandma wheelchair: real circular wheels + seated legs (`HumanoidCombatant.cs`)
+
+Creator report: the wheelchair's "wheels" were reading as flattened
+blocks, not wheels, and the whole variant didn't visibly read as a
+person sitting. Fixed by replacing the two flattened-cube wheels with
+`PrimitiveType.Cylinder` discs (rotated so the circular face is what a
+side-on camera sees) and adding a new `BuildSeatedLegs()` — a static
+thigh+shin silhouette parented under the character root, independent of
+`HumanCharacterKit`'s shared (walking) leg path, since `HasLegs` stays
+`false` on purpose for her `TickWheelchair` animation routing.
+
+- **Wheels actually read as circular**, not a fender/panel, from the
+  normal RTS camera angle — confirm at both close and default zoom.
+- **Seat/wheel/leg vertical alignment**: `BuildWheelchair`'s seat height
+  and `BuildSeatedLegs`' hip height both derive from the same
+  `SeatedHeight` profile value independently (not a shared computed
+  constant) — confirm the torso doesn't visibly float above or sink
+  below the seat cushion, and that the thighs meet the torso's hip
+  convincingly rather than gapping.
+- **Legs don't clip the seat/frame or the wheels** — the thighs project
+  forward past the seat's front edge on purpose; confirm that reads as
+  "sitting" and not as legs poking through solid geometry.
+- Untested numbers (v0.1, reasoned not measured): `wheelDiameter` 0.64,
+  `wheelThickness` 0.06, `legOffsetX`/`thighLength`/`thighThickness`/
+  `shinThickness`/`footClearance` in `BuildSeatedLegs`.

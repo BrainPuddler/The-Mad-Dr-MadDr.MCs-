@@ -83,7 +83,11 @@ public class HumanoidCombatant : MonoBehaviour
         // onto it. SeatedHeight is Grandma-specific today but the check
         // is written against the flag's actual meaning, not "today's only
         // caller," so it stays correct if a second seated variant shows up.
-        if (profile.Visual.SeatedHeight > 0f) BuildWheelchair();
+        if (profile.Visual.SeatedHeight > 0f)
+        {
+            BuildSeatedLegs();
+            BuildWheelchair();
+        }
 
         _combat = gameObject.AddComponent<UnitCombat>();
         _combat.Configure(profile.Faction, profile.MaxHealth, profile.Radius, profile.AimHeight,
@@ -146,15 +150,17 @@ public class HumanoidCombatant : MonoBehaviour
     }
 
     /// <summary>"Drive a manual wheelchair" (Grandma, creator direction
-    /// verbatim) -- a seat/frame plus two large side wheels, parented
-    /// under the character root so it moves and turns with her exactly
-    /// like a real chair would. Blocky cubes throughout, same low-poly
-    /// register as every `HumanCharacterKit` part -- a true circular
-    /// wheel isn't in this project's cube-only geometry vocabulary, but a
-    /// wide flattened cube on each side reads as "wheelchair" at RTS
-    /// camera distance, which is what actually matters (this project's
-    /// own "good enough to read as X, not a finished look" convention,
-    /// PbrTextureAtlas.cs's header).</summary>
+    /// verbatim) -- a seat/frame plus two large circular side wheels,
+    /// parented under the character root so it moves and turns with her
+    /// exactly like a real chair would. The seat/frame stays a blocky
+    /// cube (same low-poly register as every `HumanCharacterKit` part),
+    /// but the wheels are real `PrimitiveType.Cylinder` discs, not a
+    /// flattened cube -- Cylinder is already this project's own vocabulary
+    /// for round props (Collector.cs's wheel/vent trim, MonsterAgent's
+    /// glow rings), so "cube-only" was never a hard constraint on a prop
+    /// built here in HumanoidCombatant, only on the shared
+    /// HumanCharacterKit body parts. A wide flattened cube read as a
+    /// fender panel, not a wheel -- fixed per creator report (2026-08).</summary>
     private void BuildWheelchair()
     {
         var mat = HumanCharacterKit.SharedMaterial();
@@ -162,8 +168,14 @@ public class HumanoidCombatant : MonoBehaviour
         var seatHeight = _profile.Visual.SeatedHeight > 0f ? _profile.Visual.SeatedHeight : 0.5f;
 
         WheelchairPart(new Vector3(0f, seatHeight * 0.5f, 0f), new Vector3(0.55f, seatHeight, 0.5f), frameColor, mat);
-        WheelchairPart(new Vector3(-0.34f, seatHeight * 0.55f, 0f), new Vector3(0.08f, seatHeight * 1.1f, 0.62f), frameColor, mat);
-        WheelchairPart(new Vector3(0.34f, seatHeight * 0.55f, 0f), new Vector3(0.08f, seatHeight * 1.1f, 0.62f), frameColor, mat);
+
+        // Large enough to visibly extend above the seat and touch the
+        // ground -- a real wheelchair's rear wheels read as the chair's
+        // dominant silhouette feature, not an incidental detail.
+        const float wheelDiameter = 0.64f;
+        const float wheelThickness = 0.06f;
+        WheelchairWheel(new Vector3(-0.34f, wheelDiameter * 0.5f, 0f), wheelDiameter, wheelThickness, frameColor, mat);
+        WheelchairWheel(new Vector3(0.34f, wheelDiameter * 0.5f, 0f), wheelDiameter, wheelThickness, frameColor, mat);
     }
 
     private void WheelchairPart(Vector3 localCenter, Vector3 size, Color color, Material mat)
@@ -180,6 +192,71 @@ public class HumanoidCombatant : MonoBehaviour
         mpb.SetColor("_BaseColor", color);
         mpb.SetColor("_Color", color);
         renderer.SetPropertyBlock(mpb);
+    }
+
+    /// <summary>A genuinely circular wheel: Unity's stock Cylinder mesh
+    /// (radius 0.5, height 2 along its own local Y before scaling) scaled
+    /// to (diameter, thickness, diameter) and then rotated 90 degrees
+    /// around Z, which swings its height axis (the thickness) out to the
+    /// parent's X axis and leaves its circular caps facing along X -- so
+    /// at `localCenter = (+-x, diameter/2, 0)` the disc's flat round face
+    /// is what a side-on RTS camera actually sees, exactly like a real
+    /// wheel mounted on an axle running left-right through the chair.</summary>
+    private void WheelchairWheel(Vector3 localCenter, float diameter, float thickness, Color color, Material mat)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        go.transform.SetParent(transform, false);
+        go.transform.localPosition = localCenter;
+        go.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+        go.transform.localScale = new Vector3(diameter, thickness, diameter);
+        var collider = go.GetComponent<Collider>();
+        if (collider != null) Object.Destroy(collider);
+        var renderer = go.GetComponent<Renderer>();
+        renderer.sharedMaterial = mat;
+        var mpb = new MaterialPropertyBlock();
+        mpb.SetColor("_BaseColor", color);
+        mpb.SetColor("_Color", color);
+        renderer.SetPropertyBlock(mpb);
+    }
+
+    /// <summary>Grandma's `HumanCharacterProfile.HasLegs` is false --
+    /// deliberately, since her animation routes through `TickWheelchair`
+    /// rather than `TickLocomotion` (see `DriveMoveAnimation`'s own
+    /// comment), and the shared `HumanCharacterKit` leg-building path is
+    /// only for a standing walk cycle. But "no legs" alone reads as a
+    /// floating legless torso, not a person SITTING in the chair -- so
+    /// this builds a static seated silhouette directly (thigh projecting
+    /// forward from the hip, shin dropping to the footrest) independent
+    /// of the shared rig, the same "self-contained prop built here, not a
+    /// shared-rig change" shape `BuildWheelchair` itself already uses.
+    /// Scoped to this one variant on purpose -- nothing about the shared
+    /// walking-leg path for every other human unit is touched.</summary>
+    private void BuildSeatedLegs()
+    {
+        var mat = HumanCharacterKit.SharedMaterial();
+        var v = _profile.Visual;
+        var s = v.HeightScale;
+        var color = v.BodyColor;   // housedress fabric covers the legs, same as the torso
+        var seatTopY = v.SeatedHeight > 0f ? v.SeatedHeight : 0.5f;
+
+        const float legOffsetX = 0.14f;
+        const float thighLength = 0.4f;
+        const float thighThickness = 0.16f;
+        const float shinThickness = 0.14f;
+        const float footClearance = 0.12f;
+
+        var kneeZ = thighLength * s;
+        var kneeY = seatTopY - thighThickness * s * 0.5f;
+        var footY = footClearance * s;
+
+        for (var side = -1; side <= 1; side += 2)
+        {
+            var x = side * legOffsetX * s;
+            WheelchairPart(new Vector3(x, kneeY, kneeZ * 0.5f),
+                new Vector3(thighThickness * s, thighThickness * s, thighLength * s), color, mat);
+            WheelchairPart(new Vector3(x, (kneeY + footY) * 0.5f, kneeZ),
+                new Vector3(shinThickness * s, kneeY - footY, shinThickness * s), color, mat);
+        }
     }
 
     private void Update()
