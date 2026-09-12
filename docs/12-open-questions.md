@@ -20047,3 +20047,90 @@ the proportional scaling itself.
 (brace/paren balance, confirming no other file reads the renamed public
 Inspector fields) rather than actually watching a blip's size track
 zoom on screen.
+
+## 2026-09: Performance-first art standard (docs/39) -- creator brief + Empire of Sin reference
+
+Creator direction, 2026-09-12: a full "PERFORMANCE IS A PRIMARY ART
+REQUIREMENT" brief for the semi-isometric, StarCraft-2-style camera --
+camera-aware detail, LOD0-3 per asset, camera-appropriate LOD
+distances, RTS-unit efficiency (1 -> 10 -> 25 -> 50+ units), per-class
+triangle budgets, material/draw-call discipline, environment, shadow,
+animation, and VFX performance, and a mandatory visual + performance
+two-test gate -- with Empire of Sin (Steam 604540) and
+`../Inpiration-folder/` as the visual reference. The brief's own
+closing instruction: "The exact triangle counts should be determined
+after inspecting the existing game, render pipeline and actual camera."
+
+**What was inspected, and what it measured.**
+
+- Camera (`SimpleCameraRig.cs`, `SampleScene.unity`): perspective, 60 deg
+  vertical FOV, fixed 50 deg pitch, height clamped 8-400 m, match
+  starts at 70 m, shadow distance `1.9h + 15` capped at 250 m. From
+  that: ~10 px per ground metre and ~6.6 px per upright metre at the
+  default zoom (1080p), so a hydrant is ~7 px, a human ~13 px, a monster
+  ~26 px, and a rivet/gauge/bevel 1-2 px. The default view covers about
+  190 x 180 m (~9 x 9 hexes).
+- Pipeline: URP 6000.3, `PC_RPAsset` (4 cascades, 2048, additional-light
+  shadows on) / `Mobile_RPAsset` (1 cascade, 1024), SRP Batcher on,
+  dynamic batching off, `lodBias` 1 (Mobile) / **2 (PC)**.
+- Monsters: ran the existing `creature-mesh` `MeshStats` tests with the
+  real .NET SDK (present in this environment) -- **9,594 (serpentine) to
+  12,538 (arachnid) triangles per default body, 16,001 for a busy
+  tetrapod with faction hardware, 12-23 material chunks (= renderers)
+  each, at every zoom.** `grep LODGroup` over the whole client: zero
+  hits. The Lab's JS renderer has a tessellation dial (`_detail`,
+  `TRI_BUDGET = 9000`); the C# port's README lists it as dropped.
+- Primitives: 75 `PrimitiveType.Sphere` call sites (760 tris each) and
+  154 `Cylinder` (80) across the dressers and `MonsterBody`;
+  `BaseDresser` alone has 85 sphere/cylinder sites.
+- Batching state (docs/12 Tier 0 / Tier 3 entries): road surfaces and
+  DistantSkyline dressing static-batched; Engagement/LocalCity dressing
+  deliberately not (damage-mutable).
+- No frame-time capture has ever been taken (Tier 0's own finding, still
+  true).
+
+**What shipped.** `docs/39-performance-art-standard.md` (normative) and
+its condensed `.claude/skills/maddr-performance-art-standard` skill:
+four named zoom bands (Close 8-25 m / Normal 25-110 m / Overview
+110-250 m / Map 250-400 m), per-class budgets per LOD (standard monster
+LOD1 <= 3,000 tris and <= 3 renderers; hero <= 3,500; humanoid rig's
+156 unchanged; buildings by tier; props <= 60), screen-height LOD
+thresholds derived from the pixel math (monster 6 % / 1.5 % / 0.6 %),
+the engagement zones reused as the building LOD ladder, shadow-caster
+table and cascade targets (PC 4 -> 2, additional-light shadows
+spot-only), material rules, VFX caps, the two-test gate with a
+definition-of-done checklist, and a ranked backlog whose step 0 is
+"measure" (extend `LogCityBuildCensus` with tris/renderers by
+category, add a 10/25/50-monster spawn key, take the first Profiler +
+Frame Debugger capture).
+
+**Two findings worth their own line.** (1) Unity documents that the SRP
+Batcher does not batch renderers carrying a `MaterialPropertyBlock`,
+and `_BaseColor`/`_BaseMap_ST` are not GPU-instanced properties in
+URP/Lit -- so Tier 1's per-prim `_BaseMap_ST` tiling block in
+`SpawnPrim` and `HumanCharacterKit`'s per-part colour blocks very
+likely take those renderers out of batching. Flagged as "confirm in the
+Frame Debugger before acting," with the fix order (world-space-UV
+tiling material; colour-keyed shared materials; baked vertex colour).
+(2) `BuildingWindowGrid` sets `ShadowCastingMode.On` on a flat facade
+layer whose shadow is the wall's shadow; docs/39 SS8 turns it off.
+
+**Reconciliation with docs/08.** Its v0.1 budget table (<= 8k LOD0, 3
+LODs + impostor, <= 30 monsters, <= 60 bones) assumed imported part
+meshes with blend shapes; the actual pipeline is procedural
+(`creature-mesh` <- the Lab's JS). docs/08's goals stand (determinism,
+mobile 30-monster target, one uber-material, assembly at load); its
+numbers are superseded by docs/39 SS4.2 for the Unity client.
+
+**Empire of Sin, read against our camera.** Take the night/rain/
+wet-roughness look, flat facades with texture ornament and only
+silhouette-breakers as geometry, lamp pools and signage as depth cues,
+colour-blocked units, fog hiding the far LOD, boxy props. Leave the
+1920s period (we are 1950s), the 4-6-hero squad scale (we draw armies,
+so per-unit cost must be ~10x lower), and close-zoom hero detail.
+
+**Not done, deliberately.** No code changed: the brief is a standard,
+and its own rule is that budgets follow measurement -- step 0 of the
+backlog needs the creator's Editor. **No Unity Editor in this
+environment**; the only executed measurement is the `dotnet test`
+creature-mesh run above.

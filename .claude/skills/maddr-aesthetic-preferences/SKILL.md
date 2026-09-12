@@ -299,3 +299,9 @@ entries over guessing — this project keeps its own design rationale in
 those docs, and CLAUDE.md's decision-log convention means the reasoning
 for almost every non-obvious visual choice is written down somewhere in
 `docs/12` already, phrased in the creator's own words.
+
+**Cost is a separate, equally binding standard.** Every visual change is
+also held to `maddr-performance-art-standard` (docs/39): budgets, LODs,
+shadow casters, draw calls, and the two-test gate (visual before/after at
+the default 70 m framing + a 1/10/25/50 unit cost curve). Silhouette
+variety — this file's selling point — is cheap; tiny geometry is not.
