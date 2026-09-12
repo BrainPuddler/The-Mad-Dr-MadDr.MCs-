@@ -547,7 +547,8 @@ before any monster or shader work even starts.
    a ring around the camera focus; take the first Profiler and Frame
    Debugger capture (ms per frame, SRP-batch vs. plain-draw count) at
    the default framing. Record each in docs/12.
-0.5. **Fix `BuildBuildings`' one-collider-per-footprint-hex pattern.**
+0.5. **[Implemented 2026-09-12, pending Editor verification — see docs/12]
+   Fix `BuildBuildings`' one-collider-per-footprint-hex pattern.**
    `SpawnCube(hex, …, keepCollider: true)` runs once per hex in
    `building.Footprint` and every resulting `BoxCollider` is registered
    to the *same* `Building` in `_buildingByCollider` — there is no

@@ -20183,3 +20183,64 @@ SS4.1's "where the client is today" table. Mirrored into the
 entry records the finding and the backlog reprioritization only; the
 actual code fix, its own before/after census, and a Frame Debugger
 capture are still open (docs/39 SS11 item 0.5's own acceptance bar).
+
+## 2026-09 follow-up: item 0.5 implemented -- one hit-proxy collider per building, not one per footprint hex
+
+Implements the fix the previous entry's finding scoped. In
+`RuntimeCityBuilder.cs`:
+
+- `BuildBuildings`' footprint loop now calls `SpawnCube(hex, .., mat,
+  buildings, keepCollider: false)` -- every massing cube is colliderless,
+  matching how `SpawnPrim`-routed dressing/props already worked. The old
+  per-cube `_buildingByCollider[collider] = building` registration is
+  gone with it.
+- New `SpawnBuildingHitProxy(building, height, parent)`: a single bare
+  `GameObject` + `BoxCollider`, no renderer, sized to the footprint's own
+  world-space bounding box (each hex's contribution using the SAME
+  `BuildingFootprintHalfExtent` the massing cubes themselves render at,
+  so the proxy's silhouette matches what's actually visible). One call
+  per building, registered in `_buildingByCollider` and a new
+  `_hitProxyByBuilding` map.
+- `ApplyBuildingDamage`'s Destroyed-stage branch now also destroys the
+  building's hit-proxy and removes it from `_buildingByCollider` --
+  same "rubble: clicks fall through to the ground" contract the old
+  per-cube collider strip already had for the massing cubes and dressing
+  holders, just extended to the one collider that actually matters now.
+  The now-dead per-massing-cube `_buildingByCollider.Remove(...)` call in
+  that same branch was deleted (massing cubes never carry a collider to
+  remove any more).
+
+**Correctness check performed (read-through, this environment still has
+no Unity Editor to compile/run against):** traced every consumer of
+`_buildingByCollider`/`_cubesByBuilding` before touching anything.
+`BuildingFromCollider` (used by `MonsterAgent.HasClearLineOfSight` and
+`WaypointCommander`'s right-click order resolution) only ever needed
+building-level resolution, never which specific footprint hex was hit --
+`hitHex` for fire-spread/damage targeting comes from a SEPARATE
+geometric `NearestFootprintPoint`/`FootprintIndexOf` calculation, not
+from which collider a raycast happened to hit, so collapsing N colliders
+into one changes nothing there. `WaypointCommander`'s roof-vs-wall click
+distinction (`hit.normal.y > 0.5f`) still works identically against one
+larger box at the same height. `DeBatchBuildingDressingIfNeeded` and
+`IgniteBuildingIfNeeded` both index into `_cubesByBuilding`'s per-hex
+list directly by array position, which is completely unchanged -- only
+each cube's OWN collider was ever touched, never the list's shape or
+order. Confirmed `_buildingByCollider` is `private` (no outside file
+touches it) and `SpawnCube`/`SpawnBuildingHitProxy` are the only two
+places colliders get created for city geometry, so the audit is
+exhaustive, not a sample. Brace/paren balance verified across the whole
+file post-edit.
+
+**What "done" still requires (docs/39 SS10.4's own gate, and this
+backlog item's own acceptance bar):** the creator re-running the exact
+same `LogCityBuildCensus` line -- Village preset, seed 42 -- in the real
+Editor and reporting the new collider count. Expected: colliders drop
+from 81,128 to roughly the building count (one per building instead of
+one per footprint hex); GameObjects/renderers unchanged (no visual
+geometry was added, removed, or reparented -- only which of those
+GameObjects carry a `Collider` changed, plus one new invisible
+proxy GameObject per building). A quick smoke check worth doing at the
+same time, since it costs nothing extra once the Editor is open anyway:
+right-click a multi-hex building (attack order fires), right-click its
+roof (a flyer lands), and destroy one (rubble stops being clickable) --
+all three exercise a code path this change touched.

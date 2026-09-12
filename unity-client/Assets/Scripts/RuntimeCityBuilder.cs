@@ -189,6 +189,21 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
 
     private readonly Dictionary<Collider, Building> _buildingByCollider = new Dictionary<Collider, Building>();
     private readonly Dictionary<Building, List<GameObject>> _cubesByBuilding = new Dictionary<Building, List<GameObject>>();
+    // docs/39 SS11 item 0.5 (docs/12, 2026-09: a real Village-preset
+    // census measured 81,128 colliders, dominated by BuildBuildings
+    // giving every footprint hex its own BoxCollider even though every
+    // one of them resolved back to the SAME Building in
+    // `_buildingByCollider`). One invisible hit-proxy per building now
+    // carries the only real collider a multi-hex building needs --
+    // `SpawnBuildingHitProxy` sizes it to the footprint's own bounding
+    // box, so a raycast anywhere over the building's silhouette still
+    // resolves correctly. Tracked separately from `_cubesByBuilding`
+    // (whose massing cubes are now always colliderless, see
+    // BuildBuildings) purely so the Destroyed-stage collapse in
+    // ApplyBuildingDamage can find and remove this one collider too --
+    // same "rubble: clicks fall through to the ground" contract the old
+    // per-cube collider strip already had.
+    private readonly Dictionary<Building, GameObject> _hitProxyByBuilding = new Dictionary<Building, GameObject>();
     // docs/12 Tier 3 of the graphics-upgrade plan: landmark sites + every
     // player's starting HQ/Factory hex, gathered once in BeginMatch
     // (BEFORE BuildBuildings runs) and used as EngagementZoneManager's
@@ -2306,10 +2321,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             var footprintCount = building.Footprint.Count;
             foreach (var hex in building.Footprint)
             {
-                var cube = SpawnCube(hex, height / 2f, height, mat, buildings, true);
+                // docs/39 SS11 item 0.5: massing cubes are colliderless now
+                // -- SpawnBuildingHitProxy below gives the building ONE
+                // real collider instead of one per footprint hex (all of
+                // which used to resolve to this same `building` anyway).
+                var cube = SpawnCube(hex, height / 2f, height, mat, buildings, false);
                 cubes.Add(cube);
-                var collider = cube.GetComponent<Collider>();
-                if (collider != null) _buildingByCollider[collider] = building;
             }
             // 1950s dressing (docs/21 Phase 3): holders are REGISTERED in
             // the same cubes list, so the damage pipeline below crushes
@@ -2317,6 +2334,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // the massing they belong to
             BuildingDresser.Dress(this, building, height, cubes, buildings, industrial, suburb, _city.Region);
             _cubesByBuilding[building] = cubes;
+
+            var hitProxy = SpawnBuildingHitProxy(building, height, buildings);
+            _buildingByCollider[hitProxy.GetComponent<Collider>()] = building;
+            _hitProxyByBuilding[building] = hitProxy;
 
             // docs/12 Tier 3: a building whose CLOSEST footprint hex to
             // every engagement center (landmarks + starting HQs/Factories)
@@ -2510,6 +2531,42 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         return cube;
     }
 
+    /// <summary>docs/39 SS11 item 0.5: the ONE real collider a building
+    /// needs for click/raycast resolution (`BuildingFromCollider`) and
+    /// line-of-sight blocking (`MonsterAgent.HasClearLineOfSight`) --
+    /// replaces the old one-`BoxCollider`-per-footprint-hex pattern
+    /// (`BuildBuildings` used to give every massing cube `keepCollider:
+    /// true`, all resolving to this same `building`). Sized to the
+    /// footprint's own world-space bounding box using the SAME per-hex
+    /// half-extent the massing cubes themselves render at
+    /// (`BuildingFootprintHalfExtent`), so a raycast anywhere over the
+    /// building's visible silhouette still hits it -- including a
+    /// concave/L-shaped multi-hex footprint's outer hexes, at the minor,
+    /// accepted cost of the box also covering any indentation between
+    /// them (a strictly bigger click target, never a smaller one).
+    /// Renderer-less by design (docs/39 SS4.2 "gameplay proxies: minimal
+    /// geometry, invisible whenever possible") -- the massing cubes still
+    /// carry 100% of the visible geometry, unchanged.</summary>
+    private GameObject SpawnBuildingHitProxy(Building building, float height, Transform parent)
+    {
+        var minX = float.MaxValue; var maxX = float.MinValue;
+        var minZ = float.MaxValue; var maxZ = float.MinValue;
+        foreach (var hex in building.Footprint)
+        {
+            var w = WorldOf(hex);
+            if (w.x - BuildingFootprintHalfExtent < minX) minX = w.x - BuildingFootprintHalfExtent;
+            if (w.x + BuildingFootprintHalfExtent > maxX) maxX = w.x + BuildingFootprintHalfExtent;
+            if (w.z - BuildingFootprintHalfExtent < minZ) minZ = w.z - BuildingFootprintHalfExtent;
+            if (w.z + BuildingFootprintHalfExtent > maxZ) maxZ = w.z + BuildingFootprintHalfExtent;
+        }
+        var proxy = new GameObject("BuildingHitProxy");
+        proxy.transform.SetParent(parent, false);
+        proxy.transform.position = new Vector3((minX + maxX) * 0.5f, height * 0.5f, (minZ + maxZ) * 0.5f);
+        var box = proxy.AddComponent<BoxCollider>();
+        box.size = new Vector3(maxX - minX, height, maxZ - minZ);
+        return proxy;
+    }
+
     private static Material NewMaterial(Color color)
     {
         var mat = new Material(ShaderUtil.FindRenderableShader());
@@ -2618,8 +2675,10 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                     // it and replace with several big tilted slab pieces
                     var hex = building.Footprint[i];
                     var pos0 = cube.transform.position;
-                    var massingCollider = cube.GetComponent<Collider>();
-                    if (massingCollider != null) _buildingByCollider.Remove(massingCollider);
+                    // docs/39 SS11 item 0.5: massing cubes are colliderless
+                    // now (SpawnBuildingHitProxy carries the one real
+                    // collider, removed separately below) -- no per-cube
+                    // _buildingByCollider entry to clean up here any more.
                     Object.Destroy(cube);
                     if (_buildingsHost != null)
                     {
@@ -2644,6 +2703,20 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                     _buildingByCollider.Remove(collider);
                     Object.Destroy(collider); // rubble: clicks fall through to the ground
                 }
+            }
+            // docs/39 SS11 item 0.5: the massing cubes above were never
+            // this building's real click target -- SpawnBuildingHitProxy's
+            // single collider was -- so it needs the SAME "rubble: clicks
+            // fall through to the ground" treatment the per-cube colliders
+            // just got, or a destroyed building's footprint would still
+            // resolve to it forever.
+            GameObject hitProxy;
+            if (_hitProxyByBuilding.TryGetValue(building, out hitProxy) && hitProxy != null)
+            {
+                var proxyCollider = hitProxy.GetComponent<Collider>();
+                if (proxyCollider != null) _buildingByCollider.Remove(proxyCollider);
+                Object.Destroy(hitProxy);
+                _hitProxyByBuilding.Remove(building);
             }
             // small debris chunks scattered over the shattered slabs
             // (docs/21 batch 2, item 5) and a one-shot dust puff burst
