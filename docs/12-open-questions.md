@@ -20134,3 +20134,52 @@ and its own rule is that budgets follow measurement -- step 0 of the
 backlog needs the creator's Editor. **No Unity Editor in this
 environment**; the only executed measurement is the `dotnet test`
 creature-mesh run above.
+
+## 2026-09 follow-up: first real census (Village/seed 42) -- one-collider-per-footprint-hex found in BuildBuildings
+
+Creator ran the game in the real Editor and reported
+`LogCityBuildCensus`'s output for the smallest preset:
+
+> City build census -- preset=Village seed=42: 1763ms, 85347
+> GameObjects, 83889 renderers, 81128 colliders.
+
+This is docs/39's own backlog item 0 ("measure") starting to get real
+data instead of estimates. Reading `RuntimeCityBuilder.BuildBuildings`
+against that number found the dominant cause immediately: the
+`foreach (var hex in building.Footprint)` loop calls
+`SpawnCube(hex, ..., keepCollider: true)` **once per footprint hex**,
+and every one of those `BoxCollider`s is registered to the SAME
+`Building` in `_buildingByCollider` -- there is no gameplay reason a
+multi-hex building needs more than one collider; every hex's collider
+already resolves to the identical building object. Confirmed this is
+the outlier, not a general leak: `SpawnPrim` (the shared helper every
+dresser -- `BuildingDresser`, `BaseDresser`, `RoadDresser`, `FacadeKit`,
+trees, rocks, road cubes -- routes through) already destroys the
+primitive's collider on every call, so dressing/props/terrain are
+colliderless as designed. Two much smaller leaks found alongside it:
+`SpawnCitizens`/`SpawnFleeingOccupant` create a `Capsule` and never
+strip its `CapsuleCollider` (docs/34 SS0's already-known capsule
+holdout); `HumanCharacterKit`/`MonsterBody` each add exactly one
+selection `BoxCollider` per unit, which is correct and not a leak.
+
+**Why this matters more than the raw renderer count.** Renderers are
+frustum-culled every frame regardless of total scene size, so 83,889
+total renderers isn't directly comparable to docs/39's <=2,500-in-
+frustum target -- most of Village's renderers are never drawn on a
+given frame. Colliders get no such discount: Unity's physics broadphase
+and scene overhead scale with the total collider count in the world,
+not what's on screen. 81,128 colliders on the SMALLEST preset, entirely
+attributable to one loop, is a bigger and cheaper fix than anything
+already in docs/39's backlog, precisely because it's the first entry
+backed by a measurement rather than a pixel-size estimate.
+
+**Action taken:** inserted as new backlog item 0.5 in
+`docs/39-performance-art-standard.md` SS11 (fix: one collider per
+building, or one dedicated invisible footprint-bounds proxy, instead of
+one per hex; click/damage resolution walks `_cubesByBuilding[building]`
+for the visual hit) and folded the census numbers + root cause into
+SS4.1's "where the client is today" table. Mirrored into the
+`maddr-performance-art-standard` skill. **Not yet implemented** -- this
+entry records the finding and the backlog reprioritization only; the
+actual code fix, its own before/after census, and a Frame Debugger
+capture are still open (docs/39 SS11 item 0.5's own acceptance bar).

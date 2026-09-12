@@ -64,10 +64,21 @@ Stock Unity primitives: Cube 12, Cylinder 80, **Sphere 760, Capsule 832**.
 
 Where the client actually is (2026-09): monsters are **9.6k–16k tris in
 12–23 renderers each, at every zoom, with zero `LODGroup`s anywhere**;
-75 stock-sphere call sites; no frame-time measurement has ever been
-taken. The Lab's JS renderer has the tessellation dial
-(`_detail`/`segFor`, `TRI_BUDGET = 9000`) that the C# `creature-mesh`
-port dropped — porting it is the LOD mechanism (docs/39 §11 step 1).
+75 stock-sphere call sites. The Lab's JS renderer has the tessellation
+dial (`_detail`/`segFor`, `TRI_BUDGET = 9000`) that the C# `creature-mesh`
+port dropped — porting it is the LOD mechanism (docs/39 §11 item 1).
+
+**First real Editor measurement (2026-09-12), Village preset:
+85,347 GameObjects / 83,889 renderers / 81,128 colliders.** Root cause of
+the collider count: `RuntimeCityBuilder.BuildBuildings` gives **every
+footprint hex of every building its own real `BoxCollider`**
+(`SpawnCube(hex, …, keepCollider: true)` in a `foreach (var hex in
+building.Footprint)` loop) when one collider per building would do —
+all of them resolve to the same `Building` in `_buildingByCollider`
+anyway. Colliders get **no frustum-culling discount**, unlike renderers,
+so this is the single highest-value fix in the backlog: measured, not
+estimated, one function, and it is already the smallest preset (docs/39
+§11 item 0.5, ranked above the monster LOD work).
 
 Global ceiling at a Normal-band battle: ≤ 2,500 renderers in frustum,
 ≤ 600 of them units. Worst realistic frame: 50 monsters + 100 humanoids

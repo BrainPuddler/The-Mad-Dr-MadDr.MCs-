@@ -212,21 +212,38 @@ survives step 3 at 26 px, in which case it belongs in LOD1.
 Unity stock primitive costs, for reference: Quad 2, Cube 12, Cylinder 80,
 Plane 200, **Sphere 760, Capsule 832** triangles.
 
-### 4.1 Where the client is today (2026-09-12)
+### 4.1 Where the client is today (2026-09-12, updated with the first real Editor measurement)
 
 | Asset | Measured | How measured |
 | --- | --- | --- |
+| **Whole-scene census, Village preset, seed 42** | **85,347 GameObjects / 83,889 renderers / 81,128 colliders**, 1,763 ms build time | `LogCityBuildCensus`, real Editor Play, creator-reported |
+| **Root cause of the collider count** | `BuildBuildings` calls `SpawnCube(hex, …, keepCollider: true)` **once per footprint hex**, and registers every one of those colliders individually in `_buildingByCollider` — a building with an N-hex footprint gets N separate `BoxCollider`s all resolving to the same `Building`, not one collider covering the footprint. This is the dominant term in both the collider count (81,128) and a large share of the renderer count, and it is the *smallest* preset (Village, ~1.4 km) — BigCity will be worse. See §11 item 0.5 | `RuntimeCityBuilder.cs` `BuildBuildings`/`SpawnCube`, read directly |
+| Everything else stripped of colliders correctly | `SpawnPrim` (the shared helper every dresser routes through) destroys the primitive's collider on every call; trees, rocks, road cubes, water, ridges, all dressing props are colliderless as designed | `SpawnPrim`/`SpawnCube` bodies, read directly |
+| Two more collider leaks, small by comparison | `SpawnCitizens`/`SpawnFleeingOccupant` create a `Capsule` and never strip its `CapsuleCollider` (24 by default, docs/34 §0's known capsule holdout); `HumanCharacterKit` and `MonsterBody` each add one selection `BoxCollider` per character/monster (correct — one per unit, not per part) | grep `CreatePrimitive`/`AddComponent<.*Collider` across `Assets/Scripts` |
 | Monster body (`creature-mesh`), by body plan, default genome | **9,594 (serpentine) – 12,538 (arachnid)** tris; a busy tetrapod with faction hardware **16,001**; **12–23 material chunks = 12–23 renderers each** | `dotnet test Tests~/CreatureMesh.Tests.csproj --filter MeshStats` (real run) |
 | Monster LODs | **none** — one mesh at every zoom | `grep LODGroup Assets/Scripts` → 0 hits |
 | Monster legs (`LegKit`) and wings | extra chunks on top; legs also fall back to 80-tri cylinders | `MonsterBody.cs` |
 | Human rig (`HumanCharacterKit`) | **156 tris, 13 renderers**; hover alien 84 tris | file header (by construction) |
-| Building | massing cube (12) + dressing: `BuildingDresser` has 121 primitive spawn sites, 48 of them sphere/cylinder; `BaseDresser` 131 sites, 85 sphere/cylinder | call-site count; per-building totals need the Editor census |
+| Building dressing call sites | `BuildingDresser` 121 primitive spawn sites (48 sphere/cylinder), `BaseDresser` 131 sites (85 sphere/cylinder) — all routed through `SpawnPrim`, so colliderless; the renderer count these produce per building still needs the Editor census extension in §11 item 0 | call-site count |
 | Street furniture | `RoadDresser` 47 spawn sites, 25 sphere/cylinder | same |
 | Stock spheres in the whole client | **75 call sites** (BaseDresser 85 sphere+cylinder, BuildingDresser 48, MonsterBody 29, RoadDresser 25) | grep |
 | Window grid | one mesh + one draw per building (docs/33) — the model to copy | |
 | Per-frame per-window animation | distance-gated at 250 m (docs/12 Tier 0) | |
-| Batching | road surfaces and DistantSkyline dressing static-batched; Engagement/LocalCity dressing not (must stay damage-mutable) | docs/12 Tier 0 / Tier 3 |
-| Frame-time numbers | **none exist** — no Profiler capture has ever been taken | docs/12 Tier 0 |
+| Batching | road surfaces and DistantSkyline dressing static-batched; Engagement/LocalCity dressing not (must stay damage-mutable) — note batching reduces draw calls, **not** collider count or renderer-culling cost | docs/12 Tier 0 / Tier 3 |
+| Frame-time numbers (ms per frame) | **still not measured** — the census gives object counts and one build-time number, not a Profiler/Frame Debugger capture | docs/12 Tier 0 |
+
+**Why the collider number matters more than the raw renderer number.** Renderers
+get frustum-culled every frame regardless of scene size, so 83,889 total
+renderers is not directly comparable to the ≤2,500-in-frustum target in
+§4.2 — most of Village's renderers are never drawn on a given frame.
+Unity's physics broadcast and the per-frame culling *test* itself,
+however, scale with total collider/renderer count in the scene, not just
+what's visible, and colliders specifically carry a real memory and
+broadphase cost with **no frustum discount at all**. 81,128 colliders
+for the smallest preset, dominated by a single fixable pattern
+(one-collider-per-footprint-hex when one-per-building would do), is a
+bigger and cheaper win than anything already in the §11 backlog — see
+item 0.5.
 
 The Lab's JS renderer (`site/creature-renderer.js`) has a tessellation
 dial (`_detail`, `segFor()`) that rebuilds a creature until it fits
@@ -516,13 +533,41 @@ one is a design change and goes through docs/05/docs/23, not this doc).
 
 Ordered by expected milliseconds saved against the §10.3 frame, per unit
 of work. Step 0 gates the rest: the brief's own rule is that budgets are
-set from measurement, and no measurement exists yet.
+set from measurement. **Update, 2026-09-12: the first real measurement
+came back (§4.1) and it surfaced a fix that wasn't in the original
+list — item 0.5 — which is now the single highest-value item in this
+backlog:** it is measured (not estimated), touches one function, and
+removes 81,128 of 81,128 unwanted colliders at the smallest preset
+before any monster or shader work even starts.
 
-0. **Measure.** Extend `LogCityBuildCensus` with triangle/renderer
-   totals by category; add a dev key that spawns 10/25/50 default
-   monsters in a ring around the camera focus; take the first Profiler
-   and Frame Debugger capture at the default framing. Record it in
-   docs/12 as the baseline every later entry compares against.
+0. **Measure (partially done).** The whole-scene census is in (§4.1).
+   Still needed: extend `LogCityBuildCensus` with triangle/renderer
+   totals *by category* (units/humanoids/buildings/props/VFX, not just
+   a flat total); add a dev key that spawns 10/25/50 default monsters in
+   a ring around the camera focus; take the first Profiler and Frame
+   Debugger capture (ms per frame, SRP-batch vs. plain-draw count) at
+   the default framing. Record each in docs/12.
+0.5. **Fix `BuildBuildings`' one-collider-per-footprint-hex pattern.**
+   `SpawnCube(hex, …, keepCollider: true)` runs once per hex in
+   `building.Footprint` and every resulting `BoxCollider` is registered
+   to the *same* `Building` in `_buildingByCollider` — there is no
+   gameplay reason for more than one collider per building. Replace
+   with: keep the per-hex massing cubes for rendering/damage-tint
+   (`ApplyBuildingDamage` still needs per-cube visual squish/rubble), but
+   give only **one** of them (or one separate invisible proxy box sized
+   to the footprint's bounds) a real collider, and have click/raycast
+   resolution walk `_cubesByBuilding[building]` for the visual hit
+   instead of relying on every cube individually carrying a collider.
+   Verify against the "nothing floats disconnected" and "gameplay
+   proxies: minimal geometry, invisible whenever possible" rules
+   (aesthetic skill §4, docs/39 §4.2). Re-run the Village/seed 42
+   census before/after and record both numbers in docs/12 — this is the
+   cheapest, highest-confidence entry in this whole backlog because it
+   is the one item already backed by a real measurement instead of a
+   pixel-size estimate. Also fold in the two small leaks §4.1 found
+   alongside it: strip the `CapsuleCollider` in
+   `SpawnCitizens`/`SpawnFleeingOccupant` the same way `SpawnPrim`
+   already does for everything else.
 1. **Port the tessellation dial into `creature-mesh`** (`MeshCore`:
    multiply `seg`/`sides`/lathe `seg` by a `Detail` factor with the JS
    floors) and have `LabMeshBuilder.Attach` build LOD0/1/2 at
