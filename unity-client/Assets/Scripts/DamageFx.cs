@@ -163,7 +163,7 @@ public static class DamageFx
     /// cref="AttachSmoke"/> -- fire must exist and be initialized before
     /// smoke can read its heat state, so both call sites attach fire
     /// FIRST, in this order, every time.</summary>
-    public static FireCluster AttachFireCluster(Transform holder, float height, float footprintRadius, int targetCount, float holderGroundOffset = 0f)
+    public static FireCluster AttachFireCluster(Transform holder, float height, float footprintRadius, int targetCount, float holderGroundOffset = 0f, List<Collider> buildingColliders = null)
     {
         var go = new GameObject("FireCluster");
         go.transform.SetParent(holder, false);
@@ -171,7 +171,7 @@ public static class DamageFx
         var groundPos = new Vector3(holder.position.x, holder.position.y + holderGroundOffset, holder.position.z);
         go.transform.position = groundPos;
         var cluster = go.AddComponent<FireCluster>();
-        cluster.Init(height, footprintRadius, targetCount);
+        cluster.Init(height, footprintRadius, targetCount, buildingColliders);
         // 2026-08 (creator direction: "figure out how to verify fire is
         // being seen"): see AttachSmoke's own matching log line -- this
         // confirms AttachFireCluster actually ran and shows the corrected
@@ -935,6 +935,26 @@ public class FireCluster : MonoBehaviour
     private float _footprintRadius;
     private float _baseAngle;
     private float _sizeScale;
+    // docs/39 SS11 item 0.5 follow-up (creator report: "Spawned fire is
+    // now not aligning to the buildings on fire", then a screenshot:
+    // landing in the street between two buildings). PickSurfacePoint used
+    // to identify "the right building's surface" by comparing
+    // hit.collider.transform against transform.parent -- valid only while
+    // every massing cube carried its own collider. Item 0.5 removed those
+    // in favour of one bounding-box hit-proxy per building: raycasting
+    // against that instead fixed the "always falls through" symptom, but
+    // the proxy's own accepted tradeoff ("a strictly bigger click target
+    // ... covering any indentation") means its faces don't track a multi-
+    // hex/L-shaped footprint's real per-hex silhouette -- fine for a
+    // click, not for a flame that has to look like it's touching a wall.
+    // Creator direction: give attacked buildings real, accurately-
+    // positioned colliders back for the duration of the fight, so every
+    // physics query during a battle (this one included) is exact, not an
+    // approximation. RuntimeCityBuilder.EnsureCombatColliders restores a
+    // real BoxCollider on each of a building's massing cubes the moment
+    // it takes its first hit and passes them here -- Contains(hit.collider)
+    // replaces the single-collider/transform.parent identity check.
+    private List<Collider> _buildingColliders;
 
     // ---- sizing (unchanged from the prior area-based pass -- still the
     // "how many points, how big" ceiling; now the FLOOR `_maxIgnitedCells`
@@ -1085,10 +1105,11 @@ public class FireCluster : MonoBehaviour
     private const float MaxFlammability = 1.5f; // "suddenly accelerating in others"
     private const int FlammabilitySalt = 5000;  // offset clear of MaybeSpawnEmber's own RandomFloat01(i) salt range, purely to keep the two uses visibly independent in code, not a correctness requirement
 
-    public void Init(float height, float footprintRadius, int targetCount)
+    public void Init(float height, float footprintRadius, int targetCount, List<Collider> buildingColliders = null)
     {
         _height = height;
         _footprintRadius = footprintRadius;
+        _buildingColliders = buildingColliders;
         var area = BurnableSurfaceArea(height, footprintRadius);
         var areaBasedCap = Mathf.RoundToInt(area / AreaPerFirePoint);
         _baseMaxIgnitedCells = Mathf.Clamp(Mathf.Max(Mathf.Clamp(targetCount, 1, 4), areaBasedCap), 1, MaxFireCountCeiling);
@@ -1550,6 +1571,9 @@ public class FireCluster : MonoBehaviour
         var probeDist = _footprintRadius * 3f;
         var targetY = _height * heightFrac;
         var cam = Camera.main;
+        var haveOccludedSurfaceHit = false;
+        var occludedPoint = Vector3.zero;
+        var occludedNormal = Vector3.zero;
         for (var i = 0; i < AngleSearchOffsets.Length; i++)
         {
             var jitter = Mathf.Clamp(primaryJitterDeg + AngleSearchOffsets[i], -35, 35);
@@ -1558,20 +1582,69 @@ public class FireCluster : MonoBehaviour
             var rayOrigin = transform.position + new Vector3(Mathf.Cos(candidateAngle) * probeDist, targetY, Mathf.Sin(candidateAngle) * probeDist);
             RaycastHit hit;
             if (!Physics.Raycast(rayOrigin, dirIn, out hit, probeDist)) continue;
-            if (transform.parent != null && hit.collider.transform != transform.parent) continue; // never a different building's collider
+            // docs/39 SS11 item 0.5 follow-up (see _buildingColliders's own
+            // field comment): membership in the building's own real
+            // collider set replaces the single-collider/transform.parent
+            // check -- falls back to the old parent-transform check only
+            // if a caller never supplied a set (BaseDresser's RTS bases,
+            // which never lost their own collider).
+            if (_buildingColliders != null)
+            {
+                if (!_buildingColliders.Contains(hit.collider)) continue; // never a different building's collider
+            }
+            else if (transform.parent != null && hit.collider.transform != transform.parent) continue; // never a different building's collider
             if (cam != null)
             {
                 var losProbe = hit.point + hit.normal * LosProbeOffset;
-                if (Physics.Linecast(losProbe, cam.transform.position)) continue;
+                if (Physics.Linecast(losProbe, cam.transform.position))
+                {
+                    if (!haveOccludedSurfaceHit)
+                    {
+                        haveOccludedSurfaceHit = true;
+                        occludedPoint = hit.point;
+                        occludedNormal = hit.normal;
+                    }
+                    continue;
+                }
             }
             normal = hit.normal;
             return hit.point + hit.normal * SurfaceOffset;
         }
 
+        // Fire must stay on the building's surface: a real hit that only
+        // failed the camera-visibility test beats any off-surface guess.
+        if (haveOccludedSurfaceHit)
+        {
+            normal = occludedNormal;
+            return occludedPoint + occludedNormal * SurfaceOffset;
+        }
+
         var fallbackAngle = _baseAngle + primaryJitterDeg * Mathf.Deg2Rad;
         var fallbackDist = _footprintRadius * 1.6f;
         normal = new Vector3(Mathf.Cos(fallbackAngle), 0f, Mathf.Sin(fallbackAngle));
-        return transform.position + new Vector3(Mathf.Cos(fallbackAngle) * fallbackDist, targetY, Mathf.Sin(fallbackAngle) * fallbackDist);
+        var radialPoint = transform.position + new Vector3(Mathf.Cos(fallbackAngle) * fallbackDist, targetY, Mathf.Sin(fallbackAngle) * fallbackDist);
+
+        // Snap the radial guess onto the nearest real building face rather
+        // than leaving it floating in the air in front of the building.
+        if (_buildingColliders != null)
+        {
+            var bestSqr = float.MaxValue;
+            var bestPoint = radialPoint;
+            for (var i = 0; i < _buildingColliders.Count; i++)
+            {
+                var c = _buildingColliders[i];
+                if (c == null) continue;
+                var p = c.ClosestPoint(radialPoint);
+                var sqr = (p - radialPoint).sqrMagnitude;
+                if (sqr < bestSqr) { bestSqr = sqr; bestPoint = p; }
+            }
+            if (bestSqr < float.MaxValue && bestSqr > 0.0001f)
+            {
+                normal = (radialPoint - bestPoint).normalized;
+                return bestPoint + normal * SurfaceOffset;
+            }
+        }
+        return radialPoint;
     }
 
     // ==== read-only heat-network surface for SmokeCluster (see that

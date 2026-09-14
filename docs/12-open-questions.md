@@ -20244,3 +20244,85 @@ same time, since it costs nothing extra once the Editor is open anyway:
 right-click a multi-hex building (attack order fires), right-click its
 roof (a flyer lands), and destroy one (rubble stops being clickable) --
 all three exercise a code path this change touched.
+
+## 2026-09 follow-up: item 0.5 Editor verification -- census measurement was wrong, then fire broke, twice
+
+The creator opened the Editor for the first time in this environment
+(Unity 6000.3.13f1 turned out to be installed) and ran the exact
+Village/seed 42 census docs/39 item 0.5's acceptance bar asks for. Three
+separate bugs surfaced in sequence, each fixed same-session.
+
+**Bug 1 -- the census itself lied.** First real run reported 82,477
+colliders: UP from the 81,128 baseline, not down to ~building-count as
+expected. Renderers matched exactly (83,889 = 83,889, confirming city
+generation was untouched) and the collider delta was EXACTLY +1,349 --
+the same as the GameObject delta, i.e. every new hit-proxy got counted
+but not one old per-hex collider was actually removed. Root cause:
+`SpawnCube`/`SpawnPrim` stripped colliders with `Object.Destroy(collider)`,
+and `Object.Destroy()` defers actual removal until after the current
+Update loop -- `LogCityBuildCensus`'s `FindObjectsByType<Collider>()`
+call runs later in that SAME `Start()` frame, so every "destroyed"
+collider was still alive at measurement time. Fixed by switching both
+call sites to `Object.DestroyImmediate(collider)` (safe here: one-time
+build-time calls, not per-frame). This was a measurement bug only, not
+evidence the item 0.5 fix itself was wrong.
+
+**Bug 2 -- fire stopped landing on buildings at all.** Once the census
+was trustworthy, the creator reported fire no longer aligning to
+attacked buildings. `DamageFx.PickSurfacePoint`'s raycast identified
+"is this hit on the right building" by comparing `hit.collider.transform
+== transform.parent` -- valid only while every massing cube carried its
+own collider (transform.parent WAS that collider's transform). Item
+0.5 removed those in favour of one hit-proxy per building, so the
+comparison always failed and every candidate fell through to the old
+crude fixed-distance fallback (fire floating off the building). Fixed
+by threading an explicit collider reference through `AttachFireCluster`
+-> `FireCluster.Init` and checking against that instead of the
+transform hierarchy.
+
+**Bug 3 -- fire landed in the street, not on the wall.** A follow-up
+screenshot showed fire trailing along a diagonal line between two
+building masses, on open ground. The Bug 2 fix correctly identified the
+BUILDING but raycast against the hit-proxy, which is one bounding box
+for the whole footprint (item 0.5's own accepted tradeoff: "a strictly
+bigger click target ... covering any indentation") -- fine for a click,
+not for a flame that has to look like it's touching a specific wall on
+an L-shaped or multi-hex footprint.
+
+**Creator direction at this point:** give attacked buildings real,
+accurately-positioned colliders back for the duration of the fight, so
+every physics query during a battle is exact, not approximated --
+covers fire/smoke today and anything else that raycasts a burning
+building later. `RuntimeCityBuilder.EnsureCombatColliders` now restores
+one real `BoxCollider` per massing cube (idempotent, `center=0 size=1`
+matching `SpawnCube`'s original) the moment a building takes its first
+hit, registers each in `_buildingByCollider` (click/attack-order
+resolution still works whether a raycast lands on a cube or the proxy),
+and disables that building's hit-proxy collider for as long as combat
+colliders are live (the proxy's box otherwise still gets hit FIRST from
+outside, shadowing the real per-cube faces underneath it -- this was a
+4th near-miss caught before it shipped). Cleaned up in the existing
+Destroyed-stage collapse loop (`_buildingByCollider.Remove` before
+`Object.Destroy(cube)`, mirroring the dressing-holder cleanup already
+there). Deliberately scoped to only buildings actually under attack --
+restoring every building's colliders unconditionally is exactly the
+81,128-collider regression item 0.5 fixed in the first place.
+
+`PickSurfacePoint` also gained two smaller fallbacks so a real surface
+hit is never discarded for a worse guess: a spot that fails ONLY the
+camera-visibility check is now used anyway (better an occluded-but-real
+point than a floating one), and if every candidate angle truly misses,
+the old radial fallback point is snapped onto the nearest building
+collider face via `Collider.ClosestPoint` instead of being left hanging
+in open air.
+
+**Status:** all three fixes applied; the collision-accuracy-during-combat
+fix (bug 3 + the hit-proxy-shadowing catch) has not yet been re-verified
+against a live screenshot in the Editor -- next session should confirm
+fire/smoke sit on the actual wall before considering item 0.5 fully
+closed. Files touched: `RuntimeCityBuilder.cs` (`SpawnCube`, `SpawnPrim`,
+`EnsureCombatColliders`, the Destroyed-stage cleanup, `IgniteBuildingIfNeeded`),
+`DamageFx.cs` (`FireCluster._buildingColliders`, `PickSurfacePoint`,
+`AttachFireCluster`/`Init` signatures -- `BaseDresser.cs`'s RTS-base call
+site untouched, still works via the original transform.parent fallback
+since its root object never lost its own collider).

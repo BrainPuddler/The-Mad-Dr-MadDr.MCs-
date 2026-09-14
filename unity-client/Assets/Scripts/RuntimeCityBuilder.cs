@@ -2180,7 +2180,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         go.transform.position = position;
         go.transform.localScale = scale;
         var collider = go.GetComponent<Collider>();
-        if (collider != null) Object.Destroy(collider);
+        // DestroyImmediate -- see SpawnCube's identical comment: this is
+        // a one-time build-time call, and Object.Destroy()'s deferred
+        // removal would leave every prop collider still counted by
+        // LogCityBuildCensus's same-frame FindObjectsByType<Collider>.
+        if (collider != null) Object.DestroyImmediate(collider);
         var renderer = go.GetComponent<Renderer>();
         if (renderer != null)
         {
@@ -2526,7 +2530,16 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (!keepCollider)
         {
             var collider = cube.GetComponent<Collider>();
-            if (collider != null) Object.Destroy(collider);
+            // DestroyImmediate, not Destroy: this runs during the
+            // one-time synchronous city build inside Start(), and
+            // LogCityBuildCensus's FindObjectsByType<Collider> call
+            // fires later in that SAME frame -- Object.Destroy() defers
+            // actual removal until after the current Update loop, so
+            // the census would still count every collider "destroyed"
+            // this way (docs/12, item 0.5's own verification run first
+            // hit this: the fix looked like it made things WORSE because
+            // none of these had actually been removed yet).
+            if (collider != null) Object.DestroyImmediate(collider);
         }
         return cube;
     }
@@ -2676,9 +2689,15 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
                     var hex = building.Footprint[i];
                     var pos0 = cube.transform.position;
                     // docs/39 SS11 item 0.5: massing cubes are colliderless
-                    // now (SpawnBuildingHitProxy carries the one real
-                    // collider, removed separately below) -- no per-cube
-                    // _buildingByCollider entry to clean up here any more.
+                    // by default (SpawnBuildingHitProxy carries the one
+                    // real collider) -- EXCEPT a building EnsureCombatColliders
+                    // ever touched (it was attacked before it collapsed)
+                    // has real per-cube colliders again, registered in
+                    // _buildingByCollider same as the hit-proxy's; clean
+                    // that up here too or it leaks a stale entry pointing
+                    // at a destroyed GameObject.
+                    var massingCollider = cube.GetComponent<Collider>();
+                    if (massingCollider != null) _buildingByCollider.Remove(massingCollider);
                     Object.Destroy(cube);
                     if (_buildingsHost != null)
                     {
@@ -2995,12 +3014,72 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         // own doc comment for the full writeup; -height*0.5f is the
         // correction back to true ground level.
         var groundOffset = -height * 0.5f;
+        // docs/39 SS11 item 0.5 follow-up (creator report: fire not
+        // aligning to the building surface, then landing in the street
+        // between two buildings): massing cubes lost their colliders to
+        // item 0.5's fix, and the single building-wide hit-proxy is too
+        // coarse for PickSurfacePoint's per-hex raycast search (creator
+        // direction: give attacked buildings real, accurately-positioned
+        // colliders back for the fight, so every physics query during a
+        // battle is exact). EnsureCombatColliders restores one real
+        // BoxCollider per massing cube, sized/positioned exactly like the
+        // ones item 0.5 stripped.
+        var combatColliders = EnsureCombatColliders(building, cubes);
         // 2026-08 (SmokeCluster follow-up): fire attaches FIRST now --
         // SmokeCluster reads the FireCluster it's given, so that
         // FireCluster has to exist (and be Init'd) before AttachSmoke can
         // wire it up. See DamageFx.AttachFireCluster's own doc comment.
-        var fire = DamageFx.AttachFireCluster(cube.transform, height, footprintRadius, BuildingStats.FireCount(building.Tier), groundOffset);
+        var fire = DamageFx.AttachFireCluster(cube.transform, height, footprintRadius, BuildingStats.FireCount(building.Tier), groundOffset, combatColliders);
         DamageFx.AttachSmoke(cube.transform, fire, BuildingStats.SmokeScale(building.Tier), groundOffset);
+    }
+
+    /// <summary>docs/39 SS11 item 0.5 follow-up (creator direction: real,
+    /// accurately-positioned colliders on a building the moment it comes
+    /// under attack, so physics during a battle -- fire/smoke surface
+    /// placement today, anything else that raycasts a burning building
+    /// tomorrow -- is exact rather than approximated against the coarse
+    /// hit-proxy). Idempotent: only adds a `BoxCollider` to a massing cube
+    /// that doesn't already have one (repeat hits on the same building,
+    /// possibly different hexes, must not double-add or leak). Matches
+    /// `SpawnCube`'s own original collider exactly -- a fresh `BoxCollider`
+    /// defaults to `center=0, size=1`, the same unit cube `CreatePrimitive`
+    /// starts with before `localScale` stretches it to the real footprint
+    /// size -- and is registered in `_buildingByCollider` so click/attack-
+    /// order resolution (`BuildingFromCollider`) still finds this building
+    /// whether a raycast lands on this collider or the hit-proxy's.
+    /// Deliberately scoped to ONLY the massing cubes of buildings that are
+    /// actually under attack (not the whole city) -- restoring every
+    /// building's colliders unconditionally is exactly the 81,128-collider
+    /// regression item 0.5 fixed in the first place.</summary>
+    private List<Collider> EnsureCombatColliders(Building building, List<GameObject> cubes)
+    {
+        var result = new List<Collider>();
+        var footprintCount = building.Footprint.Count;
+        for (var i = 0; i < footprintCount && i < cubes.Count; i++)
+        {
+            var cube = cubes[i];
+            var collider = cube.GetComponent<Collider>();
+            if (collider == null)
+            {
+                var box = cube.AddComponent<BoxCollider>();
+                box.center = Vector3.zero;
+                box.size = Vector3.one;
+                collider = box;
+                _buildingByCollider[collider] = building;
+            }
+            result.Add(collider);
+        }
+        // The hit-proxy's box encloses these cubes, so raycasts from outside
+        // hit it first and never reach the exact per-cube faces. Disable it
+        // while combat colliders are live -- they're registered in
+        // _buildingByCollider, so click/LOS resolution is unaffected.
+        GameObject hitProxy;
+        if (_hitProxyByBuilding.TryGetValue(building, out hitProxy) && hitProxy != null)
+        {
+            var proxyCollider = hitProxy.GetComponent<Collider>();
+            if (proxyCollider != null) proxyCollider.enabled = false;
+        }
+        return result;
     }
 
     /// <summary>2026-08 (creator direction: "assign some salvage parts
