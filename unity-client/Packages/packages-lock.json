@@ -6,6 +6,26 @@
       "source": "local",
       "dependencies": {}
     },
+    "com.maddr.creature-mesh": {
+      "version": "file:../../packages/creature-mesh",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
+    },
+    "com.maddr.match-core": {
+      "version": "file:../../packages/match-core",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.maddr.citygen-core": "0.1.0"
+      }
+    },
+    "com.maddr.roster-client": {
+      "version": "file:../../packages/roster-client",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
+    },
     "com.unity.ai.navigation": {
       "version": "2.0.12",
       "depth": 0,
