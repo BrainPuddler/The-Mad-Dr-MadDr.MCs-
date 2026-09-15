@@ -505,24 +505,34 @@ already uses for a different property.
   contributor to the same class of batching break. Out of this item's
   scope; flag separately if it turns out to matter once measured.
 
-## 19. Camera zoom-out ceiling tightened again: 300 m -> 150 m (interim, pending item 4 confirmation)
+## 19. Camera zoom-out ceiling: 300 -> 150 -> back to 300, same session (verifying item 4's fix)
 
-`SimpleCameraRig.maxHeight` default dropped from 300 to 150 as a
-same-session stopgap once the item 4 root cause above was identified
-but not yet confirmed fixed live — see docs/39 §1.2's "currently
-unreachable" note on the Map band and Overview's upper half.
+`SimpleCameraRig.maxHeight` dropped from 300 to 150 as a stopgap once
+the item 4 root cause was identified but not yet fixed, then raised
+straight back to 300 once the fix (entry 18) landed -- specifically so
+a fresh Frame Debugger capture above 200 m can confirm the fix holds,
+rather than leaving the question open indefinitely.
 
-- **Scroll-zoom and Shift+up now stop at 150 m**, not 300 — confirm
-  both input paths respect the new default, same check as entry 15
-  already asked for the 300 m change.
-- **This is meant to be temporary.** Once entry 18's fix is confirmed
-  (draw calls actually batch, frame time holds up above 200 m), raise
-  `maxHeight` back up — probably toward the old 300–400 m range, not
-  necessarily reverted to exactly 300 — and re-verify frame time at the
-  new ceiling before calling it settled. Don't just leave it at 150
-  because it happens to be safe; that quietly kills the Overview band's
-  upper half and the entire Map band (docs/39 §1.2), which was never
-  the actual design intent.
+- **THE thing to check now: take a fresh Profiler/Frame Debugger
+  capture at 250-300 m**, the same wide-zoom framing as the original
+  2026-09-16 capture that found the problem (docs/12), and compare
+  against these two numbers from that capture: opaque draw events
+  should stay far below the old 8601 (ideally close to what a similarly
+  wide view now shows with proportionally more going through
+  `RenderLoop.DrawSRPBatcher` and fewer as raw `RenderLoop.Draw`), and
+  actual frame time/ms should hold up, not just the draw-call count.
+- **If the cliff is gone:** `maxHeight` can stay at 300 (or go back
+  toward the old 400 m if there's appetite for it) and docs/39 §11 item
+  7 (Map-band impostor) becomes buildable again.
+- **If the cliff is still there:** drop `maxHeight` back to 150 and
+  treat item 4's fix as incomplete rather than shipping a known-bad
+  ceiling — check whether `ApplyMatteFinish`'s still-`MaterialPropertyBlock`
+  roof override (deliberately left alone in item 4/5, docs/12) turns out
+  to matter more than assumed, or whether something else entirely is
+  the remaining cost at that range.
+- **Scroll-zoom and Shift+up now stop at 300 m again**, not 150 —
+  confirm both input paths respect the restored default, same check as
+  entry 15 already asked for.
 
 ## 20. Shadow hygiene pass (docs/39 §11 item 5 / §8)
 

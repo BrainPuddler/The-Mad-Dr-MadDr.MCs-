@@ -50,16 +50,20 @@ public class SimpleCameraRig : MonoBehaviour
     private const float MinHeight = 8f;
 
     // 2026-09 creator direction: cap zoom-out below the old fixed 400 m
-    // ceiling, then tightened again the same month once a live Frame
+    // ceiling, then tightened to 150 m the same month once a live Frame
     // Debugger capture showed frame time collapsing above ~200 m (docs/39
     // §11 item 4's MaterialPropertyBlock/SRP-batching break -- see
-    // docs/12). 150 m keeps the camera comfortably under that cliff until
-    // item 4 itself is fixed. Both scroll-zoom and Shift+up/down share
-    // this clamp, same as MinHeight above. An Inspector field (not a
-    // const like MinHeight) so it can be retuned per playtest without a
-    // code change.
-    [Tooltip("Highest the camera can zoom or Shift-move out to, in meters. Default 150 -- was 300, then a fixed 400 before that -- tightened 2026-09 pending the docs/39 item 4 SRP-batching fix.")]
-    public float maxHeight = 150f;
+    // docs/12). Raised back to 300 m the SAME session once item 4's fix
+    // (the cached-Material-variant replacement for the property-block
+    // override) landed, specifically to get a fresh Frame Debugger
+    // capture above 200 m and confirm the fix actually holds before
+    // building docs/39 §11 item 7 (Map-band impostor) on top of it --
+    // drop back to 150 m if that capture shows the cliff is still there.
+    // Both scroll-zoom and Shift+up/down share this clamp, same as
+    // MinHeight above. An Inspector field (not a const like MinHeight)
+    // so it can be retuned per playtest without a code change.
+    [Tooltip("Highest the camera can zoom or Shift-move out to, in meters. Default 300 -- was tightened to 150 pending the docs/39 item 4 SRP-batching fix, raised back once that fix landed to verify it. Was a fixed 400 before 2026-09.")]
+    public float maxHeight = 300f;
 
     // 2026-07 creator direction: "limit the shadows to objects in the
     // camera view and close to the visible area." Shadow distance was a

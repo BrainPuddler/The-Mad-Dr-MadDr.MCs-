@@ -74,7 +74,7 @@ plugged in.
 | --- | --- | --- |
 | Pitch | fixed **50°** down, yaw free (Q/E) | `Quaternion.Euler(50f, _yaw, 0f)` |
 | Vertical FOV | **60°** (perspective, not orthographic) | `SampleScene.unity` camera |
-| Height clamp | **8 m – 150 m** (`MinHeight` const / `maxHeight` Inspector field, default 150 since 2026-09-16 -- was 300, before that a fixed 400 -- see §11 item 4) | scroll zoom and Shift+arrows share the clamp |
+| Height clamp | **8 m – 300 m** (`MinHeight` const / `maxHeight` Inspector field, default 300 -- briefly tightened to 150 on 2026-09-16 pending the §11 item 4 fix, raised back the same session once that fix landed to verify it live; before all that, a fixed 400) | scroll zoom and Shift+arrows share the clamp |
 | Default height at match start | **70 m** | `RuntimeCityBuilder`: `rig.SnapTo(centre, 70f)` → offset `(0, h, -0.8h)` |
 | Shadow distance | `1.9·h + 15`, capped at **250 m** (≈148 m at default zoom) | `UpdateShadowDistance()`, overrides the pipeline asset every frame |
 | Ground plane | y = 0, feet stand on it (docs/18) | |
@@ -93,9 +93,9 @@ foreshortened by `cos 50° ≈ 0.64`; a ground footprint by `sin 50° ≈ 0.77`.
 | 25 m | 33 m | 29 | 18 |
 | **70 m (default)** | **91 m** | **10.2** | **6.6** |
 | 110 m | 144 m | 6.5 | 4.2 |
-| **150 m (ceiling, was 300, then 400)** | **196 m** | **4.8** | **3.1** |
-| 250 m (above the current ceiling -- unreachable) | 326 m | 2.9 | 1.8 |
-| 300 m (former ceiling; also unreachable now) | 392 m | 2.4 | 1.5 |
+| 150 m (interim ceiling, 2026-09-16 through the same session) | 196 m | 4.8 | 3.1 |
+| 250 m | 326 m | 2.9 | 1.8 |
+| **300 m (ceiling, was 400)** | **392 m** | **2.4** | **1.5** |
 
 **What that means for asset classes at the default 70 m zoom:**
 
@@ -121,21 +121,21 @@ looks at for most of a match.
 | --- | --- | --- | --- |
 | **Close** | 8–25 m | inspecting one monster, the Lab-style hero framing, screenshots | LOD0 |
 | **Normal** | 25–110 m (default 70) | **the game**; where >80 % of play happens | **LOD1 — the most important LOD** |
-| **Overview** | 110–150 m (was 110–250 m) | army moves, reading a fight across several blocks | LOD2 |
-| **Map** | **currently unreachable** — 250–300 m before the 2026-09-16 cap (was 250–400 m before that) | strategic overview; a monster was 6–7 px | LOD3 impostor / cull; minimap carries the information |
+| **Overview** | 110–250 m | army moves, reading a fight across several blocks | LOD2 |
+| **Map** | 250–300 m (was 250–400 m) | strategic overview; a monster is 6–7 px | LOD3 impostor / cull; minimap carries the information |
 
-**2026-09-16: the `maxHeight` cap dropped from 300 m to 150 m** as a
-stopgap for the §11 item 4 SRP-batching break (a live Frame Debugger
-capture showed opaque draw calls ballooning ~7x, 1218 → 8601, once the
-camera passed ~200 m — see docs/12). This doesn't just trim the
-Overview band, it puts the ceiling BELOW the old 250 m Map-band floor,
-so the whole Map band (and Overview's 150–250 m half) is unreachable in
-play right now, not just smaller. Item 7 (Map-band impostor) is still
-unimplemented, so nothing currently depends on that band being live —
-but raise `maxHeight` back toward 300–400 m once item 4 itself is fixed
-and re-measured, rather than leaving 150 m as a permanent design
-decision; it was chosen as "comfortably under the measured cliff," not
-because Overview/Map stopped mattering.
+**2026-09-16 history:** the `maxHeight` cap dropped from 300 m to 150 m
+as a stopgap for the §11 item 4 SRP-batching break (a live Frame
+Debugger capture showed opaque draw calls ballooning ~7x, 1218 → 8601,
+once the camera passed ~200 m — see docs/12). That put the ceiling
+BELOW the old 250 m Map-band floor, making the whole Map band (and
+Overview's 150–250 m half) unreachable in play. Once item 4's fix (the
+cached-Material-variant replacement for the property-block override)
+landed the same session, `maxHeight` was raised straight back to 300 m
+to get a fresh Frame Debugger capture above 200 m and confirm the fix
+actually holds — see docs/36 entry 19 for the current status of that
+check. If that capture still shows the cliff, drop back to 150 m rather
+than leaving a known-bad ceiling in place.
 
 ---
 
@@ -364,11 +364,10 @@ a "where is combat" query the same table applies with live centres.
 
 ### 5.3 Impostors for the Map band
 
-At 250–300 m (the Map band as it stood before the 2026-09-16 cap
-dropped `maxHeight` to 150 m -- currently unreachable in play, see §1.2)
-a monster is 6–7 px. Rendering 3D geometry there is waste. Two
-acceptable implementations, cheapest first, to build once `maxHeight`
-is raised back and this band is reachable again:
+At 250–300 m (the Map band, reachable again as of `maxHeight`'s
+2026-09-16 raise back to 300 m -- see §1.2) a monster is 6–7 px.
+Rendering 3D geometry there is waste. Two acceptable implementations,
+cheapest first:
 
 1. **Cull the body, keep the minimap blip and the selection ring.** The
    minimap already draws every unit as a proportional blip

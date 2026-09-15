@@ -20874,3 +20874,30 @@ here; `AnimationLodBudget.cs` is a new file and will need Unity to
 generate its own `.meta` on first Editor open (commit it once it
 appears, same as every other new script in this environment). See
 docs/36 entry 21 for the Editor-side checklist.
+
+## 2026-09-16 follow-up: camera cap raised 150 m -> 300 m, same session, to verify item 4's fix live
+
+Creator direction: rather than leave the fix-vs-cliff question open,
+raise `maxHeight` right back to 300 (from this session's own interim
+150 m stopgap) and take a fresh capture at the height that originally
+broke, now that item 4's fix and item 5's shadow-hygiene pass have both
+landed. `SimpleCameraRig.maxHeight` default set back to 300f; docs/39
+§1, §1.2, and §5.3 reverted from their temporary "currently unreachable"
+phrasing back to describing the real 250-300 m Map band and 110-250 m
+Overview band, since both are reachable again.
+
+This is deliberately a TEST, not a declaration that item 4 is done --
+the actual confirmation is whatever the next Profiler/Frame Debugger
+capture at 250-300 m shows (docs/36 entry 19 has the exact numbers to
+compare against: the original 1218-at-default/8601-at-wide-zoom split,
+and how much of that was raw `RenderLoop.Draw` vs
+`RenderLoop.DrawSRPBatcher`). If the cliff is gone, item 7 (Map-band
+impostor) becomes buildable. If it isn't, `maxHeight` goes back to 150
+and item 4 needs a second look -- `ApplyMatteFinish`'s still-untouched
+`MaterialPropertyBlock` roof override is the next-most-likely remaining
+contributor, named but not measured in item 4/5's own scope notes.
+
+**Verification:** brace/paren balance and read-through only (same
+standing caveat) for the one-line code change; the real verification is
+external (the creator's own next capture), not something checkable from
+inside this environment. See docs/36 entry 19 for what to check.
