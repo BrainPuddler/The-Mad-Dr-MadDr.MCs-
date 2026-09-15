@@ -376,3 +376,49 @@ old `private const float MaxHeight = 400f`.
 - **Map band feel** — confirm 250–300 m still feels like a useful
   "strategic overview" range and doesn't feel suddenly cramped compared
   to the old 250–400 m now that it's 100 m narrower.
+
+## 16. Creature vertex-color merge + new shader (docs/39 §11 item 2) -- never seen rendering, never compiled
+
+New `Assets/Shaders/CreatureVertexColor.shader` and `LabMeshBuilder
+.AttachChunksMerged`. This is the highest-risk unverified item in the
+backlog so far, because a shader is the one kind of change read-through
+literally cannot validate (HLSL either compiles or it doesn't) — but
+also the easiest to spot-check, because a broken shader fails loud.
+
+- **Step one, before anything else: open the Editor and look at a
+  spawned monster.** If it's solid magenta, the shader failed to
+  compile — check the Console for the exact HLSL error before looking
+  at anything else below. If it renders any actual color, the shader at
+  least compiled.
+- **Per-chunk color survives the merge** — compare a monster's colors
+  against what it looked like before this change (or against the Lab's
+  own preview, which is unaffected by this Unity-only change): skin
+  tone, iron/brass hardware, franken-face details, etc. should all
+  still read as visually distinct from each other, just now sharing one
+  mesh instead of separate GameObjects.
+- **Emissive parts still glow** — eyes, neon-ish parts, heart bolts
+  (whatever the 3 emissive chunks turn out to be on a given creature)
+  should still visibly glow, dimmer or brighter than before is expected
+  (the shared 0.6 `_EmissionStrength` approximates three different real
+  values of 0.30/0.85/1.00 — see docs/12 for which), but "glows at all"
+  is the actual bar.
+- **Translucent parts unaffected** — the mastermind's glass dome / the
+  blob's gelatin shell should look exactly as before (this path wasn't
+  touched).
+- **Lighting/shading looks reasonable** — no fully-black or fully-flat-
+  white creatures, shadows still cast/receive correctly, no z-fighting
+  or inside-out faces at the merge seams between what used to be
+  separate chunks.
+- **Renderer count actually dropped** — confirm via the Frame Debugger
+  or a quick Profiler/hierarchy check that a spawned monster now shows
+  2-3 renderers under its LabBody holder instead of 12-23. This is the
+  actual performance claim this item exists to deliver.
+- **SRP Batcher picks it up** — Frame Debugger should show the shared
+  opaque/emissive materials batching across multiple monsters on screen
+  (no `MaterialPropertyBlock` is used on these renderers, by design, so
+  this should just work — but "should" is exactly what needs confirming
+  here).
+- **Legs/wings unaffected** — they still use the old unmerged
+  `AttachChunks` path on purpose; confirm they still look and attach
+  correctly (this item didn't touch their code, but confirm nothing
+  about the shared body holder's restructuring broke their parenting).

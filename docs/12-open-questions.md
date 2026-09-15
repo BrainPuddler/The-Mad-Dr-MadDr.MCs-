@@ -20486,3 +20486,90 @@ found only the two usages fixed above) and confirmed
 size both derive from LIVE camera height at read-time, not a cached
 copy of the old ceiling, so neither needed a code change beyond the
 comment fix. See docs/36 for the checklist entry.
+
+## 2026-09-15: docs/39 §11 item 2 -- merge creature chunks into 2-3 renderers via a new vertex-color shader
+
+Next item in the docs/39 backlog after item 1 (the LOD dial). Item 2
+targets renderer count (draw calls), not triangle count -- a completely
+separate axis from item 1's work, and one item 1 didn't touch: every
+creature still built one GameObject+MeshRenderer+unique-Material per
+material chunk (12-23 of them, docs/39 §4.1's measured baseline), each
+an unbatched draw call (worse: `ToMaterial` calls `new Material(...)`
+per chunk, so not even the SAME chunk-shape shares a material instance
+across creatures).
+
+**Real chunk data, not a guess.** Before designing the merge, ran a
+throwaway diagnostic (`dotnet test`, deleted after) against the same
+busiest genome docs/39 §4.1 and item 1 use, dumping every chunk's
+(color, gloss, emissive, alpha): 23 total chunks, of which 19 are fully
+opaque and non-emissive, 3 are opaque-but-emissive (a gold `(255,205,50)`
+gloss 0.70 emis 0.85, a grey-green `(115,150,134)` gloss 0.60 emis 0.30,
+and a cyan `(130,220,255)` gloss 0.50 emis 1.00 -- eyes/neon/heart-bolt
+style parts), and exactly 1 translucent (`alpha=0.24`, the mastermind's
+glass dome or the blob's gelatin shell -- `packages/creature-mesh`'s own
+`Builder.SetAlpha` call sites confirm only two ever fire, both reset to
+1 immediately after). This is *why* the merge groups into exactly
+opaque / emissive / translucent: it's the real partition, not an
+invented one.
+
+**The core problem the merge has to solve:** `packages/creature-mesh`'s
+`Builder.ChunkFor` already dedupes primitives sharing an EXACT
+(color, gloss, emis, alpha) key into one chunk -- so the 12-23 chunks
+are already the minimum count if every chunk keeps its own Material.
+Getting below that requires chunks of genuinely DIFFERENT colors to
+share one mesh and one material, which stock `Universal Render
+Pipeline/Lit` cannot do -- it has no vertex-color input at all.
+
+**New shader: `Assets/Shaders/CreatureVertexColor.shader`.** Built
+directly on the `docs/33` `WindowGrid.shader` precedent -- the only
+other hand-authored shader in this codebase, in the same URP version
+(Unity 6000.3.13f1, URP 17.3.0), so its exact boilerplate (HLSLINCLUDE
+paths, `UnityPerMaterial` CBUFFER, `GetVertexPositionInputs`/
+`GetVertexNormalInputs`/`GetShadowCoord`/`MixFog` calls, and reusing
+stock `Universal Render Pipeline/Lit`'s ShadowCaster/DepthOnly/
+DepthNormals passes via `UsePass` rather than hand-authoring them) is
+the best available confidence anchor in an environment with no Editor
+to compile against. Reads `COLOR` per-vertex, multiplies into albedo
+AND (via one shared `_EmissionStrength` uniform) emission. Deliberately
+no specular/smoothness term, matching `WindowGrid.shader`'s own
+plain-diffuse model.
+
+**`LabMeshBuilder.cs`:** new `AttachChunksMerged` splits a creature's
+chunks into the three real groups above -- opaque and emissive each
+merge (`ToMergedMesh`: concatenates positions/normals/triangles with
+index offsetting, bakes each source chunk's flat `Color` into every one
+of its vertices) into one mesh against one of two lazily-created,
+process-wide-shared `Material` instances (`SharedVertexColorMaterial`);
+translucent chunks are left exactly as before, one small unmerged
+renderer each via the original `ToMaterial` (docs/39 item 2's own
+explicit exception). `AttachLodded` (item 1) and `Attach` (the
+single-LOD entry point, currently unused elsewhere but kept consistent
+rather than left worse) both now call `AttachChunksMerged` instead of
+`AttachChunks`; `AttachChunks` itself is UNCHANGED and still backs
+legs/wings (LegKit pieces), which are a handful of chunks each,
+independently positioned by the gait rig, and out of this item's scope
+(docs/39 §4.1's 12-23-chunk baseline is specifically the BODY).
+
+**The one real approximation, documented rather than hidden:** the
+three emissive chunks above have real Emissive strengths of 0.30/0.85/
+1.00, but the shared emissive-group material can only carry ONE
+`_EmissionStrength` value for every creature in the game (that's the
+whole point of "shared" -- a per-creature-tuned value would mean a
+per-creature material instance, defeating the merge). Picked 0.6, the
+midpoint of the observed range. Hue is NOT approximated (still
+per-vertex, exact) -- only brightness is. Flagged for a real look once
+an Editor exists; a second baked vertex-color channel could restore
+per-chunk emission strength later if 0.6 reads wrong for some part, but
+that's follow-up, not blocking this item.
+
+**Verification:** brace/paren balance and read-through only for
+`LabMeshBuilder.cs` (same standing caveat as every Unity-side change in
+this environment). The shader is the one piece of this session's work
+that is fundamentally NOT read-through-verifiable -- HLSL compiles or
+it doesn't, and this environment has no shader compiler. Its risk
+profile is actually more forgiving than a silent C# logic bug though: a
+broken custom shader in Unity fails LOUD (the whole mesh renders solid
+magenta), so "did this even compile" is answered at a glance the moment
+the Editor opens, unlike e.g. the fire-placement regression docs/39
+item 0.5 shipped blind twice before catching. See docs/36 for the
+checklist entry, including the magenta-mesh smoke test as step one.

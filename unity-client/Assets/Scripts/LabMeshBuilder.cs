@@ -4,21 +4,27 @@ using UnityEngine.Rendering;
 
 /// <summary>
 /// Turns a CreatureMeshResult (the engine-agnostic port of the Lab's
-/// creature renderer, packages/creature-mesh) into live Unity geometry:
-/// one child GameObject per material chunk, meshes built straight from
-/// the chunk's positions/normals/triangles, URP/Lit materials mapped
-/// from the chunk's color/gloss/emissive/alpha. This is the in-game
-/// monster regenerator's display half -- the DNA the Lab generates
-/// becomes the same stitched b-movie body on the battlefield.
+/// creature renderer, packages/creature-mesh) into live Unity geometry.
+/// The creature body (<see cref="Attach"/>/<see cref="AttachLodded"/>)
+/// merges chunks into 2-3 renderers per docs/39 §11 item 2
+/// (<see cref="AttachChunksMerged"/>'s own header comment); the raw
+/// chunk-list path (<see cref="AttachChunks"/>, one GameObject+Renderer
+/// per material chunk, URP/Lit materials mapped from each chunk's own
+/// color/gloss/emissive/alpha) still backs legs/wings, which are few
+/// chunks each and independently positioned by the gait rig. This is
+/// the in-game monster regenerator's display half -- the DNA the Lab
+/// generates becomes the same stitched b-movie body on the battlefield.
 /// </summary>
 public static class LabMeshBuilder
 {
     /// <summary>Builds the chunks under `parent` at `localPos`, uniformly
-    /// scaled by `scale` (lab units to world units). Returns the holder
-    /// so callers can strip or restyle it later.</summary>
+    /// scaled by `scale` (lab units to world units). Merged per docs/39
+    /// §11 item 2 (<see cref="AttachChunksMerged"/>) -- 2-3 renderers,
+    /// not one per material chunk. Returns the holder so callers can
+    /// strip or restyle it later.</summary>
     public static Transform Attach(CreatureMeshResult lab, Transform parent, Vector3 localPos, float scale)
     {
-        var holder = AttachChunks(lab.Chunks, parent, "LabBody", scale);
+        var holder = AttachChunksMerged(lab.Chunks, parent, "LabBody", scale);
         holder.localPosition = localPos;
         return holder;
     }
@@ -57,7 +63,10 @@ public static class LabMeshBuilder
         var lods = new LOD[lodLabs.Count];
         for (var i = 0; i < lodLabs.Count; i++)
         {
-            var lodHolder = AttachChunks(lodLabs[i].Chunks, holder, "LOD" + i, scale);
+            // docs/39 §11 item 2: merged (2-3 renderers), not one
+            // GameObject+Renderer per material chunk (12-23) -- see
+            // AttachChunksMerged's own header comment.
+            var lodHolder = AttachChunksMerged(lodLabs[i].Chunks, holder, "LOD" + i, scale);
             lods[i] = new LOD(screenHeights[i], lodHolder.GetComponentsInChildren<Renderer>());
         }
 
@@ -91,6 +100,143 @@ public static class LabMeshBuilder
             go.AddComponent<MeshRenderer>().sharedMaterial = ToMaterial(chunk);
         }
         return holder;
+    }
+
+    // Emission strength baked into the shared emissive-group material
+    // (CreatureVertexColor.shader's _EmissionStrength). One fixed value
+    // for every creature's emissive chunks, chosen to split the
+    // difference of the real range observed across a busy genome's own
+    // chunks (0.30-1.00, dotnet test diagnostic 2026-09-15) -- the
+    // per-chunk Emissive field still exists in creature-mesh and still
+    // varies; this is the one number this shared material can't
+    // reproduce individually any more (docs/39 §11 item 2's documented
+    // trade, same "cheaper read at 70 m" logic as the rest of docs/39).
+    private const float SharedEmissiveStrength = 0.6f;
+
+    private static Material _sharedOpaqueVertexColorMat;
+    private static Material _sharedEmissiveVertexColorMat;
+
+    private static Material SharedVertexColorMaterial(bool emissiveGroup)
+    {
+        if (emissiveGroup && _sharedEmissiveVertexColorMat != null) return _sharedEmissiveVertexColorMat;
+        if (!emissiveGroup && _sharedOpaqueVertexColorMat != null) return _sharedOpaqueVertexColorMat;
+
+        var shader = Shader.Find("MadDr/CreatureVertexColor");
+        if (shader == null)
+        {
+            // Falls back to a renderable shader so a creature still
+            // shows SOMETHING (flat, no per-vertex hue) rather than an
+            // invisible/pink mesh if the custom shader somehow isn't in
+            // the build -- loud in the console either way.
+            Debug.LogError("MadDr/CreatureVertexColor shader not found -- creature bodies will render without per-chunk color. Check Assets/Shaders/CreatureVertexColor.shader is imported.");
+            shader = ShaderUtil.FindRenderableShader();
+        }
+        var mat = new Material(shader);
+        if (mat.HasProperty("_EmissionStrength"))
+            mat.SetFloat("_EmissionStrength", emissiveGroup ? SharedEmissiveStrength : 0f);
+
+        if (emissiveGroup) _sharedEmissiveVertexColorMat = mat;
+        else _sharedOpaqueVertexColorMat = mat;
+        return mat;
+    }
+
+    /// <summary>docs/39 §11 item 2: merges a creature's per-material
+    /// chunks into as few renderers as the doc's own opaque/translucent
+    /// split allows, instead of one Chunk GameObject+Renderer per
+    /// distinct (color, gloss, emissive, alpha) chunk (12-23 of them per
+    /// creature, docs/39 §4.1's measured baseline). Every fully-opaque
+    /// non-emissive chunk merges into ONE mesh sharing ONE material
+    /// (CreatureVertexColor.shader bakes each chunk's flat color into
+    /// per-vertex color, since URP/Lit itself has no vertex-color
+    /// input); every emissive-but-opaque chunk (eyes, neon, heart bolts)
+    /// merges into a SECOND such mesh/material; any translucent chunk
+    /// (Alpha &lt; 0.99 -- the mastermind's glass dome, the blob's
+    /// gelatin shell) is kept exactly as before, one small unmerged
+    /// renderer per chunk via the original <see cref="ToMaterial"/> path
+    /// -- docs/39 item 2's own explicit exception ("the translucent
+    /// blob shell stays a second renderer"). Typical result: 2-3
+    /// renderers instead of 12-23.</summary>
+    public static Transform AttachChunksMerged(System.Collections.Generic.IReadOnlyList<MeshChunk> chunks,
+        Transform parent, string name, float scale)
+    {
+        var holder = new GameObject(name).transform;
+        holder.SetParent(parent, false);
+        holder.localScale = Vector3.one * scale;
+
+        var opaque = new System.Collections.Generic.List<MeshChunk>();
+        var emissive = new System.Collections.Generic.List<MeshChunk>();
+        foreach (var chunk in chunks)
+        {
+            if (chunk.Triangles.Count == 0) continue;
+            if (chunk.Alpha < 0.99)
+            {
+                var go = new GameObject("Translucent");
+                go.transform.SetParent(holder, false);
+                go.AddComponent<MeshFilter>().sharedMesh = ToMesh(chunk);
+                go.AddComponent<MeshRenderer>().sharedMaterial = ToMaterial(chunk);
+                continue;
+            }
+            (chunk.Emissive > 0.01 ? emissive : opaque).Add(chunk);
+        }
+
+        if (opaque.Count > 0) AttachMergedGroup(opaque, holder, "Opaque", SharedVertexColorMaterial(false));
+        if (emissive.Count > 0) AttachMergedGroup(emissive, holder, "Emissive", SharedVertexColorMaterial(true));
+
+        return holder;
+    }
+
+    private static void AttachMergedGroup(System.Collections.Generic.IReadOnlyList<MeshChunk> group,
+        Transform parent, string name, Material mat)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        go.AddComponent<MeshFilter>().sharedMesh = ToMergedMesh(group);
+        go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+    }
+
+    /// <summary>Concatenates every chunk in the group into one Mesh,
+    /// index-offsetting each chunk's triangles by the running vertex
+    /// count and baking each chunk's own flat Color into every one of
+    /// its vertices' vertex-color channel -- the only thing that lets
+    /// chunks of DIFFERENT colors share one mesh/material.</summary>
+    private static Mesh ToMergedMesh(System.Collections.Generic.IReadOnlyList<MeshChunk> group)
+    {
+        var totalVerts = 0;
+        var totalTris = 0;
+        foreach (var c in group) { totalVerts += c.VertexCount; totalTris += c.Triangles.Count; }
+
+        var verts = new Vector3[totalVerts];
+        var norms = new Vector3[totalVerts];
+        var colors = new Color[totalVerts];
+        var tris = new int[totalTris];
+
+        var vOff = 0;
+        var tOff = 0;
+        foreach (var c in group)
+        {
+            var count = c.VertexCount;
+            var col = new Color((float)c.Color.R / 255f, (float)c.Color.G / 255f, (float)c.Color.B / 255f, 1f);
+            for (var i = 0; i < count; i++)
+            {
+                verts[vOff + i] = new Vector3((float)c.Positions[i * 3],
+                    (float)c.Positions[i * 3 + 1], (float)c.Positions[i * 3 + 2]);
+                norms[vOff + i] = new Vector3((float)c.Normals[i * 3],
+                    (float)c.Normals[i * 3 + 1], (float)c.Normals[i * 3 + 2]);
+                colors[vOff + i] = col;
+            }
+            for (var i = 0; i < c.Triangles.Count; i++) tris[tOff + i] = c.Triangles[i] + vOff;
+            vOff += count;
+            tOff += c.Triangles.Count;
+        }
+
+        var mesh = new Mesh();
+        if (totalVerts > 65000) mesh.indexFormat = IndexFormat.UInt32;
+        mesh.vertices = verts;
+        mesh.normals = norms;
+        mesh.colors = colors;
+        mesh.triangles = tris;
+        mesh.RecalculateBounds();
+        return mesh;
     }
 
     private static Mesh ToMesh(MeshChunk chunk)

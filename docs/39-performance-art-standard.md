@@ -604,10 +604,17 @@ before any monster or shader work even starts.
    re-scoped into this item. Map-band cull (below the LOD2 threshold) is
    free from `LODGroup`'s own default behavior — no impostor billboard
    built yet, that stays item 7's job.
-2. **Merge creature chunks into one vertex-coloured mesh per LOD** with
+2. **[Implemented 2026-09-15, pending Editor verification — see docs/12]
+   Merge creature chunks into one vertex-coloured mesh per LOD** with
    one shared vertex-colour URP material (translucent blob shell stays a
-   second renderer). 12–23 renderers → 2–3 per monster; at 50 monsters
-   that is ~800 fewer draws.
+   second renderer). 12–23 renderers → 2–3 per monster (real chunk
+   breakdown, busiest genome: 19 opaque + 3 emissive + 1 translucent →
+   3 renderers); at 50 monsters that is ~800 fewer draws. Required a new
+   hand-authored shader (`Assets/Shaders/CreatureVertexColor.shader`,
+   built on the docs/33 `WindowGrid.shader` precedent) since stock
+   URP/Lit has no vertex-color input — the one piece of this item that
+   genuinely needs a live Editor to confirm compiles and renders
+   correctly, not just a read-through.
 3. **Low-poly sphere/cylinder in `PropLibrary`** (icosphere subdiv-1 ≈
    80 tris, 8-side cylinder ≈ 30 tris) and a lint rule: no
    `PrimitiveType.Sphere/Capsule` outside VFX and the Big Brain jar.

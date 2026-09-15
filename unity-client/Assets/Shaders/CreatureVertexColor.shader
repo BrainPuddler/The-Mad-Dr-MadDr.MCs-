@@ -1,0 +1,158 @@
+// docs/39 §11 item 2: one shared, SRP-batcher-friendly material for
+// every creature's merged body mesh -- LabMeshBuilder.AttachChunksMerged
+// bakes each chunk's own flat (color, gloss, emissive) into per-VERTEX
+// color instead of one Material/Renderer per chunk (packages/creature-
+// mesh's own dedup already collapses same-material primitives into one
+// chunk each; this shader is what lets DIFFERENT-colored chunks share
+// ONE mesh + ONE material too). 12-23 renderers per creature (docs/39
+// §4.1's measured baseline) collapses to 2-3: one merged opaque mesh,
+// one merged emissive-parts mesh (eyes, neon, heart bolts -- rare
+// enough per creature that approximating their individual Emissive
+// STRENGTH with this material's one shared _EmissionStrength value is
+// an acceptable "cheaper way to get the same read at 70 m" trade, same
+// as every other approximation docs/39 sanctions), and any translucent
+// chunk (glass dome, blob gelatin) kept unmerged exactly as docs/39
+// item 2 says to ("the translucent blob shell stays a second
+// renderer") -- that one still uses LabMeshBuilder.ToMaterial's
+// original per-chunk URP/Lit path, not this shader.
+//
+// Built on Unity's own stock "Universal Render Pipeline/Lit"
+// shadow/depth passes via UsePass (reused verbatim, not reimplemented,
+// same reasoning and same dummy-property set as Assets/Shaders/
+// WindowGrid.shader, docs/33's precedent for a hand-authored shader in
+// this codebase) -- only the ForwardLit pass below is hand-authored.
+// Deliberately no specular/smoothness term, matching WindowGrid's own
+// plain-diffuse lighting model (docs/39 §0 rule 3: spend nothing on
+// detail invisible at 26 px, and a monster's specular highlight is
+// exactly that kind of detail).
+Shader "MadDr/CreatureVertexColor"
+{
+    Properties
+    {
+        // Declared only because the ShadowCaster/DepthOnly/DepthNormals
+        // passes reused via UsePass below expect a _BaseMap/_Cutoff to
+        // exist on the shader they came from -- same reasoning as
+        // WindowGrid.shader's identical pair. Never sampled by the
+        // ForwardLit pass here.
+        _BaseMap("Unused (kept for UsePass compatibility)", 2D) = "white" {}
+        _Cutoff("Alpha Cutoff (unused, opaque)", Range(0,1)) = 0.5
+
+        // [MainColor] so any future damage-tint pass that follows
+        // RuntimeCityBuilder's existing convention (set _BaseColor via
+        // MaterialPropertyBlock) would work here too -- not used by any
+        // creature system today, kept for consistency with the rest of
+        // this codebase's hand-authored shaders (WindowGrid.shader's
+        // own _BaseColor plays the same role).
+        [MainColor] _BaseColor("Tint", Color) = (1,1,1,1)
+
+        // 0 for the shared OPAQUE-group material instance, >0 for the
+        // shared EMISSIVE-group instance (LabMeshBuilder picks the
+        // value; see its own header comment for why one shared constant
+        // approximates every emissive chunk's individual Emissive
+        // strength rather than reproducing it exactly).
+        _EmissionStrength("Emission Strength (0 = opaque-group material)", Float) = 0
+    }
+
+    SubShader
+    {
+        Tags { "RenderType" = "Opaque" "RenderPipeline" = "UniversalPipeline" "Queue" = "Geometry" }
+        LOD 100
+
+        Pass
+        {
+            Name "ForwardLit"
+            Tags { "LightMode" = "UniversalForward" }
+
+            HLSLPROGRAM
+            #pragma vertex CreatureVertexColorVertex
+            #pragma fragment CreatureVertexColorFragment
+
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile _ _SHADOWS_SOFT
+            #pragma multi_compile_fog
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+
+            CBUFFER_START(UnityPerMaterial)
+                half4 _BaseColor;
+                half _EmissionStrength;
+            CBUFFER_END
+
+            struct Attributes
+            {
+                float4 positionOS : POSITION;
+                float3 normalOS   : NORMAL;
+                // Per-vertex baked chunk color (LabMeshBuilder.ToMergedMesh)
+                // -- this is the whole point of this shader: URP/Lit itself
+                // has no vertex-color input, so DIFFERENT-colored chunks
+                // could never share one mesh/material without it.
+                float4 color      : COLOR;
+            };
+
+            struct Varyings
+            {
+                float4 positionCS  : SV_POSITION;
+                float4 color       : COLOR;
+                float3 positionWS  : TEXCOORD0;
+                float3 normalWS    : TEXCOORD1;
+                float4 shadowCoord : TEXCOORD2;
+                float  fogFactor   : TEXCOORD3;
+            };
+
+            Varyings CreatureVertexColorVertex(Attributes IN)
+            {
+                Varyings OUT = (Varyings)0;
+                VertexPositionInputs posInputs = GetVertexPositionInputs(IN.positionOS.xyz);
+                VertexNormalInputs normInputs = GetVertexNormalInputs(IN.normalOS);
+
+                OUT.positionCS = posInputs.positionCS;
+                OUT.positionWS = posInputs.positionWS;
+                OUT.normalWS = normInputs.normalWS;
+                OUT.color = IN.color;
+                OUT.shadowCoord = GetShadowCoord(posInputs);
+                OUT.fogFactor = ComputeFogFactor(posInputs.positionCS.z);
+                return OUT;
+            }
+
+            half4 CreatureVertexColorFragment(Varyings IN) : SV_Target
+            {
+                half3 albedo = IN.color.rgb * _BaseColor.rgb;
+
+                float3 normalWS = normalize(IN.normalWS);
+                Light mainLight = GetMainLight(IN.shadowCoord);
+                half3 ambient = SampleSH(normalWS);
+                half ndotl = saturate(dot(normalWS, mainLight.direction));
+                half3 diffuse = albedo * (ambient
+                    + mainLight.color * (ndotl * mainLight.shadowAttenuation * mainLight.distanceAttenuation));
+
+                // Emission reuses the SAME per-vertex color as albedo (a
+                // glowing eye's emission is the same hue as its lit
+                // color) -- only the STRENGTH is the one shared uniform
+                // this material can't vary per-chunk any more, per the
+                // header comment above.
+                half3 emission = IN.color.rgb * _EmissionStrength;
+
+                half3 color = diffuse + emission;
+                color = MixFog(color, IN.fogFactor);
+                return half4(color, 1.0h);
+            }
+            ENDHLSL
+        }
+
+        // Reuse Unity's own stock URP Lit passes verbatim for shadows/
+        // depth rather than hand-authoring them -- same reasoning as
+        // WindowGrid.shader's identical UsePass block: a shadow caster
+        // only needs position, and hand-rolling one blind (no Editor to
+        // verify against in this environment) would be pure added risk
+        // for zero benefit over the tested stock passes.
+        UsePass "Universal Render Pipeline/Lit/ShadowCaster"
+        UsePass "Universal Render Pipeline/Lit/DepthOnly"
+        UsePass "Universal Render Pipeline/Lit/DepthNormals"
+    }
+
+    FallBack "Universal Render Pipeline/Lit"
+}
