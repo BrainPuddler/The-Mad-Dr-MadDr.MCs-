@@ -35,17 +35,12 @@ ALLOWLIST_FILES=(
   "DamageFx.cs"
   "WeaponFx.cs"
 )
-# Known, DELIBERATELY DEFERRED exception, not VFX/Big Brain jar:
-# RuntimeCityBuilder's citizen Capsule spawns (SpawnCitizens,
-# SpawnFleeingOccupant) -- docs/34 §0 / docs/36 §12's "Citizen.cs is the
-# last capsule holdout... waiting on the Civilian Victims work before it
-# moves onto HumanCharacterKit." Tracked there, not re-litigated here;
-# this script should stay quiet about it, not silently ignore a REAL new
-# regression in the same file, so it's checked by content, not by
-# allowlisting the whole file.
-KNOWN_DEFERRED_PATTERN='GameObject.CreatePrimitive(PrimitiveType.Capsule)'
-KNOWN_DEFERRED_FILE="RuntimeCityBuilder.cs"
-KNOWN_DEFERRED_COUNT_EXPECTED=2
+# 2026-09-16: the citizen-Capsule holdout this script used to carve out
+# an exception for (docs/34 §0 / docs/36 §12 -- "Citizen.cs is the last
+# capsule holdout") is now fixed: Citizen builds a real HumanCharacterKit
+# rig instead. No exception needed for RuntimeCityBuilder.cs anymore --
+# removed rather than left as a zero-count no-op, so a REAL new
+# regression there is caught like anywhere else.
 
 violations=0
 
@@ -56,21 +51,9 @@ while IFS=: read -r file line rest; do
     if [[ "$base" == "$a" ]]; then allowed=true; break; fi
   done
   if [[ "$allowed" == true ]]; then continue; fi
-  if [[ "$base" == "$KNOWN_DEFERRED_FILE" && "$rest" == *"$KNOWN_DEFERRED_PATTERN"* ]]; then
-    continue
-  fi
   echo "VIOLATION: $file:$line: $rest"
   violations=$((violations + 1))
 done < <(grep -rn "CreatePrimitive(PrimitiveType.Sphere)\|CreatePrimitive(PrimitiveType.Capsule)" "$SCRIPTS_DIR"/*.cs)
-
-# Sanity-check the known-deferred count itself, so if someone ever DOES
-# fix the citizen holdout (removing those 2 lines) this script notices
-# and asks for its own allowlist entry to be trimmed, instead of quietly
-# masking the fix forever.
-actual_deferred_count=$(grep -c "$KNOWN_DEFERRED_PATTERN" "$SCRIPTS_DIR/$KNOWN_DEFERRED_FILE" || true)
-if [[ "$actual_deferred_count" -ne "$KNOWN_DEFERRED_COUNT_EXPECTED" ]]; then
-  echo "NOTE: $KNOWN_DEFERRED_FILE now has $actual_deferred_count Capsule call(s), expected $KNOWN_DEFERRED_COUNT_EXPECTED -- if the citizen-capsule holdout (docs/36 §12) was just fixed, update KNOWN_DEFERRED_COUNT_EXPECTED in this script (or remove the exception entirely)."
-fi
 
 if [[ "$violations" -gt 0 ]]; then
   echo ""

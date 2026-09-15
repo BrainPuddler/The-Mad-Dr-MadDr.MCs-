@@ -21063,3 +21063,92 @@ read-through only -- same standing caveat. This closes out docs/39 §11
 item 6 entirely; the ranked backlog (§11, items 0 through 8) now has no
 remaining unaddressed items. See docs/36 entry 23 for the Editor-side
 checklist.
+
+## 2026-09-16 follow-up: Citizen.cs's capsule holdout closed (docs/34 §0/§6, docs/36 §12)
+
+Creator report ("there are still humans or something walking around
+that is just a pill shape, are those combatants") -- confirmed via
+`grep` these were Citizens (`RuntimeCityBuilder.SpawnCitizens`/
+`SpawnFleeingOccupant`, still `GameObject.CreatePrimitive(PrimitiveType
+.Capsule)`), not `HumanoidCombatant` (already fully rigged). This is
+docs/36 §12's already-documented "last capsule holdout," explicitly
+NOT a regression from anything this session touched. Creator direction:
+"go ahead and give citizens a real rigs."
+
+**Scope check against docs/34 §0 before touching anything:** that doc's
+own scoping explicitly separated two things -- (a) swapping `Citizen`'s
+capsule for the shared `HumanCharacterKit` rig, and (b) "Civilian
+Victims," a wholly new rescue-mechanic GAMEPLAY system (calm/alert/
+panic/injured/trapped/rescued states, ~10 variants) that was deliberately
+deferred as "the highest-risk, most novel piece of the whole brief."
+The creator's ask ("give citizens a real rig") is (a), not (b) -- did
+NOT build any rescue mechanic, new states, or new variants; Citizen's
+EXISTING behavior (walk an errand / flee a monster / get captured and
+eaten or possessed) is reskinned as-is, verbatim, onto the shared rig.
+
+**New `HumanCharacterProfile.Civilian(int variant)`** (`HumanCharacterKit
+.cs`): 8 fixed plain-clothes body-color looks plus a little height
+jitter, selected via `variant % 8` (any hash works, no pre-clamping
+needed). Deliberately NOT Citizen's old continuous per-instance random
+hue -- that old approach minted a genuinely fresh `Material` per citizen
+(`new Material(ShaderUtil.FindRenderableShader())`, found by reading
+the old `Init()`), which is WORSE for SRP batching than anything docs/39
+§7 already flags (a real per-instance Material, not just a property-
+block override on a shared one). A small fixed palette bounds this to 8
+distinct looks total, matching `HumanCharacterKit`'s own existing
+MaterialPropertyBlock-per-part coloring convention every other
+rig-based unit already uses -- not a fix for docs/39 §7's own named,
+still-open "13 unbatched draws per humanoid" gap (out of scope, not
+newly made worse either).
+
+**`Citizen.cs` rewritten to match Worker/HumanoidCombatant's own
+pattern:** `Init` builds the rig and drops the old capsule's `+0.9`
+center-pivot offset everywhere (6 occurrences found via `grep` and
+removed) -- the rig is built feet-at-transform, unlike a capsule's
+center pivot. `MoveToward` now RETURNS the actual distance moved (0 if
+already at the target) instead of a `void`, so every call site can feed
+`HumanCharacterAnimator.TickLocomotion` the real displacement --
+"no skating, ever" (maddr-aesthetic-preferences skill §7) applies
+here exactly like every other rig-based unit. New `DriveAnimation`
+helper mirrors Worker/HumanoidCombatant's own gate-the-animator-call-
+not-the-caller's-movement-logic shape, throttled through the same
+`AnimationLodBudget.TryGetAnimDt` item 6 already introduced. The
+captured/dragged state is a genuinely NEW animated case (the old capsule
+had no gait to skate in the first place) -- measured via a before/after
+`transform.position` diff around `CaptureState.TickPull` (which mutates
+the transform directly and exposes no distance of its own), the same
+before/after-diff idiom `MonsterAgent.TickCaptured` already uses for an
+identical problem one class over.
+
+**Checked, not assumed, that the new automatic `BoxCollider`
+(`HumanCharacterKit.Build` always adds one) doesn't reintroduce
+something docs/39 §11 item 0.5 deliberately removed:** read the actual
+git history of `SpawnCitizens` (10 commits back) and confirmed Citizens
+NEVER had their collider stripped -- item 0.5's own backlog description
+mentioned it as a candidate cleanup, but the shipped citizen capsule
+kept its `CapsuleCollider` the whole time, actively used by
+`WaypointCommander.cs`'s right-click-to-order-eat raycast
+(`hit.Value.collider.GetComponentInParent<Citizen>()`). The new
+`BoxCollider` replaces that 1:1 (same raycast target, arguably cheaper
+shape), not a new cost.
+
+**`unity-client/Tools~/check-no-stock-primitives.sh`** updated: removed
+the now-obsolete citizen-Capsule allowlist exception entirely (the
+script's own comment anticipated this exact fix and asked for the
+allowlist to be trimmed once it happened) rather than leaving a
+zero-count no-op exception around. Ran it for real: passes clean with
+no exceptions needed in `RuntimeCityBuilder.cs` at all now.
+
+**Known, named, not fixed:** a citizen crowd now casts shadows by
+default (same as every other rig-based humanoid -- not a new
+inconsistency, but Citizens can appear in real numbers via `citizenCount`
+where Worker/HumanoidCombatant typically don't, so this is worth a real
+measurement once the Editor's available, not assumed fine because
+nothing else changed).
+
+**Verification:** brace/paren balance (confirmed matching pre-edit
+counts across `Citizen.cs`, `HumanCharacterKit.cs`, `RuntimeCityBuilder
+.cs`) and read-through only -- the captured-drag animation case
+specifically has NEVER been seen rendered (nothing like it existed
+before this change), so it carries more uncertainty than a typical
+reskin. See docs/36 entry 24 for the Editor-side checklist.

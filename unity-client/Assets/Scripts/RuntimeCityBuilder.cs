@@ -3728,10 +3728,14 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // scatter: skip most candidates deterministically
             if ((hex.Q * 31 + hex.R * 17) % 5 != 0) continue;
 
-            var capsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            capsule.name = "Citizen_" + spawned;
-            capsule.transform.SetParent(parent, false);
-            var citizen = capsule.AddComponent<Citizen>();
+            // docs/34 §0's own capsule holdout, closed: Citizen now builds
+            // a real HumanCharacterKit rig in Init() instead of styling a
+            // stock Capsule primitive, so the root here is a plain
+            // GameObject -- Init()/HumanCharacterKit.Build supply all the
+            // actual geometry.
+            var go = new GameObject("Citizen_" + spawned);
+            go.transform.SetParent(parent, false);
+            var citizen = go.AddComponent<Citizen>();
             citizen.Init(this, hex);
             _citizens.Add(citizen);
             spawned++;
@@ -3765,9 +3769,8 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var blocked = BlockedFor(false);
         var spawnHex = _city.Contains(hex) && !blocked.Contains(hex) ? hex : NearestOpenHex(hex, blocked);
 
-        var capsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-        capsule.name = "Citizen_Occupant_" + _citizens.Count;
-        var citizen = capsule.AddComponent<Citizen>();
+        var go = new GameObject("Citizen_Occupant_" + _citizens.Count);
+        var citizen = go.AddComponent<Citizen>();
         citizen.Init(this, spawnHex);
         citizen.InitFleeingFrom(WorldOf(hex));
         _citizens.Add(citizen);

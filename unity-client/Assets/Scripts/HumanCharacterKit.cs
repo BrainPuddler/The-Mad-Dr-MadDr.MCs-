@@ -497,4 +497,62 @@ public struct HumanCharacterProfile
             Headgear = HeadgearKind.Helmet,
         };
     }
+
+    // 2026-09 (docs/34 §0 / docs/36 §12 "citizen-capsule holdout,"
+    // closed): Citizen's own crowd-variety need -- "a coloured blob"
+    // read at 70m zoom (docs/39 §1.1), several distinct-looking ordinary
+    // people, not one faction uniform -- rather than one fixed look like
+    // every profile above. A small FIXED palette (picked by the caller
+    // via a deterministic per-instance hash, same idiom `TrafficCar`/
+    // building-prop color variety already uses elsewhere in this
+    // codebase) instead of Citizen's old continuous per-instance random
+    // hue: that old approach minted a brand-new `Material` per citizen
+    // (maximally SRP-batch-unfriendly, worse than anything docs/39 §7
+    // flags); a small fixed set means at most `CivilianVariantCount`
+    // distinct looks exist at all, no better or worse for batching than
+    // every other rig-based unit's own MaterialPropertyBlock coloring
+    // (docs/39 §7's own already-named, not-yet-fixed gap -- unchanged by
+    // this addition, not newly introduced by it).
+    public const int CivilianVariantCount = 8;
+
+    private static readonly Color[] CivilianBodyColors =
+    {
+        new Color(0.72f, 0.32f, 0.30f),   // brick red shirt
+        new Color(0.30f, 0.45f, 0.68f),   // denim blue
+        new Color(0.40f, 0.58f, 0.32f),   // olive green
+        new Color(0.78f, 0.62f, 0.28f),   // mustard
+        new Color(0.52f, 0.38f, 0.60f),   // plum
+        new Color(0.76f, 0.55f, 0.58f),   // dusty pink
+        new Color(0.42f, 0.42f, 0.45f),   // slate grey
+        new Color(0.62f, 0.48f, 0.34f),   // tan
+    };
+
+    /// <summary>An ordinary civilian, one of `CivilianVariantCount`
+    /// plain-clothes looks -- `variant` is taken mod that count, so any
+    /// hash (instance ID, spawn index) works as-is without the caller
+    /// needing to pre-clamp it. Slight height jitter (0.9-1.06) reads as
+    /// "a crowd of different people," not a rank of identical clones,
+    /// without going as far as a distinct child/adult system nothing
+    /// else in this brief asked for.</summary>
+    public static HumanCharacterProfile Civilian(int variant)
+    {
+        var i = ((variant % CivilianVariantCount) + CivilianVariantCount) % CivilianVariantCount;
+        var body = CivilianBodyColors[i];
+        return new HumanCharacterProfile
+        {
+            BodyColor = body,
+            AccentColor = body * 0.55f,   // darker shoes/hands -- same tone family, not a second palette to maintain
+            HeightScale = 0.9f + (i / (float)(CivilianVariantCount - 1)) * 0.16f,
+            LimbThicknessScale = 0.9f,
+            ArmLengthScale = 1f,
+            ShoulderWidthScale = 0.95f,
+            HunchDegrees = 0f,
+            Asymmetric = false,
+            HasLegs = true,
+            HasHands = true,
+            OversizedHands = false,
+            HasBackpack = false,
+            Headgear = HeadgearKind.None,
+        };
+    }
 }

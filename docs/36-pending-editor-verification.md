@@ -289,9 +289,10 @@ Deliberately left alone, flagged rather than silently touched:
   `git show HEAD` to predate this session. Harmless; noted only so the
   next balance-check sweep doesn't mistake them for new damage. (A third
   such imbalance, in `RuntimeCityBuilder.cs`, WAS fixed in `eeb504b`.)
-- **`Citizen.cs` is the last capsule holdout** (docs/34 §0) — still
-  waiting on the Civilian Victims work before it moves onto
-  `HumanCharacterKit`.
+- **`Citizen.cs`'s capsule holdout is FIXED (2026-09-16)** — see entry
+  24 below for the checklist. (Civilian Victims itself -- the rescue-
+  mechanic gameplay system, docs/34 §0/§6 -- is still not built; only
+  the capsule-to-rig reskin closed here.)
 
 ## 13. Grandma wheelchair: real circular wheels + seated legs (`HumanoidCombatant.cs`)
 
@@ -661,3 +662,51 @@ the animator calls themselves throttle.
   own at all, so there was nothing to gate there; not a gap, just a
   correction of the original item 6 note's assumption that it was one
   of the four call sites.
+
+## 24. Citizen capsule-to-rig reskin (docs/34 §0/§6, docs/36 §12 holdout closed)
+
+`Citizen.cs` builds a real `HumanCharacterKit` rig via a new
+`HumanCharacterProfile.Civilian(int variant)` (8 fixed plain-clothes
+looks + a little height jitter, picked by hashing `GetInstanceID()`)
+instead of styling a stock Capsule primitive. Walk/flee/forced-flee/
+captured-drag all now drive `TickLocomotion`/`TickIdle` from the REAL
+displacement each state's own movement code already computes (never a
+speed*dt guess), gated by the same `AnimationLodBudget` throttle every
+other humanoid uses (docs/39 §11 item 6). `RuntimeCityBuilder.SpawnCitizens`/
+`SpawnFleeingOccupant` spawn a plain GameObject now instead of a Capsule
+primitive; `check-no-stock-primitives.sh`'s citizen-specific allowlist
+exception was removed (confirmed the script still passes clean with
+zero exceptions needed for `RuntimeCityBuilder.cs` now).
+
+- **The actual visual check:** spawn a match, watch a citizen walk its
+  sidewalk errand and confirm it reads as a small person (torso/head/
+  arms/legs swinging in a walk cycle), not a floating pill or a
+  T-posed/frozen rig. Check several citizens at once for the 8-look
+  palette variety (plus the height jitter) actually reading as "a crowd
+  of different people," not 8 visibly-cloned ranks.
+- **Fleeing (both proximity and forced-building-collapse) should read as
+  a SPRINT** — faster gait, bigger arm/leg swing (`running: true`) than
+  the ambling walk cycle, not just a faster slide.
+- **Being captured/dragged toward a monster** — this is the ONE new,
+  never-before-existing behavior (the old capsule had no gait to begin
+  with, so nothing could look wrong here before): confirm the citizen's
+  legs actually move while it's pulled toward its captor, rather than
+  a static rig sliding along the ground (the exact "skating" the
+  project's own animation rule exists to prevent) — this is measured
+  from the real per-frame drag displacement, but has never been seen
+  rendered.
+- **Right-click "order eat this citizen" still works**
+  (`WaypointCommander.cs`'s `hit.Value.collider.GetComponentInParent<Citizen>()`)
+  — `HumanCharacterKit.Build` gives every citizen a fresh `BoxCollider`
+  sized to the rig's own bounds (replacing the stock Capsule's own
+  collider 1:1, not removing collision entirely) -- confirm clicking a
+  citizen on-screen still targets the right one and a monster still
+  visibly arrives and eats it.
+- **Sub-1m-prop shadow rule (docs/39 §11 item 5) doesn't apply here** --
+  Citizens don't go through `RuntimeCityBuilder`'s `SpawnPrim`/`SpawnMesh`
+  choke points at all (their geometry comes from `HumanCharacterKit
+  .Build` directly), so they get whatever shadow-casting default a
+  fresh `MeshRenderer` has (`.On`) same as every other rig-based
+  humanoid -- consistent with Worker/HumanoidCombatant, not a new gap,
+  but worth confirming a crowd of citizens doesn't reintroduce a
+  shadow-cost regression at scale (`citizenCount` can be large).

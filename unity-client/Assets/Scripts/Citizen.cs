@@ -33,6 +33,17 @@ public class Citizen : MonoBehaviour
     private float _repickTimer;
     private int _stepSalt;
 
+    // 2026-09 (docs/34 §0 / docs/36 §12 holdout, closed): a real
+    // HumanCharacterKit rig instead of a styled Capsule primitive.
+    private HumanCharacterRig _rig;
+    private HumanCharacterAnimState _animState;
+    // docs/39 §11 item 6 (LOD-aware animation) -- same pattern
+    // HumanoidCombatant/Worker already use: computed once per Update(),
+    // read wherever DriveAnimation is called this frame.
+    private float _skippedAnimDt;
+    private bool _animTick;
+    private float _animDt;
+
     /// <summary>docs/26 Phase 6: this citizen's own CaptureState -- a
     /// Citizen has no UnitCombat component (confirmed via grep, not
     /// assumed), so it can't share UnitCombat's copy and owns one
@@ -74,19 +85,16 @@ public class Citizen : MonoBehaviour
     public void Init(RuntimeCityBuilder builder, HexCoord home)
     {
         _builder = builder;
-        transform.position = _builder.WorldOf(home) + new Vector3(0f, 0.9f, 0f);
+        // no +0.9 offset anymore -- the old capsule was centered above
+        // its feet; HumanCharacterKit's rig is built upward from y=0 at
+        // `transform.position` itself (same "feet at the transform"
+        // convention Worker/HumanoidCombatant already use).
+        transform.position = _builder.WorldOf(home);
         _target = transform.position;
 
-        // a little person: capsule body + head, tinted civilian colors
-        transform.localScale = new Vector3(0.5f, 0.9f, 0.5f);
-        var renderer = GetComponent<Renderer>();
-        if (renderer != null)
-        {
-            var mat = new Material(ShaderUtil.FindRenderableShader());
-            var hue = (GetInstanceID() % 100 + 100) % 100 / 100f;
-            mat.color = Color.HSVToRGB(hue, 0.35f, 0.8f);
-            renderer.sharedMaterial = mat;
-        }
+        var profile = HumanCharacterProfile.Civilian(GetInstanceID());
+        _rig = HumanCharacterKit.Build(transform, profile);
+        _animState = new HumanCharacterAnimState { Seed = (GetInstanceID() % 1000) / 1000f * 6.283f };
     }
 
     /// <summary>Call right after <see cref="Init"/> for a citizen spawned
@@ -103,6 +111,7 @@ public class Citizen : MonoBehaviour
     private void Update()
     {
         var dt = Time.deltaTime;
+        _animTick = AnimationLodBudget.TryGetAnimDt(ref _skippedAnimDt, dt, out _animDt);
 
         // captured overrides everything, even fleeing -- a caught citizen
         // is being dragged, not choosing to run (docs/26 Phase 6); once it
@@ -122,9 +131,19 @@ public class Citizen : MonoBehaviour
             }
             else
             {
+                // "no skating, ever" (maddr-aesthetic-preferences skill
+                // §7) applies to a dragged citizen too -- measure the
+                // ACTUAL displacement TickPull just applied (it mutates
+                // transform.position directly and doesn't expose the
+                // amount itself) rather than guessing from Speed*dt, and
+                // drive a real (running) gait from it so a captured
+                // citizen's legs move with its body instead of sliding
+                // limp toward its captor.
+                var beforePos = transform.position;
                 var arrived = _capture.TickPull(transform, dt);
                 var cp = transform.position;
-                transform.position = new Vector3(cp.x, _builder.GroundHeightAt(cp) + 0.9f, cp.z);
+                transform.position = new Vector3(cp.x, _builder.GroundHeightAt(cp), cp.z);
+                DriveAnimation((transform.position - beforePos).magnitude, running: true);
                 if (arrived)
                 {
                     if (_possessOnArrival)
@@ -160,8 +179,9 @@ public class Citizen : MonoBehaviour
             // instant the building dies, the same frame occupants spawn),
             // so there's no real "away" direction yet -- pick a
             // deterministic fallback angle off this citizen's own instance
-            // ID (same idiom Init already uses for its color hue) rather
-            // than leaving it stuck with a zero-length flee vector.
+            // ID (same "hash the instance ID" idiom Init uses to pick a
+            // civilian color variant) rather than leaving it stuck with a
+            // zero-length flee vector.
             if (awayFromWreck.sqrMagnitude <= 0.01f)
             {
                 var angle = (GetInstanceID() % 360) * Mathf.Deg2Rad;
@@ -179,7 +199,7 @@ public class Citizen : MonoBehaviour
             var fleeHex = _builder.HexAt(fleeTo);
             if (_builder.City.Contains(fleeHex) && !_builder.BlockedFor(false).Contains(fleeHex))
                 _target = fleeTo;
-            MoveToward(_target, FleeSpeed, dt);
+            DriveAnimation(MoveToward(_target, FleeSpeed, dt), running: true);
             return;
         }
 
@@ -197,9 +217,9 @@ public class Citizen : MonoBehaviour
                 var fleeTo = transform.position + away.normalized * 6f;
                 var fleeHex = _builder.HexAt(fleeTo);
                 if (_builder.City.Contains(fleeHex) && !_builder.BlockedFor(false).Contains(fleeHex))
-                    _target = _builder.WorldOf(fleeHex) + new Vector3(0f, 0.9f, 0f);
+                    _target = _builder.WorldOf(fleeHex);
             }
-            MoveToward(_target, FleeSpeed, dt);
+            DriveAnimation(MoveToward(_target, FleeSpeed, dt), running: true);
             return;
         }
 
@@ -211,7 +231,22 @@ public class Citizen : MonoBehaviour
             _repickTimer = 1.5f + (GetInstanceID() % 20) / 10f;
             StepTowardDestination();
         }
-        MoveToward(_target, WalkSpeed, dt);
+        DriveAnimation(MoveToward(_target, WalkSpeed, dt), running: false);
+    }
+
+    /// <summary>Walk/run when actually moving, idle twitch otherwise --
+    /// same "gate the animator call, not the caller's own movement/state
+    /// logic" shape `HumanoidCombatant`/`Worker` already use (docs/39
+    /// §11 item 6). `movedDist` is the REAL displacement `MoveToward`
+    /// (or the capture-drag branch) just applied this frame, never a
+    /// speed*dt guess -- "no skating, ever."</summary>
+    private void DriveAnimation(float movedDist, bool running)
+    {
+        if (!_animTick) return;
+        if (movedDist > 0.001f)
+            HumanCharacterAnimator.TickLocomotion(_rig, _animState, movedDist, running, _animDt);
+        else
+            HumanCharacterAnimator.TickIdle(_rig, _animState, twitchy: false, _animDt);
     }
 
     /// <summary>Advance one hex toward the current destination, staying
@@ -271,22 +306,30 @@ public class Citizen : MonoBehaviour
 
     private void SetTarget(HexCoord hex)
     {
-        _target = _builder.WorldOf(hex) + new Vector3(0f, 0.9f, 0f);
+        _target = _builder.WorldOf(hex);
     }
 
-    private void MoveToward(Vector3 target, float speed, float dt)
+    /// <summary>Returns the ACTUAL distance moved this call (0 if already
+    /// within arrival tolerance) -- callers feed this straight into
+    /// <see cref="DriveAnimation"/> so the gait always matches real
+    /// displacement, never a speed*dt guess (maddr-aesthetic-preferences
+    /// skill §7, "no skating, ever").</summary>
+    private float MoveToward(Vector3 target, float speed, float dt)
     {
         var to = target - transform.position;
         to.y = 0f;
         var dist = to.magnitude;
-        if (dist < 0.05f) return;
+        if (dist < 0.05f) return 0f;
         var dir = to / dist;
-        transform.position += dir * Mathf.Min(speed * dt, dist);
-        // terrain-follow the sculpted ground (docs/21), keeping the
-        // capsule's own 0.9 body offset above it
+        var moveAmt = Mathf.Min(speed * dt, dist);
+        transform.position += dir * moveAmt;
+        // terrain-follow the sculpted ground (docs/21) -- the rig's own
+        // feet-at-transform convention needs no body offset above it,
+        // unlike the old capsule's center-pivot 0.9 add.
         var p = transform.position;
-        transform.position = new Vector3(p.x, _builder.GroundHeightAt(p) + 0.9f, p.z);
+        transform.position = new Vector3(p.x, _builder.GroundHeightAt(p), p.z);
         transform.rotation = Quaternion.Slerp(transform.rotation,
             Quaternion.LookRotation(dir, Vector3.up), dt * 6f);
+        return moveAmt;
     }
 }

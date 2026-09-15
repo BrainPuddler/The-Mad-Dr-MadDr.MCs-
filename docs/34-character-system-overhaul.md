@@ -184,7 +184,16 @@ collider, were followed by construction, not measured).
 ## 6. Explicitly deferred / not done this pass
 
 - **Civilian Victims** (calm/alert/panic/injured/trapped/rescued states,
-  ~10 variants, rescue mechanics) — see §0. `Citizen.cs` is untouched.
+  ~10 variants, rescue mechanics) — see §0. Still not built; this is a
+  wholly new gameplay system, not a reskin, and remains out of scope.
+  **Update, 2026-09-16:** `Citizen.cs` itself is no longer untouched --
+  it now builds a real `HumanCharacterKit` rig (`HumanCharacterProfile
+  .Civilian`, a small 8-look fixed palette rather than a combat/rescue
+  variant system) and drives `TickLocomotion`/`TickIdle` through its
+  existing walk/flee/captured states. This closes the docs/36 §12
+  capsule-holdout note, but is a plain reskin of the EXISTING states --
+  the calm/alert/injured/trapped/rescued state machine and its ~10
+  distinct variants above are unaffected and still not started.
 - **Human Soldier as a real combat unit** — no `UnitCombat`, no
   match-core registration, no roster/production entry. Aim/fire is
   flavor animation only.
