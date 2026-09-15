@@ -690,7 +690,23 @@ before any monster or shader work even starts.
    needs its own investigation into whether one of those call sites is
    itself already a shared driver, not a blind copy-paste of the
    monster fix into four places.
-7. **Map-band impostor** via instanced faction quads or cull + minimap.
+7. **[Implemented 2026-09-16, pending Editor verification -- see docs/12]
+   Map-band impostor**, the cheapest sanctioned option (§5.3 option 1:
+   "cull the body, keep the minimap blip and the selection ring").
+   `MonsterBody.SetBodyVisible`, called every `UpdateLocomotion`, toggles
+   `_torso` (covers the LOD0/1/2 body, wings, and weapon, all parented
+   under it) and each leg's Upper/Lower/Foot/Hip off entirely once
+   `AnimationLodBudget.CurrentBand == Map` -- a hard, camera-height-exact
+   cull, not reliant on item 1's LODGroup screen-height cutoff (which
+   only APPROXIMATELY tracks the Map band's 250 m start depending on the
+   creature's own size, and never covered legs/wings/weapon at all since
+   they aren't part of that LODGroup's renderer list). Selection ring and
+   `_selectionCollider` are untouched (both live directly on the shared
+   root GameObject, not under `_torso`), and the minimap already draws
+   every unit's blip from a live registry with no dependency on body
+   visibility -- confirmed by reading `Minimap.cs`, not assumed. The
+   fancier 2-triangle billboard option (§5.3 option 2) was not built --
+   not needed once the cheap option is confirmed sufficient.
 8. **[Implemented 2026-09-14]** Set `lodBias` to 1.0 on the PC tier
    (`QualitySettings.asset`) now that step 1 has landed.
 

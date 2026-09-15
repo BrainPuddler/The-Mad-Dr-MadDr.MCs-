@@ -830,6 +830,43 @@ public class MonsterBody : MonoBehaviour
     /// <summary>Called by the agent every frame with the body's actual
     /// world velocity. All stepping is derived from it -- nothing here
     /// reads an animation clock.</summary>
+    // docs/39 §11 item 7 (Map-band impostor, cheapest sanctioned option:
+    // "cull the body, keep the minimap blip and the selection ring").
+    // Null until the first SetBodyVisible call, so the very first frame
+    // always actually applies instead of a `false == false` no-op
+    // hiding nothing.
+    private bool? _bodyVisible;
+
+    /// <summary>Toggles every renderer that makes up the creature's own
+    /// visible body -- `_torso` (which already carries the LOD0/1/2
+    /// LODGroup, wings, and the weapon, all parented under it -- see
+    /// `Build`) plus each leg's Upper/Lower/Foot/Hip (parented directly
+    /// to this component's own root transform, NOT under `_torso`, so
+    /// they need their own toggle). Deliberately does NOT touch
+    /// `_selectionCollider` (clicking a Map-band unit should still work)
+    /// or the selection ring (`MonsterAgent`'s own child, a sibling of
+    /// this component's transform, never part of this creature's body
+    /// hierarchy at all) or anything minimap-related (a wholly separate
+    /// system that already draws every unit as a blip regardless of
+    /// this). Cached against redundant `SetActive` calls -- this runs
+    /// every `UpdateLocomotion`, so without the cache it would call
+    /// `SetActive(true)` on an already-active hierarchy every single
+    /// frame outside the Map band.</summary>
+    private void SetBodyVisible(bool visible)
+    {
+        if (_bodyVisible == visible) return;
+        _bodyVisible = visible;
+        if (_torso != null) _torso.gameObject.SetActive(visible);
+        for (var i = 0; i < _legs.Count; i++)
+        {
+            var leg = _legs[i];
+            if (leg.Upper != null) leg.Upper.gameObject.SetActive(visible);
+            if (leg.Lower != null) leg.Lower.gameObject.SetActive(visible);
+            if (leg.Foot != null) leg.Foot.gameObject.SetActive(visible);
+            if (leg.Hip != null) leg.Hip.gameObject.SetActive(visible);
+        }
+    }
+
     public void UpdateLocomotion(Vector3 velocity, float dt)
     {
         // docs/39 §11 item 6 (LOD-aware animation): a monster's own
@@ -844,6 +881,19 @@ public class MonsterBody : MonoBehaviour
         // frame changes nothing about where the unit actually is or
         // where it's going, only how often its pose gets recomputed.
         var band = AnimationLodBudget.CurrentBand;
+
+        // docs/39 §11 item 7: force-cull the WHOLE body in the Map band,
+        // regardless of what item 1's LODGroup would do on its own --
+        // its 0.6% screen-height cutoff roughly tracks the Map band's
+        // 250 m start for a "typical" ~4 m monster (crosses around
+        // ~284 m camera height, comfortably inside 250-300 m) but drifts
+        // for a bulkier/taller genome, and never covered legs/wings/
+        // weapon at all (they aren't part of that LODGroup's own
+        // renderer list). This runs even on frames the throttle below is
+        // about to skip, so a unit that entered Map band while already
+        // idle doesn't wait for its next animation tick to disappear.
+        SetBodyVisible(band != AnimationLodBudget.Band.Map);
+
         if (!AnimationLodBudget.ShouldTick(band))
         {
             _skippedAnimDt += dt;

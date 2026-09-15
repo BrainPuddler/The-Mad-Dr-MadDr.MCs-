@@ -20901,3 +20901,100 @@ contributor, named but not measured in item 4/5's own scope notes.
 standing caveat) for the one-line code change; the real verification is
 external (the creator's own next capture), not something checkable from
 inside this environment. See docs/36 entry 19 for what to check.
+
+## 2026-09-16 follow-up: creator calls performance "adequate" at 300 m; item 4's SRP-batching ratio left formally unconfirmed
+
+A second capture came back at the restored 300 m ceiling: opaque draw
+events 344 (near) / 1246 (wide), shadowmap draws 124 (near) / 15 (wide)
+— both far below the original 1218/8601 and 11503/4729. Flagged to the
+creator that this drop is NOT on its own proof the item 4 batching fix
+specifically worked, since SRP batching changes draw-call COST, not
+draw-call COUNT, and this capture's game state (citizen counts, traffic
+%) differs from the original one — the shadowmap collapse is much more
+likely item 5's doing (fewer shadow-casting objects), and some of the
+opaque-count drop may just be a lighter scene this time. Asked for the
+`(RP 3:0) DrawOpaqueObjects` node expanded (the `DrawSRPBatcher` vs raw
+`Draw` split, same breakdown the original capture showed) as the actual
+confirming evidence.
+
+**Creator response: "performance is adequate for now. Let's move on."**
+Treated as a real decision, not a thing to re-litigate — this project's
+own established norm ([[maddr-editor-verification-workflow]]) is that
+the creator, not the assistant, decides when "good enough" is good
+enough, and re-asking for the same capture after being told to move on
+would be exactly the excessive-questions failure mode to avoid.
+`maxHeight` stays at 300 m. The SRP-batching-ratio question is now
+CLOSED as "not formally confirmed, not going to be" rather than left
+open -- if the cliff resurfaces later at a wider zoom or heavier scene,
+the `ApplyMatteFinish` `MaterialPropertyBlock` roof override (named in
+item 4/5's own notes, never measured) is still the next place to look,
+not a mystery to re-diagnose from scratch.
+
+Continued straight to docs/39 §11 item 7 (Map-band impostor) the same
+session -- see its own docs/12 entry below.
+
+## 2026-09-16 follow-up: docs/39 §11 item 7 -- Map-band impostor (cheapest option)
+
+Per creator direction ("get on with the fixes and upgrades," repeated
+from the item 6 follow-up), continued to the next ranked backlog item.
+§5.3 names two options, cheapest first: cull the body and rely on the
+minimap blip + selection ring (already-existing systems), or a real
+2-triangle billboard. Built the first one -- it's genuinely free once
+confirmed sufficient, and nothing so far suggested it wouldn't be.
+
+**Investigated whether this was already free from item 1's LODGroup
+work before writing any new code** (worth checking given this project's
+own "reuse before rebuilding" pattern): `LabMeshBuilder.
+StandardMonsterLodScreenHeights = { 0.06, 0.015, 0.006 }` means Unity's
+LODGroup already culls the LOD0/1/2 body mesh below 0.6% screen height.
+Worked the actual crossover camera height for a "typical" 4 m monster
+using §1.1's own formula (upright px/m = (935/distance) * cos 50°,
+distance = height / sin 50°): ~284 m -- comfortably inside the 250-300 m
+Map band, confirming item 1's LODGroup ALREADY silently culls a
+typical-sized monster's main body somewhere inside the Map band, not
+exactly at its 250 m start (a bulkier/taller genome culls later,
+possibly not until near or past 300 m). Two real gaps beyond that
+approximation, found by tracing the actual GameObject hierarchy in
+`MonsterBody.cs` rather than assuming: (1) wings and the weapon are
+parented under `_torso` alongside the LOD-grouped body but are built by
+separate methods (`BuildWings`/`BuildWeapon`) OUTSIDE the "LabBody"
+holder `AttachLodded` builds -- so they are NOT among the renderers
+`LODGroup.SetLODs` manages, and never culled by distance at all before
+this; (2) legs (`LabMeshBuilder.AttachChunks` for Upper/Lower/Foot/Hip)
+are parented directly to `MonsterBody`'s own root `transform` -- a
+SIBLING of `_torso`, not a child of it -- so they're outside the
+LODGroup's reach for the same reason.
+
+**Fix:** new `MonsterBody.SetBodyVisible(bool)`, called unconditionally
+every `UpdateLocomotion` (even on throttled/skipped frames, so a unit
+idling when it crosses into Map band doesn't wait for its next
+animation tick to disappear) — `SetActive(false)` on `_torso` and every
+leg's Upper/Lower/Foot/Hip once `AnimationLodBudget.CurrentBand ==
+Band.Map`, `SetActive(true)` otherwise, cached against redundant calls
+on frames where the band hasn't changed. Reuses item 6's `AnimationLodBudget`
+directly -- exactly the kind of shared-infrastructure payoff building it
+as a small standalone static class was meant to enable, not
+speculative reuse.
+
+**Confirmed by reading, not assuming, that the two "keep visible" halves
+of §5.3 option 1 already work:** the selection ring (`MonsterAgent`'s
+own `ring.transform.SetParent(transform, false)`) and `_selectionCollider`
+(`gameObject.AddComponent<BoxCollider>()`) both live directly on the
+shared root GameObject `MonsterBody`/`MonsterAgent` share, never
+touched by `SetBodyVisible` at all. `Minimap.cs` was grepped for any
+`isVisible`/`activeInHierarchy`/`.enabled` check that could make a
+blip disappear when its unit's renderers do -- none exists; it already
+draws every unit from a live registry independent of render state.
+
+**Deliberately not built:** the 2-triangle billboard (§5.3 option 2) --
+the cheap option wasn't ruled insufficient by anything found this
+session, so building the fancier one would be speculative work against
+a requirement nobody's raised yet.
+
+**Verification:** brace/paren balance (confirmed) and read-through only
+(same standing caveat as every Unity-side change here) -- this item is
+unusually visual/behavioral rather than purely mechanical, so read-
+through confidence is lower than a typical choke-point fix; flagged
+accordingly in docs/36 entry 22, including the untested-legless-plan and
+untested-wings/weapon gaps specifically (both new code paths that never
+had any distance-based hiding before this).

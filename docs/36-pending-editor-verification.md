@@ -594,3 +594,33 @@ skipped `dt` into the next tick that runs.
   fix** — see docs/39 §11 item 6's own note on why (four separate call
   sites, no shared choke point found yet). Not a regression, just an
   intentionally unfinished half of this item.
+
+## 22. Map-band body cull (docs/39 §11 item 7)
+
+`MonsterBody.SetBodyVisible` hides `_torso` (body/wings/weapon) and
+every leg segment once the camera enters the Map band (250 m+, reachable
+again now that `maxHeight` is back at 300 — entries 18/19), leaving the
+selection ring, click hitbox, and minimap blip untouched.
+
+- **The actual thing to look at:** zoom out past 250 m with a monster
+  selected and confirm the body visibly disappears while the selection
+  ring and minimap blip both keep showing exactly where the unit is —
+  this is the one item this session where the pass/fail is genuinely
+  "did it look right," not just "did it not crash."
+- **Zoom back in through 250 m** and confirm the body reappears cleanly
+  — no pop-in glitch, no frozen mid-gait pose (the throttle from entry
+  21 should mean it resumes wherever its accumulated dt puts it).
+- **Legless plans** (blob/serpentine/floater/treant — `_legs.Count == 0`)
+  only have `_torso` to hide; confirm one of these specifically, not
+  just a legged monster, since the leg-hiding code path is untested by a
+  legless creature entirely.
+- **A creature mid-special-attack or mid-gait-fail-safe when it crosses
+  into Map band** — confirm nothing about `SetBodyVisible` fighting with
+  those other systems (e.g., a special-attack VFX anchored to a now-
+  hidden torso transform still tracking the right position, even though
+  the torso itself isn't rendering).
+- **Weapon and wings specifically** — these were NOT covered by item 1's
+  own LODGroup cull (only the LOD0/1/2 body mesh was), so this is the
+  first time they've ever been hidden by distance at all; confirm they
+  actually disappear along with the rest of the body rather than
+  floating disembodied (the exact failure mode this item exists to fix).
