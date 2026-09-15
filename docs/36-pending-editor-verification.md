@@ -462,3 +462,64 @@ those individual call sites themselves edited.
   in this backlog; this item's own contribution should show up as a
   measurable per-sphere/cylinder triangle reduction across the whole
   scene, on top of items 1/2's creature-specific wins.
+
+## 18. `MaterialPropertyBlock` batching break fixed via a cached tiling-Material cache (docs/39 §11 item 4)
+
+`RuntimeCityBuilder.ApplyWorldScaledTiling` no longer overrides
+`_BaseMap_ST` per-instance via `MaterialPropertyBlock` (confirmed, from
+a real Frame Debugger capture this session, to be exactly why opaque
+draw events went from 1218 at the default height to 8601 above ~200 m
+without a matching drop in SRP-batched entries). It now looks up/builds
+a cached, shared Material variant per (base material, tile-count bucket
+rounded to the nearest 0.25) and assigns that to `renderer.
+sharedMaterial` instead — same pattern `PropLibrary.DoubleSidedCache`
+already uses for a different property.
+
+- **Take a fresh Frame Debugger capture at the same >150 m height this
+  bug was originally found at** (the two Frame Debugger + Profiler
+  screenshots from this session are the baseline — before: 1218 opaque
+  events, 33 SRP-batched / 1185 raw `RenderLoop.Draw`, at the default
+  height; 8601 at the wide-zoom capture with no batcher breakdown taken
+  yet). Confirm the fix actually moves most of those events from raw
+  `RenderLoop.Draw` into `RenderLoop.DrawSRPBatcher`, and confirm actual
+  frame time improves at wide zoom, not just the draw-call count.
+- **Every textured building/prop still tiles correctly** — walk a few
+  differently-sized building walls and small props and confirm the
+  texture still reads at a sensible density (rounding the tile count to
+  the nearest 0.25 before caching should be visually invisible, but
+  "should be" is exactly what needs confirming here).
+- **Low-poly sphere/cylinder props (item 3, `PropLibrary`-routed) still
+  tile correctly too** — these compose the double-sided-clone cache
+  (`PropLibrary.DoubleSidedCache`) with the new tiling-variant cache, a
+  two-level lookup that was never live-tested; confirm a tiled sphere/
+  cylinder (e.g. a lamppost bulb) looks right, not stretched, doubled,
+  or reverted to a flat default tiling.
+- **Watch the Material variant cache doesn't balloon** — check the
+  Profiler's Memory module for total Material count after a full city
+  build; this is bounded by (distinct base materials) × (distinct tile
+  buckets actually generated), not by prop instance count, but that's a
+  read-through claim, not a measured one yet.
+- **Roof matte finish (`ApplyMatteFinish`) was deliberately left alone**
+  — it still uses its own `MaterialPropertyBlock` (smoothness override
+  on `GableRoof` shapes only), a known, smaller, NOT-fixed-this-session
+  contributor to the same class of batching break. Out of this item's
+  scope; flag separately if it turns out to matter once measured.
+
+## 19. Camera zoom-out ceiling tightened again: 300 m -> 150 m (interim, pending item 4 confirmation)
+
+`SimpleCameraRig.maxHeight` default dropped from 300 to 150 as a
+same-session stopgap once the item 4 root cause above was identified
+but not yet confirmed fixed live — see docs/39 §1.2's "currently
+unreachable" note on the Map band and Overview's upper half.
+
+- **Scroll-zoom and Shift+up now stop at 150 m**, not 300 — confirm
+  both input paths respect the new default, same check as entry 15
+  already asked for the 300 m change.
+- **This is meant to be temporary.** Once entry 18's fix is confirmed
+  (draw calls actually batch, frame time holds up above 200 m), raise
+  `maxHeight` back up — probably toward the old 300–400 m range, not
+  necessarily reverted to exactly 300 — and re-verify frame time at the
+  new ceiling before calling it settled. Don't just leave it at 150
+  because it happens to be safe; that quietly kills the Overview band's
+  upper half and the entire Map band (docs/39 §1.2), which was never
+  the actual design intent.

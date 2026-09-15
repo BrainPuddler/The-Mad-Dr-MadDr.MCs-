@@ -2136,16 +2136,37 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// project, not a measured/authored value.</summary>
     private const float TileWorldMeters = 6f;
 
-    private static MaterialPropertyBlock _tilingBlock;
+    // docs/39 §11 item 4 (2026-09-16, real Frame Debugger capture):
+    // this used to be a MaterialPropertyBlock override, which is exactly
+    // the "SRP Batcher can't batch instances with a per-renderer property
+    // block" break that item flags -- confirmed live, opaque draws went
+    // from 1218 events (33 SRP-batched, 1185 raw `RenderLoop.Draw`) at
+    // the default camera height to 8601 at >200m, i.e. nearly every
+    // textured dressed cube/prop in the scene was paying a raw draw call
+    // instead of batching, and that count scales directly with how much
+    // of the city is in frame. Fixed the same way `PropLibrary`'s own
+    // `DoubleSidedCache` already fixes an identical problem one property
+    // over (see that file's header comment): cache a real, shared
+    // Material VARIANT per (base material, quantized tile count) instead
+    // of a per-instance property-block override, so every renderer that
+    // lands in the same bucket shares one Material instance and stays
+    // SRP-batchable.
+    private static readonly Dictionary<(Material, float), Material> _tiledMaterialCache =
+        new Dictionary<(Material, float), Material>();
 
-    /// <summary>Per-instance `_BaseMap` tiling via MaterialPropertyBlock,
-    /// derived from this object's own world scale -- deliberately NOT a
-    /// per-instance Material (that would defeat SRP batching on every
-    /// shared dresser material, the exact regression this project's own
-    /// material-caching convention exists to avoid). Only touches
-    /// materials that actually carry a `_BaseMap` texture (`MTextured`'s
-    /// output) -- a flat `M()` color has no texture to tile, so this is a
-    /// silent no-op for it either way.
+    /// <summary>World-scale-derived `_BaseMap` tiling, applied as a
+    /// cached shared Material variant (see the field comment above) --
+    /// deliberately NOT a MaterialPropertyBlock and NOT a fresh Material
+    /// per call, either of which defeats SRP batching. Reads `renderer.
+    /// sharedMaterial` as the base to derive from (not a separately
+    /// passed-in material) so it composes correctly whether the caller
+    /// just assigned a plain cached dresser material or -- as
+    /// `SpawnLowPolyPrim` does -- `PropLibrary`'s own double-sided clone
+    /// of one. Only touches materials that actually carry a `_BaseMap`
+    /// texture (`MTextured`'s output) -- a flat `M()` color has no
+    /// texture to tile, so this is a silent no-op for it either way, and
+    /// the renderer just keeps sharing that one base material directly
+    /// (maximally batchable).
     ///
     /// Uses the LARGEST scale component as the size proxy rather than an
     /// average of all three: most dressed geometry here is a thin wall
@@ -2154,22 +2175,33 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// toward the thin axis. Approximate -- Unity's built-in primitive UV
     /// layout isn't reasoned about per-face here -- but it is a real,
     /// documented improvement over the flat constant it replaces, not a
-    /// claim of exactness.</summary>
-    private static void ApplyWorldScaledTiling(Renderer renderer, Material mat, Vector3 scale)
+    /// claim of exactness. The tile count is additionally rounded to the
+    /// nearest 0.25 before it becomes a cache key/bucket: invisible at
+    /// normal play distance, and it's what keeps the variant cache
+    /// bounded (a handful of buckets per base material, not one per
+    /// distinct building size ever generated).</summary>
+    private static void ApplyWorldScaledTiling(Renderer renderer, Vector3 scale)
     {
-        if (renderer == null || mat == null) return;
-        if (!mat.HasProperty("_BaseMap")) return;
-        if (mat.GetTexture("_BaseMap") == null) return;
+        if (renderer == null) return;
+        var baseMat = renderer.sharedMaterial;
+        if (baseMat == null) return;
+        if (!baseMat.HasProperty("_BaseMap")) return;
+        if (baseMat.GetTexture("_BaseMap") == null) return;
 
         var size = Mathf.Max(scale.x, Mathf.Max(scale.y, scale.z));
         if (size < 0.01f) return;
         var tiles = Mathf.Max(0.35f, size / TileWorldMeters);
+        var bucket = Mathf.Round(tiles * 4f) / 4f;
 
-        if (_tilingBlock == null) _tilingBlock = new MaterialPropertyBlock();
-        else _tilingBlock.Clear();
-        renderer.GetPropertyBlock(_tilingBlock);
-        _tilingBlock.SetVector("_BaseMap_ST", new Vector4(tiles, tiles, 0f, 0f));
-        renderer.SetPropertyBlock(_tilingBlock);
+        var key = (baseMat, bucket);
+        Material variant;
+        if (!_tiledMaterialCache.TryGetValue(key, out variant) || variant == null)
+        {
+            variant = new Material(baseMat);
+            variant.SetTextureScale("_BaseMap", new Vector2(bucket, bucket));
+            _tiledMaterialCache[key] = variant;
+        }
+        renderer.sharedMaterial = variant;
     }
 
     /// <summary>Colliderless styled primitive -- the dresser workhorse.
@@ -2203,7 +2235,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (renderer != null)
         {
             renderer.sharedMaterial = mat;
-            ApplyWorldScaledTiling(renderer, mat, scale);
+            ApplyWorldScaledTiling(renderer, scale);
         }
         return go;
     }
@@ -2214,18 +2246,19 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     /// sided-cull-off safety net every ProceduralMeshKit shape needs in
     /// an Editor-free environment (see PropLibrary.Spawn's own comment).
     /// The one thing it does NOT do that stock SpawnPrim always did is
-    /// world-scaled UV tiling (ApplyWorldScaledTiling reads the caller's
-    /// ORIGINAL `mat`, not the double-sided clone PropLibrary.Spawn
-    /// assigns, so it composes fine as a property-block overlay applied
-    /// after) -- applied here so callers see identical tiling behavior
-    /// whether SpawnPrim happens to route them through a stock primitive
-    /// or a low-poly mesh.</summary>
+    /// world-scaled UV tiling -- applied here so callers see identical
+    /// tiling behavior whether SpawnPrim happens to route them through a
+    /// stock primitive or a low-poly mesh. `ApplyWorldScaledTiling` reads
+    /// `renderer.sharedMaterial` (PropLibrary.Spawn's own double-sided
+    /// clone of `mat` by this point, not `mat` itself) as the base it
+    /// derives a tiled variant from, so the two caches compose correctly
+    /// instead of one silently overwriting the other's work.</summary>
     private GameObject SpawnLowPolyPrim(string key, PrimitiveType fallbackType, Vector3 position, Vector3 scale,
         Material mat, Transform parent)
     {
         var go = PropLibrary.Spawn(this, key, fallbackType, position, scale, mat, parent);
         var renderer = go.GetComponent<Renderer>();
-        if (renderer != null) ApplyWorldScaledTiling(renderer, mat, scale);
+        if (renderer != null) ApplyWorldScaledTiling(renderer, scale);
         return go;
     }
 
@@ -2274,7 +2307,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         filter.sharedMesh = mesh;
         var renderer = go.AddComponent<MeshRenderer>();
         renderer.sharedMaterial = mat;
-        ApplyWorldScaledTiling(renderer, mat, scale);
+        ApplyWorldScaledTiling(renderer, scale);
         if (matte) ApplyMatteFinish(renderer);
         return go;
     }
@@ -2555,13 +2588,14 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var cubeRenderer = cube.GetComponent<Renderer>();
         cubeRenderer.sharedMaterial = mat;
         // 2026-08 ("apply all texture and displacement map details"):
-        // per-instance tiling via MaterialPropertyBlock, same Tier 1a
-        // technique (docs/12) every other textured prop in this file
-        // already uses -- a no-op for the six massing materials' old
-        // untextured incarnation (ApplyWorldScaledTiling bails out on
-        // any material with no `_BaseMap` texture assigned), so this is
-        // purely additive now that NewTexturedMaterial gives them one.
-        ApplyWorldScaledTiling(cubeRenderer, mat, cube.transform.localScale);
+        // world-scaled tiling, same technique every other textured prop
+        // in this file already uses (docs/12; see ApplyWorldScaledTiling's
+        // own comment for the 2026-09 SRP-batching fix) -- a no-op for
+        // the six massing materials' old untextured incarnation
+        // (ApplyWorldScaledTiling bails out on any material with no
+        // `_BaseMap` texture assigned), so this is purely additive now
+        // that NewTexturedMaterial gives them one.
+        ApplyWorldScaledTiling(cubeRenderer, cube.transform.localScale);
         if (!keepCollider)
         {
             var collider = cube.GetComponent<Collider>();

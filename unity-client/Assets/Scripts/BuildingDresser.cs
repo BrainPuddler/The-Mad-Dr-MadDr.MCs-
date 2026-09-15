@@ -71,14 +71,17 @@ public static class BuildingDresser
     /// 2026-08 (docs/30 Tier 1): the (3,3) scale set here is now only the
     /// FALLBACK, applied if a caller somehow bypasses `RuntimeCityBuilder.
     /// SpawnPrim`. Every real call site goes through `SpawnPrim`, which
-    /// now overrides `_BaseMap_ST` per instance via a `MaterialPropertyBlock`
-    /// sized from that instance's own world scale -- the fix for the
+    /// applies world-scaled `_BaseMap` tiling via a cached shared Material
+    /// variant sized from that instance's own world scale (2026-09:
+    /// switched from a per-instance `MaterialPropertyBlock` override to
+    /// this cached-variant approach after a live capture showed the block
+    /// was defeating SRP batching -- see `RuntimeCityBuilder.
+    /// ApplyWorldScaledTiling`'s own doc comment) -- the fix for the
     /// exact "SAME 0..1 UV rect stretches across a 1m curb prop or a 30m
     /// building wall equally" gap this comment used to flag as an open
-    /// v0.1 simplification. See `SpawnPrim.ApplyWorldScaledTiling`'s own
-    /// doc comment for the reasoning; this material's own SHARED tiling
-    /// stays a harmless, never-actually-visible default now that every
-    /// consumer overrides it per instance.</summary>
+    /// v0.1 simplification. This material's own SHARED tiling stays a
+    /// harmless, never-actually-visible default now that every consumer
+    /// gets its own tiled variant instead.</summary>
     private static Material MTextured(string key, float r, float g, float b, Texture2D tex)
     {
         Material mat;

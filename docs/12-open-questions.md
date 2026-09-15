@@ -20675,3 +20675,80 @@ injected fake violation, and confirmed its self-check fires correctly
 when the deferred-exception count doesn't match. See docs/36 for the
 Editor-side checklist entry (visual/perf confirmation of the mesh swap
 itself).
+
+## 2026-09-16: docs/39 §11 item 4 -- SRP-batching break confirmed and fixed via a real Frame Debugger capture, camera cap tightened as an interim stopgap
+
+First real Profiler/Frame Debugger data this project has ever had (the
+creator's own capture: one Profiler `.data` file plus three Frame
+Debugger screenshots, at the default camera height and at a wide,
+zoomed-out framing). The requested comparison from the 2026-09-15
+session's resume point (docs/12's own prior entry that day) finally
+came back.
+
+**What the capture showed:** `(RP 3:0) DrawOpaqueObjects` went from
+1218 draw events at the default framing to 8601 at the wide framing --
+roughly 7x, far more than the wider view alone would explain. The
+default-height capture's own breakdown made the mechanism visible
+directly: of those 1218 events, only 33 went through `RenderLoop.
+DrawSRPBatcher`; the other 1185 were raw, unbatched `RenderLoop.Draw`
+calls. `DrawDepthNormalPrepass` scaled the same way (981 -> 8319),
+consistent with the same underlying objects being drawn twice per
+frame (prepass + opaque). This is the exact shape of docs/39 §11 item 4's
+suspected `MaterialPropertyBlock`-breaks-SRP-batching problem, now
+confirmed with real numbers instead of inferred from first principles.
+
+**Root cause, found by grepping for `MaterialPropertyBlock` across
+`unity-client/Assets`:** `RuntimeCityBuilder.ApplyWorldScaledTiling` --
+the single choke-point every dressed building cube/prop's world-scaled
+`_BaseMap` tiling already routes through (docs/30 Tier 1) -- set
+`_BaseMap_ST` via a per-renderer `MaterialPropertyBlock`. Unity's SRP
+Batcher is documented to be incompatible with any renderer carrying a
+property-block override, so essentially every textured piece of city
+geometry was paying a raw draw call instead of batching, and that raw
+count scales directly with how much of the city is in the frustum --
+exactly why zooming out made it worse, not better (LOD/culling from
+items 1-3 should otherwise have helped at wide zoom, not hurt it).
+
+**Fix:** replaced the property-block override with a cached, shared
+Material variant per (base material, tile-count bucket rounded to the
+nearest 0.25), mirroring `PropLibrary.DoubleSidedCache` -- an existing,
+already-proven fix for the identical "SRP Batcher can't batch a
+per-renderer override" problem one property over (2026-08, docs/12).
+`ApplyWorldScaledTiling`'s signature dropped its separate `mat`
+parameter in favor of reading `renderer.sharedMaterial` as the base to
+derive from, so it composes correctly with `PropLibrary`'s own
+double-sided-clone variant instead of silently working from the wrong
+material. Rounding the tile count bounds the cache size to a handful of
+buckets per base material rather than one per distinct building size
+ever generated -- deliberately NOT a per-instance Material (the exact
+regression this project's material-caching convention exists to avoid)
+and NOT a world-space-UV shader rewrite (the other fix direction docs/39
+item 4 named -- bigger, and not needed once the property-block was
+identified as the actual mechanism). `ApplyMatteFinish` (roof
+smoothness override) still uses its own `MaterialPropertyBlock` and was
+deliberately left alone -- same class of problem, smaller and
+unmeasured scope, not part of this fix.
+
+**Camera cap tightened 300 m -> 150 m, same session, as an interim
+stopgap:** creator direction, since the fix above hasn't been confirmed
+live yet and the measured cliff sits above ~200 m. `SimpleCameraRig.
+maxHeight` default changed the same way the 400 -> 300 change did
+(docs/12, 2026-09-15) -- an Inspector field, not a const, specifically
+so it's easy to raise back. **This has a real design cost, not just a
+number change:** 150 m sits below the OLD 250 m Map-band floor, so the
+entire Map band and the top half of Overview (docs/39 §1.2) are
+currently unreachable in play, not merely smaller. Item 7 (Map-band
+impostor) is unimplemented, so nothing live depends on that band today
+-- but this is meant to be temporary, reverted upward once item 4's fix
+is confirmed and re-measured, not a quiet redesign of the zoom bands.
+docs/39 §1, §1.2, and §5.3 updated in place to describe the current
+(temporary) reality.
+
+**Verification:** brace/paren balance and read-through only for the C#
+change (same standing caveat as every Unity-side change here) -- the
+Frame Debugger/Profiler capture that motivated this fix is real
+creator-provided data, but the FIX itself is unverified against a
+second capture; that's the actual next thing to check, not a re-guess
+at the mechanism. See docs/36 entries 18-19 for the Editor-side
+checklist (a fresh Frame Debugger capture at the new 150 m ceiling is
+the single most valuable thing that could come back next).

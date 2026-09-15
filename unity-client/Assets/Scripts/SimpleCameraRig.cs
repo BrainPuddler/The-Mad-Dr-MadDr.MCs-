@@ -50,15 +50,16 @@ public class SimpleCameraRig : MonoBehaviour
     private const float MinHeight = 8f;
 
     // 2026-09 creator direction: cap zoom-out below the old fixed 400 m
-    // ceiling. Both scroll-zoom and Shift+up/down share this clamp, same
-    // as MinHeight above. docs/39's Map band (250 m up to the old 400 m
-    // ceiling: "a monster is 5-8 px ... minimap carries the information")
-    // shrinks to 250-300 m at the new default -- the camera never reaches
-    // a range where there was much left to see anyway. An Inspector field
-    // (not a const like MinHeight) so it can be retuned per playtest
-    // without a code change.
-    [Tooltip("Highest the camera can zoom or Shift-move out to, in meters (docs/39's Map band runs from 250 m up to this). Default 300 -- was a fixed 400 before 2026-09.")]
-    public float maxHeight = 300f;
+    // ceiling, then tightened again the same month once a live Frame
+    // Debugger capture showed frame time collapsing above ~200 m (docs/39
+    // §11 item 4's MaterialPropertyBlock/SRP-batching break -- see
+    // docs/12). 150 m keeps the camera comfortably under that cliff until
+    // item 4 itself is fixed. Both scroll-zoom and Shift+up/down share
+    // this clamp, same as MinHeight above. An Inspector field (not a
+    // const like MinHeight) so it can be retuned per playtest without a
+    // code change.
+    [Tooltip("Highest the camera can zoom or Shift-move out to, in meters. Default 150 -- was 300, then a fixed 400 before that -- tightened 2026-09 pending the docs/39 item 4 SRP-batching fix.")]
+    public float maxHeight = 150f;
 
     // 2026-07 creator direction: "limit the shadows to objects in the
     // camera view and close to the visible area." Shadow distance was a
