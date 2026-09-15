@@ -624,3 +624,40 @@ selection ring, click hitbox, and minimap blip untouched.
   first time they've ever been hidden by distance at all; confirm they
   actually disappear along with the rest of the body rather than
   floating disembodied (the exact failure mode this item exists to fix).
+
+## 23. LOD-aware animation, humanoid half (docs/39 §11 item 6 completion)
+
+Finishes item 6 (entry 21 was monsters only). `HumanoidCombatant`,
+`Worker`, and `RosterInfantryView` each gate every
+`HumanCharacterAnimator.TickXxx` call through the same
+`AnimationLodBudget.TryGetAnimDt` helper `MonsterBody` uses indirectly --
+movement/combat/state-machine code in those classes is untouched, only
+the animator calls themselves throttle.
+
+- **Citizens/soldiers/police/militia (`HumanoidCombatant`) and Workers**
+  visibly slow their gait/idle/aim animation to every-other-frame in the
+  Overview band and freeze in Map, same as monsters -- confirm this at
+  a crowd of these specifically, not just monsters, since this is a
+  DIFFERENT code path with its own accumulator fields per instance.
+- **Roster infantry (`RosterInfantryView`'s Riflemen/Flamethrower
+  Troopers)** -- this one shares ONE animation-tick decision across
+  EVERY infantry unit per frame (a single manager, not one MonoBehaviour
+  per unit) rather than each unit having its own accumulator; confirm
+  a squad of these throttles together correctly, and that a unit that
+  spawns mid-Overview-band doesn't get a broken first tick (it should
+  just inherit whatever `animTick`/`animDt` that frame already computed,
+  same as every other live unit).
+- **A dying unit crossing into Map/Overview band** — `TickDeath` is now
+  throttled/frozen too for all three classes; confirm a death animation
+  doesn't look stuck/frozen mid-collapse in a way that reads as a bug
+  rather than "distant unit, animation throttled." The destroy-after-
+  timer logic itself (`_deathTimer`/`v.DeathTimer`) still counts down on
+  the REAL per-frame `dt`, unaffected by animation throttling, so a
+  frozen-looking corpse should still despawn on schedule even if its
+  pose never finished animating -- confirm that's actually true, not
+  just intended.
+- **`HumanCharacterKit.cs` is untouched** — investigation found it's a
+  geometry/rig-definition file with no `Update()` or `Tick` calls of its
+  own at all, so there was nothing to gate there; not a gap, just a
+  correction of the original item 6 note's assumption that it was one
+  of the four call sites.

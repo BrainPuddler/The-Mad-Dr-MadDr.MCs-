@@ -17,13 +17,10 @@ using UnityEngine;
 /// the same frame (dozens of monsters) cost one comparison each after
 /// the first.
 ///
-/// 2026-09-16: `SimpleCameraRig.maxHeight` sits at 150 m (docs/39 §1.2,
-/// an interim stopgap for the §11 item 4 SRP-batching break), well below
-/// `MapHeight` below -- so `Band.Map` is currently unreachable in play,
-/// same known-and-flagged situation as item 5's zone-conditional rules.
-/// The thresholds themselves are left at their real docs/39 §1.2 values
-/// rather than temporarily lowered to match, so this keeps working
-/// unmodified once `maxHeight` is raised back.
+/// `SimpleCameraRig.maxHeight` is 300 m as of 2026-09-16 (docs/39 §1.2 --
+/// briefly tightened to 150 m mid-session as a stopgap for the §11 item 4
+/// SRP-batching break, raised back once that fix landed), so all three
+/// bands below are reachable in play.
 /// </summary>
 public static class AnimationLodBudget
 {
@@ -66,5 +63,32 @@ public static class AnimationLodBudget
             case Band.Overview: return (Time.frameCount & 1) == 0;
             default: return true;
         }
+    }
+
+    /// <summary>For a caller with SEVERAL animation-tick call sites per
+    /// Update (docs/39 §11 item 6's humanoid half -- `HumanoidCombatant`/
+    /// `RosterInfantryView`/`Worker` each branch into one of several
+    /// `HumanCharacterAnimator.TickXxx` calls depending on state, unlike
+    /// `MonsterBody`'s single `UpdateLocomotion` choke point). Call once
+    /// per Update, before deciding which `TickXxx` applies this frame:
+    /// if it returns true, use `effectiveDt` (already folded with any
+    /// accumulated skipped time) for whichever call actually fires; if
+    /// false, skip EVERY `TickXxx` call this frame entirely (the caller's
+    /// own state-machine/movement/gameplay logic around those calls still
+    /// runs as normal -- only the animator call itself is gated).
+    /// `skippedDt` is the caller's own per-instance accumulator field,
+    /// passed by ref so this stays a pure function with no static
+    /// per-unit state of its own.</summary>
+    public static bool TryGetAnimDt(ref float skippedDt, float dt, out float effectiveDt)
+    {
+        if (!ShouldTick(CurrentBand))
+        {
+            skippedDt += dt;
+            effectiveDt = 0f;
+            return false;
+        }
+        effectiveDt = dt + skippedDt;
+        skippedDt = 0f;
+        return true;
     }
 }

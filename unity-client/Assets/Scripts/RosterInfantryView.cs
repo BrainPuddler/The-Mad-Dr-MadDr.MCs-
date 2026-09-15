@@ -89,24 +89,35 @@ public class RosterInfantryView : MonoBehaviour
         builder = cityBuilder;
     }
 
+    // docs/39 §11 item 6 (LOD-aware animation, humanoid half): one
+    // manager driving every infantry visual, so the animation-tick
+    // decision (and its accumulated skipped dt) is computed ONCE per
+    // Update() and shared across every unit ticked this frame -- unlike
+    // HumanoidCombatant/Worker (one MonoBehaviour per unit, so each
+    // needs its own accumulator), every unit here was skipped on
+    // exactly the same frames as every other, so one shared accumulator
+    // is correct, not an approximation.
+    private float _skippedAnimDt;
+
     private void Update()
     {
         if (bridge == null || !bridge.HasMatch || builder == null) return;
         var dt = Time.deltaTime;
+        var animTick = AnimationLodBudget.TryGetAnimDt(ref _skippedAnimDt, dt, out var animDt);
 
         for (var i = 0; i < bridge.UnitCount; i++)
         {
             var u = bridge.UnitAt(i);
             if (!IsInfantry(u.SourceRosterKind)) continue;
             if (_deadHandled.Contains(u.EntityId)) continue;
-            TickUnit(u, dt);
+            TickUnit(u, dt, animTick, animDt);
         }
     }
 
     private static bool IsInfantry(RosterUnitKind? kind)
         => kind == RosterUnitKind.Rifleman || kind == RosterUnitKind.FlamethrowerTrooper;
 
-    private void TickUnit(SimUnit u, float dt)
+    private void TickUnit(SimUnit u, float dt, bool animTick, float animDt)
     {
         if (!_visuals.TryGetValue(u.EntityId, out var v))
         {
@@ -125,7 +136,7 @@ public class RosterInfantryView : MonoBehaviour
         {
             if (!v.Dying) { v.Dying = true; v.DeathTimer = DeathDestroyDelay; }
             v.Root.transform.position = pos;   // corpse settles where it fell -- match-core stops moving a dead unit too
-            HumanCharacterAnimator.TickDeath(v.Rig, v.AnimState, dt);
+            if (animTick) HumanCharacterAnimator.TickDeath(v.Rig, v.AnimState, animDt);
             v.DeathTimer -= dt;
             if (v.DeathTimer <= 0f)
             {
@@ -154,12 +165,13 @@ public class RosterInfantryView : MonoBehaviour
         var attacking = u.Order == UnitOrderKind.AttackUnit
             || u.Order == UnitOrderKind.AttackBuilding
             || u.Order == UnitOrderKind.AttackAnomaly;
+        if (!animTick) return;
         if (attacking)
-            HumanCharacterAnimator.TickAim(v.Rig, v.AnimState, aiming: true, firing: true, dt);
+            HumanCharacterAnimator.TickAim(v.Rig, v.AnimState, aiming: true, firing: true, animDt);
         else if (moveDist > StationaryEpsilon)
-            HumanCharacterAnimator.TickLocomotion(v.Rig, v.AnimState, moveDist, running: false, dt);
+            HumanCharacterAnimator.TickLocomotion(v.Rig, v.AnimState, moveDist, running: false, animDt);
         else
-            HumanCharacterAnimator.TickIdle(v.Rig, v.AnimState, twitchy: false, dt);
+            HumanCharacterAnimator.TickIdle(v.Rig, v.AnimState, twitchy: false, animDt);
     }
 
     private UnitVisual SpawnVisual(SimUnit u)

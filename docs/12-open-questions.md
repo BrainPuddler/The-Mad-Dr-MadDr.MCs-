@@ -20998,3 +20998,68 @@ through confidence is lower than a typical choke-point fix; flagged
 accordingly in docs/36 entry 22, including the untested-legless-plan and
 untested-wings/weapon gaps specifically (both new code paths that never
 had any distance-based hiding before this).
+
+## 2026-09-16 follow-up: docs/39 §11 item 6 finished -- humanoid half
+
+Creator direction ("go ahead and do the human thing") pointed back at
+item 6's own named gap from earlier this session: `HumanCharacterAnimator`
+had no shared choke point across its call sites the way `MonsterBody
+.UpdateLocomotion` did for monsters, so it was left unfinished.
+
+**Traced the actual call sites first, rather than trusting the earlier
+"four files" note at face value:** `HumanCharacterKit.cs` turned out to
+have NO `Update()`/`Tick*` calls at all -- it's a rig/geometry
+definition file, referenced only in a comment. The real count is THREE
+MonoBehaviours, each with its own `Update()`: `HumanoidCombatant` (one
+component per hostile-civilian-variant unit -- Grandma/Police/etc,
+docs/35), `Worker` (one per Worker), and `RosterInfantryView` (ONE
+manager driving every Rifleman/Flamethrower-Trooper visual from a
+single shared `Update()`, match-core-sim-driven -- same "one manager
+MonoBehaviour, walks every unit" shape `BaseDresser` already uses, per
+that class's own header comment).
+
+**New `AnimationLodBudget.TryGetAnimDt(ref float skippedDt, float dt,
+out float effectiveDt)`:** a second entry point alongside `CurrentBand`/
+`ShouldTick` for callers with SEVERAL animation-tick call sites per
+Update (unlike `MonsterBody`'s single one) -- returns whether to tick
+this frame and, if so, the skipped-time-folded dt to actually use;
+otherwise accumulates into the caller's own `skippedDt` and returns
+false. The caller decides what "skip" means for its own control flow
+(guard each `TickXxx` call individually, or early-return a whole
+sub-method) since unlike `MonsterBody.UpdateLocomotion` there's no
+single function boundary to skip wholesale -- movement, combat
+resolution, and state-machine logic in `HumanoidCombatant`/`Worker`
+must keep running on the real `dt` every frame regardless of animation
+throttling.
+
+**Wiring, one call computed once per `Update()`, reused at every
+`TickXxx` site reached that frame:**
+- `HumanoidCombatant`/`Worker`: per-instance `_skippedAnimDt`/`_animTick`/
+  `_animDt` fields (each unit has its own accumulator, correct since
+  each is its own MonoBehaviour with its own Update timing in principle,
+  even though in practice all instances share the same global camera-
+  band decision). Guarded every `TickDeath`/`TickIdle`/`TickHover`/
+  `TickLocomotion`/`TickWheelchair`/`TickCarry`/`TickBuild`/`TickHarvest`
+  call site across both files (8 total) -- either an inline `if
+  (_animTick)` or an early-return at the top of a sub-method
+  (`DriveMoveAnimation`, `DriveIdleOrMoveAnimation`) that ALL of that
+  method's own `TickXxx` branches funnel through, whichever fit the
+  existing structure without restructuring it.
+- `RosterInfantryView`: ONE class-level `_skippedAnimDt`, computed once
+  in `Update()` and passed as extra `(animTick, animDt)` parameters into
+  `TickUnit` -- correct (not an approximation) that every unit shares
+  one accumulator here, since they were all skipped on exactly the same
+  frames as each other (one shared camera-driven decision, not a
+  per-unit one). Guarded `TickDeath`/`TickAim`/`TickLocomotion`/
+  `TickIdle` (4 call sites) with the position/rotation update ahead of
+  the guard left unconditional, matching the same "translation isn't
+  gated, only the animator pose is" principle as everywhere else this
+  session.
+
+**Verification:** brace/paren balance (confirmed matching pre-edit
+counts across all four touched files: `AnimationLodBudget.cs`,
+`HumanoidCombatant.cs`, `Worker.cs`, `RosterInfantryView.cs`) and
+read-through only -- same standing caveat. This closes out docs/39 §11
+item 6 entirely; the ranked backlog (§11, items 0 through 8) now has no
+remaining unaddressed items. See docs/36 entry 23 for the Editor-side
+checklist.

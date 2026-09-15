@@ -675,21 +675,24 @@ before any monster or shader work even starts.
    casting to restrict. Zone-conditional casting for building dressing/
    trees/lampposts (Engagement-only) is NOT part of this pass -- it
    needs a live per-object zone-tier system this item didn't build.
-6. **[Implemented 2026-09-16 for monsters, pending Editor verification --
-   see docs/12] LOD-aware animation** in `HumanCharacterAnimator` and
-   `MonsterBody`: tick rate by band; freeze in Map. Done for `MonsterBody
-   .UpdateLocomotion` -- the single choke point every monster's gait/
-   idle/breath/flight-lift tick already runs through, gated by a new
-   shared `AnimationLodBudget` static (camera-height bands from §1.2:
-   always tick in Close/Normal, every second frame in Overview, frozen
-   in Map, with skipped dt folded into the next tick so nothing runs in
-   slow motion). `HumanCharacterAnimator` is NOT done -- unlike
-   `MonsterBody`, it's called from four separate files
-   (`HumanCharacterKit`, `HumanoidCombatant`, `RosterInfantryView`,
-   `Worker`) with no single shared per-frame choke point, so gating it
-   needs its own investigation into whether one of those call sites is
-   itself already a shared driver, not a blind copy-paste of the
-   monster fix into four places.
+6. **[Implemented 2026-09-16, pending Editor verification -- see docs/12]
+   LOD-aware animation** in `HumanCharacterAnimator` and `MonsterBody`:
+   tick rate by band; freeze in Map. `MonsterBody.UpdateLocomotion` --
+   the single choke point every monster's gait/idle/breath/flight-lift
+   tick already runs through -- is gated by a new shared
+   `AnimationLodBudget` static (camera-height bands from §1.2: always
+   tick in Close/Normal, every second frame in Overview, frozen in Map,
+   with skipped dt folded into the next tick so nothing runs in slow
+   motion). `HumanCharacterAnimator` has no single choke point of its
+   own (called from `HumanoidCombatant`, `RosterInfantryView`, and
+   `Worker` -- three separate MonoBehaviours, each with its own
+   `Update()`; `HumanCharacterKit` turned out to be geometry-only, no
+   Tick calls at all), so each of those three got its own per-instance
+   (`RosterInfantryView`: per-MANAGER, since it already drives every
+   infantry visual from one shared `Update()`) `AnimationLodBudget
+   .TryGetAnimDt` gate at every `HumanCharacterAnimator.TickXxx` call
+   site -- movement/combat/state-machine logic in those same methods is
+   untouched, only the animator calls themselves are throttled.
 7. **[Implemented 2026-09-16, pending Editor verification -- see docs/12]
    Map-band impostor**, the cheapest sanctioned option (§5.3 option 1:
    "cull the body, keep the minimap blip and the selection ring").

@@ -226,6 +226,15 @@ public class Worker : MonoBehaviour
     private bool _dying;
     private float _deathTimer;
 
+    // docs/39 §11 item 6 (LOD-aware animation, humanoid half) -- same
+    // shape as HumanoidCombatant's own fields of the same name: set once
+    // per Update(), read by every HumanCharacterAnimator.TickXxx call
+    // site reached this frame. State-machine/movement logic keeps using
+    // the real `dt`.
+    private float _skippedAnimDt;
+    private bool _animTick;
+    private float _animDt;
+
     // 2026-08 (creator report: "same problem as the monsters, walking
     // directly toward each other and not wandering. Why can't you use
     // the monster navigation system?"): a Worker never had a real
@@ -259,6 +268,7 @@ public class Worker : MonoBehaviour
     {
         if (_builder == null) return;
         var dt = Time.deltaTime;
+        _animTick = AnimationLodBudget.TryGetAnimDt(ref _skippedAnimDt, dt, out _animDt);
 
         // 2026-08: checked BEFORE the _combat.Alive guard below on
         // purpose -- once UnitCombat marks this Worker dead, `!Alive`
@@ -270,7 +280,7 @@ public class Worker : MonoBehaviour
         if (_dying)
         {
             _deathTimer -= dt;
-            HumanCharacterAnimator.TickDeath(_rig, _animState, dt);
+            if (_animTick) HumanCharacterAnimator.TickDeath(_rig, _animState, _animDt);
             if (_deathTimer <= 0f) Object.Destroy(gameObject);
             return;
         }
@@ -289,7 +299,7 @@ public class Worker : MonoBehaviour
         {
             _frameMoveDistance = 0f;
             TickCombat(enemy, dt);
-            HumanCharacterAnimator.TickLocomotion(_rig, _animState, _frameMoveDistance, running: true, dt);
+            if (_animTick) HumanCharacterAnimator.TickLocomotion(_rig, _animState, _frameMoveDistance, running: true, _animDt);
             _builder.ApplySeparation(_combat);
             SnapToGround();
             return;
@@ -330,22 +340,23 @@ public class Worker : MonoBehaviour
     /// hovering normally instead.</summary>
     private void DriveIdleOrMoveAnimation(float dt)
     {
+        if (!_animTick) return;
         switch (_state)
         {
             case ZombieState.PlayerMove:
             case ZombieState.SeekBuild:
             case ZombieState.SeekScavenge:
             case ZombieState.Wander:
-                if (_rig.HasLegs) HumanCharacterAnimator.TickLocomotion(_rig, _animState, _frameMoveDistance, running: false, dt);
-                else HumanCharacterAnimator.TickHover(_rig, _animState, _frameMoveDistance / Mathf.Max(dt, 0.0001f), dt);
+                if (_rig.HasLegs) HumanCharacterAnimator.TickLocomotion(_rig, _animState, _frameMoveDistance, running: false, _animDt);
+                else HumanCharacterAnimator.TickHover(_rig, _animState, _frameMoveDistance / Mathf.Max(dt, 0.0001f), _animDt);
                 break;
             case ZombieState.SeekDeliver:
-                if (_rig.HasLegs) HumanCharacterAnimator.TickCarry(_rig, _animState, _frameMoveDistance, dt);
-                else HumanCharacterAnimator.TickHover(_rig, _animState, _frameMoveDistance / Mathf.Max(dt, 0.0001f), dt);
+                if (_rig.HasLegs) HumanCharacterAnimator.TickCarry(_rig, _animState, _frameMoveDistance, _animDt);
+                else HumanCharacterAnimator.TickHover(_rig, _animState, _frameMoveDistance / Mathf.Max(dt, 0.0001f), _animDt);
                 break;
             default:
-                if (_rig.HasLegs) HumanCharacterAnimator.TickIdle(_rig, _animState, _twitchyIdle, dt);
-                else HumanCharacterAnimator.TickHover(_rig, _animState, 0f, dt);
+                if (_rig.HasLegs) HumanCharacterAnimator.TickIdle(_rig, _animState, _twitchyIdle, _animDt);
+                else HumanCharacterAnimator.TickHover(_rig, _animState, 0f, _animDt);
                 break;
         }
     }
@@ -713,7 +724,7 @@ public class Worker : MonoBehaviour
     /// stays in this state.</summary>
     private void TickStaffing(float dt)
     {
-        HumanCharacterAnimator.TickBuild(_rig, _animState, dt);
+        if (_animTick) HumanCharacterAnimator.TickBuild(_rig, _animState, _animDt);
         var b = FindStationedBuilding();
         if (b == null || b.State != BuildingState.UnderConstruction)
         {
@@ -766,7 +777,7 @@ public class Worker : MonoBehaviour
             return;
         }
 
-        HumanCharacterAnimator.TickHarvest(_rig, _animState, dt);
+        if (_animTick) HumanCharacterAnimator.TickHarvest(_rig, _animState, _animDt);
 
         var room = WorkerCarryCapacity - _carriedParts;
         if (room <= 0.01f) { _scavengeTarget = null; _state = ZombieState.SeekDeliver; return; }

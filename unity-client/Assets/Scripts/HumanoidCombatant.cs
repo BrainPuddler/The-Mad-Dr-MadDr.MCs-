@@ -66,6 +66,16 @@ public class HumanoidCombatant : MonoBehaviour
     private bool _dying;
     private float _deathTimer;
 
+    // docs/39 §11 item 6 (LOD-aware animation, humanoid half): set once
+    // per Update() and read by every `HumanCharacterAnimator.TickXxx`
+    // call site reached this frame (TickGuard/TickCombat/
+    // DriveMoveAnimation/Update itself) -- movement, combat, and state-
+    // machine logic in those same methods keep using the real `dt`
+    // unchanged; only the animator calls respect these.
+    private float _skippedAnimDt;
+    private bool _animTick;
+    private float _animDt;
+
     public void Init(RuntimeCityBuilder builder, HumanCombatProfile profile, Vector3 post)
     {
         _builder = builder;
@@ -263,11 +273,12 @@ public class HumanoidCombatant : MonoBehaviour
     {
         if (_builder == null) return;
         var dt = Time.deltaTime;
+        _animTick = AnimationLodBudget.TryGetAnimDt(ref _skippedAnimDt, dt, out _animDt);
 
         if (_dying)
         {
             _deathTimer -= dt;
-            HumanCharacterAnimator.TickDeath(_rig, _animState, dt);
+            if (_animTick) HumanCharacterAnimator.TickDeath(_rig, _animState, _animDt);
             if (_deathTimer <= 0f) Object.Destroy(gameObject);
             return;
         }
@@ -304,10 +315,13 @@ public class HumanoidCombatant : MonoBehaviour
         // wheels, not wings. TickIdle already safely no-ops its leg-
         // specific half on a legless rig (checked at its own call site),
         // so this is a plain two-way split, not three.
-        if (_rig.HasLegs || _profile.Visual.SeatedHeight > 0f)
-            HumanCharacterAnimator.TickIdle(_rig, _animState, _profile.Visual.Twitchy, dt);
-        else
-            HumanCharacterAnimator.TickHover(_rig, _animState, 0f, dt);
+        if (_animTick)
+        {
+            if (_rig.HasLegs || _profile.Visual.SeatedHeight > 0f)
+                HumanCharacterAnimator.TickIdle(_rig, _animState, _profile.Visual.Twitchy, _animDt);
+            else
+                HumanCharacterAnimator.TickHover(_rig, _animState, 0f, _animDt);
+        }
 
         _stateTimer -= dt;
         if (_stateTimer <= 0f)
@@ -401,12 +415,13 @@ public class HumanoidCombatant : MonoBehaviour
     // seated) still falls through to TickHover.
     private void DriveMoveAnimation(float moveDistance, float dt)
     {
+        if (!_animTick) return;
         if (_rig.HasLegs)
-            HumanCharacterAnimator.TickLocomotion(_rig, _animState, moveDistance, running: _state == State.Combat, dt);
+            HumanCharacterAnimator.TickLocomotion(_rig, _animState, moveDistance, running: _state == State.Combat, _animDt);
         else if (_profile.Visual.SeatedHeight > 0f)
-            HumanCharacterAnimator.TickWheelchair(_rig, _animState, moveDistance, dt);
+            HumanCharacterAnimator.TickWheelchair(_rig, _animState, moveDistance, _animDt);
         else
-            HumanCharacterAnimator.TickHover(_rig, _animState, moveDistance / Mathf.Max(dt, 0.0001f), dt);
+            HumanCharacterAnimator.TickHover(_rig, _animState, moveDistance / Mathf.Max(dt, 0.0001f), _animDt);
     }
 
     private float NextGuardDuration() { _pickSalt++; return 4f + Frac(_seed * 59.7f + _pickSalt * 3.1f) * 5f; }
