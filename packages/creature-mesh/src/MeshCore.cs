@@ -162,8 +162,38 @@ namespace MadDr.CreatureMesh
     /// dial can come later with the perf pass).</summary>
     public static class Prims
     {
+        // Thread-local, not a plain static: the JS original is a module
+        // global and safe because JS is single-threaded, but xUnit runs
+        // test classes in parallel by default, and nothing rules out a
+        // future Unity caller building LODs for several monsters off the
+        // main thread. A plain static here is a real, silent-corruption
+        // race (one thread's Build() reading a Detail another thread's
+        // Build() just changed mid-mesh) -- caught by
+        // DetailDialNeverLeaksIntoTheNextBuild flaking under `dotnet
+        // test`'s default parallelization before it shipped.
+        [ThreadStatic] private static double? _detail;
+
+        /// <summary>Tessellation dial for LOD: 1 = full detail. Read by
+        /// every primitive below via SegFor -- port of the Lab's
+        /// creature-renderer.js `_detail`/segFor (docs/39 SS11 item 1).
+        /// Callers that build a reduced-detail pass (CreatureBuilder.Build,
+        /// LegKit.Build) set this before building and MUST reset it to 1
+        /// immediately after -- never leak a reduced dial into a build
+        /// outside its own pass, same contract as the JS.</summary>
+        public static double Detail
+        {
+            get => _detail ?? 1;
+            set => _detail = value;
+        }
+
+        private static int SegFor(int n, int floor)
+        {
+            return Math.Max(floor, (int)Math.Round(n * Detail));
+        }
+
         public static void Ellipsoid(Builder mb, Vec3 c, Vec3 r, Col col, double gloss = 0.25, double emis = 0, int seg = 14, double tilt = 0)
         {
+            seg = SegFor(seg, 3);
             var chunk = mb.Begin(col, gloss, emis);
             var la = seg;
             var lo = (int)Math.Round(seg * 1.6);
@@ -218,6 +248,7 @@ namespace MadDr.CreatureMesh
         public static void Tube(Builder mb, IReadOnlyList<Vec3> path, IReadOnlyList<double> radii,
             Col col, double gloss = 0.25, double emis = 0, int sides = 10, int caps = 3)
         {
+            sides = SegFor(sides, 4);
             var chunk = mb.Begin(col, gloss, emis);
 
             // sanitize path: drop zero-length steps, floor radii
@@ -279,6 +310,8 @@ namespace MadDr.CreatureMesh
         public static void Torus(Builder mb, Vec3 center, Vec3 axis, double majorR, double minorR,
             Col col, double gloss = 0.4, double emis = 0, int nMaj = 14, int nMin = 8)
         {
+            nMaj = SegFor(nMaj, 6);
+            nMin = SegFor(nMin, 3);
             var chunk = mb.Begin(col, gloss, emis);
             var a = axis.Norm();
             var n = Math.Abs(a.Y) < 0.9
@@ -326,6 +359,15 @@ namespace MadDr.CreatureMesh
         public static void Lathe(Builder mb, IReadOnlyList<LatheLevel> levels, Col col,
             double gloss = 0.28, double emis = 0, int seg = 16)
         {
+            // The JS lathe() was never gated by _detail (site/creature-
+            // renderer.js never calls segFor here) -- docs/39 SS11 item 1
+            // explicitly asks this port to close that gap, since Lathe
+            // builds the torso, the single biggest tri contributor. Floor
+            // of 6 (vs. Tube's 4) because the torso is the primary
+            // silhouette read at every zoom band (docs/39 SS1.1): a
+            // hexagonal cross-section still reads as "body," a
+            // Tube-floor square one would not.
+            seg = SegFor(seg, 6);
             var chunk = mb.Begin(col, gloss, emis);
             var count = levels.Count;
             var rows = new int[count][];

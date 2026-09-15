@@ -53,7 +53,28 @@ Dropped relative to the JS (future passes): per-vertex color gradients
 (each material chunk is flat-colored), texture tiling, blink/gaze/
 breath animation channels, glow halos, faction kits (robot/alien
 re-skins), piston_leg's tank-tread variant (its spider-strut mode is
-used for the walking rig), the LOD detail dial.
+used for the walking rig).
+
+**LOD detail dial (docs/39 SS11 item 1):** ported, and extended past the
+JS -- `Prims.Detail`/`SegFor` gates `Ellipsoid`/`Tube`/`Torus` with the
+same floors as `site/creature-renderer.js`'s `_detail`/`segFor`, and
+additionally gates `Lathe` (floor 6), which the JS never did even though
+Lathe builds the torso, the single biggest tri contributor.
+`CreatureBuilder.Build(genome, detail)` sets/resets the dial around one
+build the same way the JS's `buildCreature()` does. Unlike the JS (which
+auto-searches `_detail` down until a single 9k-tri Lab budget is met),
+Unity fixes three passes at `detail = 1 / 0.55 / 0.3` for LOD0/1/2
+(`unity-client`'s `MonsterBody.Build` + `LabMeshBuilder.AttachLodded`).
+**Real measurement, not the doc's original estimate:** those fixed
+multipliers cut tris by roughly two-thirds (LOD0->LOD1) and another
+third (LOD1->LOD2) but do NOT reach docs/39 SS4.2's own budget table for
+the busiest genome (measured 16,001 / 5,652 / 3,814 against a
+budget of \<=9,000(?) / \<=3,500 / \<=900) -- see docs/39 SS11 item 1's
+status note and docs/12 for the full writeup. `Prims.Detail` is
+`[ThreadStatic]`, not a plain static -- a plain static here would be a
+silent cross-thread data race (this codebase's tests run in parallel by
+default under `dotnet test`, and nothing rules out a future concurrent
+Unity caller).
 
 `Builder.FixWinding()` runs at the end of every build: Unity
 single-sides materials where the Lab's shader is two-sided, so any

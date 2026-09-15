@@ -318,3 +318,61 @@ thigh+shin silhouette parented under the character root, independent of
 - Untested numbers (v0.1, reasoned not measured): `wheelDiameter` 0.64,
   `wheelThickness` 0.06, `legOffsetX`/`thighLength`/`thighThickness`/
   `shinThickness`/`footClearance` in `BuildSeatedLegs`.
+
+## 14. Creature LODGroup (docs/39 §11 item 1) -- never seen rendering
+
+New `LabMeshBuilder.AttachLodded`, `MonsterBody.Build` now builds three
+`CreatureBuilder.Build` passes per monster instead of one. The C# mesh
+math itself (`packages/creature-mesh`) is real-verified (103 passing
+`dotnet test` runs, including 5 repeats to rule out the thread-race
+flake found and fixed during this work) -- only the Unity wiring below
+is unverified.
+
+- **Spawn a monster, zoom through all four bands** (Close 8–25 m, Normal
+  25–110 m, Overview 110–250 m, Map 250–400 m) and confirm the body mesh
+  visibly changes detail at the right points, doesn't pop at the wrong
+  moment, and is fully culled (body invisible, minimap blip still shown)
+  past 250 m.
+- **Check every body plan at LOD2** (`Detail=0.3`), not just tetrapod —
+  the new `Lathe` floor (6) is untested visually; confirm the torso
+  still reads as a body and not a faceted mess on blob/serpentine/
+  treant/floater's larger lathe-built masses especially.
+- **Winding/normals at reduced segment counts** — confirm no inside-out
+  faces or lighting artifacts appear at LOD1/LOD2 that aren't present at
+  LOD0 (the geometry math is unchanged, only segment counts are lower,
+  but a Frame Debugger/Editor viewport is the only way to actually see
+  shading artifacts).
+- **Legs/wings still align correctly** under the LOD-swapped torso —
+  they're built once at full detail and don't LOD-swap themselves, so
+  confirm they don't visibly separate from the body as the torso mesh
+  changes underneath them.
+- **Frame Debugger / Profiler capture** per docs/39 §10.2 at the default
+  70 m framing with a realistic monster count on screen (the §10.3
+  50-monster curve), recorded back into docs/12 — this is the actual
+  performance claim this whole item exists to deliver, and nothing in
+  this environment could measure it.
+- **`lodBias` PC-tier change (1 instead of 2)** — confirm no other
+  system was quietly relying on the old doubled LOD thresholds (grep
+  found none, but grep isn't a substitute for seeing it run).
+
+## 15. Camera zoom-out ceiling: 400 m -> 300 m, now an Inspector field
+
+`SimpleCameraRig.maxHeight` (new public field, default 300) replaces the
+old `private const float MaxHeight = 400f`.
+
+- **Scroll-zoom and Shift+up stop at 300 m**, not 400 — confirm both
+  input paths actually respect the new default and that the camera
+  can't be pushed past it by any combination of the two in the same
+  frame.
+- **The Inspector field actually shows up and works** — change
+  `maxHeight` on the `SimpleCameraRig` component in the Inspector
+  (try something below 300, like 150, and something above, like 500)
+  and confirm zoom/Shift-move immediately respect the new value with no
+  recompile needed.
+- **Minimap frustum box** at the new ceiling — confirm `DrawCameraFrustum`
+  still reads sensibly at max zoom-out (its clamp already saturates well
+  under both 300 and the old 400, so this should be a no-op, but it's
+  worth a look since the Map band shrank).
+- **Map band feel** — confirm 250–300 m still feels like a useful
+  "strategic overview" range and doesn't feel suddenly cramped compared
+  to the old 250–400 m now that it's 100 m narrower.

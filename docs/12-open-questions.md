@@ -20326,3 +20326,163 @@ closed. Files touched: `RuntimeCityBuilder.cs` (`SpawnCube`, `SpawnPrim`,
 `AttachFireCluster`/`Init` signatures -- `BaseDresser.cs`'s RTS-base call
 site untouched, still works via the original transform.parent fallback
 since its root object never lost its own collider).
+
+## 2026-09-14: docs/39 §11 item 1 -- the creature-mesh LOD dial, ported and measured (real numbers, not the doc's original estimate)
+
+Implements the next item in the docs/39 backlog after item 0.5 (the
+collider fix). Item 1 ports the Lab's dropped tessellation dial
+(`site/creature-renderer.js`'s `_detail`/`segFor`, noted in
+`packages/creature-mesh/README.md`'s "dropped" list) into the C# mesh
+builder and wires it into a real Unity `LODGroup`.
+
+**`packages/creature-mesh` (TypeScript-adjacent C#, real `dotnet test`
+verification):**
+
+- `MeshCore.cs`'s `Prims` class gets a `Detail` dial and `SegFor(n,
+  floor)` helper, applied to `Ellipsoid` (floor 3), `Tube` (floor 4),
+  `Torus` (floor 6 major / 3 minor) -- the same floors the JS uses -- and
+  additionally to `Lathe` (floor 6, chosen not measured: the JS's own
+  `lathe()` was **never** gated by `_detail` at all, even though Lathe
+  builds the torso, the single biggest tri contributor; docs/39 §11 item
+  1 explicitly asked this port to close that gap).
+- `CreatureBuilder.Build(GenomeDto genome, double detail = 1)` sets
+  `Prims.Detail` before building and resets it to 1 in a `finally` block
+  after -- the JS's own "never leak a reduced dial into anything built
+  outside this pass" contract, but with an actual guarantee (`finally`)
+  instead of a bare reset statement, because C# builds can throw where
+  the JS's never did in practice.
+- **Real bug caught by the test suite, not by inspection:** the first
+  version used a plain `public static double Detail` field. `dotnet
+  test` runs test classes in parallel by default, and
+  `DetailDialNeverLeaksIntoTheNextBuild` flaked immediately -- one
+  thread's `Build(g, 0.3)` measured 16,001 tris (the FULL-detail count)
+  because a second thread's concurrent `Build()` call had reset the
+  shared static back to 1 mid-mesh. This was a genuine cross-thread data
+  race that could silently corrupt geometry (mixed segment counts within
+  one mesh), not just a flaky assertion. Fixed by making `Prims.Detail`
+  `[ThreadStatic]` (a nullable-backed property defaulting to 1 per
+  thread). All 103 `creature-mesh` tests, including three new ones
+  (`DetailDialReducesTriangleCountMonotonically`,
+  `DefaultDetailIsAStrictNoOp`, `DetailDialNeverLeaksIntoTheNextBuild`),
+  pass consistently across 5 repeated real `dotnet test` runs after the
+  fix.
+- **The measurement itself corrects docs/39 §4.2's own estimate.** That
+  section predicted `_detail ≈ 0.55` lands "a default body near 3k" and
+  `_detail ≈ 0.3` "near 800." Real numbers, busiest genome (mastermind +
+  titan + busiest families, the same genome
+  `TriangleCountStaysNearTheLabsMobileBudget` already used, matching its
+  measured LOD0 figure of 16,001 exactly): LOD0=16,001, LOD1(0.55)=5,652,
+  LOD2(0.3)=3,814. Default tetrapod (all genes 0.5): LOD0=12,182,
+  LOD1(0.55)=4,274, LOD2(0.3)=2,936. The dial cuts roughly two-thirds of
+  the tris from LOD0→LOD1 and another third from LOD1→LOD2 (real,
+  meaningful, and the biggest single per-unit saving in the backlog as
+  item 1 claimed) but does **not** land inside docs/39 §4.2's own budget
+  ceilings (Hero LOD1 ≤ 3,500/LOD2 ≤ 900; Standard LOD1 ≤ 3,000/LOD2 ≤
+  800) for either genome tested. docs/39 §4.2 and §11 item 1 updated
+  in place with the real table and an explicit note that closing the
+  remaining gap (steeper curve for hero-tier, and/or primitive-level
+  simplification beyond a uniform segment dial) is follow-up work, not
+  a defect in this item.
+- Test assertions were written against the *real* measured behavior
+  (monotonic decrease, real cut ratios) rather than the doc's original
+  absolute targets, once the first test run showed the targets were
+  aspirational, not yet achieved -- asserting a ceiling the code
+  provably doesn't hit would just be a test that always fails.
+
+**`unity-client` (no Editor in this environment -- verified by
+read-through and brace/paren balance only, per this repo's standing
+practice for Unity-side changes; flagged below and in docs/36 for real
+verification):**
+
+- New `LabMeshBuilder.AttachLodded(lodLabs, parent, localPos, scale,
+  screenHeights)`: builds one child mesh-holder per pre-built LOD
+  (reusing the existing `AttachChunks`), wraps them in a `LODGroup`
+  (`fadeMode = LODFadeMode.None` -- docs/39 §5.1: mass units pop, only
+  hero units cross-fade, not built yet), and calls
+  `RecalculateBounds()`. The original single-LOD `Attach` is kept
+  unchanged (still used nowhere else right now, but it's a genuinely
+  distinct capability -- one mesh, no `LODGroup` -- not dead code from
+  this change).
+- New `LabMeshBuilder.StandardMonsterLodScreenHeights = { 0.06, 0.015,
+  0.006 }` -- docs/39 §5.1's "Standard monster (4 m)" row. **Not yet
+  split by hero vs. standard tier** -- every monster uses these
+  thresholds for now; §5.1's own Hero row (mastermind-tier monsters, Big
+  Brain, faction HQ) is more generous and unapplied. Flagged as a
+  follow-up, not silently assumed away.
+- `MonsterBody.Build` now calls `CreatureBuilder.Build` three times (
+  `detail` 1 / 0.55 / 0.3) instead of once, and `LabMeshBuilder
+  .AttachLodded` instead of `.Attach`. Leg/Wing socket data and framing
+  heights (`Leg.Len`, `TopY`, ...) are read off the LOD0 (`detail=1`)
+  result only -- verified by reading the plan-builder functions that
+  populate them, which derive positions from genome params, never from
+  `seg`/`sides` counts, so they're identical across all three LODs by
+  construction. Legs and wings themselves are **not** LOD-swapped in
+  this pass (they're already small, and the gait rig's per-frame
+  transform-driven segments aren't a natural fit for mesh-swapping) --
+  scoped out deliberately, not an oversight.
+- `QualitySettings.asset`'s PC tier `lodBias` dropped from 2 to 1 (docs/39
+  §11 item 8, explicitly gated on item 1 landing): at `lodBias=2` every
+  `LODGroup` threshold above would have silently doubled, defeating the
+  budget the moment `LODGroup`s existed. Mobile tier was already 1;
+  unchanged.
+
+**What "done" still requires (docs/39 §10's own gate):** the creator
+opening the Editor and confirming, at the default 70 m framing: (1) a
+monster's LOD0/1/2 meshes all look correct (no missing chunks, no
+winding/normal breakage introduced by the lower segment counts,
+especially Lathe's new floor-6 torso at LOD2), (2) the `LODGroup`
+actually swaps meshes as the camera zooms through the Close/Normal/
+Overview bands and culls below the Overview threshold, (3) legs/wings
+stay correctly attached and undistorted at every LOD (they don't swap,
+but the torso under them does), and (4) a Frame Debugger/Profiler
+capture per docs/39 §10.2 at the default framing with several monsters
+on screen, recorded back into this doc. See docs/36 for the checklist
+entry.
+
+## 2026-09-15: camera zoom-out ceiling lowered 400 m -> 300 m, made an Inspector field
+
+Creator direction, prompted by the docs/39 §11 item 1 LOD discussion:
+the far end of the Map band (250-400 m, where a monster is only 5-8 px
+and the minimap already carries the information) wasn't buying the
+player much, so cap zoom-out at 300 m instead of 400 m -- and make the
+ceiling itself tunable rather than another baked-in literal.
+
+`SimpleCameraRig.cs`: `MaxHeight` was a `private const float = 400f`,
+shared by scroll-zoom (`Update`'s mouse-scroll branch) and the
+Shift+up/down vertical-move clamp. Changed to `public float maxHeight =
+300f` with a `[Tooltip]`, matching this file's existing convention for
+creator-tunable numbers (`shadowDistancePerHeight`,
+`shadowDistanceFloor`, `shadowDistanceCap` are all public Inspector
+fields already; only `MinHeight` stays a const, since nobody has asked
+to tune the near clamp). Both usages (`Mathf.Clamp(...,  MinHeight,
+maxHeight)` and `newPos.y < maxHeight`) updated to read the field.
+`Minimap.cs`'s `DrawCameraFrustum` had a stale comment citing the old
+8..400 range for context (its own 6-90 px clamp doesn't depend on the
+literal number, so no behavior change there) -- comment corrected to
+name the field instead of a number, so it can't go stale again the same
+way.
+
+**Consequence for docs/39, updated in place:** the Map band (§1.2)
+shrinks from 250-400 m to 250-300 m at the new default; §1's height-clamp
+row, §1.1's screen-space table's ceiling row (recomputed: 300 m ->
+392 m camera-to-ground distance, 2.4 px/m ground, 1.5 px/m upright,
+replacing the old 400 m/522 m/1.8/1.1 row), and §5.3's Map-band prose
+(monster size at the ceiling: 6-7 px, not 5-8 px) all updated to match.
+Shadow distance is unaffected -- `shadowDistanceCap` (250) already
+saturated well before either the old 400 m or the new 300 m ceiling
+(saturates once height exceeds ~124 m), so `UpdateShadowDistance()`
+needed no change. LOD thresholds (docs/39 §5.1) are screen-height
+*fractions*, not absolute metres, so the `LODGroup` work from item 1
+is also unaffected by this -- a monster still gets culled below the
+same 0.6% threshold, which now just corresponds to a slightly smaller
+absolute Map-band range.
+
+**Verification:** read-through and brace/paren balance only (no Editor
+in this environment, same standing caveat as every other Unity-side
+change here) -- confirmed no other script hardcodes the old 400 m value
+(`grep -rn "400f\|MaxHeight\b"` across `unity-client/Assets/Scripts`
+found only the two usages fixed above) and confirmed
+`RuntimeCityBuilder`'s traffic-freeze radius and `Minimap`'s frustum-box
+size both derive from LIVE camera height at read-time, not a cached
+copy of the old ceiling, so neither needed a code change beyond the
+comment fix. See docs/36 for the checklist entry.

@@ -59,59 +59,71 @@ namespace MadDr.CreatureMesh
     {
         /// <summary>Unknown plans fall back to tetrapod, same as the JS
         /// (`builders[plan] ?? planTetrapod`), so this never returns null
-        /// for a well-formed genome.</summary>
-        public static CreatureMeshResult Build(GenomeDto genome)
+        /// for a well-formed genome. `detail` drives every primitive's
+        /// tessellation dial (docs/39 SS11 item 1: 1 = LOD0, ~0.55 = LOD1,
+        /// ~0.3 = LOD2) -- reset to 1 before returning so a reduced-detail
+        /// pass never leaks into a build outside it, same contract as the
+        /// JS's buildCreature().</summary>
+        public static CreatureMeshResult Build(GenomeDto genome, double detail = 1)
         {
-            var mb = new Builder();
-            var o = MakeCtx(genome);
-            Sockets s;
-            switch (genome.Body.Plan)
+            Prims.Detail = detail;
+            try
             {
-                case "blob": s = PlanBlob(mb, o); break;
-                case "serpentine": s = PlanSerpentine(mb, o); break;
-                case "winged": s = PlanWinged(mb, o); break;
-                case "crab": s = PlanCrab(mb, o); break;
-                case "arachnid": s = PlanArachnid(mb, o); break;
-                case "avian": s = PlanAvian(mb, o); break;
-                case "treant": s = PlanTreant(mb, o); break;
-                case "floater": s = PlanFloater(mb, o); break;
-                default: s = PlanTetrapod(mb, o); break;
-            }
-
-            if (s.Leg != null)
-            {
-                s.Leg.Family = genome.Slots.Leg.Family;
-                s.Leg.Params = genome.Slots.Leg.Params;
-            }
-
-            if (s.Hand != null) BuildSlot(mb, "hand", genome.Slots.Hand, s.Hand, o);
-            if (!o.Headless)
-            {
-                if (s.Sensor != null)
+                var mb = new Builder();
+                var o = MakeCtx(genome);
+                Sockets s;
+                switch (genome.Body.Plan)
                 {
-                    // a STORAGE vessel is a tank on the creature's BACK/TOP,
-                    // not a sense organ on its head -- each plan provides its
-                    // own Back mount (docs/22, creator direction); the
-                    // derived DorsalSock is only a fallback for a plan that
-                    // forgot to. Everything else stays head-mounted.
-                    var sensorSock = IsStorageVessel(genome.Slots.Sensor.Family)
-                        ? (s.Back ?? DorsalSock(s)) : s.Sensor;
-                    BuildSlot(mb, "sensor", genome.Slots.Sensor, sensorSock, o);
+                    case "blob": s = PlanBlob(mb, o); break;
+                    case "serpentine": s = PlanSerpentine(mb, o); break;
+                    case "winged": s = PlanWinged(mb, o); break;
+                    case "crab": s = PlanCrab(mb, o); break;
+                    case "arachnid": s = PlanArachnid(mb, o); break;
+                    case "avian": s = PlanAvian(mb, o); break;
+                    case "treant": s = PlanTreant(mb, o); break;
+                    case "floater": s = PlanFloater(mb, o); break;
+                    default: s = PlanTetrapod(mb, o); break;
                 }
-                if (s.Eye != null) BuildSlot(mb, "eye", genome.Slots.Eye, s.Eye, o);
+
+                if (s.Leg != null)
+                {
+                    s.Leg.Family = genome.Slots.Leg.Family;
+                    s.Leg.Params = genome.Slots.Leg.Params;
+                }
+
+                if (s.Hand != null) BuildSlot(mb, "hand", genome.Slots.Hand, s.Hand, o);
+                if (!o.Headless)
+                {
+                    if (s.Sensor != null)
+                    {
+                        // a STORAGE vessel is a tank on the creature's BACK/TOP,
+                        // not a sense organ on its head -- each plan provides its
+                        // own Back mount (docs/22, creator direction); the
+                        // derived DorsalSock is only a fallback for a plan that
+                        // forgot to. Everything else stays head-mounted.
+                        var sensorSock = IsStorageVessel(genome.Slots.Sensor.Family)
+                            ? (s.Back ?? DorsalSock(s)) : s.Sensor;
+                        BuildSlot(mb, "sensor", genome.Slots.Sensor, sensorSock, o);
+                    }
+                    if (s.Eye != null) BuildSlot(mb, "eye", genome.Slots.Eye, s.Eye, o);
+                }
+
+                mb.FixWinding();
+
+                return new CreatureMeshResult
+                {
+                    Chunks = mb.Chunks,
+                    Skin = o.Skin,
+                    TopY = s.TopY,
+                    WaistY = s.WaistY,
+                    Leg = s.Leg,
+                    Wing = s.Wing,
+                };
             }
-
-            mb.FixWinding();
-
-            return new CreatureMeshResult
+            finally
             {
-                Chunks = mb.Chunks,
-                Skin = o.Skin,
-                TopY = s.TopY,
-                WaistY = s.WaistY,
-                Leg = s.Leg,
-                Wing = s.Wing,
-            };
+                Prims.Detail = 1;
+            }
         }
 
         // gene context for one creature -- the slice of the JS `o` object

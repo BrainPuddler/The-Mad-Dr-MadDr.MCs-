@@ -74,7 +74,7 @@ plugged in.
 | --- | --- | --- |
 | Pitch | fixed **50°** down, yaw free (Q/E) | `Quaternion.Euler(50f, _yaw, 0f)` |
 | Vertical FOV | **60°** (perspective, not orthographic) | `SampleScene.unity` camera |
-| Height clamp | **8 m – 400 m** (`MinHeight`/`MaxHeight`) | scroll zoom and Shift+arrows share the clamp |
+| Height clamp | **8 m – 300 m** (`MinHeight` const / `maxHeight` Inspector field, default 300, was a fixed 400 before 2026-09) | scroll zoom and Shift+arrows share the clamp |
 | Default height at match start | **70 m** | `RuntimeCityBuilder`: `rig.SnapTo(centre, 70f)` → offset `(0, h, -0.8h)` |
 | Shadow distance | `1.9·h + 15`, capped at **250 m** (≈148 m at default zoom) | `UpdateShadowDistance()`, overrides the pipeline asset every frame |
 | Ground plane | y = 0, feet stand on it (docs/18) | |
@@ -94,7 +94,7 @@ foreshortened by `cos 50° ≈ 0.64`; a ground footprint by `sin 50° ≈ 0.77`.
 | **70 m (default)** | **91 m** | **10.2** | **6.6** |
 | 110 m | 144 m | 6.5 | 4.2 |
 | 250 m | 326 m | 2.9 | 1.8 |
-| 400 m (ceiling) | 522 m | 1.8 | 1.1 |
+| 300 m (ceiling, was 400) | 392 m | 2.4 | 1.5 |
 
 **What that means for asset classes at the default 70 m zoom:**
 
@@ -121,7 +121,7 @@ looks at for most of a match.
 | **Close** | 8–25 m | inspecting one monster, the Lab-style hero framing, screenshots | LOD0 |
 | **Normal** | 25–110 m (default 70) | **the game**; where >80 % of play happens | **LOD1 — the most important LOD** |
 | **Overview** | 110–250 m | army moves, reading a fight across several blocks | LOD2 |
-| **Map** | 250–400 m | strategic overview; a monster is 5–8 px | LOD3 impostor / cull; minimap carries the information |
+| **Map** | 250–300 m (was 250–400 m) | strategic overview; a monster is 6–7 px | LOD3 impostor / cull; minimap carries the information |
 
 ---
 
@@ -276,9 +276,31 @@ Justifying the monster LOD1 number: at 26 px on screen, 3,000 triangles
 is already more than 100 triangles per pixel row. Silhouette, three
 material masses, and joint deformation are all that survive at that
 size. Dropping ellipsoid `seg` from 14 to 8 turns a 616-tri ellipsoid
-into 208; tube `sides` from 10 to 6 is a 40 % cut; the dial at
-`_detail ≈ 0.55` lands a default body near 3k. LOD2 at `_detail ≈ 0.3`
-with the floor of 3 segments lands near 800.
+into 208; tube `sides` from 10 to 6 is a 40 % cut; the original estimate
+here was that the dial at `_detail ≈ 0.55` lands a default body near 3k,
+and LOD2 at `_detail ≈ 0.3` with the floor of 3 segments near 800.
+
+**Real measurement (2026-09-14, §11 item 1) corrects that estimate.**
+The estimate only modeled Ellipsoid+Tube scaling; it missed that Lathe
+(the torso, the single biggest contributor) was never gated by the JS
+at all, and that many hardware-detail primitives already sit at or near
+their floor with little room left to shrink. Actual `creature-mesh`
+numbers, `dotnet test Tests~/CreatureMesh.Tests.csproj --filter
+MeshStats`:
+
+| Genome | LOD0 (`Detail=1`) | LOD1 (`Detail=0.55`) | LOD2 (`Detail=0.3`) |
+| --- | --- | --- | --- |
+| Busiest (mastermind + titan + busiest families) | 16,001 | 5,652 | 3,814 |
+| Default tetrapod (all genes 0.5) | 12,182 | 4,274 | 2,936 |
+
+The dial alone reaches roughly a third of LOD0 at LOD1 and a quarter at
+LOD2 — a real, meaningful cut — but does not land the busiest genome
+inside this table's own Hero-tier LOD1/LOD2 ceilings (≤ 3,500 / ≤ 900),
+nor the default genome inside Standard-tier (≤ 3,000 / ≤ 800). Closing
+that remaining gap is follow-up work (a steeper curve for hero-tier
+genomes, and/or simplifying primitives beyond what a uniform segment-
+count dial can reach), not a re-scope of item 1, which shipped the dial
+mechanism itself, correctly and measurably.
 
 **Global renderer ceiling for a battle view at the Normal band:** ≤ 2,500
 renderers in frustum, of which ≤ 600 are unit renderers. Today 50
@@ -328,7 +350,8 @@ a "where is combat" query the same table applies with live centres.
 
 ### 5.3 Impostors for the Map band
 
-At 250–400 m a monster is 5–8 px. Rendering 3D geometry there is waste.
+At 250–300 m (the Map band, shrunk from 250–400 m by the 2026-09
+zoom-out cap) a monster is 6–7 px. Rendering 3D geometry there is waste.
 Two acceptable implementations, cheapest first:
 
 1. **Cull the body, keep the minimap blip and the selection ring.** The
@@ -569,12 +592,18 @@ before any monster or shader work even starts.
    alongside it: strip the `CapsuleCollider` in
    `SpawnCitizens`/`SpawnFleeingOccupant` the same way `SpawnPrim`
    already does for everything else.
-1. **Port the tessellation dial into `creature-mesh`** (`MeshCore`:
+1. **[Implemented 2026-09-14, pending Editor verification — see docs/12]
+   Port the tessellation dial into `creature-mesh`** (`MeshCore`:
    multiply `seg`/`sides`/lathe `seg` by a `Detail` factor with the JS
-   floors) and have `LabMeshBuilder.Attach` build LOD0/1/2 at
+   floors) and have `LabMeshBuilder` build LOD0/1/2 at
    `Detail = 1 / 0.55 / 0.3`, wired into one `LODGroup` per monster with
-   §5.1 thresholds plus Map-band cull. Biggest single per-unit saving
-   (≈ 12k → 3k tris in the band that matters).
+   §5.1's standard-monster thresholds. Real measurement (docs/12) came in
+   short of this item's own "≈ 12k → 3k" estimate — the fixed dial alone
+   does not reach the §4.2 budget table for the busiest genome; a hero/
+   standard threshold split and/or a steeper curve is follow-up work, not
+   re-scoped into this item. Map-band cull (below the LOD2 threshold) is
+   free from `LODGroup`'s own default behavior — no impostor billboard
+   built yet, that stays item 7's job.
 2. **Merge creature chunks into one vertex-coloured mesh per LOD** with
    one shared vertex-colour URP material (translucent blob shell stays a
    second renderer). 12–23 renderers → 2–3 per monster; at 50 monsters
@@ -593,7 +622,8 @@ before any monster or shader work even starts.
 6. **LOD-aware animation** in `HumanCharacterAnimator` and
    `MonsterBody`: tick rate by band; freeze in Map.
 7. **Map-band impostor** via instanced faction quads or cull + minimap.
-8. **Set `lodBias` to 1.0 on the PC tier** when step 1 lands.
+8. **[Implemented 2026-09-14]** Set `lodBias` to 1.0 on the PC tier
+   (`QualitySettings.asset`) now that step 1 has landed.
 
 Each step is its own docs/12 entry with the §10 numbers.
 

@@ -260,13 +260,25 @@ public class MonsterBody : MonoBehaviour
         // is authored ground-up at y=0, so it hangs at -BodyHeight under
         // the bobbing torso node and rides the same gait bob (and blob
         // squash, and floater hover) as everything else.
-        var lab = CreatureBuilder.Build(g);
+        //
+        // docs/39 SS11 item 1: LOD0/1/2 built once here at match-load time
+        // (the docs/08 handshake rule -- no mid-match tessellation) at
+        // Detail = 1 / 0.55 / 0.3, wired into one LODGroup so the camera's
+        // own zoom picks which mesh renders instead of one full-detail
+        // mesh at every distance. Leg/Wing sockets and framing heights
+        // (Leg.Len, TopY, ...) are geometry-position data, computed from
+        // genome params, not from tessellation resolution -- reading them
+        // off `lab` (the LOD0 build) is exactly as correct as reading them
+        // off any of the three.
+        var lab = CreatureBuilder.Build(g, 1);
         if (lab != null)
         {
+            var lodLabs = new[] { lab, CreatureBuilder.Build(g, 0.55), CreatureBuilder.Build(g, 0.3) };
             var s = lab.Leg != null
                 ? _legLen / (float)lab.Leg.Len
                 : Mathf.Lerp(2.4f, 4.6f, bulk) / Mathf.Max(0.1f, (float)lab.TopY);
-            LabMeshBuilder.Attach(lab, _torso, new Vector3(0f, -BodyHeight, 0f), s);
+            LabMeshBuilder.AttachLodded(lodLabs, _torso, new Vector3(0f, -BodyHeight, 0f), s,
+                LabMeshBuilder.StandardMonsterLodScreenHeights);
             if (lab.Leg != null) BuildLegsFromSocket(lab, s);
             if (lab.Wing != null) BuildWings(lab.Wing, s);
         }

@@ -643,9 +643,13 @@ public class Minimap : MonoBehaviour
         var p = WorldToMinimapPoint(new Vector3(cam.transform.position.x, 0f, cam.transform.position.z), rect, texCoords);
         if (!p.HasValue) return;
 
-        // camera height is the zoom proxy (SimpleCameraRig clamps it
-        // 8..400) -- a bigger footprint box when zoomed out, smaller when
-        // zoomed in, scaled into minimap pixels by the current view span
+        // camera height is the zoom proxy (SimpleCameraRig clamps it to
+        // [MinHeight, maxHeight], 8-300 by default, maxHeight now an
+        // Inspector field) -- a bigger footprint box when zoomed out,
+        // smaller when zoomed in, scaled into minimap pixels by the
+        // current view span. The 6-90 clamp below already saturates well
+        // inside either the old 400 or the new 300 ceiling, so this
+        // method needed no numeric change, only the comment.
         var worldSpan = (_maxX - _minX) * texCoords.width;
         var footprintWorld = Mathf.Clamp(cam.transform.position.y * 0.9f, 6f, 90f);
         var footprintPx = footprintWorld / Mathf.Max(1f, worldSpan) * rect.width;

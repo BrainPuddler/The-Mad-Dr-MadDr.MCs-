@@ -45,8 +45,20 @@ public class SimpleCameraRig : MonoBehaviour
     // ON the ground plane is degenerate (near-zero vertical FOV, mostly
     // clipping) -- 8 units up is the practical "as low as this camera
     // can usefully go," already the zoom code's own floor before this.
+    // Not exposed in the Inspector -- unlike maxHeight below, nobody's
+    // asked to tune this one.
     private const float MinHeight = 8f;
-    private const float MaxHeight = 400f;
+
+    // 2026-09 creator direction: cap zoom-out below the old fixed 400 m
+    // ceiling. Both scroll-zoom and Shift+up/down share this clamp, same
+    // as MinHeight above. docs/39's Map band (250 m up to the old 400 m
+    // ceiling: "a monster is 5-8 px ... minimap carries the information")
+    // shrinks to 250-300 m at the new default -- the camera never reaches
+    // a range where there was much left to see anyway. An Inspector field
+    // (not a const like MinHeight) so it can be retuned per playtest
+    // without a code change.
+    [Tooltip("Highest the camera can zoom or Shift-move out to, in meters (docs/39's Map band runs from 250 m up to this). Default 300 -- was a fixed 400 before 2026-09.")]
+    public float maxHeight = 300f;
 
     // 2026-07 creator direction: "limit the shadows to objects in the
     // camera view and close to the visible area." Shadow distance was a
@@ -67,9 +79,10 @@ public class SimpleCameraRig : MonoBehaviour
     // just the exact center point out to the frustum's far edge.
     //
     // Deliberately proportional-with-a-cap, NOT a straight Lerp across
-    // the full [MinHeight, MaxHeight] range: distance-to-ground is
-    // linear in height all the way out to MaxHeight=400 (h*1.28=512),
-    // but shadow distance shouldn't keep growing that far -- individual
+    // the full [MinHeight, maxHeight] range: distance-to-ground is
+    // linear in height all the way out to maxHeight (h*1.28 = 384 at the
+    // 300 m default, was 512 at the old fixed 400 m ceiling), but shadow
+    // distance shouldn't keep growing that far -- individual
     // shadows are visually tiny at extreme zoom-out anyway, and URP's
     // cascades would spread thinner (blockier) over an ever-larger area
     // for no visible benefit. `shadowDistanceCap` holds the line past
@@ -166,7 +179,7 @@ public class SimpleCameraRig : MonoBehaviour
         }
 
         // Shift + up/down arrow: move the camera straight up/down (world
-        // Y), clamped to the same [MinHeight, MaxHeight] band zoom uses --
+        // Y), clamped to the same [MinHeight, maxHeight] band zoom uses --
         // "do not allow moving below the ground" (2026-07 creator
         // direction).
         if (keyboard != null && shiftHeld)
@@ -177,7 +190,7 @@ public class SimpleCameraRig : MonoBehaviour
             if (Mathf.Abs(vertical) > 0.01f)
             {
                 var pos = transform.position;
-                pos.y = Mathf.Clamp(pos.y + vertical * verticalMoveSpeed * dt, MinHeight, MaxHeight);
+                pos.y = Mathf.Clamp(pos.y + vertical * verticalMoveSpeed * dt, MinHeight, maxHeight);
                 transform.position = pos;
                 manual = true;
             }
@@ -235,7 +248,7 @@ public class SimpleCameraRig : MonoBehaviour
             if (Mathf.Abs(scroll) > 0.01f)
             {
                 var newPos = transform.position + transform.forward * scroll * zoomSpeed * 0.02f;
-                if (newPos.y > MinHeight && newPos.y < MaxHeight) { transform.position = newPos; manual = true; }
+                if (newPos.y > MinHeight && newPos.y < maxHeight) { transform.position = newPos; manual = true; }
             }
         }
 
