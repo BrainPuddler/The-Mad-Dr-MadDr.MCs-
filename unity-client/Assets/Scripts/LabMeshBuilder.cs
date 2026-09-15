@@ -113,6 +113,21 @@ public static class LabMeshBuilder
     // trade, same "cheaper read at 70 m" logic as the rest of docs/39).
     private const float SharedEmissiveStrength = 0.6f;
 
+    // 2026-09-16 (creator report, real Editor session: "flat shaded at
+    // all LOD levels") -- one shared Smoothness per material group,
+    // driving CreatureVertexColor.shader's Blinn-Phong specular term.
+    // The first version of this shader had no specular term at all
+    // (reasoned as "matching WindowGrid's plain-diffuse model," the
+    // wrong call for a curved creature body that used to get real
+    // per-chunk Gloss through URP/Lit's own PBR response) -- see that
+    // shader's own header comment for the full story. 0.35 for the
+    // opaque group roughly splits the difference of the real per-chunk
+    // Gloss range creature-mesh emits (0.10-0.95, per the busy-genome
+    // chunk dump in docs/12); 0.5 for the emissive group, since glowing
+    // parts (eyes, neon, heart bolts) tend to read as wetter/shinier.
+    private const float SharedOpaqueSmoothness = 0.35f;
+    private const float SharedEmissiveSmoothness = 0.5f;
+
     private static Material _sharedOpaqueVertexColorMat;
     private static Material _sharedEmissiveVertexColorMat;
 
@@ -134,6 +149,8 @@ public static class LabMeshBuilder
         var mat = new Material(shader);
         if (mat.HasProperty("_EmissionStrength"))
             mat.SetFloat("_EmissionStrength", emissiveGroup ? SharedEmissiveStrength : 0f);
+        if (mat.HasProperty("_Smoothness"))
+            mat.SetFloat("_Smoothness", emissiveGroup ? SharedEmissiveSmoothness : SharedOpaqueSmoothness);
 
         if (emissiveGroup) _sharedEmissiveVertexColorMat = mat;
         else _sharedOpaqueVertexColorMat = mat;

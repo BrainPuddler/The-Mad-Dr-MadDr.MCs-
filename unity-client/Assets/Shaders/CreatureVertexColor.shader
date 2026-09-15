@@ -21,10 +21,26 @@
 // same reasoning and same dummy-property set as Assets/Shaders/
 // WindowGrid.shader, docs/33's precedent for a hand-authored shader in
 // this codebase) -- only the ForwardLit pass below is hand-authored.
-// Deliberately no specular/smoothness term, matching WindowGrid's own
-// plain-diffuse lighting model (docs/39 §0 rule 3: spend nothing on
-// detail invisible at 26 px, and a monster's specular highlight is
-// exactly that kind of detail).
+//
+// 2026-09-16 (creator report, real Editor session: "flat shaded at all
+// LOD levels"): the first version of this shader dropped the specular
+// term entirely, reasoning it as "matching WindowGrid's plain-diffuse
+// model" -- wrong call for THIS subject. WindowGrid shades flat building
+// facades, where a highlight adds nothing; every creature chunk this
+// shader replaced used to carry its own real Gloss value into URP/Lit's
+// full PBR specular response, and losing that entirely (not just
+// approximating it) is what read as "flat" -- pure Lambertian diffuse
+// on a curved organic/mechanical surface has none of the roundness cue
+// a highlight provides. Restored below as a hand-rolled Blinn-Phong
+// term (not a call into URP's own BRDF/PBR helpers, whose exact
+// signatures for this URP version can't be confirmed without an Editor
+// -- this uses only `dot`/`pow`/`normalize` and the always-available
+// `_WorldSpaceCameraPos` global, so it doesn't depend on guessing an
+// API this environment still has no way to compile-check). One shared
+// `_Smoothness` per material group (opaque vs. emissive), same
+// "shared uniform approximates per-chunk variation" trade as
+// `_EmissionStrength` already makes -- not the per-chunk Gloss value
+// URP/Lit used to read, but real specular response instead of none.
 Shader "MadDr/CreatureVertexColor"
 {
     Properties
@@ -51,6 +67,11 @@ Shader "MadDr/CreatureVertexColor"
         // approximates every emissive chunk's individual Emissive
         // strength rather than reproducing it exactly).
         _EmissionStrength("Emission Strength (0 = opaque-group material)", Float) = 0
+
+        // Blinn-Phong specular response (see the 2026-09-16 header note)
+        // -- one shared value per material group, LabMeshBuilder-set,
+        // same approximation trade as _EmissionStrength.
+        _Smoothness("Smoothness (drives specular highlight tightness/strength)", Range(0,1)) = 0.35
     }
 
     SubShader
@@ -80,6 +101,7 @@ Shader "MadDr/CreatureVertexColor"
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
                 half _EmissionStrength;
+                half _Smoothness;
             CBUFFER_END
 
             struct Attributes
@@ -125,9 +147,21 @@ Shader "MadDr/CreatureVertexColor"
                 float3 normalWS = normalize(IN.normalWS);
                 Light mainLight = GetMainLight(IN.shadowCoord);
                 half3 ambient = SampleSH(normalWS);
+                half lightAtten = mainLight.shadowAttenuation * mainLight.distanceAttenuation;
                 half ndotl = saturate(dot(normalWS, mainLight.direction));
-                half3 diffuse = albedo * (ambient
-                    + mainLight.color * (ndotl * mainLight.shadowAttenuation * mainLight.distanceAttenuation));
+                half3 diffuse = albedo * (ambient + mainLight.color * (ndotl * lightAtten));
+
+                // Blinn-Phong specular -- see the 2026-09-16 header note
+                // ("flat shaded" fix). viewDirWS from _WorldSpaceCameraPos
+                // rather than a URP helper macro, for the same
+                // can't-verify-the-exact-API-here reason as everything
+                // else unusual about this pass.
+                float3 viewDirWS = normalize(_WorldSpaceCameraPos - IN.positionWS);
+                float3 halfDirWS = normalize(mainLight.direction + viewDirWS);
+                half specAngle = saturate(dot(normalWS, halfDirWS));
+                half specPower = lerp(4.0h, 64.0h, _Smoothness);
+                half specStrength = pow(specAngle, specPower) * _Smoothness;
+                half3 specular = specStrength * mainLight.color * lightAtten;
 
                 // Emission reuses the SAME per-vertex color as albedo (a
                 // glowing eye's emission is the same hue as its lit
@@ -136,7 +170,7 @@ Shader "MadDr/CreatureVertexColor"
                 // header comment above.
                 half3 emission = IN.color.rgb * _EmissionStrength;
 
-                half3 color = diffuse + emission;
+                half3 color = diffuse + specular + emission;
                 color = MixFog(color, IN.fogFactor);
                 return half4(color, 1.0h);
             }
