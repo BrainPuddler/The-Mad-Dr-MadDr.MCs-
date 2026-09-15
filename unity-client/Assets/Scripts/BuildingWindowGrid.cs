@@ -298,7 +298,10 @@ public class BuildingWindowGrid : MonoBehaviour
         filter.sharedMesh = mesh;
         var renderer = gameObject.AddComponent<MeshRenderer>();
         renderer.sharedMaterial = SharedMaterial();
-        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+        // docs/39 §8 shadow hygiene item 5: a window grid is a flat layer
+        // on a facade -- its shadow is the wall's shadow, so casting its
+        // own is pure waste. Was `.On`.
+        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
         _mpb = new MaterialPropertyBlock();
         _mpb.SetTexture("_OverrideStateTex", _overrideTex);

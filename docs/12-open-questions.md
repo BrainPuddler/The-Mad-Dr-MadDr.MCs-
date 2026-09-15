@@ -20752,3 +20752,64 @@ second capture; that's the actual next thing to check, not a re-guess
 at the mechanism. See docs/36 entries 18-19 for the Editor-side
 checklist (a fresh Frame Debugger capture at the new 150 m ceiling is
 the single most valuable thing that could come back next).
+
+## 2026-09-16 follow-up: creator confirms performance is fine at the new 150 m ceiling; docs/39 §11 item 5 -- shadow hygiene
+
+Creator tested at the tightened 150 m cap and reported performance is
+okay there -- doesn't independently confirm item 4's SRP-batching fix
+holds up past the old ~200 m cliff (150 m stays under it either way),
+but is enough to move on to the next backlog item rather than block
+everything on one more capture. Continued straight to item 5 per
+direction ("get on with the fixes and upgrades").
+
+**Item 5, §8's four concrete rules, three implemented as literal config/
+code changes:**
+
+1. **Window grid shadows off** -- `BuildingWindowGrid.cs`'s renderer was
+   the ONE setting §8's own table already named as currently wrong
+   (`ShadowCastingMode.On`, should be `.Off` -- "a flat layer on a
+   facade; its shadow is the wall's shadow"). One-line fix.
+2. **Sub-1 m props and thin ground slabs off** -- new
+   `RuntimeCityBuilder.ApplySmallPropShadowRule(renderer, scale)`,
+   called from the same three shared prop-spawn choke points
+   `ApplyWorldScaledTiling` already runs from (`SpawnPrim`,
+   `SpawnLowPolyPrim`, `SpawnMesh` -- deliberately NOT `SpawnCube`,
+   building massing always casts per §8). Two independent triggers:
+   largest scale dimension < 1 m (the doc's own literal "street
+   furniture < 1 m" threshold -- hydrants, mailboxes, curbs), OR Y scale
+   < 0.3 m regardless of footprint. The second trigger exists because
+   `RoadDresser`'s sidewalks (`Vector3(roadWidth + 3.4f, 0.24f, ...)`)
+   and lane paint (`Vector3(0.28f, 0.05f, 1.5f)`) are both WIDE in at
+   least one horizontal axis -- lane paint's own 1.5 m long dash is
+   already over the 1 m largest-dimension threshold -- so a
+   largest-dimension-only check would have missed every flat ground
+   marking §8 explicitly names. Checked GableRoof/AlienSaucer's own
+   `SpawnMesh` scale literals (7.8 m roof height, similar saucer
+   heights) to confirm neither false-positives against the new Y
+   threshold.
+3. **PC pipeline asset** (`PC_RPAsset.asset`): `m_ShadowCascadeCount`
+   4 -> 2, `m_AdditionalLightsShadowmapResolution` 2048 -> 1024, exactly
+   matching §8's target row. Mobile's own asset already matched its
+   target column with no change needed (checked before touching
+   anything).
+4. **"Additional-light shadows spot-only" needed no change.** Grepped
+   every `LightShadows.` assignment in the codebase: every dynamically-
+   spawned point/spot light (`BaseDresser`'s pulse lights,
+   `DynamicLightBudget`'s promoted budget lights, `DamageFx`,
+   `LowPolyFireSystem`) already sets `LightShadows.None` explicitly --
+   the sun (`LumenCycleController`) is the only light with shadows on at
+   all. That's a STRICTER state than "spot only," so nothing needed
+   restricting; noted rather than silently treated as done, since a
+   future light that opts into shadows should still respect "spot only,"
+   not just inherit today's blanket-off default by accident.
+
+**Deliberately out of scope:** §8's zone-conditional rules (building
+dressing casts in Engagement zone only; trees/lampposts cast in
+Engagement/LocalCity, off in DistantSkyline) need a live per-object
+zone-tier system that doesn't exist yet for arbitrary dressed props
+(only referenced today for the zone table in §5.2) -- not something this
+pass's choke-point-fix approach can reach. Left as a named gap, not
+silently dropped.
+
+**Verification:** brace/paren balance and read-through only (same
+standing caveat). See docs/36 entry 20 for the Editor-side checklist.

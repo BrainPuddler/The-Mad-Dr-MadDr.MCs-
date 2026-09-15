@@ -2204,6 +2204,28 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         renderer.sharedMaterial = variant;
     }
 
+    /// <summary>docs/39 §8 shadow hygiene item 5: "7 px objects have 2 px
+    /// shadows" -- small dressing/street-furniture props and thin
+    /// ground-hugging slabs don't earn their shadow's cost. Two
+    /// independent triggers, either is enough: the largest scale
+    /// dimension is under 1 m (the doc's own literal threshold --
+    /// hydrants, mailboxes, curbs, trim details), or the object is a
+    /// thin slab (Y scale under 0.3 m) regardless of its footprint --
+    /// sidewalks, lane paint, and crosswalk stripes (`RoadDresser`) have
+    /// a large XZ footprint but are practically flat, so the <1m
+    /// largest-dimension check alone would miss every one of them.
+    /// Deliberately NOT called from `SpawnCube` (building massing always
+    /// casts, docs/39 §8) and not applied to monster/humanoid/vehicle
+    /// geometry (governed by its own LOD-tied rule elsewhere, not this
+    /// static per-spawn check).</summary>
+    private static void ApplySmallPropShadowRule(Renderer renderer, Vector3 scale)
+    {
+        if (renderer == null) return;
+        var largest = Mathf.Max(scale.x, Mathf.Max(scale.y, scale.z));
+        if (largest < 1f || scale.y < 0.3f)
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+    }
+
     /// <summary>Colliderless styled primitive -- the dresser workhorse.
     /// docs/39 §11 item 3: Sphere/Cylinder redirect to PropLibrary's
     /// low-poly stand-ins (760/80 stock tris -> ~80/~30) instead of
@@ -2236,6 +2258,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         {
             renderer.sharedMaterial = mat;
             ApplyWorldScaledTiling(renderer, scale);
+            ApplySmallPropShadowRule(renderer, scale);
         }
         return go;
     }
@@ -2258,7 +2281,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
     {
         var go = PropLibrary.Spawn(this, key, fallbackType, position, scale, mat, parent);
         var renderer = go.GetComponent<Renderer>();
-        if (renderer != null) ApplyWorldScaledTiling(renderer, scale);
+        if (renderer != null)
+        {
+            ApplyWorldScaledTiling(renderer, scale);
+            ApplySmallPropShadowRule(renderer, scale);
+        }
         return go;
     }
 
@@ -2308,6 +2335,7 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         var renderer = go.AddComponent<MeshRenderer>();
         renderer.sharedMaterial = mat;
         ApplyWorldScaledTiling(renderer, scale);
+        ApplySmallPropShadowRule(renderer, scale);
         if (matte) ApplyMatteFinish(renderer);
         return go;
     }

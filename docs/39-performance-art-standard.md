@@ -663,8 +663,19 @@ before any monster or shader work even starts.
    unaddressed, out of this item's fixed scope. `maxHeight` also
    dropped 300 → 150 m the same session as an interim stopgap (§1.2)
    until this fix is confirmed live and the ceiling can be raised back.
-5. **Shadow hygiene** (§8): window grids off, sub-1 m props off,
-   cascades 4 → 2 on PC, additional-light shadows spot-only.
+5. **[Implemented 2026-09-16, pending Editor verification -- see docs/12]
+   Shadow hygiene** (§8): window grids off (`BuildingWindowGrid.cs`, was
+   `.On`), sub-1 m props and thin ground slabs (sidewalks/lane paint/
+   crosswalk stripes) off via a new `ApplySmallPropShadowRule` at
+   `RuntimeCityBuilder`'s shared prop-spawn choke points, main-light
+   cascades 4 → 2 and additional-light shadow resolution 2048 → 1024 on
+   PC (`PC_RPAsset.asset`; Mobile already matched target). "Additional-
+   light shadows spot-only" needed no change -- every dynamically-spawned
+   point/spot light in this codebase already sets `LightShadows.None`
+   (a stricter subset of "spot only"), so there was nothing currently
+   casting to restrict. Zone-conditional casting for building dressing/
+   trees/lampposts (Engagement-only) is NOT part of this pass -- it
+   needs a live per-object zone-tier system this item didn't build.
 6. **LOD-aware animation** in `HumanCharacterAnimator` and
    `MonsterBody`: tick rate by band; freeze in Map.
 7. **Map-band impostor** via instanced faction quads or cull + minimap.

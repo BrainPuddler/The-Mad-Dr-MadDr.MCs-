@@ -523,3 +523,31 @@ unreachable" note on the Map band and Overview's upper half.
   because it happens to be safe; that quietly kills the Overview band's
   upper half and the entire Map band (docs/39 §1.2), which was never
   the actual design intent.
+
+## 20. Shadow hygiene pass (docs/39 §11 item 5 / §8)
+
+- **Window grids no longer cast a shadow** — spawn a building with lit
+  windows and confirm the facade's own shadow (from the wall mesh
+  behind the grid) still reads correctly; the grid itself should visibly
+  stop throwing its own separate shadow shape. Watch specifically for
+  any facade that looked "right" only because the window grid's shadow
+  was filling in for something else.
+- **Small props and thin ground slabs stopped casting** — walk a
+  sidewalk, some lane-paint dashes, and a crosswalk, plus a hydrant/
+  mailbox-scale prop, and confirm none of them throw a shadow anymore.
+  Then check a handful of larger dressed props (roofs, lampposts, market
+  stalls) that should be UNAFFECTED — the two triggers (largest
+  dimension < 1 m, or Y-scale < 0.3 m) were sized off a read-through of
+  this file's own scale literals, not measured against every call site,
+  so a false-positive catch (something that should still cast losing its
+  shadow) is the actual risk to check for here, not just "did the
+  intended things turn off."
+- **Cascades 4 → 2 on PC** — confirm shadow quality at the Normal band
+  (25–110 m, where >80% of play happens) doesn't visibly degrade;
+  docs/39 §8's own reasoning is that 2 cascades at the unchanged
+  resolution should give MORE texels where units actually stand, not
+  fewer, but that's a claim to verify by looking, not assume.
+- **Additional-light shadow resolution 2048 → 1024** — no light in the
+  codebase currently casts one (see docs/39 §11 item 5's own note), so
+  this should be a total no-op today; flagging only so a future light
+  that DOES opt into shadows doesn't get a surprise resolution.
