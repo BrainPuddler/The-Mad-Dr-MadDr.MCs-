@@ -676,8 +676,21 @@ before any monster or shader work even starts.
    casting to restrict. Zone-conditional casting for building dressing/
    trees/lampposts (Engagement-only) is NOT part of this pass -- it
    needs a live per-object zone-tier system this item didn't build.
-6. **LOD-aware animation** in `HumanCharacterAnimator` and
-   `MonsterBody`: tick rate by band; freeze in Map.
+6. **[Implemented 2026-09-16 for monsters, pending Editor verification --
+   see docs/12] LOD-aware animation** in `HumanCharacterAnimator` and
+   `MonsterBody`: tick rate by band; freeze in Map. Done for `MonsterBody
+   .UpdateLocomotion` -- the single choke point every monster's gait/
+   idle/breath/flight-lift tick already runs through, gated by a new
+   shared `AnimationLodBudget` static (camera-height bands from §1.2:
+   always tick in Close/Normal, every second frame in Overview, frozen
+   in Map, with skipped dt folded into the next tick so nothing runs in
+   slow motion). `HumanCharacterAnimator` is NOT done -- unlike
+   `MonsterBody`, it's called from four separate files
+   (`HumanCharacterKit`, `HumanoidCombatant`, `RosterInfantryView`,
+   `Worker`) with no single shared per-frame choke point, so gating it
+   needs its own investigation into whether one of those call sites is
+   itself already a shared driver, not a blind copy-paste of the
+   monster fix into four places.
 7. **Map-band impostor** via instanced faction quads or cull + minimap.
 8. **[Implemented 2026-09-14]** Set `lodBias` to 1.0 on the PC tier
    (`QualitySettings.asset`) now that step 1 has landed.

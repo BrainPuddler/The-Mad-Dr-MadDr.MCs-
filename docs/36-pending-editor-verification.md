@@ -551,3 +551,36 @@ unreachable" note on the Map band and Overview's upper half.
   codebase currently casts one (see docs/39 §11 item 5's own note), so
   this should be a total no-op today; flagging only so a future light
   that DOES opt into shadows doesn't get a surprise resolution.
+
+## 21. LOD-aware monster animation tick rate (docs/39 §11 item 6, monsters only)
+
+New `AnimationLodBudget.cs` (a plain script file, needs Unity to
+generate its own `.meta` on first open -- same standing note every new
+script in this repo gets, commit it once it appears). `MonsterBody.
+UpdateLocomotion` now skips its own body when the camera is in the
+Overview band (every second frame) or Map band (frozen), folding
+skipped `dt` into the next tick that runs.
+
+- **This is currently near-impossible to actually exercise** — the
+  camera's `maxHeight` cap sits at 150 m (entry 19), and `Overview`
+  doesn't start until 110 m, so there's only a narrow 110–150 m sliver
+  where the every-second-frame throttle can even engage, and `Map`
+  (250 m+) is fully unreachable. Confirm the throttle at least doesn't
+  misbehave in that narrow sliver — no visible stutter/slow-motion gait,
+  no popping — since that's the one part of this that's reachable today.
+- **The real test comes once `maxHeight` is raised back** (after entry
+  18's fix is confirmed) — at that point, re-check this entry: spawn a
+  crowd of monsters, zoom to Overview (110–250 m) and confirm gait/
+  breath/wing-flap visibly slows to every-other-frame without looking
+  like slow motion (the accumulated-dt fold-in is what's supposed to
+  prevent that), then zoom to Map (250 m+) and confirm animation fully
+  freezes with no idle-pose jitter.
+- **Landing/liftoff transitions still look right** even when throttled
+  — a flyer's `SnapFeetToGround()` call only fires on the tick that
+  detects the airborne→grounded transition, which could now land up to
+  one throttled tick later than before; confirm this doesn't produce a
+  visible foot-through-ground moment at the transition itself.
+- **Humanoid animation (`HumanCharacterAnimator`) is NOT part of this
+  fix** — see docs/39 §11 item 6's own note on why (four separate call
+  sites, no shared choke point found yet). Not a regression, just an
+  intentionally unfinished half of this item.

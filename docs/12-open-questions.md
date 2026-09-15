@@ -20813,3 +20813,64 @@ silently dropped.
 
 **Verification:** brace/paren balance and read-through only (same
 standing caveat). See docs/36 entry 20 for the Editor-side checklist.
+
+## 2026-09-16 follow-up: docs/39 §11 item 6 -- LOD-aware animation tick rate, monsters only
+
+Continued straight through the backlog per creator direction ("get on
+with the fixes and upgrades"). Item 6 asks for animation tick-rate
+throttling by camera zoom band in both `HumanCharacterAnimator` and
+`MonsterBody` -- only the `MonsterBody` half is done this pass.
+
+**Why monsters only:** `MonsterBody.UpdateLocomotion` is a single choke
+point every monster's gait/idle/breath/flight-lift tick already runs
+through (called from five spots inside `MonsterAgent.Update`, but always
+this one function) -- the exact same "one shared function, many callers"
+shape items 1/3/4/5 already exploited. `HumanCharacterAnimator` has no
+equivalent: it's a static utility with nine separate `Tick*` entry
+points (`TickLocomotion`, `TickCarry`, `TickBuild`, `TickHarvest`,
+`TickIdle`, `TickHover`, `TickAim`, `TickDeath`, `TickWheelchair`),
+called from four different files (`HumanCharacterKit`,
+`HumanoidCombatant`, `RosterInfantryView`, `Worker`) with no shared
+per-frame driver found yet. Throttling it properly needs figuring out
+whether one of those four already IS a shared driver worth gating at,
+not a blind per-call-site copy of the monster fix -- left as a named
+gap for a follow-up pass, not silently dropped.
+
+**New `AnimationLodBudget.cs`:** a small static class, same "one shared
+static answer, many scattered callers" shape as `GlowPointRegistry`/
+`DynamicLightBudget`. `CurrentBand` reads `Camera.main`'s live height
+against docs/39 §1.2's own Overview (110 m) / Map (250 m) thresholds,
+memoized per `Time.frameCount` so the many-monsters-per-frame case costs
+one comparison each after the first real lookup. Deliberately does NOT
+depend on `RuntimeCityBuilder.Update()` having already run this frame
+(Unity doesn't order MonoBehaviour `Update()`s across components) --
+self-contained and lazy instead.
+
+**`MonsterBody.UpdateLocomotion`:** early-returns entirely when
+`AnimationLodBudget.ShouldTick` says no for the current band (every
+frame in Close/Normal, every second frame in Overview, never in Map),
+accumulating the skipped `dt` into a new `_skippedAnimDt` field and
+folding it into the next tick that actually runs -- gait phase, torso
+bob, and flight-lift easing all still advance by the TRUE total elapsed
+time once they do tick, so throttling looks choppier at distance, not
+slower. Confirmed skipping the whole function is safe: everything in it
+is purely visual (actual XZ translation happens earlier in
+`MonsterAgent`, before this is even called), and `_distTraveled` (the
+only field read outside this function, by the legless-locomotion tail/
+bob) is itself deferred correctly by the same dt fold-in.
+
+**Known limited reach today:** `SimpleCameraRig.maxHeight` sits at
+150 m (this same session's item 4 stopgap), so only the narrow
+110-150 m sliver of Overview is currently reachable and Map (250 m+) is
+not reachable at all -- same "real test comes once the cap is raised
+back" caveat as item 5's shadow-hygiene work. The thresholds themselves
+are left at their real docs/39 values rather than temporarily lowered to
+match, so nothing here needs revisiting when the cap moves.
+
+**Verification:** brace/paren balance (confirmed matching pre-edit
+counts plus exactly the new code's own brace/paren pairs) and
+read-through only -- same standing caveat as every Unity-side change
+here; `AnimationLodBudget.cs` is a new file and will need Unity to
+generate its own `.meta` on first Editor open (commit it once it
+appears, same as every other new script in this environment). See
+docs/36 entry 21 for the Editor-side checklist.

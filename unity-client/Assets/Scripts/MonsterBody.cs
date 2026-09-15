@@ -97,6 +97,12 @@ public class MonsterBody : MonoBehaviour
     private float _bulkScale = 1f;
     private float _standHeight = 1.2f;
     private float _distTraveled;
+    // docs/39 §11 item 6: dt accumulated across frames UpdateLocomotion
+    // skipped for LOD-aware animation (AnimationLodBudget) -- folded into
+    // the next tick that actually runs, so gait/bob phase and
+    // _distTraveled still advance by the correct TOTAL elapsed time
+    // instead of quietly running in slow motion once ticks get throttled.
+    private float _skippedAnimDt;
     private float _gaitDist;       // linear + rotational displacement -- what feet actually have to cover
     private float _lastYaw;
     private bool _yawInitialized;
@@ -826,6 +832,26 @@ public class MonsterBody : MonoBehaviour
     /// reads an animation clock.</summary>
     public void UpdateLocomotion(Vector3 velocity, float dt)
     {
+        // docs/39 §11 item 6 (LOD-aware animation): a monster's own
+        // camera-distance-driven visual tick rate, independent of the
+        // mesh LOD (item 1) it happens to be rendering at right now --
+        // the docs/39 §1.2 bands this keys off are defined by camera
+        // HEIGHT, not per-object screen coverage. Skipping this whole
+        // method entirely (rather than thinning out only part of it) is
+        // deliberate: everything below is purely visual (gait phase,
+        // torso bob, flight-lift easing) -- actual translation happens
+        // in MonsterAgent before this is even called -- so a skipped
+        // frame changes nothing about where the unit actually is or
+        // where it's going, only how often its pose gets recomputed.
+        var band = AnimationLodBudget.CurrentBand;
+        if (!AnimationLodBudget.ShouldTick(band))
+        {
+            _skippedAnimDt += dt;
+            return;
+        }
+        dt += _skippedAnimDt;
+        _skippedAnimDt = 0f;
+
         var speed = new Vector3(velocity.x, 0f, velocity.z).magnitude;
         _distTraveled += speed * dt;
 
