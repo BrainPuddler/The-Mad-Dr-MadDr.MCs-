@@ -67,6 +67,106 @@ public static class ProceduralMeshKit
         }
     }
 
+    /// <summary>docs/39 §11 item 3: a low-poly icosphere -- subdivision 0
+    /// is a plain icosahedron (20 tris), each further subdivision
+    /// quadruples the face count (subdiv 1 = 80 tris, the item's own
+    /// target, vs. Unity's stock Sphere primitive at 760). Centered at
+    /// local origin, radius 0.5 -- same -0.5..0.5 extent convention as
+    /// every other shape here, and the same position/scale contract as
+    /// CreatePrimitive(Sphere). <see cref="RuntimeCityBuilder.SpawnPrim"/>
+    /// routes every PrimitiveType.Sphere call through this (via
+    /// PropLibrary's "generic-low-poly-sphere" registration) automatically
+    /// -- no dresser call site needed to change.</summary>
+    public static Mesh IcoSphere(int subdivisions)
+    {
+        // Golden-ratio icosahedron -- the standard construction. Twelve
+        // vertices, all equidistant from the origin, twenty triangular
+        // faces; subdividing and re-normalizing each new midpoint onto
+        // the unit sphere is the standard "geodesic sphere" refinement.
+        var golden = (1f + Mathf.Sqrt(5f)) / 2f;
+        var verts = new List<Vector3>
+        {
+            new Vector3(-1, golden, 0), new Vector3(1, golden, 0), new Vector3(-1, -golden, 0), new Vector3(1, -golden, 0),
+            new Vector3(0, -1, golden), new Vector3(0, 1, golden), new Vector3(0, -1, -golden), new Vector3(0, 1, -golden),
+            new Vector3(golden, 0, -1), new Vector3(golden, 0, 1), new Vector3(-golden, 0, -1), new Vector3(-golden, 0, 1),
+        };
+        for (var i = 0; i < verts.Count; i++) verts[i] = verts[i].normalized;
+
+        var tris = new List<int>
+        {
+            0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11,
+            1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8,
+            3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9,
+            4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1,
+        };
+
+        var midpointCache = new Dictionary<long, int>();
+        for (var s = 0; s < subdivisions; s++)
+        {
+            var refined = new List<int>(tris.Count * 4);
+            for (var i = 0; i + 2 < tris.Count; i += 3)
+            {
+                var a = tris[i]; var b = tris[i + 1]; var c = tris[i + 2];
+                var ab = IcoMidpoint(verts, midpointCache, a, b);
+                var bc = IcoMidpoint(verts, midpointCache, b, c);
+                var ca = IcoMidpoint(verts, midpointCache, c, a);
+                refined.Add(a); refined.Add(ab); refined.Add(ca);
+                refined.Add(b); refined.Add(bc); refined.Add(ab);
+                refined.Add(c); refined.Add(ca); refined.Add(bc);
+                refined.Add(ab); refined.Add(bc); refined.Add(ca);
+            }
+            tris = refined;
+        }
+
+        var finalVerts = new Vector3[verts.Count];
+        for (var i = 0; i < verts.Count; i++) finalVerts[i] = verts[i] * 0.5f;
+
+        // Geometrically already outward-winding by construction (every
+        // face of a sphere centered on the origin faces away from it if
+        // the source triangle list is correct) -- run FaceOutward anyway,
+        // same belt-and-braces this file applies to every other shape,
+        // since this environment has no Editor to visually catch a
+        // mistake in the hand-typed base icosahedron index list above.
+        FaceOutward(new List<Vector3>(finalVerts), tris);
+
+        var mesh = new Mesh();
+        mesh.vertices = finalVerts;
+        mesh.triangles = tris.ToArray();
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
+    /// <summary>Returns the (cached) index of the normalized midpoint
+    /// between two icosphere vertices, appending a new vertex only the
+    /// first time a given edge is split -- without the cache, each
+    /// subdivision pass would duplicate every shared edge's midpoint
+    /// once per adjacent triangle, splitting the mesh into disconnected
+    /// shards at every seam instead of one continuous surface.</summary>
+    private static int IcoMidpoint(List<Vector3> verts, Dictionary<long, int> cache, int a, int b)
+    {
+        var key = a < b ? ((long)a << 32) + b : ((long)b << 32) + a;
+        int existing;
+        if (cache.TryGetValue(key, out existing)) return existing;
+        var mid = ((verts[a] + verts[b]) * 0.5f).normalized;
+        var idx = verts.Count;
+        verts.Add(mid);
+        cache[key] = idx;
+        return idx;
+    }
+
+    /// <summary>docs/39 §11 item 3: a low-poly stand-in for Unity's stock
+    /// Cylinder primitive (80 tris) -- 8 sides lands at ~30 tris, the
+    /// item's own target. Just <see cref="Frustum"/> with equal top/
+    /// bottom radius; a separate named entry point so the PropLibrary
+    /// registration below reads as "a cylinder," not "a Frustum with
+    /// matching radii." <see cref="RuntimeCityBuilder.SpawnPrim"/> routes
+    /// every PrimitiveType.Cylinder call through this automatically.</summary>
+    public static Mesh LowPolyCylinder(int sides)
+    {
+        return Frustum(0.5f, 0.5f, sides);
+    }
+
     /// <summary>A tapered cylinder -- centered at local origin like
     /// CreatePrimitive's own shapes (extends -0.5..0.5 in Y before
     /// scale), so it drops into the same position/scale calling

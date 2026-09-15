@@ -422,3 +422,43 @@ also the easiest to spot-check, because a broken shader fails loud.
   `AttachChunks` path on purpose; confirm they still look and attach
   correctly (this item didn't touch their code, but confirm nothing
   about the shared body holder's restructuring broke their parenting).
+
+## 17. Low-poly sphere/cylinder swap (docs/39 §11 item 3) -- never seen rendering
+
+`RuntimeCityBuilder.SpawnPrim`, `MonsterBody.Part`, `Tank.Prim`, and
+`TrafficCar.MakeBulb` now redirect `PrimitiveType.Sphere`/`Cylinder` to
+new `ProceduralMeshKit.IcoSphere`/`LowPolyCylinder` meshes instead of
+Unity's stock primitives. This is a choke-point fix — every existing
+call site across `BaseDresser`/`BuildingDresser`/`RoadDresser`/
+`MonsterBody`/`Tank`/`TrafficCar` changes automatically, with none of
+those individual call sites themselves edited.
+
+- **Every sphere/cylinder-shaped prop in the game still looks
+  spherical/cylindrical** — streetlamp bulbs, Factory/Control Centre
+  domes and rivets, fire hydrants, tank turrets, traffic car head/brake
+  lights, roundabout globes, etc. At normal play zoom an 80-tri icosphere
+  should be indistinguishable from the old 760-tri stock sphere; check
+  it doesn't read as visibly faceted at the Close band either.
+  `FaceOutward` should mean no inside-out faces, but this is exactly the
+  kind of thing that's only actually confirmed by looking at it.
+  Consciously accepted risk: this is the SAME winding-computation
+  approach (`FaceOutward`) that has already needed one live-Editor
+  correction on this project's other `ProceduralMeshKit` shapes (the
+  2026-07 double-siding fix in `PropLibrary.Spawn`) — if a new sphere/
+  cylinder prop renders invisible (back-face culled) rather than
+  correctly, that's the known failure mode to check first.
+- **World-scaled UV tiling still works** on any Sphere/Cylinder spawned
+  with a textured material (`ApplyWorldScaledTiling` is re-applied
+  explicitly in `SpawnLowPolyPrim` specifically to preserve this —
+  confirm a tiled-texture sphere/cylinder, if any exist, doesn't look
+  stretched or untiled compared to before).
+- **Run `unity-client/Tools~/check-no-stock-primitives.sh`** after any
+  future change that touches primitive spawning, to catch a
+  reintroduced stock Sphere/Capsule outside the VFX/Big Brain jar
+  exception — this is the actual lint rule docs/39 item 3 asks for
+  (there's no CI to run it automatically yet).
+- **Triangle/renderer count actually dropped** — confirm via the same
+  `LogCityBuildCensus`/Profiler numbers docs/39 §10.2 asks for elsewhere
+  in this backlog; this item's own contribution should show up as a
+  measurable per-sphere/cylinder triangle reduction across the whole
+  scene, on top of items 1/2's creature-specific wins.

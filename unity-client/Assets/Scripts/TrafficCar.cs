@@ -435,18 +435,24 @@ public class TrafficCar : MonoBehaviour
         SetBulbsActive(_brakeLightBulbs, false);
     }
 
+    private static Mesh _lowPolySphereMesh;
+
+    /// <summary>docs/39 §11 item 3 lint rule ("no PrimitiveType.Sphere/
+    /// Capsule outside VFX and the Big Brain jar") -- head/brake-light
+    /// bulbs are neither, and up to 16 traffic cars can be on screen at
+    /// once (docs/39 §10.3), so this is exactly the "spawned in numbers"
+    /// case the rule targets.</summary>
     private Renderer MakeBulb(string name, Vector3 localPos, Vector3 localScale, Material mat)
     {
-        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        go.name = name;
+        if (_lowPolySphereMesh == null) _lowPolySphereMesh = ProceduralMeshKit.IcoSphere(1);
+        var go = new GameObject(name);
+        go.AddComponent<MeshFilter>().sharedMesh = _lowPolySphereMesh;
+        var renderer = go.AddComponent<MeshRenderer>();
         var t = go.transform;
         t.SetParent(transform, false);
         t.localPosition = localPos;
         t.localScale = localScale;
-        var renderer = go.GetComponent<Renderer>();
-        if (renderer != null) renderer.sharedMaterial = mat;
-        var collider = go.GetComponent<Collider>();
-        if (collider != null) Object.Destroy(collider);
+        renderer.sharedMaterial = mat;
         return renderer;
     }
 

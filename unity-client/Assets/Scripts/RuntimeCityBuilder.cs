@@ -2172,9 +2172,23 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         renderer.SetPropertyBlock(_tilingBlock);
     }
 
-    /// <summary>Colliderless styled primitive -- the dresser workhorse.</summary>
+    /// <summary>Colliderless styled primitive -- the dresser workhorse.
+    /// docs/39 §11 item 3: Sphere/Cylinder redirect to PropLibrary's
+    /// low-poly stand-ins (760/80 stock tris -> ~80/~30) instead of
+    /// GameObject.CreatePrimitive -- this is the one shared choke point
+    /// every dresser already routes through (docs/39 §4.1), so every
+    /// existing call site gets the cheaper mesh automatically, with no
+    /// per-call-site change. Cube/Plane/Quad are already cheap (Cube 12
+    /// tris) and Capsule has no low-poly stand-in built yet (docs/34 §0's
+    /// known holdout) -- both still take the stock primitive path
+    /// below.</summary>
     public GameObject SpawnPrim(PrimitiveType type, Vector3 position, Vector3 scale, Material mat, Transform parent)
     {
+        if (type == PrimitiveType.Sphere)
+            return SpawnLowPolyPrim("generic-low-poly-sphere", PrimitiveType.Sphere, position, scale, mat, parent);
+        if (type == PrimitiveType.Cylinder)
+            return SpawnLowPolyPrim("generic-low-poly-cylinder", PrimitiveType.Cylinder, position, scale, mat, parent);
+
         var go = GameObject.CreatePrimitive(type);
         go.transform.SetParent(parent, false);
         go.transform.position = position;
@@ -2191,6 +2205,27 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             renderer.sharedMaterial = mat;
             ApplyWorldScaledTiling(renderer, mat, scale);
         }
+        return go;
+    }
+
+    /// <summary>PropLibrary.Spawn already handles the mesh lookup,
+    /// colliderless-by-construction (no CreatePrimitive call at all, so
+    /// no Collider component ever exists to strip), and the double-
+    /// sided-cull-off safety net every ProceduralMeshKit shape needs in
+    /// an Editor-free environment (see PropLibrary.Spawn's own comment).
+    /// The one thing it does NOT do that stock SpawnPrim always did is
+    /// world-scaled UV tiling (ApplyWorldScaledTiling reads the caller's
+    /// ORIGINAL `mat`, not the double-sided clone PropLibrary.Spawn
+    /// assigns, so it composes fine as a property-block overlay applied
+    /// after) -- applied here so callers see identical tiling behavior
+    /// whether SpawnPrim happens to route them through a stock primitive
+    /// or a low-poly mesh.</summary>
+    private GameObject SpawnLowPolyPrim(string key, PrimitiveType fallbackType, Vector3 position, Vector3 scale,
+        Material mat, Transform parent)
+    {
+        var go = PropLibrary.Spawn(this, key, fallbackType, position, scale, mat, parent);
+        var renderer = go.GetComponent<Renderer>();
+        if (renderer != null) ApplyWorldScaledTiling(renderer, mat, scale);
         return go;
     }
 

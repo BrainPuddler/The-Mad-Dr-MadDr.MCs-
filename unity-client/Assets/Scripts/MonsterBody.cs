@@ -768,14 +768,47 @@ public class MonsterBody : MonoBehaviour
         return t;
     }
 
+    private static Mesh _lowPolySphereMesh;
+    private static Mesh _lowPolyCylinderMesh;
+
+    /// <summary>docs/39 §11 item 3: this fallback path (only reached if
+    /// CreatureBuilder.Build ever returns null -- it never does for a
+    /// well-formed genome, per that method's own doc comment) still
+    /// shouldn't spawn a stock 760-tri Sphere/80-tri Cylinder if it ever
+    /// does run. Cached locally rather than routed through PropLibrary --
+    /// MonsterBody has no RuntimeCityBuilder reference to hand it, and
+    /// the winding-safety FaceOutward pass PropLibrary's double-sided-
+    /// cull-off trick exists to cover is already baked INTO
+    /// IcoSphere/LowPolyCylinder themselves, so nothing here needs that
+    /// extra safety net.</summary>
+    private static Mesh LowPolyMeshFor(PrimitiveType type)
+    {
+        if (type == PrimitiveType.Sphere)
+            return _lowPolySphereMesh != null ? _lowPolySphereMesh : (_lowPolySphereMesh = ProceduralMeshKit.IcoSphere(1));
+        if (type == PrimitiveType.Cylinder)
+            return _lowPolyCylinderMesh != null ? _lowPolyCylinderMesh : (_lowPolyCylinderMesh = ProceduralMeshKit.LowPolyCylinder(8));
+        return null;
+    }
+
     private Transform Part(PrimitiveType type, Transform parent, Vector3 localPos, Vector3 localScale, Color color)
     {
-        var go = GameObject.CreatePrimitive(type);
+        GameObject go;
+        var lowPolyMesh = LowPolyMeshFor(type);
+        if (lowPolyMesh != null)
+        {
+            go = new GameObject(type.ToString());
+            go.AddComponent<MeshFilter>().sharedMesh = lowPolyMesh;
+            go.AddComponent<MeshRenderer>();
+        }
+        else
+        {
+            go = GameObject.CreatePrimitive(type);
+            var stockCollider = go.GetComponent<Collider>();
+            if (stockCollider != null) Object.Destroy(stockCollider);
+        }
         go.transform.SetParent(parent, false);
         go.transform.localPosition = localPos;
         go.transform.localScale = localScale;
-        var collider = go.GetComponent<Collider>();
-        if (collider != null) Object.Destroy(collider);
         var renderer = go.GetComponent<Renderer>();
         if (renderer != null)
         {

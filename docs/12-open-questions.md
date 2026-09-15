@@ -20573,3 +20573,105 @@ magenta), so "did this even compile" is answered at a glance the moment
 the Editor opens, unlike e.g. the fire-placement regression docs/39
 item 0.5 shipped blind twice before catching. See docs/36 for the
 checklist entry, including the magenta-mesh smoke test as step one.
+
+## 2026-09-15: docs/39 §11 item 3 -- low-poly sphere/cylinder via a choke-point fix, not a 187-site sweep
+
+Third docs/39 backlog item this session, after items 1 (LOD dial) and 2
+(vertex-color merge). Item 3 asks for two things: (a) low-poly
+sphere/cylinder meshes in `PropLibrary`, and (b) a lint rule banning
+`PrimitiveType.Sphere/Capsule` outside VFX and the Big Brain jar. Its
+own touch-list names `BaseDresser`, `BuildingDresser`, `RoadDresser`,
+`MonsterBody` fallbacks -- a real `grep` count found 187 individual
+`PrimitiveType.Sphere/Cylinder` call sites across exactly those four
+files (85+48+25+29), which would have been a huge, individually-
+unverifiable sweep if done call-site-by-call-site.
+
+**Chose a choke-point fix instead.** Every one of those 187 sites
+already calls one of a small number of shared helpers: `RuntimeCityBuilder
+.SpawnPrim` (BaseDresser/BuildingDresser/RoadDresser, confirmed by
+`grep` -- no direct `GameObject.CreatePrimitive` bypassing it anywhere
+in those three files) and `MonsterBody.Part` (all 29 MonsterBody sites,
+confirmed the same way). Redirecting Sphere/Cylinder to
+`PropLibrary`'s low-poly meshes INSIDE those two shared methods gets
+every existing call site the cheaper mesh with zero per-call-site
+changes -- exactly `PropLibrary.cs`'s own stated design goal ("swap
+CreatePrimitive calls for a PropLibrary lookup... with zero changes
+needed at any dresser call site"), just applied one level up from where
+it's applied today.
+
+**New geometry, `ProceduralMeshKit.cs`:** `IcoSphere(int subdivisions)`
+(golden-ratio-icosahedron construction, standard geodesic-sphere
+subdivision with a midpoint cache so shared edges don't split the mesh
+into disconnected shards at the seams -- subdiv 1 = exactly 80 tris, a
+clean match to the item's own "≈80 tris" target) and
+`LowPolyCylinder(int sides)` (just `Frustum(0.5, 0.5, sides)` under a
+clearer name; 8 sides = 32 tris, close to the item's "≈30 tris"). Both
+run the file's existing `FaceOutward` winding-safety pass, same as
+every other shape here.
+
+**Registered in `PropLibrary`** as `"generic-low-poly-sphere"`/
+`"generic-low-poly-cylinder"` (subdiv 1 / 8 sides -- the specific
+tessellation level is PropLibrary's choice, not a caller concern).
+
+**`RuntimeCityBuilder.SpawnPrim`** now branches on `type` before doing
+anything else: Sphere/Cylinder go through a new private
+`SpawnLowPolyPrim` (calls `PropLibrary.Spawn`, which already gives
+colliderless-by-construction + `FaceOutward`'s established double-
+sided-cull-off winding safety net for free, then re-applies
+`ApplyWorldScaledTiling` afterward so textured-material tiling behaves
+identically to the stock-primitive path it replaces -- the one thing
+`PropLibrary.Spawn` doesn't already do that `SpawnPrim` always did).
+Cube/Plane/Quad (already cheap) and Capsule (no low-poly stand-in built
+yet) still take the original `GameObject.CreatePrimitive` path.
+
+**`MonsterBody.Part`** (the fallback-only path used if
+`CreatureBuilder.Build` ever returns null, which it never does for a
+well-formed genome -- so this is dead code in practice today, but named
+explicitly in the item's own touch-list) got the same treatment, with a
+locally-cached mesh pair rather than routing through `PropLibrary`
+(MonsterBody has no `RuntimeCityBuilder` reference to hand it, and the
+winding safety is already baked into `IcoSphere`/`LowPolyCylinder`
+themselves via `FaceOutward`, so `PropLibrary`'s extra double-sided-
+material trick isn't needed here).
+
+**Two files outside the item's own touch-list also fixed, in scope
+because the LINT RULE (not just the asset swap) is blanket:** a real
+`grep` for the precise violation (`GameObject.CreatePrimitive
+(PrimitiveType.Sphere)` / `...Capsule)`, the thing that actually spawns
+a stock mesh -- NOT every mention of the enum, which would have false-
+flagged every `SpawnPrim`/`Part` call as a violation of a rule those
+calls no longer break) found two more real hits: `Tank.Prim` (turret
+sphere, 2 call sites) and `TrafficCar.MakeBulb` (head/brake-light
+bulbs, up to 16 cars on screen at once per docs/39 §10.3 -- exactly the
+"spawned in numbers" case the rule targets). Both fixed the same way,
+small and self-contained.
+
+**The lint rule itself:** `unity-client/Tools~/check-no-stock-primitives
+.sh`, a plain bash script (this project has no C#/Unity CI at all --
+the only workflow is the Pages deploy for `site/`) that greps for the
+precise violation pattern, allowlists the VFX files (`DamageFx.cs`,
+`SpecialAttackVfx.cs`, `WeaponFx.cs`) and the Big Brain jar
+(`BrainJarBubbles.cs`) by filename, and separately allowlists the ONE
+known, already-documented, deliberately-deferred exception -- the
+citizen-Capsule holdout in `RuntimeCityBuilder.cs` (docs/34 §0 / docs/36
+§12: "waiting on the Civilian Victims work") -- by exact pattern-in-file
+rather than blanket-exempting that whole large file, plus a self-check
+that warns if that holdout's own call count ever changes (so a future
+fix isn't silently swallowed by a stale allowlist). Ran it for real
+against this session's own changes: passes clean. Also ran a throwaway
+sandbox test (a fake violator file in a scratch temp directory, deleted
+after) to confirm the script actually catches a real violation and
+exits non-zero, not just a vacuous pass.
+
+**Verification:** brace/paren balance and read-through for all six
+touched C# files (same standing caveat as every Unity-side change in
+this environment) -- `TrafficCar.cs`'s paren count is off by one both
+before and after this change (confirmed via `git show HEAD`), a
+pre-existing imbalance in comment prose predating this session, not
+introduced by it. The lint script itself IS fully verified, for real,
+in this environment (it's a shell script, not Unity code) -- ran it
+three ways: clean against the real repo, positive-catch against an
+injected fake violation, and confirmed its self-check fires correctly
+when the deferred-exception count doesn't match. See docs/36 for the
+Editor-side checklist entry (visual/perf confirmation of the mesh swap
+itself).

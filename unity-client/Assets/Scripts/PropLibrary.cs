@@ -31,6 +31,20 @@ public static class PropLibrary
 
     static PropLibrary()
     {
+        // docs/39 §11 item 3: low-poly stand-ins for Unity's stock
+        // Sphere (760 tris) / Cylinder (80 tris) primitives, ~80/~30
+        // tris respectively. RuntimeCityBuilder.SpawnPrim -- "the shared
+        // helper every dresser routes through" (docs/39 §4.1) --
+        // redirects PrimitiveType.Sphere/Cylinder to these two keys
+        // itself, so every existing BaseDresser/BuildingDresser/
+        // RoadDresser call site (187 of them at last count) gets the
+        // cheaper mesh with zero per-call-site changes, exactly this
+        // file's own "swap CreatePrimitive calls for a PropLibrary
+        // lookup... with zero changes needed at any dresser call site"
+        // design goal.
+        Register("generic-low-poly-sphere", () => ProceduralMeshKit.IcoSphere(1));
+        Register("generic-low-poly-cylinder", () => ProceduralMeshKit.LowPolyCylinder(8));
+
         Register("ornate-lamppost-pole", () => ProceduralMeshKit.Frustum(1f, 0.55f, 10));
         Register("market-stall-canopy", ProceduralMeshKit.Wedge);
         // 2026-07 (Big Brain jar, replacing a pink-sphere-cluster

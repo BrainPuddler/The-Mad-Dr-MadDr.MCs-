@@ -281,18 +281,37 @@ public class Tank : MonoBehaviour
         _muzzle.localPosition = new Vector3(0f, 0.1f, flame ? 2.4f : 3.1f) * Scale;
     }
 
+    private static Mesh _lowPolySphereMesh;
+
     private static Transform Prim(PrimitiveType type, Transform parent, Vector3 pos, Vector3 scale,
         Color color, bool keepCollider = false)
     {
-        var go = GameObject.CreatePrimitive(type);
+        GameObject go;
+        // docs/39 §11 item 3 lint rule ("no PrimitiveType.Sphere/Capsule
+        // outside VFX and the Big Brain jar") -- Tank isn't either, and
+        // this method's own two call sites both use the default
+        // keepCollider: false, so there's no per-instance collider
+        // dependency a mesh-only GameObject (no CreatePrimitive, so no
+        // Collider to strip in the first place) would break.
+        if (type == PrimitiveType.Sphere && !keepCollider)
+        {
+            if (_lowPolySphereMesh == null) _lowPolySphereMesh = ProceduralMeshKit.IcoSphere(1);
+            go = new GameObject("Sphere");
+            go.AddComponent<MeshFilter>().sharedMesh = _lowPolySphereMesh;
+            go.AddComponent<MeshRenderer>();
+        }
+        else
+        {
+            go = GameObject.CreatePrimitive(type);
+            if (!keepCollider)
+            {
+                var c = go.GetComponent<Collider>();
+                if (c != null) Object.Destroy(c);
+            }
+        }
         go.transform.SetParent(parent, false);
         go.transform.localPosition = pos;
         go.transform.localScale = scale;
-        if (!keepCollider)
-        {
-            var c = go.GetComponent<Collider>();
-            if (c != null) Object.Destroy(c);
-        }
         var r = go.GetComponent<Renderer>();
         if (r != null)
         {

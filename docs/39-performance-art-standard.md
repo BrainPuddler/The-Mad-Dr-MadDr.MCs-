@@ -615,11 +615,21 @@ before any monster or shader work even starts.
    URP/Lit has no vertex-color input — the one piece of this item that
    genuinely needs a live Editor to confirm compiles and renders
    correctly, not just a read-through.
-3. **Low-poly sphere/cylinder in `PropLibrary`** (icosphere subdiv-1 ≈
-   80 tris, 8-side cylinder ≈ 30 tris) and a lint rule: no
+3. **[Implemented 2026-09-15, pending Editor verification — see docs/12]
+   Low-poly sphere/cylinder in `PropLibrary`** (icosphere subdiv-1 = 80
+   tris exactly, 8-side cylinder ≈ 32 tris) and a lint rule: no
    `PrimitiveType.Sphere/Capsule` outside VFX and the Big Brain jar.
-   Touches `BaseDresser`, `BuildingDresser`, `RoadDresser`,
-   `MonsterBody` fallbacks.
+   Landed as a choke-point fix, not a per-call-site sweep:
+   `RuntimeCityBuilder.SpawnPrim` and `MonsterBody.Part`/`Tank.Prim`/
+   `TrafficCar.MakeBulb` (the shared helpers every one of the 187
+   `BaseDresser`/`BuildingDresser`/`RoadDresser`/`MonsterBody` call
+   sites already routes through) now redirect Sphere/Cylinder to
+   `PropLibrary`'s low-poly meshes internally — zero call sites touched.
+   `unity-client/Tools~/check-no-stock-primitives.sh` is the actual lint
+   rule (no CI runs Unity C# in this project yet, so it's a manual/
+   pre-commit script, not a gate); passes clean against the real
+   codebase today, with the one already-documented, deliberately
+   deferred exception (docs/36 §12's citizen-capsule holdout).
 4. **Confirm and fix the `MaterialPropertyBlock` batching break** (§7):
    Frame Debugger first; then world-space-UV tiling material instead of
    per-prim `_BaseMap_ST`, and colour-keyed shared materials or baked
