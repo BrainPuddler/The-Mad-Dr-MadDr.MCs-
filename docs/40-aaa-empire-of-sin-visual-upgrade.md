@@ -399,6 +399,55 @@ docs/39 §11. Each item states its Editor-dependence up front.
    creator to do the one-time Editor step, or accept item 4's fake-
    puddle approximation as the ceiling.**
 
+   **2026-09-16, read-only recon of the actual URP config (reading
+   asset/scene YAML, no Editor access) — narrows the creator's own
+   step considerably:**
+   - `Assets/Settings/PC_RPAsset.asset` (confirmed active pipeline —
+     matches `ProjectSettings/GraphicsSettings.asset`'s
+     `m_CustomRenderPipeline` guid) already has
+     `m_RequireDepthTexture: 1` and `m_RequireOpaqueTexture: 1` — both
+     hard prerequisites for URP Screen Space Reflections are already
+     on. Nothing to change there.
+   - Its renderer, `Assets/Settings/PC_Renderer.asset`, already carries
+     one Renderer Feature (`ScreenSpaceAmbientOcclusion`) but no SSR
+     feature yet. **Creator step 1: select `PC_Renderer.asset` →
+     Inspector → Add Renderer Feature → Screen Space Reflections.**
+   - The scene's one Global Volume (`Assets/Scenes/SampleScene.unity`)
+     references `Assets/Settings/DefaultVolumeProfile.asset` as its
+     shared profile (same guid as `PC_RPAsset`'s own default volume
+     profile field). That profile has no SSR override yet (it does
+     carry several stray `CopyPasteTestComponent*`/`TestVolume`/
+     `VolumeComponentSupportedEverywhere` entries that look like
+     leftover Unity package test-sample data — harmless, not touched,
+     flagged in case it's ever worth cleaning up). **Creator step 2:
+     select `DefaultVolumeProfile.asset` → Add Override →
+     Post-processing → Screen Space Reflections → enable it.**
+   - **No code changes needed for this half of item 5.** Item 1's own
+     `WetSurfaceRegistry` already raises `_Smoothness` on wet road
+     materials specifically so "any EXISTING light... produce[s] a
+     sharper specular response" once a real reflection technique
+     exists — SSR reads screen-space depth/color, exactly what's
+     already enabled above, so turning it on should make the
+     already-shipped wet roads/puddle decals show real mirrored
+     buildings/sky for free. **Visual check once both steps are done:**
+     rain on, at night, near a roundabout — confirm the puddle decals
+     and wet asphalt now show a rough real reflection, not just a flat
+     tinted patch.
+   - **Real baked Reflection Probes are a poor fit here specifically —
+     worth recording so nobody tries it and gets confused.** This
+     project's entire city is built procedurally at RUNTIME by
+     `RuntimeCityBuilder` (docs/18); there's no building geometry in
+     the edit-time scene for a baked `ReflectionProbe` to see. A baked
+     probe placed in `SampleScene` today would capture essentially
+     nothing. It would need to be `Realtime`, updated every frame
+     (expensive, likely conflicts with docs/39's performance floor) or
+     spawned/triggered from code near specific landmarks and rendered
+     on-demand — a real, separately-scoped follow-up. **Recommendation:
+     ship SSR alone first** (zero code, both prerequisites already on)
+     **and only build a runtime landmark-probe spawner if the creator
+     specifically wants mirror-like glass-tower reflections after
+     seeing SSR in action** — don't build it preemptively.
+
 6. **Volumetric fog integration** — the REAL Renderer Feature stays
    parked, not re-evaluated. docs/28 row 19 already did the feasibility
    work and the creator already chose the cheaper Bloom-based
