@@ -72,6 +72,22 @@ Shader "MadDr/CreatureVertexColor"
         // -- one shared value per material group, LabMeshBuilder-set,
         // same approximation trade as _EmissionStrength.
         _Smoothness("Smoothness (drives specular highlight tightness/strength)", Range(0,1)) = 0.35
+
+        // docs/40 §3 item 3: a cool rim/fresnel term for night-silhouette
+        // pop -- monsters are 26 px at the default zoom (docs/39 §1.1,
+        // roughly a third of Empire of Sin's own 30-60 px characters), so
+        // contrast against a dark background has to do more of the read
+        // than pixel count can. Cool blue-white, matching the same
+        // night-ambient tint color docs/28 row 31 already settled on for
+        // this project's whole night palette, so a rim-lit monster reads
+        // as part of the same lighting mood as the city around it rather
+        // than a mismatched new color. Strength is scaled at runtime by
+        // the GLOBAL _MadDrNightAmount below, not this per-material
+        // value alone -- this Range is a per-material-group ceiling
+        // multiplier, same "one shared value" idiom as _Smoothness.
+        _RimColor("Rim Color", Color) = (0.55, 0.72, 1, 1)
+        _RimPower("Rim Power (fresnel falloff sharpness)", Range(0.5, 8)) = 2.5
+        _RimIntensity("Rim Intensity (ceiling, scaled by night amount at runtime)", Range(0,3)) = 1.2
     }
 
     SubShader
@@ -102,7 +118,21 @@ Shader "MadDr/CreatureVertexColor"
                 half4 _BaseColor;
                 half _EmissionStrength;
                 half _Smoothness;
+                half4 _RimColor;
+                half _RimPower;
+                half _RimIntensity;
             CBUFFER_END
+
+            // docs/40 §3 item 3: a true global, NOT inside the per-
+            // material CBUFFER above -- set once per frame from
+            // LumenCycleController.ApplyBlend via Shader.SetGlobalFloat,
+            // read identically by every creature material with zero
+            // per-instance update cost. Declaring it outside
+            // UnityPerMaterial is what keeps this SRP-Batcher-safe (a
+            // per-object override would defeat batching per docs/39 §7;
+            // this is the same category as Unity's own built-in globals
+            // like _WorldSpaceCameraPos, not a per-draw property).
+            half _MadDrNightAmount;
 
             struct Attributes
             {
@@ -170,7 +200,19 @@ Shader "MadDr/CreatureVertexColor"
                 // header comment above.
                 half3 emission = IN.color.rgb * _EmissionStrength;
 
-                half3 color = diffuse + specular + emission;
+                // docs/40 §3 item 3: standard Schlick-style fresnel rim
+                // term (1 - N.V, powered) -- reuses viewDirWS already
+                // computed above for the specular half-vector, no extra
+                // per-pixel work beyond one more dot/pow. Scaled by
+                // _MadDrNightAmount (0 all through Day, per
+                // LumenCycleController's own existing curve) so the rim
+                // is invisible in daylight and strengthens exactly when
+                // the background gets darker and silhouette readability
+                // needs it most -- never an always-on outline glow.
+                half rimFresnel = pow(1.0h - saturate(dot(normalWS, viewDirWS)), _RimPower);
+                half3 rim = _RimColor.rgb * (rimFresnel * _RimIntensity * _MadDrNightAmount);
+
+                half3 color = diffuse + specular + emission + rim;
                 color = MixFog(color, IN.fogFactor);
                 return half4(color, 1.0h);
             }

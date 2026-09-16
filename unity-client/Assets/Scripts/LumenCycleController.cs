@@ -649,6 +649,18 @@ public class LumenCycleController : MonoBehaviour
         DayNightState.NeonBoost = neonBoost;
         DayNightState.NightAmount = nightAmount;
 
+        // docs/40 §3 item 3: a true GLOBAL shader uniform (not a
+        // per-material property, unlike _Smoothness/_EmissionStrength
+        // above it in CreatureVertexColor.shader) -- every creature
+        // material reads the same value with zero per-instance update
+        // cost, the cheapest possible way to make monster rim lighting
+        // track the night cycle. Declared as a plain global outside that
+        // shader's UnityPerMaterial CBUFFER, so this doesn't touch SRP
+        // Batcher compatibility at all (a real global uniform, same
+        // category Unity's own built-in globals like
+        // _WorldSpaceCameraPos already are, not a per-draw override).
+        Shader.SetGlobalFloat("_MadDrNightAmount", nightAmount);
+
         // HDR-style shadow lift, weighted by nightAmount the same way
         // neonBoost/lamp intensity already are -- 0 lift all through Day
         // (nightAmount==0, untouched daytime image), ramping to

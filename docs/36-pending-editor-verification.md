@@ -913,3 +913,44 @@ rather than vanish.
   `WetSurfaceRegistry`, nothing reads `RainSystem`'s own state) --
   deleting its `AddComponent` call in `RuntimeCityBuilder` fully
   disables it with zero ripple effects.
+
+## 28. Monster rim/fill light (docs/40 §3 item 3)
+
+New rim/fresnel term in `CreatureVertexColor.shader` (the hand-authored
+shader docs/39 §11 item 2 shipped, confirmed compiling by a real Editor
+per that item's own docs/12/36 history) -- `_RimColor`/`_RimPower`/
+`_RimIntensity` as three new per-material-group Properties (default
+values apply automatically to every `LabMeshBuilder`-created material,
+no C# change needed there), scaled at runtime by a new GLOBAL
+`_MadDrNightAmount` set once per frame from `LumenCycleController.
+ApplyBlend` via `Shader.SetGlobalFloat` -- zero per-material update
+cost, every creature reacts identically and instantly to the existing
+day/night curve with no new registration system. Rim is 0 in daylight
+by construction (`_MadDrNightAmount` starts and stays 0 through Day)
+and strengthens through Dusk/Night on the same curve `nightAmount`
+already drives for lamps/windows/ambient elsewhere.
+
+- **The actual visual check**: watch a monster from Dusk through Night
+  and confirm a cool blue-white rim/edge light appears against its
+  silhouette, strengthening as the sky darkens, and is genuinely absent
+  in full Day -- `_RimIntensity`/`_RimPower` in the shader's Properties
+  block are the tuning knobs if it reads too strong/weak/tight/wide.
+- **Property-declaration correctness**: this is the first GLOBAL
+  (non-per-material) HLSL uniform this project's hand-authored shaders
+  have used -- confirm `Shader.SetGlobalFloat("_MadDrNightAmount", ...)`
+  actually reaches the shader (expected to "just work" per Unity's
+  standard global-uniform binding-by-name convention, but every other
+  hand-authored shader gotcha in this project's history — WindowGrid's
+  glazing, CreatureVertexColor's own flat-shading miss — was also
+  "should just work" until seen rendered).
+- **SRP-batching check**: confirm merged creature meshes are still
+  batching correctly (docs/39 §11 item 4's own Frame Debugger check) --
+  the new CBUFFER fields are per-material like the existing ones, and
+  the global sits outside the CBUFFER entirely, so this SHOULD have no
+  batching impact, but hasn't been confirmed against a real capture.
+- **If this looks broken**: the three new properties and the rim
+  computation in `CreatureVertexColorFragment` are additive and
+  isolated -- deleting the `half3 rim = ...` line and the `+ rim` in
+  the final `color` composition (plus optionally the global float call
+  in `LumenCycleController`) fully reverts to the pre-item-3 shader
+  with no effect on diffuse/specular/emission.

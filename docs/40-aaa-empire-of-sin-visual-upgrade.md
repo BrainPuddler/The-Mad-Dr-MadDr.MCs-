@@ -309,15 +309,23 @@ docs/39 §11. Each item states its Editor-dependence up front.
    correctly at the Normal-band 26 px test is a visual judgment call for
    the creator, same ceiling as every VFX change here.
 
-3. **Monster rim/fill light term** (closes §2.4). A cool rim/fresnel
-   term added to `CreatureVertexColor.shader` (the shader docs/39 §11
-   item 2 already hand-authored and confirmed compiles, docs/36), driven
-   by the already-global `LumenCycleController.nightAmount` so it
-   strengthens exactly when the background gets darker and readability
-   needs it most — no new registration system, no new per-monster
-   script hookup beyond a shader property block already present.
+3. **[Implemented 2026-09-16, pending Editor verification — see docs/36
+   entry 28] Monster rim/fill light term** (closes §2.4). A cool rim/
+   fresnel term added to `CreatureVertexColor.shader` (the shader
+   docs/39 §11 item 2 already hand-authored and confirmed compiles,
+   docs/36) — three new per-material Properties (`_RimColor`/
+   `_RimPower`/`_RimIntensity`, defaults apply automatically, no
+   `LabMeshBuilder` change needed) scaled by a new GLOBAL
+   `_MadDrNightAmount`, pushed once per frame from
+   `LumenCycleController.ApplyBlend` via `Shader.SetGlobalFloat` — no
+   new registration system, no per-monster script hookup, zero per-
+   material update cost since every material reads the same global.
    **Editor-dependence: low** — same shader, same proven-precedent
-   pattern as item 0, one more property on an existing pass.
+   pattern as item 0, one more property block on an existing pass; this
+   IS, however, the first genuinely global (non-per-material) uniform
+   any hand-authored shader in this project has used, flagged as its
+   own specific unconfirmed detail in docs/36 rather than folded
+   silently into "same as before."
 
 4. **Puddle "fake reflection" decals at key plazas/intersections**
    (partial alternative to full reflection probes/SSR, which docs/28
