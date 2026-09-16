@@ -485,6 +485,19 @@ docs/39 §11. Each item states its Editor-dependence up front.
    items had; the real Renderer Feature version above remains fully
    blocked regardless of this.
 
+   **[Rewritten 2026-09-16, pending Editor verification — see docs/36
+   entry 33] "Fluffy" pass, direct creator feedback** ("lets implement
+   fluffy volumetric fog bank. replacing the ugly fake ones") — the
+   3-layer hard-edged `CloudShard` stack (no UVs, uniform alpha per
+   surface) is gone, replaced by a cluster of 5 camera-facing billboard
+   quads per patch, each textured with a new soft, organically-lumpy
+   alpha texture (multiple overlapping soft radial lobes unioned
+   together, not one circle) — the same "hard mesh → real UV + soft
+   procedural alpha texture" fix `RainSystem` already proved on the
+   identical complaint (docs/36 entry 27). Puffs are taller/wider near a
+   patch's own center and shorter toward its flanks for a real bank
+   silhouette. Full detail in docs/36 entry 33.
+
 ---
 
 ## 4. Explicitly out of scope for this doc

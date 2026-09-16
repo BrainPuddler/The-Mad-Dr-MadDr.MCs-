@@ -1244,3 +1244,62 @@ whether any of it actually LOOKS right -- rain density/streak fade,
 puddle patchiness, fog layering, rim-light silhouette, window/headlight
 cone sizing are all still open creator-eyes questions. No screenshot or
 Frame Debugger capture exists for any of this yet.
+
+## 33. Fluffy fog banks, replacing entry 30's hard-edged patches (docs/40 §3 item 5/6)
+
+Creator direction: "lets implement fluffy volumetric fog bank. replacing
+the ugly fake ones." Entry 30's `VolumetricFogPatchSystem` stacked 3
+flat `ProceduralMeshKit.CloudShard` layers per patch -- a solid low-poly
+mesh with NO UVs and a uniform alpha across its whole surface, so it
+rendered as exactly what it was: a faceted geometric blob, not a soft
+cloud. That's the "ugly fake" the creator meant.
+
+**Rewrite, mirroring `RainSystem`'s own proven fix for the identical
+complaint** (its streaks/splashes went from flat-alpha boxes to real
+UV-mapped procedural alpha-gradient textures on the same creator
+feedback, docs/36 entry 27): each patch is now a cluster of 5 camera-
+facing billboard quads ("puffs") instead of 3 stacked hard layers. Each
+puff carries a NEW soft alpha texture (`BuildFluffyPuffTexture`) -- 5
+overlapping soft-edged radial lobes at randomized offsets, unioned via
+`Mathf.Max`, baked once per texture variant (3 variants, shared across
+all puffs using that variant) -- which reads as a genuinely lumpy,
+organic cloud silhouette rather than one perfect circle. Puffs are laid
+out taller and wider near a patch's own horizontal center, shorter and
+thinner toward its flanks (`BuildPuffLayout`'s `centerFactor`), which is
+what actually produces a "bank" shape (rises in the middle, tapers at
+the edges) instead of a uniform row.
+
+**Billboarding is new, too**: every puff's quad rotates each frame
+(`Quaternion.LookRotation` toward the camera, plus a fixed per-puff roll
+rolled once at creation for variety) so it reads correctly from any
+pan/zoom angle -- the old geometry was ground-fixed and only looked
+right from whatever angle it happened to be built at. `PatchCount`
+dropped 8 -> 6 (each patch now covers more visual area via 5 puffs
+apiece, 30 renderers total vs. the old 24 -- comparable order of
+magnitude to `MistSystem`'s 12 and `RainSystem`'s 40-splash pool, both
+already-accepted uses of docs/39 §7's "bounded set, MaterialPropertyBlock
+per instance" exception).
+
+Everything else is unchanged from entry 30: stationary patches that
+REPOSITION (not respawn) when the camera wanders past `SpawnHalfExtent
++ RecenterMargin`, `DayNightState.NightAmount`/`WeatherController
+.Wetness`-driven visibility (same formula), Map-band cull. No other file
+touches `VolumetricFogPatchSystem` besides its one `AddComponent` call
+in `RuntimeCityBuilder` -- a fully self-contained rewrite.
+
+- **The actual visual check**: at night, confirm each fog bank reads as
+  a soft, lumpy cloud-like cluster with a real bump silhouette (taller
+  middle, tapering edges) rather than a stack of hard geometric rings --
+  and that panning/zooming the camera never reveals a flat card edge-on
+  (the billboard rotation should prevent this; if it doesn't, the most
+  likely cause is `Camera.main` being null or stale at the moment
+  checked).
+- **Texture variety check**: with 3 shared texture variants across 30
+  puffs, confirm nearby puffs don't look like obvious repeated copies of
+  the exact same shape -- if they do, `TextureVariants` is the easy knob
+  to raise.
+- **If this looks broken**: `VolumetricFogPatchSystem` is still the same
+  single self-contained MonoBehaviour with no other system depending on
+  it (see entry 30) -- deleting its `AddComponent` call in
+  `RuntimeCityBuilder` fully disables it with zero ripple effects, same
+  as before this rewrite.
