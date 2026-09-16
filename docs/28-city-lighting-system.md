@@ -298,12 +298,30 @@ otherwise ignores the day/night cycle entirely.
 | Movie palace neon (underglow/blade/letters) | existing `NeonTeal`/`SignWhite`/`NeonRed` | No (decorative, not budgeted) | **Buzz** |
 | Movie palace marquee chaser row | new small bulb row | No (decorative, not budgeted) | **Chase** |
 
-**Deliberately not attempted this pass** (real, separate follow-ups, not
-silently skipped):
-- Office-tower window bands (`DressOffice`'s single tall strip per face,
-  not per-floor) — no per-floor granularity exists there yet to flicker
-  individually; would need the same per-floor-strip treatment
-  `DressApartment` got.
+**2026-09-16 correction, found while about to build the item below**:
+the "office-tower window bands" gap this list named is now STALE, not
+open — checked the live code before starting, per the standing "a
+backlog item's own prose isn't proof of current state" lesson
+(`maddr-editor-verification-workflow` memory). `DressOffice`'s
+"single tall strip per face" only describes its LEGACY `else` branch,
+which is dead in practice: `UseFacadeGrammar = true` and
+`GrammarAppliesTo(BuildingTier.Large) == true` are both the shipped
+defaults, so every real office tower already routes through
+`DressFacadeGrammar` (docs/30, shipped 2026-08-10/12, AFTER this row
+was written) instead. That path solves a real per-floor cell strip
+(`FacadeGrammar.Solve`, `floors + 2` cells) with `FacadeStyle
+.Commercial` assigning `WindowBay`/`BlindBay`/`Shopfront` per floor
+(confirmed down to the contradiction-fallback case, which still
+assigns `WindowBay` per cell, never a single tall strip), each window
+getting its own independent glow roll (`FacadeMaterials.RollGlow`,
+docs/28 row 35's own no-clumping fix) and the full arrival/bedtime
+occupancy schedule (rows 13/37-39) same as every other grammar-dressed
+building. Office towers already flicker floor-by-floor, window-by-
+window, exactly like apartments do — there is no remaining gap here to
+build, this row is closed.
+
+**Still genuinely open** (real, separate follow-ups, not silently
+skipped):
 - Individual window-pane geometry — every "window" here is still one
   whole floor-height strip, not individual panes; true single-window
   lit/dark granularity needs real per-pane geometry, a bigger
