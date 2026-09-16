@@ -1213,3 +1213,34 @@ unchanged.
   window helpers) or a purely additive sentinel-gated parameter (the
   range/coneAngle overrides) -- reverting any one piece independently
   is safe and doesn't require touching the others.
+
+## 32. Editor confirmation: entries 25-31 compile clean and survive a real play session
+
+Found by reading `~/Library/Logs/Unity/Editor.log` directly (file mtime
+2026-09-16 15:50, well after this session's tip commit `ae9d4f3` at
+13:11) -- not asked about; same opportunistic check
+`maddr-editor-verification-workflow` already established. This is a
+NEW play session distinct from the earlier item-0/1 confirmation noted
+in entry 25/26: `*** Tundra build success (2.62 seconds), 9 items
+updated, 841 evaluated` followed by a real played match (23-24 citizens
+eaten, several harvester bank events, clean domain reload) with ZERO
+`LogError`/exception/shader-error lines across the entire 1086-line
+log. Only non-project noise: offline `curl` failures resolving
+`cdp.cloud.unity3d.com` and a roster-fetch timeout falling back to
+cache -- both environment networking, unrelated to any shipped code.
+
+This is the first real-Editor confirmation for entries 27-31 (rain
+polish passes, monster rim light, puddle decals + the clone-chain fix,
+volumetric fog patches, docs/28 §4 light-shaping/flicker cleanup) --
+entries 25/26 already had their own separate item-0/1 confirmation
+from an earlier session, but everything shipped after that (items 2-6
+of docs/40, plus the docs/28 §4 follow-up) had never been through a
+real Editor at all until now. **What this confirms:** the whole stack
+through `ae9d4f3` compiles clean and runs a full match without
+throwing -- including the clone-chain fix (entry 29) that a compile
+check alone cannot validate the absence-of-exception for. **What this
+does NOT confirm, same standing distinction as every prior entry:**
+whether any of it actually LOOKS right -- rain density/streak fade,
+puddle patchiness, fog layering, rim-light silhouette, window/headlight
+cone sizing are all still open creator-eyes questions. No screenshot or
+Frame Debugger capture exists for any of this yet.
