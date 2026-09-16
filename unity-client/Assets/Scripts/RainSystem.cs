@@ -246,6 +246,15 @@ public class RainSystem : MonoBehaviour
     {
         var mat = new Material(ShaderUtil.FindRenderableShader());
         mat.color = new Color(0.75f, 0.8f, 0.85f, 0.35f);
+        // Real Editor exception caught this the first time it actually
+        // ran: Graphics.DrawMeshInstanced throws InvalidOperationException
+        // ("Material needs to enable instancing") without this --
+        // LowPolyFireSystem.MakeFireMaterial already sets this same flag
+        // right after construction, and this file's own header claims
+        // that file as its precedent, but the flag itself got missed
+        // when mirroring it. Confirmed the real, load-bearing gap; not a
+        // style choice.
+        mat.enableInstancing = true;
         LabMeshBuilder.MakeTransparent(mat);
         ApplyDoubleSidedSafetyNet(mat);
         return mat;
@@ -259,6 +268,7 @@ public class RainSystem : MonoBehaviour
     {
         var mat = new Material(ShaderUtil.FindRenderableShader());
         mat.color = new Color(0.8f, 0.85f, 0.9f, 0.25f);
+        mat.enableInstancing = true;   // see BuildStreakMaterial's own comment
         LabMeshBuilder.MakeTransparent(mat);
         if (mat.HasProperty("_EmissionColor"))
         {

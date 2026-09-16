@@ -890,6 +890,23 @@ reads were updated to chain through it instead of skipping straight to
 
 ## 27. Falling rain streaks + splashes (docs/40 §3 item 2)
 
+**2026-09-16 update: real creator-reported exception, fixed.**
+`Graphics.DrawMeshInstanced` threw `InvalidOperationException:
+Material needs to enable instancing for use with DrawMeshInstanced`
+every frame `RainSystem.Update` ran with `Wetness > 0` (i.e., rain was
+genuinely toggled on and this code genuinely executed -- useful
+confirmation in its own right, buried inside a real bug report). Root
+cause: `BuildStreakMaterial`/`BuildSplashMaterial` never set
+`mat.enableInstancing = true` -- `LowPolyFireSystem.MakeFireMaterial`
+(this file's own cited precedent) DOES set it, immediately after
+construction; the flag itself got missed when mirroring the technique,
+not the `Graphics.DrawMeshInstanced` call shape. Fixed by adding it to
+both material builders. This is exactly the kind of gap the project's
+own risk calibration expects from mirroring a precedent read-through-
+only (a missing one-line flag, not a structural misunderstanding) --
+confirmed working now depends on the creator re-running it, not
+re-read here.
+
 New `RainSystem`, a pure visual consumer of item 1's
 `WeatherController.Wetness` (no weather state of its own). GPU-
 instanced via `Graphics.DrawMeshInstanced` on a hand-authored unit-box
