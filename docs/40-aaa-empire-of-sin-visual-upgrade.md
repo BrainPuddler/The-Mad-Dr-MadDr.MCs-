@@ -449,10 +449,15 @@ docs/39 §11. Each item states its Editor-dependence up front.
       probes are expensive against docs/39's floor.
    4. **Accept item 4's puddle-decal approximation as the ceiling** —
       the original framing of this item, still valid.
-   Ask the creator which of these (if any) before doing more here —
-   this is the genuine "wait for the creator" case the item's opening
-   paragraph already called out, now with the real menu instead of a
-   two-click illusion of one.
+
+   **2026-09-16, creator decision: option 4.** No Editor upgrade,
+   no third-party SSR package, no runtime realtime-probe follow-up.
+   Item 4's puddle decals (`RoadDresser.PuddleDecal()`, faded by
+   `WeatherController.Wetness`) are the final ceiling for reflections in
+   this project on its current Unity version. **This closes docs/40's
+   entire ranked backlog (items 0-6) — nothing left to pick up here
+   without a new ask.** Don't re-raise real reflection probes/SSR
+   again unless the creator upgrades Unity or brings it up themselves.
 
 6. **Volumetric fog integration** — the REAL Renderer Feature stays
    parked, not re-evaluated. docs/28 row 19 already did the feasibility
