@@ -399,13 +399,31 @@ docs/39 §11. Each item states its Editor-dependence up front.
    creator to do the one-time Editor step, or accept item 4's fake-
    puddle approximation as the ceiling.**
 
-6. **Volumetric fog integration** — stays parked, not re-evaluated.
-   docs/28 row 19 already did the feasibility work and the creator
-   already chose the cheaper Bloom-based approximation for performance.
-   Nothing here changes that calculus; don't re-litigate it (same
-   "once the creator calls something adequate, that's final" rule the
-   `maddr-editor-verification-workflow` memory already states for the
-   SRP-batching item).
+6. **Volumetric fog integration** — the REAL Renderer Feature stays
+   parked, not re-evaluated. docs/28 row 19 already did the feasibility
+   work and the creator already chose the cheaper Bloom-based
+   approximation for performance. Nothing here changes that calculus;
+   don't re-litigate it (same "once the creator calls something
+   adequate, that's final" rule the `maddr-editor-verification-workflow`
+   memory already states for the SRP-batching item).
+
+   **[Implemented 2026-09-16, pending Editor verification — see docs/36
+   entry 30] Cheap approximation shipped instead**, direct creator
+   direction ("add the volumetric fog patches") rather than a re-
+   evaluation of the real package. New `VolumetricFogPatchSystem.cs`: 8
+   stationary ground-fog patches, each a 3-layer stack of soft
+   `ProceduralMeshKit.CloudShard` blobs (wide/opaque near the ground,
+   smaller/fainter with height — the standard "billboard stack" trick
+   for a volume-reading silhouette with no real density field), scaled
+   by `DayNightState.NightAmount` plus a smaller `WeatherController
+   .Wetness` boost. Not tied to real terrain (rivers, dips) — this
+   environment has no simple terrain-height query from a standalone
+   MonoBehaviour, so patches scatter generically across the visible
+   area rather than anchoring to actual low ground. **Editor-
+   dependence: low** — plain GameObjects/MeshRenderers, no
+   `Graphics.DrawMeshInstanced`/clone-chain risk like `RainSystem`'s own
+   items had; the real Renderer Feature version above remains fully
+   blocked regardless of this.
 
 ---
 

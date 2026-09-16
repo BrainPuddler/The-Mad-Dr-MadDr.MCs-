@@ -1118,3 +1118,47 @@ rain, check whether asphalt/sidewalk/curb wetness ALSO isn't showing
   defensive (an `if (TryGetParams(...))` that does nothing when the
   material isn't wet-registered), so it's safe to leave in place even
   if the puddle decal itself is reverted.
+
+## 30. Volumetric fog patches (docs/40 §3 item 5 follow-up)
+
+Creator direction: "add the volumetric fog patches." **Not** the real
+URP volumetric-fog Renderer Feature docs/28 row 19 evaluated and the
+creator already chose not to integrate for performance -- that
+decision is untouched, and a genuine ray-marched volumetric fog feature
+still needs the same Editor-only Renderer-Feature-registration step
+every other item-5 option does. New `VolumetricFogPatchSystem.cs` is
+the cheap approximation instead: 8 stationary ground-fog patches, each
+a 3-layer stack of soft `ProceduralMeshKit.CloudShard` blobs (wide and
+relatively opaque near the ground at 0.3m, smaller and fainter at 1.4m
+and 2.8m) -- the standard "billboard stack" trick for a fog silhouette
+that reads as having real height, without any actual density field.
+Intensity tracks `DayNightState.NightAmount` (thick at night, gone by
+day) plus a smaller boost from `WeatherController.Wetness` (fog and
+rain read as one weather system, not two unrelated ones). Patches
+reposition (not respawn -- the same GameObjects move) around the
+camera's ground focus when the camera wanders far enough away, and skip
+entirely in the Map band, same pattern as `RainSystem`/`MistSystem`.
+
+Deliberately NOT tied to actual low-lying terrain (rivers, dips) --
+this environment has no simple terrain-height query available from a
+standalone MonoBehaviour, so patches scatter across the visible area
+generically. If the creator wants them anchored to real geography
+later, that needs a query into `RuntimeCityBuilder`'s own terrain/water
+data, a bigger follow-up, not attempted here.
+
+- **The actual visual check**: at night (with or without rain),
+  confirm 1-2 soft, layered fog patches are visible somewhere in view,
+  reading as having real vertical extent (thicker near the ground,
+  thinning with height) rather than a flat gray smear -- and that they
+  fade toward nothing in full daylight. `LayerHeight`/`LayerRadiusScale`/
+  `LayerBaseAlpha` in `VolumetricFogPatchSystem.cs` are the tuning
+  knobs if the layering doesn't read as volume.
+- **Rain interaction**: confirm turning rain on at night thickens the
+  fog somewhat rather than replacing it or doing nothing -- the two
+  contributions are meant to add, capped before summing.
+- **Map-band cull**: zoom out past ≥250m and confirm patches disappear,
+  same check as `RainSystem`/`MistSystem`'s own Map-band gate.
+- **If this looks broken**: `VolumetricFogPatchSystem` is a single
+  self-contained MonoBehaviour with no other system depending on it --
+  deleting its `AddComponent` call in `RuntimeCityBuilder` fully
+  disables it with zero ripple effects.

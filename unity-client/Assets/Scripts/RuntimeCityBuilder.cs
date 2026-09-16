@@ -695,6 +695,11 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (gameObject.GetComponent<MistSystem>() == null)
             gameObject.AddComponent<MistSystem>();
 
+        // docs/40 §3 item 5 follow-up: same unconditional-but-cheap-
+        // while-invisible shape as RainSystem/MistSystem above.
+        if (gameObject.GetComponent<VolumetricFogPatchSystem>() == null)
+            gameObject.AddComponent<VolumetricFogPatchSystem>();
+
         var bars = gameObject.GetComponent<HealthBars>();
         if (bars == null) bars = gameObject.AddComponent<HealthBars>();
         bars.Init(this);
