@@ -710,3 +710,74 @@ zero exceptions needed for `RuntimeCityBuilder.cs` now).
   humanoid -- consistent with Worker/HumanoidCombatant, not a new gap,
   but worth confirming a crowd of citizens doesn't reintroduce a
   shadow-cost regression at scale (`citizenCount` can be large).
+
+## 25. Facade normal-map rollout (docs/40 §3 item 0)
+
+New `PbrTextureAtlas.BuildNormalFromHeight` (central-difference
+height-to-tangent-space-normal, same technique `BrainTextureKit.
+BuildNormal` uses) plus three independent height functions
+(`BrickHeight`/`LimestoneHeight`/`DressedStoneHeight`) that each
+re-read their matching albedo builder's own per-pixel mortar/joint/
+jitter rule -- not shared code, so this pass never touched the
+already-shipped `BuildBrick`/`BuildLimestone`/`BuildDressedStone`
+albedo output. `_BumpMap`/`_NORMALMAP` wired into `BuildingDresser.
+MTextured` and `BaseDresser.MTextured` (both pre-existing per-file
+copies of the same idiom) and every wall material built from Brick/
+Limestone/DressedStone: `BuildingDresser.Brick`/`Cream`/`Seafoam`/
+`Mustard`/`Concrete`/`RustRed`, `BaseDresser.DoctorDarkBrick`/
+`DoctorStone`/`DoctorCastleStone`/`PedestalPlaqueMat` -- every
+civilian building wall and every faction masonry surface in the game.
+Also fixed `RuntimeCityBuilder.ApplyWorldScaledTiling` to copy the
+albedo's world-scaled tiling bucket onto `_BumpMap` too, so the normal
+map can't drift out of registration with its own albedo once an
+object gets its per-size tiled material variant.
+
+**Genuinely higher-risk than most entries in this file, stated
+plainly rather than glossed over**: `_BumpMap`/`_NORMALMAP` are stock
+URP/Lit property/keyword names, correct per Unity's own shader source,
+but this is the actual FIRST live test of whether they render
+correctly in this project at all. The one prior usage
+(`BaseDresser.BrainMaterial`, the Big Brain jar) was never confirmed
+either -- its own doc comment already said so, and a later 2026-08
+weathering-pass session (docs/12) explicitly declined to build more
+normal-map work on top of it for exactly that reason. That decision
+was never carried into this file as a checklist item, which is a real
+gap this entry also retroactively covers (see the un-numbered note
+right below).
+
+- **The actual visual check**: any brick or dressed-stone building wall
+  at Close/Normal zoom, ideally under a raking/low-angle light (dawn,
+  dusk, or a nearby streetlamp) where a working normal map reads as
+  real coursing depth and a broken one reads as either flat (map not
+  actually applied/enabled) or visibly WRONG -- inverted bumps reading
+  as engraved instead of raised, or a moire/banding artifact from the
+  central-difference step being too large or too small at this
+  texture's 64x64 size.
+- **Property/keyword correctness**: confirm `_BumpMap`/`_NORMALMAP`
+  actually engage URP/Lit's normal-mapping path in this project's
+  specific Unity/URP version (6000.3.13f1) -- the property names are
+  correct per Unity's long-stable source, but "correct name" and
+  "actually wired to the right shader variant in THIS project" are
+  different claims, the same gap that made the Big Brain jar's own
+  usage unconfirmed for two sessions running.
+- **Tiling registration**: zoom in on a large building (apartment/
+  office tier, several world-scale tiling buckets) and confirm the
+  brick/stone bump pattern lines up with the color pattern -- the
+  `ApplyWorldScaledTiling` fix above is reasoned, not rendered.
+- **If this looks broken**: the fallback is trivial and low-risk to
+  apply -- drop the `normalTex` argument at each of the 9 call sites
+  listed above (or pass `null`) to instantly revert to the pre-this-
+  entry flat-shaded look; no other system depends on these normal maps
+  existing.
+
+**Retroactive gap, not new work**: the Big Brain jar's own
+`BrainMaterial` (`BaseDresser.cs`, `_BumpMap`/`_NORMALMAP`/
+`_OcclusionMap`/`_MetallicGlossMap`/`_ParallaxMap`, shipped 2026-07/08)
+was never added to this checklist despite its own doc comment flagging
+it as unconfirmed from day one. Folding it in here since it's the same
+underlying question as item 25 above: **confirm the Big Brain jar
+itself actually shows visible fold/vein bump detail, AO darkening in
+the vessel grooves, and a metallic-gloss response on its brass rings**
+-- if that FIRST usage turns out to be broken, item 25's newer usage is
+almost certainly broken the same way, and vice versa; check them
+together, not independently.

@@ -82,7 +82,7 @@ public static class BuildingDresser
     /// v0.1 simplification. This material's own SHARED tiling stays a
     /// harmless, never-actually-visible default now that every consumer
     /// gets its own tiled variant instead.</summary>
-    private static Material MTextured(string key, float r, float g, float b, Texture2D tex)
+    private static Material MTextured(string key, float r, float g, float b, Texture2D tex, Texture2D normalTex = null)
     {
         Material mat;
         if (TexturedCache.TryGetValue(key, out mat) && mat != null) return mat;
@@ -93,11 +93,21 @@ public static class BuildingDresser
             mat.SetTexture("_BaseMap", tex);
             mat.SetTextureScale("_BaseMap", new Vector2(3f, 3f));
         }
+        // docs/40 §3 item 0: same HasProperty-guarded wiring
+        // BaseDresser.BrainMaterial already proves compiles/renders
+        // (docs/36) for the Big Brain jar, extended here to the shared
+        // masonry materials every civilian building wall actually uses.
+        if (normalTex != null && mat.HasProperty("_BumpMap"))
+        {
+            mat.SetTexture("_BumpMap", normalTex);
+            mat.SetTextureScale("_BumpMap", new Vector2(3f, 3f));
+            mat.EnableKeyword("_NORMALMAP");
+        }
         TexturedCache[key] = mat;
         return mat;
     }
 
-    private static Material Brick() { return MTextured("brick", 0.55f, 0.27f, 0.2f, PbrTextureAtlas.Brick); }
+    private static Material Brick() { return MTextured("brick", 0.55f, 0.27f, 0.2f, PbrTextureAtlas.Brick, PbrTextureAtlas.BrickNormal); }
     // 2026-08 (creator direction: "apply all texture and displacement
     // map details to city building"): these three were the last flat,
     // untextured WALL colors in this file -- every other wall/trim
@@ -108,10 +118,10 @@ public static class BuildingDresser
     // painted clapboard/stucco surface variation too, not just cut
     // stone -- the mottling is generic enough weathering to serve
     // either read.
-    private static Material Cream() { return MTextured("cream-clapboard", 0.87f, 0.82f, 0.68f, PbrTextureAtlas.Limestone); }
-    private static Material Seafoam() { return MTextured("seafoam-clapboard", 0.62f, 0.78f, 0.68f, PbrTextureAtlas.Limestone); }
-    private static Material Mustard() { return MTextured("mustard-clapboard", 0.82f, 0.66f, 0.25f, PbrTextureAtlas.Limestone); }
-    private static Material Concrete() { return MTextured("limestone", 0.62f, 0.6f, 0.55f, PbrTextureAtlas.Limestone); }
+    private static Material Cream() { return MTextured("cream-clapboard", 0.87f, 0.82f, 0.68f, PbrTextureAtlas.Limestone, PbrTextureAtlas.LimestoneNormal); }
+    private static Material Seafoam() { return MTextured("seafoam-clapboard", 0.62f, 0.78f, 0.68f, PbrTextureAtlas.Limestone, PbrTextureAtlas.LimestoneNormal); }
+    private static Material Mustard() { return MTextured("mustard-clapboard", 0.82f, 0.66f, 0.25f, PbrTextureAtlas.Limestone, PbrTextureAtlas.LimestoneNormal); }
+    private static Material Concrete() { return MTextured("limestone", 0.62f, 0.6f, 0.55f, PbrTextureAtlas.Limestone, PbrTextureAtlas.LimestoneNormal); }
     private static Material Chrome() { return MTextured("chrome", 0.78f, 0.8f, 0.82f, PbrTextureAtlas.Chrome); }
     private static Material WindowBand() { return MTextured("glass", 0.16f, 0.2f, 0.28f, PbrTextureAtlas.Glass); }
 
@@ -137,7 +147,7 @@ public static class BuildingDresser
     // roofs, canopy trim -- see call sites), not a sign/neon color, so
     // it gets the same texture treatment as Cream/Seafoam/Mustard above
     // rather than staying flat.
-    private static Material RustRed() { return MTextured("rust-red-surface", 0.5f, 0.24f, 0.16f, PbrTextureAtlas.Limestone); }
+    private static Material RustRed() { return MTextured("rust-red-surface", 0.5f, 0.24f, 0.16f, PbrTextureAtlas.Limestone, PbrTextureAtlas.LimestoneNormal); }
     private static Material NeonRed() { return M(0.95f, 0.25f, 0.3f, 1.6f); }
     private static Material NeonTeal() { return M(0.3f, 0.9f, 0.85f, 1.6f); }
     private static Material SignWhite() { return M(0.92f, 0.9f, 0.82f, 0.6f); }

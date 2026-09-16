@@ -59,6 +59,25 @@ public static class PbrTextureAtlas
     /// 20-34, 40).</summary>
     private static Texture2D _dressedStone;
     public static Texture2D DressedStone { get { return _dressedStone != null ? _dressedStone : (_dressedStone = BuildDressedStone()); } }
+
+    /// <summary>docs/40 §3 item 0 (facade normal-map rollout): the same
+    /// height-field-to-tangent-space-normal technique BrainTextureKit.
+    /// BuildNormal already proves compiles and renders (docs/36), applied
+    /// to the three masonry albedos every building wall actually uses
+    /// (docs/38: BuildingDresser's Brick/Cream/Seafoam/Mustard/Concrete,
+    /// BaseDresser's DressedStone-based faction walls). Deliberately NOT
+    /// wired through the existing BuildBrick/BuildLimestone/
+    /// BuildDressedStone albedo builders -- each normal map below
+    /// re-reads that builder's own per-pixel mortar/joint/jitter rule
+    /// independently (see each Height function's own comment) rather
+    /// than refactoring the already-shipped albedo code to share it, so
+    /// this pass carries zero risk of changing a texture nothing here
+    /// can visually re-verify.</summary>
+    private static Texture2D _brickNormal, _limestoneNormal, _dressedStoneNormal;
+    public static Texture2D BrickNormal { get { return _brickNormal != null ? _brickNormal : (_brickNormal = BuildNormalFromHeight(BrickHeight, 1.6f)); } }
+    public static Texture2D LimestoneNormal { get { return _limestoneNormal != null ? _limestoneNormal : (_limestoneNormal = BuildNormalFromHeight(LimestoneHeight, 1.4f)); } }
+    public static Texture2D DressedStoneNormal { get { return _dressedStoneNormal != null ? _dressedStoneNormal : (_dressedStoneNormal = BuildNormalFromHeight(DressedStoneHeight, 1.6f)); } }
+
     public static Texture2D AsphaltWet { get { return _asphaltWet != null ? _asphaltWet : (_asphaltWet = BuildAsphaltWet()); } }
     public static Texture2D Chrome { get { return _chrome != null ? _chrome : (_chrome = BuildChrome()); } }
     public static Texture2D PaintedMetal { get { return _paintedMetal != null ? _paintedMetal : (_paintedMetal = BuildPaintedMetal()); } }
@@ -271,6 +290,97 @@ public static class PbrTextureAtlas
         tex.SetPixels32(pixels);
         tex.Apply(true);
         return tex;
+    }
+
+    /// <summary>Standard height-gradient-to-tangent-space-normal
+    /// conversion via central differences -- the exact technique
+    /// BrainTextureKit.BuildNormal already ships and proves compiles
+    /// (docs/36), generalized here over any per-pixel height function
+    /// instead of one hardcoded noise field. Samples height at integer
+    /// pixel neighbors with wraparound (`% Size`, not clamped) since
+    /// these are Repeat-tiled masonry patterns, not a single continuous
+    /// UV field -- one texel step in each direction is the natural
+    /// analogue of BrainTextureKit's `1f / Size` UV-space step. Linear
+    /// color space (`linear: true`), same as every normal map must be so
+    /// URP doesn't sRGB-decode encoded normal vectors.</summary>
+    private static Texture2D BuildNormalFromHeight(System.Func<int, int, float> height01, float strength)
+    {
+        var tex = new Texture2D(Size, Size, TextureFormat.RGB24, true, true);
+        tex.wrapMode = TextureWrapMode.Repeat;
+        tex.filterMode = FilterMode.Bilinear;
+        var pixels = new Color32[Size * Size];
+        for (var y = 0; y < Size; y++)
+        for (var x = 0; x < Size; x++)
+        {
+            var xL = (x - 1 + Size) % Size;
+            var xR = (x + 1) % Size;
+            var yD = (y - 1 + Size) % Size;
+            var yU = (y + 1) % Size;
+            var dx = (height01(xR, y) - height01(xL, y)) * strength;
+            var dy = (height01(x, yU) - height01(x, yD)) * strength;
+            var n = new Vector3(-dx, -dy, 1f).normalized;
+            pixels[y * Size + x] = new Color(n.x * 0.5f + 0.5f, n.y * 0.5f + 0.5f, n.z * 0.5f + 0.5f, 1f);
+        }
+        tex.SetPixels32(pixels);
+        tex.Apply(true);
+        return tex;
+    }
+
+    /// <summary>Mirrors BuildBrick's own isMortar/jitter rule exactly --
+    /// a fresh independent read of the same per-pixel logic, not shared
+    /// code (see BrickNormal's own doc comment for why). Mortar joints
+    /// sit recessed; each brick face bulges slightly, with the SAME
+    /// per-brick jitter BuildBrick already uses for its own weathering
+    /// shade reused here as a height variation, so a brick that reads
+    /// darker in the albedo also reads more worn/uneven in the bump --
+    /// real weathered brick does exactly that, the two aren't
+    /// independent random fields.</summary>
+    private static float BrickHeight(int x, int y)
+    {
+        const int rowHeight = 8;
+        const int mortarPx = 1;
+        var row = y / rowHeight;
+        var inRow = y % rowHeight;
+        var offset = (row % 2 == 0) ? 0 : Size / 8;
+        var shifted = (x + offset) % Size;
+        var brickX = shifted % (Size / 4);
+        var isMortar = inRow < mortarPx || brickX < mortarPx;
+        if (isMortar) return 0.15f;
+        var jitter = Jitter(x, y, 1);   // half-open 0..1, same salt/inputs BuildBrick's own jitter uses
+        return 0.5f + jitter * 0.4f;    // brick faces: 0.5..0.9, mortar well below at 0.15
+    }
+
+    /// <summary>Mirrors BuildLimestone's own coarse/fine noise blend
+    /// exactly -- that blend is already a 0..1-ish weighted average of
+    /// two jitter fields, so it doubles as a height value directly with
+    /// no remapping, same "reuse the color logic's own math, don't share
+    /// the code" independence as BrickHeight.</summary>
+    private static float LimestoneHeight(int x, int y)
+    {
+        var coarse = Jitter(x / 8, y / 8, 2);
+        var fine = Jitter(x, y, 3);
+        return coarse * 0.7f + fine * 0.3f;
+    }
+
+    /// <summary>Mirrors BuildDressedStone's own isJoint/jitter rule
+    /// exactly, same independence rationale as BrickHeight -- deep
+    /// mortar joints between dressed blocks, each block face bulging by
+    /// its own per-block jitter (the moss/grime overlay is a pure color
+    /// effect in BuildDressedStone and deliberately has no height
+    /// counterpart here -- damp staining doesn't raise or lower stone).</summary>
+    private static float DressedStoneHeight(int x, int y)
+    {
+        const int rowHeight = 16;
+        const int jointPx = 2;
+        var row = y / rowHeight;
+        var inRow = y % rowHeight;
+        var offset = (row % 2 == 0) ? 0 : Size / 4;
+        var shifted = (x + offset) % Size;
+        var blockX = shifted % (Size / 2);
+        var isJoint = inRow < jointPx || blockX < jointPx;
+        if (isJoint) return 0.1f;
+        var jitter = Jitter(row, shifted / (Size / 2), 41);   // same per-block jitter BuildDressedStone uses
+        return 0.5f + jitter * 0.4f;
     }
 
     /// <summary>Neutral mid-gray base -- deliberately NOT baked warm or

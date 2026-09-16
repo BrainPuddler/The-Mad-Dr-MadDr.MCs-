@@ -2199,6 +2199,16 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         {
             variant = new Material(baseMat);
             variant.SetTextureScale("_BaseMap", new Vector2(bucket, bucket));
+            // docs/40 §3 item 0: keep the normal map's tiling locked to
+            // the albedo's own world-scaled bucket -- BuildingDresser/
+            // BaseDresser's MTextured only sets _BumpMap's tiling to a
+            // fixed (3,3) fallback, same as _BaseMap's own pre-this-
+            // method fallback used to be. Without this, a facade normal
+            // map would silently drift out of registration with its
+            // albedo on any object this method retiles, which is every
+            // dressed wall in the game.
+            if (baseMat.HasProperty("_BumpMap") && baseMat.GetTexture("_BumpMap") != null)
+                variant.SetTextureScale("_BumpMap", new Vector2(bucket, bucket));
             _tiledMaterialCache[key] = variant;
         }
         renderer.sharedMaterial = variant;

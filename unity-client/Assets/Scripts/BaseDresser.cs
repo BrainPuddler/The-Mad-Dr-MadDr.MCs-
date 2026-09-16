@@ -2554,7 +2554,7 @@ public class BaseDresser : MonoBehaviour
     /// own default alone," matching MTextured's existing sentinel
     /// convention in the other two files.</summary>
     private static Material MTextured(string key, float r, float g, float b, Texture2D tex,
-        float smoothness = -1f, float metallic = -1f)
+        float smoothness = -1f, float metallic = -1f, Texture2D normalTex = null)
     {
         Material mat;
         if (TexturedCache.TryGetValue(key, out mat) && mat != null) return mat;
@@ -2567,6 +2567,14 @@ public class BaseDresser : MonoBehaviour
         }
         if (smoothness >= 0f && mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", smoothness);
         if (metallic >= 0f && mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", metallic);
+        // docs/40 §3 item 0: same guarded wiring BrainMaterial() already
+        // proves compiles/renders (docs/36) for the Big Brain jar.
+        if (normalTex != null && mat.HasProperty("_BumpMap"))
+        {
+            mat.SetTexture("_BumpMap", normalTex);
+            mat.SetTextureScale("_BumpMap", new Vector2(3f, 3f));
+            mat.EnableKeyword("_NORMALMAP");
+        }
         TexturedCache[key] = mat;
         return mat;
     }
@@ -2832,7 +2840,7 @@ public class BaseDresser : MonoBehaviour
     /// own Concrete() material) rather than inventing a fresh one.</summary>
     private static Material PedestalPlaqueMat()
     {
-        return MTextured("big-brain-pedestal-plaque", 0.8f, 0.77f, 0.68f, PbrTextureAtlas.Limestone, 0.4f);
+        return MTextured("big-brain-pedestal-plaque", 0.8f, 0.77f, 0.68f, PbrTextureAtlas.Limestone, 0.4f, -1f, PbrTextureAtlas.LimestoneNormal);
     }
 
     // ---- 2026-08 per-faction Factory/Control Centre materials
@@ -2886,7 +2894,7 @@ public class BaseDresser : MonoBehaviour
     /// fresh texture -- brick coursing reads the same regardless of
     /// which building it's on; only the tone needs to shift toward
     /// "old, mysterious, gothic" instead of a lived-in row house.</summary>
-    private static Material DoctorDarkBrick() => MTextured("faction-doctor-brick", 0.3f, 0.24f, 0.22f, PbrTextureAtlas.Brick, 0.12f);
+    private static Material DoctorDarkBrick() => MTextured("faction-doctor-brick", 0.3f, 0.24f, 0.22f, PbrTextureAtlas.Brick, 0.12f, -1f, PbrTextureAtlas.BrickNormal);
 
     /// <summary>2026-08 (creator direction: "chimney is a thick walled
     /// brick tube not a rod"): flat near-black, untextured, matte --
@@ -2899,7 +2907,7 @@ public class BaseDresser : MonoBehaviour
     /// window surrounds -- reuses PbrTextureAtlas.Limestone (same
     /// texture PedestalPlaqueMat/BuildingDresser.Concrete both already
     /// share) at a cooler, more weathered tone than either.</summary>
-    private static Material DoctorStone() => MTextured("faction-doctor-stone", 0.52f, 0.51f, 0.48f, PbrTextureAtlas.Limestone, 0.18f);
+    private static Material DoctorStone() => MTextured("faction-doctor-stone", 0.52f, 0.51f, 0.48f, PbrTextureAtlas.Limestone, 0.18f, -1f, PbrTextureAtlas.LimestoneNormal);
 
     /// <summary>2026-08 (faction gauntlet, docs/31 §3/§7 Phase 3): "large
     /// stone blocks, not decorative brick" for the gothic-castle
@@ -2908,7 +2916,7 @@ public class BaseDresser : MonoBehaviour
     /// has the full reasoning for why `DoctorStone`'s Limestone or
     /// `DoctorDarkBrick`'s Brick are the wrong scale here), darker and
     /// rougher than `DoctorStone`'s own polished-cut-stone tone.</summary>
-    private static Material DoctorCastleStone() => MTextured("faction-doctor-castle-stone", 0.4f, 0.39f, 0.37f, PbrTextureAtlas.DressedStone, 0.1f);
+    private static Material DoctorCastleStone() => MTextured("faction-doctor-castle-stone", 0.4f, 0.39f, 0.37f, PbrTextureAtlas.DressedStone, 0.1f, -1f, PbrTextureAtlas.DressedStoneNormal);
 
     /// <summary>Mad Doctor faction: the "green illuminated tubes" --
     /// opaque, strongly emissive, paired with a real EerieChamberGlow

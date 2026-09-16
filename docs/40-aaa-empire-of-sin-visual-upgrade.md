@@ -129,9 +129,19 @@ assumed from docs/28's own summary of itself):
 - **One real normal-mapped surface**: the Big Brain jar
   (`BaseDresser.cs` lines ~2377–2400, `BrainTextureKit`) sets
   `_BumpMap`/`_NORMALMAP` from a procedurally generated normal/height/
-  AO/roughness set. This is the **proven precedent** §3 item 2 mirrors —
-  it already compiles and renders (docs/36), so this is not unproven
-  territory, it's an unfinished rollout.
+  AO/roughness set. **Correction to an earlier draft of this doc**: this
+  is *not* a confirmed-working precedent — `BrainMaterial`'s own doc
+  comment says plainly it's "genuinely unconfirmed in THIS project (no
+  prior usage to check against, and no Editor here to compile/render
+  it)," and a later 2026-08 weathering-pass session (docs/12) explicitly
+  declined to build new per-faction normal maps on top of it for exactly
+  that reason — never added to docs/36's checklist either, a real
+  tracking gap fixed by this doc's own §3 item 0 work. What *is* true:
+  `_BumpMap`/`_NORMALMAP` are stock URP/Lit property/keyword names (not
+  hand-authored HLSL like `CreatureVertexColor.shader`), so the risk
+  here is the same "shipped, unconfirmed, ship-blind-and-flag" category
+  as the rest of this codebase's visual work, not a specially-proven
+  low-risk case — treat it accordingly, not as a free pass.
 - **Volumetric fog was evaluated, not skipped out of ignorance**
   (docs/28 row 19): `URP-VolumetricFog-ForwardPlus` is confirmed
   compatible (ForwardPlus renderer, URP 17.3.0, license), the creator
@@ -222,20 +232,29 @@ Ordered by hero-look gained per unit of (mostly shader/texture, not
 geometry) work, same "rank by visible-improvement-per-effort" logic as
 docs/39 §11. Each item states its Editor-dependence up front.
 
-0. **Facade normal-map rollout** (closes §2.3). Extend
-   `PbrTextureAtlas`'s existing per-material generation functions
-   (brick, stone, weathered metal — all already computing jitter/height-
-   ish variation for the diffuse channel) with a paired normal-map
-   generator using the same height→normal technique `BrainTextureKit`
-   already ships and proves compiles (§1). Wire `_BumpMap`/
-   `_NORMALMAP` into `BuildingDresser`'s and `RoadDresser`'s shared
-   material helpers (`M()`/`MTextured()`) the same way `BaseDresser`
-   already does for the jar. **Editor-dependence: low** — this mirrors
-   a proven, already-compiling precedent almost exactly (the pattern
-   the `maddr-editor-verification-workflow` memory's 2026-09-16 entry
-   confirms is reliable blind), ships read-through-verified, flagged in
-   docs/36. No new triangles, no new renderers — texture-only, inside
-   docs/39 §7's atlas-everything rule.
+0. **[Implemented 2026-09-15, pending Editor verification — see docs/36]
+   Facade normal-map rollout** (closes §2.3). Extended `PbrTextureAtlas`
+   with a shared `BuildNormalFromHeight` central-difference helper (the
+   same technique `BrainTextureKit.BuildNormal` uses) plus independent
+   height functions mirroring `BuildBrick`/`BuildLimestone`/
+   `BuildDressedStone`'s own per-pixel mortar/joint/jitter rules (not
+   shared code — a deliberate re-read, so this pass can't touch the
+   already-shipped albedo textures at all). Wired `_BumpMap`/
+   `_NORMALMAP` into `BuildingDresser`'s and `BaseDresser`'s `MTextured`
+   helpers (both already-existing per-file copies of the same idiom) and
+   every wall material that uses Brick/Limestone/DressedStone — 8 call
+   sites across both files, plus a fix to `RuntimeCityBuilder.
+   ApplyWorldScaledTiling` so the normal map's tiling bucket stays
+   locked to the albedo's own world-scaled tiling instead of drifting to
+   a fixed (3,3) fallback. **Editor-dependence: low, not zero** — see
+   §1's correction above: `_BumpMap`/`_NORMALMAP` are stock URP/Lit
+   property/keyword names (lower risk than hand-authored HLSL, which
+   already shipped successfully — docs/39 §11 item 2), but this is
+   genuinely the first live test of whether they render correctly in
+   this project at all, not a specially-proven case. Verified only by
+   brace/paren balance and read-through, same standing ceiling as
+   everything else here. No new triangles, no new renderers — texture-
+   only, inside docs/39 §7's atlas-everything rule.
 
 1. **Wet-response shader pass, gated to a rain/weather state, not
    global** (closes §2.1 the right way this time). docs/28 rows 14/15
