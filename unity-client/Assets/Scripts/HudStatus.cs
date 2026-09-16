@@ -37,7 +37,7 @@ public class HudStatus : MonoBehaviour
     // to print here permanently -- static text, never depends on match
     // state, but still ate ~100px of the top-left corner every match,
     // which is exactly the real estate every other top-left panel
-    // (WindowLightsHud, BuildMenuHud, CollectorLabHud) stacks below via
+    // (WindowLightsHud, RainToggleHud, BuildMenuHud, CollectorLabHud) stacks below via
     // ContentBottom. Moved behind a single (i) button into an on-demand,
     // centered popup instead -- shrinks HudStatus's default footprint
     // (and therefore ContentBottom) down to just the LIVE status lines,

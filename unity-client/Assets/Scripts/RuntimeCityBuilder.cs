@@ -678,6 +678,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (gameObject.GetComponent<WindowLightsHud>() == null)
             gameObject.AddComponent<WindowLightsHud>();
 
+        // docs/40 §3 item 1: same "no Init() needed, no data source"
+        // shape as WindowLightsHud just above -- reads/writes
+        // WeatherController's own static toggle directly.
+        if (gameObject.GetComponent<RainToggleHud>() == null)
+            gameObject.AddComponent<RainToggleHud>();
+
         var bars = gameObject.GetComponent<HealthBars>();
         if (bars == null) bars = gameObject.AddComponent<HealthBars>();
         bars.Init(this);

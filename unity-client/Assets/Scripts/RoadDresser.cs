@@ -82,14 +82,53 @@ public static class RoadDresser
     // mid dark gray (0.35/0.34/0.36), then "still too dark" -- raised
     // again to a genuinely light gray. Contrast against the road's own
     // color remains the mechanism relied on, not glossiness.
-    private static Material Asphalt() { return MTextured("asphalt-wet", 0.52f, 0.51f, 0.53f, PbrTextureAtlas.AsphaltWet); }
-    private static Material Sidewalk() { return M(0.58f, 0.56f, 0.52f); }
+    // docs/40 §3 item 1: these four are the "road/sidewalk/plaza"
+    // ground surfaces the wet-response system targets -- each wrapped
+    // in its own one-time-registration cache field (redundant with
+    // MTextured/M's own internal cache, same tolerance for a small
+    // guard field this file's sibling dressers already accept
+    // elsewhere) so WetSurfaceRegistry.Register runs exactly once per
+    // material, at first mint, never on a cache-hit call. Lane/cross
+    // paint, grass, and shrubs are deliberately NOT registered -- paint
+    // stripes and vegetation don't gain the same "thin water film"
+    // specular response asphalt/stone do, and docs/40's own scope is
+    // road/sidewalk/plaza, not everything RoadDresser touches.
+    private static Material _asphaltMat;
+    private static Material Asphalt()
+    {
+        if (_asphaltMat != null) return _asphaltMat;
+        _asphaltMat = MTextured("asphalt-wet", 0.52f, 0.51f, 0.53f, PbrTextureAtlas.AsphaltWet);
+        WetSurfaceRegistry.Register(_asphaltMat, wetSmoothness: 0.85f, darken: 0.55f);
+        return _asphaltMat;
+    }
+    private static Material _sidewalkMat;
+    private static Material Sidewalk()
+    {
+        if (_sidewalkMat != null) return _sidewalkMat;
+        _sidewalkMat = M(0.58f, 0.56f, 0.52f);
+        WetSurfaceRegistry.Register(_sidewalkMat, wetSmoothness: 0.7f, darken: 0.65f);
+        return _sidewalkMat;
+    }
     private static Material LanePaint() { return M(0.85f, 0.7f, 0.2f); }
     private static Material CrossPaint() { return M(0.85f, 0.84f, 0.8f); }
-    private static Material RoundaboutCurb() { return M(0.62f, 0.6f, 0.56f); }
+    private static Material _roundaboutCurbMat;
+    private static Material RoundaboutCurb()
+    {
+        if (_roundaboutCurbMat != null) return _roundaboutCurbMat;
+        _roundaboutCurbMat = M(0.62f, 0.6f, 0.56f);
+        WetSurfaceRegistry.Register(_roundaboutCurbMat, wetSmoothness: 0.7f, darken: 0.65f);
+        return _roundaboutCurbMat;
+    }
     private static Material RoundaboutGrass() { return M(0.30f, 0.44f, 0.21f); }
     private static Material Shrub() { return M(0.20f, 0.36f, 0.16f); }
-    private static Material IslandStone() { return M(0.58f, 0.58f, 0.6f); }
+    private static Material _islandStoneMat;
+    private static Material IslandStone()
+    {
+        if (_islandStoneMat != null) return _islandStoneMat;
+        _islandStoneMat = M(0.58f, 0.58f, 0.6f);
+        WetSurfaceRegistry.Register(_islandStoneMat, wetSmoothness: 0.7f, darken: 0.65f);
+        return _islandStoneMat;
+    }
     private static Material SignBlue() { return M(0.10f, 0.26f, 0.7f); }
     private static Material SignRed() { return M(0.78f, 0.16f, 0.13f); }
     private static Material PostGray() { return M(0.5f, 0.52f, 0.54f); }

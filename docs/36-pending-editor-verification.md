@@ -781,3 +781,50 @@ the vessel grooves, and a metallic-gloss response on its brass rings**
 -- if that FIRST usage turns out to be broken, item 25's newer usage is
 almost certainly broken the same way, and vice versa; check them
 together, not independently.
+
+## 26. Wet-response weather toggle (docs/40 §3 item 1)
+
+New `WeatherController` (a real `IsRaining` toggle + an eased 0..1
+`Wetness` value, ticked once per frame from `LumenCycleController.
+Update`) and `WetSurfaceRegistry` (same "record each material's base
+value once at mint time, blend a live override onto every registered
+SHARED Material" shape `NeonRegistry` already establishes for night
+emissive boost, applied here to `_Smoothness`/albedo darkening
+instead). `RoadDresser.Asphalt`/`Sidewalk`/`RoundaboutCurb`/
+`IslandStone` each register themselves once, at first mint, via a new
+one-time-cache-field wrapper around their existing `MTextured`/`M`
+calls -- lane/cross paint, grass, and shrubs are deliberately NOT
+registered (docs/40 scopes this to road/sidewalk/plaza surfaces only).
+New `RainToggleHud` (a visible IMGUI button, same idiom as the
+existing `WindowLightsHud`) is the one current trigger, inserted into
+the top-left HUD chain between `WindowLightsHud` and `BuildMenuHud` --
+`BuildMenuHud`/`BarracksHud`/`CollectorLabHud`'s own upstream-anchor
+reads were updated to chain through it instead of skipping straight to
+`WindowLightsHud.Bottom`.
+
+- **The actual visual check**: click the new "🌧 Rain: ON" button (top-
+  left HUD stack, just below the window-lights toggle) and confirm
+  asphalt/sidewalk/roundabout-curb/plaza materials visibly darken and
+  gain a specular sheen over roughly a 6-second ease, most obviously
+  under an existing streetlamp/window light pool at night (docs/39 §2's
+  own "wet cobble reflecting streetlamp pools" reference shot is
+  exactly this effect) -- and that toggling back OFF eases back to the
+  ordinary matte dry look over the same ~6 seconds, not an instant pop.
+- **Dry-state regression check**: with rain OFF (the default), confirm
+  every road/sidewalk/plaza surface looks EXACTLY as it did before this
+  change -- `WetSurfaceRegistry` reads each material's own pre-existing
+  smoothness/color as its "dry" baseline rather than assuming a fixed
+  value, but that's a reasoned claim, not a rendered one yet.
+- **HUD stacking**: with the rain toggle now a 5th panel in the top-left
+  chain (`HudStatus` -> `WindowLightsHud` -> `RainToggleHud` ->
+  `BuildMenuHud` -> `CollectorLabHud`), confirm nothing overlaps at any
+  HudStatus state (traffic present, a unit selected, etc.) -- this
+  chain has broken before (docs/28's own row-8-adjacent HUD history)
+  purely from an anchor field going stale, not from bad math.
+- **If this looks broken**: reverting is cheap and localized --
+  `WeatherController.IsRaining` defaults `false` and nothing else in
+  the game reads `Wetness`/calls into `WetSurfaceRegistry` except the
+  four registered materials, so deleting `RainToggleHud`'s
+  `AddComponent` call in `RuntimeCityBuilder` (and reverting the three
+  chain-reference edits back to `WindowLightsHud.Bottom`) fully
+  disables the feature with no other system depending on it.

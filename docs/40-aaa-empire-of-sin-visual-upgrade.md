@@ -256,21 +256,31 @@ docs/39 §11. Each item states its Editor-dependence up front.
    everything else here. No new triangles, no new renderers — texture-
    only, inside docs/39 §7's atlas-everything rule.
 
-1. **Wet-response shader pass, gated to a rain/weather state, not
-   global** (closes §2.1 the right way this time). docs/28 rows 14/15
-   already proved *global* smoothness reads wrong. The AAA fix is
-   conditional, not constant: a small `WeatherState` (rain on/off, or
-   tied to a phase/match event) that raises smoothness and darkens
-   albedo on road/sidewalk/plaza materials *only* while active, so dry
-   daytime keeps the already-tuned matte look and rain becomes a
-   genuine state change instead of an always-on shine. Reuses the
-   existing lamp/window real-light and emissive registries for the
-   specular response — no reflection probes, no SSR needed for the
-   pavement itself. **Editor-dependence: low-to-medium** — pure
-   material/shader-parameter work, same verification ceiling as
-   docs/28's own material tuning; the "does it look wet, not shiny"
-   judgment call is genuinely visual and needs the creator's eyes once
-   built, same as every docs/28 row.
+1. **[Implemented 2026-09-16, pending Editor verification — see docs/36
+   entry 26] Wet-response shader pass, gated to a rain/weather state,
+   not global** (closes §2.1 the right way this time). docs/28 rows
+   14/15 already proved *global* smoothness reads wrong. The fix is
+   conditional, not constant: new `WeatherController.IsRaining` (a real
+   toggle, exposed via a new `RainToggleHud` button) drives an eased
+   `Wetness` value, and new `WetSurfaceRegistry` — same "record each
+   material's base value once, blend a live override onto the shared
+   Material" shape `NeonRegistry` already uses for night emissive boost
+   — raises `_Smoothness` and darkens albedo on `RoadDresser`'s Asphalt/
+   Sidewalk/RoundaboutCurb/IslandStone materials only while wet, so dry
+   play keeps the already-tuned matte look untouched. No reflection
+   probes or SSR needed: raising smoothness alone lets any EXISTING
+   light (real streetlamps, the animated sun) already in the scene
+   produce a sharper specular response — this doesn't reuse
+   `GlowPointRegistry`/`DynamicLightBudget` through any special code
+   path, it just benefits from whatever lights are already there once
+   the surface itself responds to light differently, which is a
+   correction to this entry's own original phrasing above ("reuses the
+   existing... registries" overstated what the implementation actually
+   needed to do). **Editor-dependence: low-to-medium** — pure material-
+   parameter work plus one new static-class pair, same verification
+   ceiling as docs/28's own material tuning; the "does it look wet, not
+   shiny" judgment call is genuinely visual and needs the creator's
+   eyes, same as every docs/28 row.
 
 2. **Rain VFX** (closes §2.2, pairs with item 1). Instanced rain
    streaks (`Graphics.RenderMeshInstanced`, the same pattern

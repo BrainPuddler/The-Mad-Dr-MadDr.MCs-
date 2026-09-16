@@ -77,12 +77,12 @@ public class BarracksHud : MonoBehaviour
         // does -- CollectorLabHud doesn't publish its own Bottom (its
         // collapsed tab height is fixed and it doesn't get chained off
         // today), so this adds one extra fixed tab-height step on top of
-        // the same WindowLightsHud/BuildMenuHud anchor rather than
+        // the same RainToggleHud/BuildMenuHud anchor rather than
         // guessing a brand-new corner. A real Bottom-publishing chain
         // (matching CollectorLabHud's own upstream precedent) would be
         // the more robust fix if a FIFTH panel ever needs to stack here
         // too -- flagged, not attempted for one panel.
-        var upstreamBottom = BuildMenuHud.Bottom > 0f ? BuildMenuHud.Bottom : WindowLightsHud.Bottom;
+        var upstreamBottom = BuildMenuHud.Bottom > 0f ? BuildMenuHud.Bottom : RainToggleHud.Bottom;
         var tabY = upstreamBottom + dockGapPixels + tabHeight + dockGapPixels;
         var tabRect = new Rect(leftMarginPixels, tabY, tabWidth, tabHeight);
         var e = Event.current;

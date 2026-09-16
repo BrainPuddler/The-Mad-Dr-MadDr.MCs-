@@ -37,10 +37,12 @@ using UnityEngine.InputSystem;
 /// the same chained-anchor idiom <see cref="HudStatus.ContentBottom"/>
 /// started: HudStatus publishes its own bottom, <see
 /// cref="WindowLightsHud"/> stacks below THAT and publishes its own,
-/// <see cref="BuildMenuHud"/> stacks below that one and publishes its
-/// own <see cref="BuildMenuHud.Bottom"/> -- this panel stacks below
-/// THAT. Four panels sharing the same corner, each genuinely below the
-/// last, none guessing a fixed pixel offset.
+/// <see cref="RainToggleHud"/> (docs/40 §3 item 1, added 2026-09) stacks
+/// below THAT and publishes its own, <see cref="BuildMenuHud"/> stacks
+/// below that one and publishes its own <see cref="BuildMenuHud.Bottom"/>
+/// -- this panel stacks below THAT. Five panels sharing the same
+/// corner, each genuinely below the last, none guessing a fixed pixel
+/// offset.
 /// </summary>
 public class CollectorLabHud : MonoBehaviour
 {
@@ -102,7 +104,7 @@ public class CollectorLabHud : MonoBehaviour
         if (!IsMadDoctor()) { PointerOver = false; return; }
         var prevMatrix = UiScale.Begin();
 
-        var tabY = BuildMenuHud.Bottom > 0f ? BuildMenuHud.Bottom + dockGapPixels : WindowLightsHud.Bottom + dockGapPixels;
+        var tabY = BuildMenuHud.Bottom > 0f ? BuildMenuHud.Bottom + dockGapPixels : RainToggleHud.Bottom + dockGapPixels;
         var tabRect = new Rect(leftMarginPixels, tabY, tabWidth, tabHeight);
         var e = Event.current;
         PointerOver = e != null && tabRect.Contains(e.mousePosition);

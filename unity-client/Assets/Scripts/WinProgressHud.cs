@@ -18,7 +18,8 @@ using UnityEngine;
 /// addition in this project**: top-center was picked because it's the
 /// one region of the screen NOTHING else claims. A survey of every
 /// OnGUI panel anchored near the top (2026-08) found: top-left is a
-/// chained stack (`HudStatus` -> `WindowLightsHud` -> `BuildMenuHud` ->
+/// chained stack (`HudStatus` -> `WindowLightsHud` -> `RainToggleHud`
+/// (docs/40 §3 item 1, added 2026-09) -> `BuildMenuHud` ->
 /// `CollectorLabHud`/`LabBattalionHud`, each docking off the previous
 /// one's own published `Bottom`, roughly x 12-900, y 8 down to 250+);
 /// top-right is `AnalogClockHud` (default corner, ~108px square) with

@@ -501,6 +501,12 @@ public class LumenCycleController : MonoBehaviour
         }
 
         ApplyBlend();
+
+        // docs/40 §3 item 1: rain is orthogonal to the day/night phase
+        // blend above (real, unscaled dt -- not time-lapse-scaled, same
+        // as weather rolling in shouldn't visually speed up with the
+        // N-key demo/dev time-lapse toggle above).
+        WeatherController.Tick(Time.deltaTime);
     }
 
     /// <summary>Cross-fades between the current Lumen phase's keyframe and
