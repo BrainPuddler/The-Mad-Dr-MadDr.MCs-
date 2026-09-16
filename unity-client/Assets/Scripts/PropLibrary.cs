@@ -174,6 +174,22 @@ public static class PropLibrary
         if (DoubleSidedCache.TryGetValue(mat, out variant) && variant != null) return variant;
         variant = new Material(mat);
         variant.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+
+        // docs/40 §3 item 1/4 correctness fix: this is the FIRST of two
+        // clone layers every low-poly Cylinder/Sphere spawn (Asphalt,
+        // Sidewalk, RoundaboutCurb, IslandStone, PuddleDecal all go
+        // through this, since "generic-low-poly-cylinder" is a
+        // registered mesh, not the primitive fallback) actually passes
+        // through -- RuntimeCityBuilder.ApplyWorldScaledTiling clones
+        // AGAIN on top of whatever this method returns, not on top of
+        // the original `mat`. Without propagating a WetSurfaceRegistry
+        // registration here too, `ApplyWorldScaledTiling`'s own
+        // propagation fix would look up THIS variant (its actual
+        // `baseMat`) and find nothing registered, silently breaking the
+        // whole chain one layer earlier than that fix alone could catch.
+        if (WetSurfaceRegistry.TryGetParams(mat, out var wetSmoothness, out var darken, out var wetAlpha))
+            WetSurfaceRegistry.Register(variant, wetSmoothness, darken, wetAlpha);
+
         DoubleSidedCache[mat] = variant;
         return variant;
     }

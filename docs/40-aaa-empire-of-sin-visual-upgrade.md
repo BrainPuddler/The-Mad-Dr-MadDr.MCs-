@@ -327,16 +327,38 @@ docs/39 §11. Each item states its Editor-dependence up front.
    own specific unconfirmed detail in docs/36 rather than folded
    silently into "same as before."
 
-4. **Puddle "fake reflection" decals at key plazas/intersections**
-   (partial alternative to full reflection probes/SSR, which docs/28
-   row 19 already flagged as Editor-only setup work this environment
-   can't do blind). A handful of hand-placed, low-poly, semi-
-   transparent dark quads at high-traffic plazas, textured with a
-   vertically-flipped skyline silhouette and tinted by nearby
-   `GlowPointRegistry` colors — the classic pre-SSR "fake puddle"
-   trick, cheap and bounded in count (not a per-tile system). **Editor-
-   dependence: low** — a material/prop addition, not a renderer-feature
-   registration.
+4. **[Implemented 2026-09-16, pending Editor verification — see docs/36
+   entry 29] Puddle "fake reflection" decals at key plazas/
+   intersections** (partial alternative to full reflection probes/SSR,
+   which docs/28 row 19 already flagged as Editor-only setup work this
+   environment can't do blind). New `RoadDresser.PuddleDecal()`, one
+   per roundabout — the generator's own clearest "high-traffic plaza/
+   intersection" concept (a named `city.Roundabouts` set with real
+   circulating-asphalt geometry already built); the separate
+   `liberty_statuette_plaza` landmark archetype (§1 above) is a
+   `BuildingDresser` set piece, not a `RoadDresser` ground surface, and
+   wasn't pulled into this pass — at a hash-deterministic position, faded
+   in/out by `WeatherController.Wetness` rather than always-visible
+   (avoiding docs/28 rows 14/15's exact "always-on = too much" mistake
+   in a new spot) — **narrower than this entry's original text**: a
+   static warm-tinted dark patch, not a literal "vertically-flipped
+   skyline silhouette" (that needs a live mirrored-camera render, the
+   same Editor-only category as reflection probes/SSR themselves, so it
+   would have contradicted this item's own "doesn't need a renderer
+   feature" framing). Tinted once at creation by `RoadDresser.LampColor`
+   — the same constant every roundabout lamp already registers with
+   `GlowPointRegistry` — rather than a live per-frame query, since a
+   static decal doesn't need one. **This item also surfaced and fixed a
+   real bug in item 1**: a two-layer material-cloning chain
+   (`PropLibrary.GetDoubleSidedVariant` then `RuntimeCityBuilder
+   .ApplyWorldScaledTiling`) was silently disconnecting every
+   `WetSurfaceRegistry`-registered Sphere/Cylinder-shaped material
+   (including `Asphalt()` itself) from what `SetWetness` actually
+   mutates — see docs/12's own entry and docs/36 entries 26/29 for the
+   full story. **Editor-dependence: low, not zero** — a material/prop
+   addition, not a renderer-feature registration, but the clone-chain
+   fix underneath it is reasoned from reading the call chain, not seen
+   rendered.
 
 5. **Real reflection probes / URP SSR** — deliberately **not** picked
    up here. This is the one item in this backlog that is a genuine

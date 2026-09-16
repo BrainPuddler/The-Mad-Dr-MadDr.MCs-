@@ -822,6 +822,27 @@ still a real screen check, not a log one. Item 2's own `RainSystem` was
 written AFTER this play session closed and has none of this coverage
 -- see entry 27.
 
+**2026-09-16, second update: a real correctness bug was found and fixed
+in this item AFTER the play session above, so that session's "ran
+without exception" coverage does NOT mean "the wet effect actually
+worked" -- full story in docs/12's own new entry, condensed here.**
+`RoadDresser.Asphalt()` (and every Cylinder/Sphere-shaped wet-registered
+prop -- the roundabout's own circular asphalt/curb/sidewalk) routes
+through TWO separate material-cloning layers (`PropLibrary
+.GetDoubleSidedVariant`, then `RuntimeCityBuilder
+.ApplyWorldScaledTiling`), each producing a NEW `Material` object
+distinct from whatever `WetSurfaceRegistry.Register` originally
+recorded -- meaning `SetWetness` was mutating a `Material` nothing on
+screen actually used, a silent no-op with no exception and no compile
+signal. Fixed by propagating the registration through both clone
+layers (`WetSurfaceRegistry.TryGetParams`, checked and re-registered in
+both `GetDoubleSidedVariant` and `ApplyWorldScaledTiling`). This fix
+itself has NOT been through any Editor session -- it's pure reasoning
+about the actual call chain, verified by reading every hop, not by
+seeing it render. **This raises this item's own risk above the
+"probably fine" level entry 25 could claim for item 0** -- the render
+check below is now the one to actually pay attention to.
+
 New `WeatherController` (a real `IsRaining` toggle + an eased 0..1
 `Wetness` value, ticked once per frame from `LumenCycleController.
 Update`) and `WetSurfaceRegistry` (same "record each material's base
@@ -954,3 +975,56 @@ already drives for lamps/windows/ambient elsewhere.
   the final `color` composition (plus optionally the global float call
   in `LumenCycleController`) fully reverts to the pre-item-3 shader
   with no effect on diffuse/specular/emission.
+
+## 29. Plaza puddle decals + the two-layer clone-chain fix (docs/40 §3 item 4)
+
+New `RoadDresser.PuddleDecal()`: a static, dark, warm-tinted,
+transparent patch (not a live mirrored-skyline reflection -- that needs
+a Render-Texture camera, Editor-only setup docs/28 row 19 already
+flagged, so this is the "classic pre-SSR fake puddle" trick instead),
+one per roundabout at a hash-deterministic position, faded in/out by
+`WeatherController.Wetness` via the same `WetSurfaceRegistry` item 1
+built (near-invisible dry, visible wet). Tinted once at creation with
+`RoadDresser.LampColor`, the same color every roundabout lamp already
+registers with `GlowPointRegistry` -- not a live per-frame query.
+
+**This item is also where a real, non-obvious bug in item 1 was found
+and fixed** -- see entry 26's own second update and docs/12 for the
+full story: a two-layer material-cloning chain
+(`PropLibrary.GetDoubleSidedVariant` then `RuntimeCityBuilder
+.ApplyWorldScaledTiling`) silently disconnects any `WetSurfaceRegistry`
+-registered material spawned as a Sphere/Cylinder (which is every
+roundabout surface, puddle decal included) from the object
+`SetWetness` actually mutates. Fixed by propagating the registration
+through both clone layers. **Both items 1 and 4 share this exact fix
+and this exact remaining risk** -- if the puddle doesn't fade in with
+rain, check whether asphalt/sidewalk/curb wetness ALSO isn't showing
+(same root cause), not just this decal in isolation.
+
+- **The actual visual check**: at a roundabout, toggle rain on and
+  confirm a dark, glossy puddle patch fades in on the circulating
+  asphalt over the same ~6s transition item 1 uses, warm-tinted rather
+  than a flat gray blob -- and fades back to invisible when rain turns
+  off. Absence here most likely means the clone-chain fix above didn't
+  fully close the loop somewhere, not that the puddle itself is wrong.
+- **Position check**: confirm the patch actually sits ON the asphalt
+  (not floating above it or sunk into it) and doesn't overlap the
+  dashed lane markings or curb in a way that reads as a rendering
+  glitch rather than a puddle -- `RndCurb`/`RndAsphalt`-derived radius
+  and the 0.37 height are reasoned against the lane markings' own
+  proven-clear 0.36, not measured.
+- **The clone-chain fix itself**: with rain ON, confirm ALL of
+  Asphalt/Sidewalk/RoundaboutCurb/IslandStone visually darken/gain
+  sheen (item 1's own check) AND the puddle decal appears (this item's
+  check) -- if item 1 alone works but the puddle doesn't (or vice
+  versa), that would mean the two effects are reaching different
+  materials somehow, worth a closer look at whether the puddle's own
+  Cylinder spawn is hitting a genuinely different code path than
+  expected.
+- **If this looks broken**: `PuddleDecal()`'s own spawn call in
+  `DrawRoundabout` is a single line -- deleting it removes the puddle
+  entirely with no effect on anything else. The clone-chain fix itself
+  (in `PropLibrary.cs`/`RuntimeCityBuilder.cs`) is additive and
+  defensive (an `if (TryGetParams(...))` that does nothing when the
+  material isn't wet-registered), so it's safe to leave in place even
+  if the puddle decal itself is reverted.

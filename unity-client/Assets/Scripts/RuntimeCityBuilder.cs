@@ -2221,6 +2221,22 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
             // dressed wall in the game.
             if (baseMat.HasProperty("_BumpMap") && baseMat.GetTexture("_BumpMap") != null)
                 variant.SetTextureScale("_BumpMap", new Vector2(bucket, bucket));
+
+            // docs/40 §3 item 1/4 correctness fix: if `baseMat` is a
+            // WetSurfaceRegistry-registered material (currently only
+            // RoadDresser.Asphalt -- the sole registered material that
+            // carries a real _BaseMap texture, hence the only one that
+            // ever reaches this clone path at all), register this NEW
+            // variant too, with the SAME wet-response parameters.
+            // Without this, every already-spawned road tile using this
+            // tiled variant would silently stop tracking
+            // WeatherController.Wetness the instant it was cloned --
+            // SetWetness would keep mutating the original, un-rendered
+            // `baseMat` forever, a bug that would have shipped invisibly
+            // since nothing about it throws or fails a compile check.
+            if (WetSurfaceRegistry.TryGetParams(baseMat, out var wetSmoothness, out var darken, out var wetAlpha))
+                WetSurfaceRegistry.Register(variant, wetSmoothness, darken, wetAlpha);
+
             _tiledMaterialCache[key] = variant;
         }
         renderer.sharedMaterial = variant;

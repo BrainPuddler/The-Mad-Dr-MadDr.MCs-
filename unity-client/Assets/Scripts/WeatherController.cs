@@ -74,6 +74,7 @@ public static class WetSurfaceRegistry
     private static readonly List<float> BaseSmoothness = new List<float>();
     private static readonly List<float> WetSmoothnessTarget = new List<float>();
     private static readonly List<float> DarkenFactor = new List<float>();
+    private static readonly List<float> WetAlphaTarget = new List<float>();
 
     /// <summary>`wetSmoothness`/`darken` are per-material (not one global
     /// pair) so a caller can tune how strongly each surface responds --
@@ -82,8 +83,13 @@ public static class WetSurfaceRegistry
     /// material's OWN current value (whatever the shader's default is,
     /// or whatever the caller already set) rather than assumed, so this
     /// never silently overrides an unrelated tuning choice made before
-    /// registration.</summary>
-    public static void Register(Material mat, float wetSmoothness = 0.8f, float darken = 0.6f)
+    /// registration. `wetAlpha` is a SEPARATE, optional target (default
+    /// -1, meaning "leave alpha exactly as it is" -- every road/sidewalk
+    /// caller so far is opaque and stays opaque) for docs/40 §3 item 4's
+    /// puddle decals, which need to fade IN with rain rather than just
+    /// darken -- a dry puddle patch shouldn't be visible at all, unlike
+    /// asphalt/sidewalk which are always fully opaque either way.</summary>
+    public static void Register(Material mat, float wetSmoothness = 0.8f, float darken = 0.6f, float wetAlpha = -1f)
     {
         if (mat == null) return;
         Mats.Add(mat);
@@ -91,6 +97,32 @@ public static class WetSurfaceRegistry
         BaseSmoothness.Add(mat.HasProperty("_Smoothness") ? mat.GetFloat("_Smoothness") : 0.5f);
         WetSmoothnessTarget.Add(wetSmoothness);
         DarkenFactor.Add(darken);
+        WetAlphaTarget.Add(wetAlpha);
+    }
+
+    /// <summary>Lets `RuntimeCityBuilder.ApplyWorldScaledTiling` propagate
+    /// a registration onto a CLONED tiled variant of an already-
+    /// registered base material -- without this, `Asphalt()` (the one
+    /// registered material that carries a real `_BaseMap` texture,
+    /// unlike Sidewalk/RoundaboutCurb/IslandStone/PuddleDecal, which are
+    /// flat-color and never get cloned) would silently stop responding
+    /// to `SetWetness` the moment a real road tile's world-scaled tiling
+    /// clones it into a separate Material object this registry never
+    /// sees again. A small linear scan is fine -- this list never holds
+    /// more than a handful of entries (the road/sidewalk/plaza surfaces
+    /// docs/40 §3 scopes items 1/4 to, not one entry per city object).</summary>
+    public static bool TryGetParams(Material baseMat, out float wetSmoothness, out float darken, out float wetAlpha)
+    {
+        var i = Mats.IndexOf(baseMat);
+        if (i < 0)
+        {
+            wetSmoothness = 0f; darken = 0f; wetAlpha = -1f;
+            return false;
+        }
+        wetSmoothness = WetSmoothnessTarget[i];
+        darken = DarkenFactor[i];
+        wetAlpha = WetAlphaTarget[i];
+        return true;
     }
 
     public static void SetWetness(float wetness01)
@@ -101,7 +133,14 @@ public static class WetSurfaceRegistry
             if (mat == null) continue;
             if (mat.HasProperty("_Smoothness"))
                 mat.SetFloat("_Smoothness", Mathf.Lerp(BaseSmoothness[i], WetSmoothnessTarget[i], wetness01));
-            mat.color = Color.Lerp(BaseColor[i], BaseColor[i] * DarkenFactor[i], wetness01);
+            var rgb = Color.Lerp(BaseColor[i], BaseColor[i] * DarkenFactor[i], wetness01);
+            // WetAlphaTarget < 0 is the "don't touch alpha" sentinel --
+            // Lerp(BaseAlpha, BaseAlpha, t) is exactly BaseAlpha for any
+            // t, so every pre-existing caller's opaque materials are
+            // completely unaffected by this addition.
+            var alphaTarget = WetAlphaTarget[i] >= 0f ? WetAlphaTarget[i] : BaseColor[i].a;
+            var a = Mathf.Lerp(BaseColor[i].a, alphaTarget, wetness01);
+            mat.color = new Color(rgb.r, rgb.g, rgb.b, a);
         }
     }
 }

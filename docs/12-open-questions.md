@@ -21152,3 +21152,52 @@ counts across `Citizen.cs`, `HumanCharacterKit.cs`, `RuntimeCityBuilder
 specifically has NEVER been seen rendered (nothing like it existed
 before this change), so it carries more uncertainty than a typical
 reskin. See docs/36 entry 24 for the Editor-side checklist.
+
+## docs/40 items 0-4: AAA/Empire-of-Sin visual upgrade (2026-09-15/16)
+
+Creator direction: "continue with graphics upgrade to AAA status and
+Empire of Sin styling," later "keep going" through the ranked backlog.
+Full narrative lives in docs/40's own §3/§0 and docs/36 entries 25-29;
+this entry records the one genuinely non-obvious bug found and fixed
+mid-implementation, since it's exactly the kind of thing a future
+session needs to know about `RoadDresser`'s material path, not just
+this specific feature.
+
+**Found: a two-layer material-cloning chain that silently defeats any
+"mutate a shared cached Material at runtime" registry (`NeonRegistry`'s
+own established pattern, and this session's new `WetSurfaceRegistry`)
+for any material spawned as a `Sphere`/`Cylinder`.** `RuntimeCityBuilder
+.SpawnPrim` routes Sphere/Cylinder through `SpawnLowPolyPrim` ->
+`PropLibrary.Spawn`, which -- for the REGISTERED low-poly meshes docs/39
+§11 item 3 shipped -- clones the material via `GetDoubleSidedVariant`
+(a real, cached, SEPARATE `Material` object, not the one passed in).
+`ApplyWorldScaledTiling` then clones AGAIN on top of THAT if the
+resulting material carries a real `_BaseMap` texture. A registry that
+records a material at CREATION time (e.g. `RoadDresser.Asphalt()`
+calling `WetSurfaceRegistry.Register(_asphaltMat, ...)`) and later
+mutates it at runtime (`SetWetness`/`SetBoost`) is mutating an object
+NOTHING on screen actually uses once either clone layer has run --
+silent, no exception, no compile-time signal, would have shipped as a
+no-op effect.
+
+**Fixed for `WetSurfaceRegistry` specifically**: both `PropLibrary
+.GetDoubleSidedVariant` and `RuntimeCityBuilder.ApplyWorldScaledTiling`
+now check `WetSurfaceRegistry.TryGetParams` on the material they're
+about to clone, and propagate a matching registration onto the new
+clone if the source was registered -- chained correctly since
+`ApplyWorldScaledTiling`'s own `baseMat` IS `GetDoubleSidedVariant`'s
+output for anything that goes through both layers, so fixing the first
+layer is what lets the second layer's existing propagation find
+anything to propagate.
+
+**NOT fixed, flagged for whoever next touches `NeonRegistry`**: the
+exact same disconnection risk likely applies to any EMISSIVE material
+registered with `NeonRegistry` that's ever spawned as a Sphere/Cylinder
+(e.g. `RoadDresser.Bulb()`, a lamp globe). Not investigated further
+this session -- out of docs/40's scope, and docs/28's real, creator-
+confirmed lamp-glow behavior across many rounds suggests the VISIBLE
+effect is dominated by `GlowPointRegistry`'s real-Light system (which
+tracks by world position, not by Material, and is immune to this bug
+entirely), likely masking any material-level dimming no-op. Worth a
+real look if a future creator report describes a bulb's own emissive
+material specifically (not its light pool) failing to dim in daylight.

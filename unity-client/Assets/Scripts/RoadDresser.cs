@@ -129,6 +129,40 @@ public static class RoadDresser
         WetSurfaceRegistry.Register(_islandStoneMat, wetSmoothness: 0.7f, darken: 0.65f);
         return _islandStoneMat;
     }
+
+    /// <summary>docs/40 §3 item 4: the "classic pre-SSR fake puddle"
+    /// trick, scoped to what this environment can actually build blind
+    /// -- a real mirrored-skyline reflection needs a second Render-
+    /// Texture camera, which docs/28 row 19 already flagged as Editor-
+    /// only setup work, so this is a STATIC dark, glossy, warm-tinted
+    /// patch rather than a live reflection. Nearly invisible while dry
+    /// (`wetAlpha`'s -1-less registration below fades it from
+    /// near-zero to visible with the SAME `WeatherController.Wetness`
+    /// item 1 already drives, unlike a permanent always-there puddle,
+    /// which would repeat docs/28 rows 14/15's "always-on = too much"
+    /// mistake in a new spot). Tinted by <see cref="LampColor"/> --
+    /// every roundabout lamp already registers this exact color with
+    /// `GlowPointRegistry` (see `DrawRoundabout`), so baking it in once
+    /// here is the same "nearby lamp color" read docs/40 asks for,
+    /// without a live per-frame registry query a static decal doesn't
+    /// need.</summary>
+    private static Material _puddleDecalMat;
+    private static Material PuddleDecal()
+    {
+        if (_puddleDecalMat != null) return _puddleDecalMat;
+        var mat = new Material(ShaderUtil.FindRenderableShader());
+        mat.color = new Color(0.05f, 0.05f, 0.06f, 0.02f);   // dry: near-invisible
+        LabMeshBuilder.MakeTransparent(mat);
+        if (mat.HasProperty("_EmissionColor"))
+        {
+            mat.EnableKeyword("_EMISSION");
+            mat.SetColor("_EmissionColor", LampColor * 0.15f);
+        }
+        WetSurfaceRegistry.Register(mat, wetSmoothness: 0.9f, darken: 1f, wetAlpha: 0.5f);
+        _puddleDecalMat = mat;
+        return _puddleDecalMat;
+    }
+
     private static Material SignBlue() { return M(0.10f, 0.26f, 0.7f); }
     private static Material SignRed() { return M(0.78f, 0.16f, 0.13f); }
     private static Material PostGray() { return M(0.5f, 0.52f, 0.54f); }
@@ -750,6 +784,19 @@ public static class RoadDresser
             GlowPointRegistry.Register(roundaboutBulb.transform, LampColor);
             SpawnLightBeam(b, roundaboutBulbPos, 4.7f, host);
         }
+
+        // docs/40 §3 item 4: one fake-reflection puddle patch on the
+        // circulating asphalt, at a deterministic (hashed off this
+        // roundabout's own hex, not random) angle/radius between the
+        // curb and the outer edge -- "same seed always furnishes the
+        // same streets" holds here too. y matches the dashed lane
+        // markings' own proven-clear height just above (0.37 vs their
+        // 0.36) rather than a fresh guess at the asphalt's top surface.
+        var puddleAngle = (Hash(hex, 777) % 360) * Mathf.Deg2Rad;
+        var puddleRadius = (RndCurb + RndAsphalt) * 0.5f;
+        var puddlePos = c + new Vector3(Mathf.Sin(puddleAngle), 0f, Mathf.Cos(puddleAngle)) * puddleRadius
+            + Vector3.up * 0.37f;
+        b.SpawnPrim(PrimitiveType.Cylinder, puddlePos, new Vector3(2.2f, 0.02f, 2.2f), PuddleDecal(), host);
 
         // per-entry treatment: flared apron, give-way triangles, set-back
         // pedestrian crossing, and European signs (blue circular
