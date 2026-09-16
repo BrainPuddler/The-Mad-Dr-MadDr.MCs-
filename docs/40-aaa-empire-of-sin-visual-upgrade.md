@@ -400,53 +400,59 @@ docs/39 §11. Each item states its Editor-dependence up front.
    puddle approximation as the ceiling.**
 
    **2026-09-16, read-only recon of the actual URP config (reading
-   asset/scene YAML, no Editor access) — narrows the creator's own
-   step considerably:**
-   - `Assets/Settings/PC_RPAsset.asset` (confirmed active pipeline —
-     matches `ProjectSettings/GraphicsSettings.asset`'s
-     `m_CustomRenderPipeline` guid) already has
-     `m_RequireDepthTexture: 1` and `m_RequireOpaqueTexture: 1` — both
-     hard prerequisites for URP Screen Space Reflections are already
-     on. Nothing to change there.
-   - Its renderer, `Assets/Settings/PC_Renderer.asset`, already carries
-     one Renderer Feature (`ScreenSpaceAmbientOcclusion`) but no SSR
-     feature yet. **Creator step 1: select `PC_Renderer.asset` →
-     Inspector → Add Renderer Feature → Screen Space Reflections.**
-   - The scene's one Global Volume (`Assets/Scenes/SampleScene.unity`)
-     references `Assets/Settings/DefaultVolumeProfile.asset` as its
-     shared profile (same guid as `PC_RPAsset`'s own default volume
-     profile field). That profile has no SSR override yet (it does
-     carry several stray `CopyPasteTestComponent*`/`TestVolume`/
-     `VolumeComponentSupportedEverywhere` entries that look like
-     leftover Unity package test-sample data — harmless, not touched,
-     flagged in case it's ever worth cleaning up). **Creator step 2:
-     select `DefaultVolumeProfile.asset` → Add Override →
-     Post-processing → Screen Space Reflections → enable it.**
-   - **No code changes needed for this half of item 5.** Item 1's own
-     `WetSurfaceRegistry` already raises `_Smoothness` on wet road
-     materials specifically so "any EXISTING light... produce[s] a
-     sharper specular response" once a real reflection technique
-     exists — SSR reads screen-space depth/color, exactly what's
-     already enabled above, so turning it on should make the
-     already-shipped wet roads/puddle decals show real mirrored
-     buildings/sky for free. **Visual check once both steps are done:**
-     rain on, at night, near a roundabout — confirm the puddle decals
-     and wet asphalt now show a rough real reflection, not just a flat
-     tinted patch.
-   - **Real baked Reflection Probes are a poor fit here specifically —
-     worth recording so nobody tries it and gets confused.** This
-     project's entire city is built procedurally at RUNTIME by
-     `RuntimeCityBuilder` (docs/18); there's no building geometry in
-     the edit-time scene for a baked `ReflectionProbe` to see. A baked
-     probe placed in `SampleScene` today would capture essentially
-     nothing. It would need to be `Realtime`, updated every frame
-     (expensive, likely conflicts with docs/39's performance floor) or
-     spawned/triggered from code near specific landmarks and rendered
-     on-demand — a real, separately-scoped follow-up. **Recommendation:
-     ship SSR alone first** (zero code, both prerequisites already on)
-     **and only build a runtime landmark-probe spawner if the creator
-     specifically wants mirror-like glass-tower reflections after
-     seeing SSR in action** — don't build it preemptively.
+   asset/scene YAML, no Editor access) — corrected same-day after a web
+   check, see below.** First pass here wrongly claimed a plain
+   "Add Renderer Feature → Screen Space Reflections" was available and
+   gave the creator two Inspector steps to do it. **That was wrong —
+   caught by checking Unity's own release notes/forum posts before
+   handing the creator real steps, not by anyone reporting back.**
+   Native URP SSR does not exist in `6000.3.13f1` (this project's exact
+   Editor version) at all — Unity's own team states it's targeting
+   Unity 6.7, requiring at least `6000.6.0a7` (an alpha three minor
+   versions ahead of what's installed here), still in preview as of
+   2026-09-16. There is no "Screen Space Reflections" entry in this
+   project's Add Renderer Feature list to click. **Lesson for next
+   time, same shape as the `_BumpMap`/Big Brain jar mistake in this
+   same doc's §1: reasoning from a feature's generic existence in
+   "URP"/"Unity 6" is not the same as confirming it ships in the
+   specific Editor version this project is pinned to** — always check
+   against the exact version (`6000.3.13f1`) before writing creator
+   steps, not against "URP" as a generic moving target.
+
+   What DID hold up from that recon (still true, not retracted):
+   `PC_RPAsset.asset` (confirmed active pipeline) already has
+   `m_RequireDepthTexture: 1`/`m_RequireOpaqueTexture: 1` on, and the
+   scene's one Global Volume already shares `DefaultVolumeProfile.asset`
+   (which does carry stray `CopyPasteTestComponent*`/`TestVolume`
+   entries, harmless leftover Unity package test-sample data, not
+   touched). None of that unlocks SSR on this Unity version, though —
+   depth/opaque textures are necessary but not sufficient without the
+   feature existing at all.
+
+   **Real options, none of them a two-click Inspector step like the
+   puddle decals or docs/28's material tuning:**
+   1. **Upgrade the Editor to `6000.6.0a7`+** to get native SSR once it
+      ships — an alpha/preview jump this deep into a project carries
+      real stability risk (LTS vs. alpha tradeoff), a creator call, not
+      a blind recommendation.
+   2. **Adopt a third-party open-source URP SSR Renderer Feature**
+      (several exist on GitHub, unnamed here since none has been
+      evaluated against this project's URP version/pipeline
+      customizations) — real third-party rendering code, its own
+      integration/compatibility risk, a bigger decision than anything
+      else in this backlog.
+   3. **Realtime Reflection Probes**, spawned/triggered from code near
+      landmarks — the `RuntimeCityBuilder`-builds-at-runtime problem
+      from the original recon still applies unchanged: a baked probe in
+      the edit-time scene sees nothing, so this needs new runtime code
+      (a real, separately-scoped follow-up), and per-frame realtime
+      probes are expensive against docs/39's floor.
+   4. **Accept item 4's puddle-decal approximation as the ceiling** —
+      the original framing of this item, still valid.
+   Ask the creator which of these (if any) before doing more here —
+   this is the genuine "wait for the creator" case the item's opening
+   paragraph already called out, now with the real menu instead of a
+   two-click illusion of one.
 
 6. **Volumetric fog integration** — the REAL Renderer Feature stays
    parked, not re-evaluated. docs/28 row 19 already did the feasibility
