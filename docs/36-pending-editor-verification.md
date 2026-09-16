@@ -713,6 +713,25 @@ zero exceptions needed for `RuntimeCityBuilder.cs` now).
 
 ## 25. Facade normal-map rollout (docs/40 §3 item 0)
 
+**2026-09-16 update, from the creator's own `~/Library/Logs/Unity/
+Editor.log` (read directly, not asked about): confirmed compiles AND
+survives a real play session.** The log shows a real Unity 6000.3.13f1
+session on this exact working directory: `*** Tundra build success
+(2.75 seconds)` compiling `Assembly-CSharp.dll` with this item's
+changes included (`WeatherController.cs.meta`/`RainToggleHud.cs.meta`
+exist on disk, proving the AssetDatabase imported item 1's new files
+from the same session), then a real match played on the Village preset
+(seed 42, "City build census... 86696 GameObjects, 83889 renderers")
+with 24 citizens eaten and several harvest banks over the session,
+ending in a clean Editor shutdown -- zero `LogError`/exception/shader-
+compile-error lines anywhere in the 1040-line log. This resolves the
+property/keyword-correctness risk this entry originally flagged
+(`_BumpMap`/`_NORMALMAP` do exist and do not throw in this project's
+URP version). **Still NOT confirmed: the actual visual read** -- the
+log has no way to show whether the brick/stone bump depth is visible
+or looks right at a raking light angle; that half of this entry's own
+checklist below still needs the creator's eyes, not just a clean log.
+
 New `PbrTextureAtlas.BuildNormalFromHeight` (central-difference
 height-to-tangent-space-normal, same technique `BrainTextureKit.
 BuildNormal` uses) plus three independent height functions
@@ -784,6 +803,25 @@ together, not independently.
 
 ## 26. Wet-response weather toggle (docs/40 §3 item 1)
 
+**2026-09-16 update: same real play-session evidence as entry 25 above
+covers this item too** (same session, same commit's changes) --
+`RoadDresser`'s new registration wrappers around `Asphalt`/`Sidewalk`/
+`RoundaboutCurb`/`IslandStone` ran during that session's real city
+build (the census log line confirms `RoadDresser` built successfully),
+and `WeatherController.Tick`/`WetSurfaceRegistry.SetWetness` ran every
+frame via `LumenCycleController.Update` for the whole ~24-citizen
+session with no exception. **Not confirmed: whether the rain toggle was
+actually clicked, or whether wet asphalt visually reads as wet** -- the
+log has no record of button clicks or visual state, only that the code
+path never crashed. This item's own HUD-stack edits (`RainToggleHud`'s
+new position, and the `BuildMenuHud`/`BarracksHud`/`CollectorLabHud`
+anchor updates that came with it) were part of the same commit this
+play session covers, so "renders without an OnGUI exception" is
+confirmed for that stack too -- but "nothing visually overlaps" is
+still a real screen check, not a log one. Item 2's own `RainSystem` was
+written AFTER this play session closed and has none of this coverage
+-- see entry 27.
+
 New `WeatherController` (a real `IsRaining` toggle + an eased 0..1
 `Wetness` value, ticked once per frame from `LumenCycleController.
 Update`) and `WetSurfaceRegistry` (same "record each material's base
@@ -828,3 +866,50 @@ reads were updated to chain through it instead of skipping straight to
   `AddComponent` call in `RuntimeCityBuilder` (and reverting the three
   chain-reference edits back to `WindowLightsHud.Bottom`) fully
   disables the feature with no other system depending on it.
+
+## 27. Falling rain streaks + splashes (docs/40 §3 item 2)
+
+New `RainSystem`, a pure visual consumer of item 1's
+`WeatherController.Wetness` (no weather state of its own). GPU-
+instanced via `Graphics.DrawMeshInstanced` on a hand-authored unit-box
+mesh -- the SAME technique `LowPolyFireSystem` already ships, confirmed
+by reading that file directly (an earlier draft of docs/40 named the
+wrong overload, `RenderMeshInstanced`; corrected once this file was
+written against the real precedent). 260 falling streaks scaled by
+`Wetness`, respawning around a camera-ground-focus point (a ray-plane
+intersection against y=0 from `Camera.main`, computed fresh each
+frame); each landing spawns a short growing splash disc from a
+separate 40-slot pool. Both pools skip entirely in the Map band
+(`AnimationLodBudget.CurrentBand`) and cost nothing while `Wetness` is
+0. The hand-authored box mesh's winding is unverified like every other
+procedural mesh in this project written blind -- mitigated with the
+same `_Cull = Off` double-sided safety net `PropLibrary`/
+`RoofPortraitHologram` already carry after docs/28 rows 6/7's real
+winding incident, so even a wrong triangle order should stay visible
+rather than vanish.
+
+- **The actual visual check**: toggle rain ON (the button added in
+  entry 26, same panel) and confirm streaks are actually visible falling
+  through the Close/Normal/Overview bands, at a density that reads as
+  "raining" without looking like sparse debris or an opaque wall --
+  `MaxStreaks`/`StreakWidth`/`StreakLengthMin/Max` in `RainSystem.cs`
+  are the tuning knobs if not.
+- **Splash read**: confirm the landing splash discs are visible as a
+  quick expanding ring/blob at night (their cool emissive tint is tuned
+  for reading against dark wet pavement, not daylight) and that they
+  don't look like a solid disc popping in/out -- `SplashLifeSeconds`/
+  `SplashMaxRadius` are the tuning knobs.
+- **Winding check specifically**: confirm the streak box doesn't look
+  inside-out or show any missing face from a typical yaw angle --
+  `_Cull = Off` should make even a wrong winding fully visible, just
+  possibly with backwards-looking normals/shading, which is a lesser
+  bug than "invisible."
+- **Map-band cull**: zoom out past the Map-band threshold (docs/39 §1.2,
+  ≥250 m) with rain on and confirm streaks/splashes actually disappear
+  rather than being tiny far-away dots -- this reuses `MonsterBody`'s
+  own Map-band check but has never been seen triggering for this file.
+- **If this looks broken**: `RainSystem` is a single self-contained
+  MonoBehaviour with no other system depending on it (unlike
+  `WetSurfaceRegistry`, nothing reads `RainSystem`'s own state) --
+  deleting its `AddComponent` call in `RuntimeCityBuilder` fully
+  disables it with zero ripple effects.

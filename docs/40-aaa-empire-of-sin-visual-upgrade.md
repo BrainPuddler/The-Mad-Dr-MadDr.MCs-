@@ -282,18 +282,32 @@ docs/39 §11. Each item states its Editor-dependence up front.
    shiny" judgment call is genuinely visual and needs the creator's
    eyes, same as every docs/28 row.
 
-2. **Rain VFX** (closes §2.2, pairs with item 1). Instanced rain
-   streaks (`Graphics.RenderMeshInstanced`, the same pattern
-   `LowPolyFireSystem` already uses per docs/39 §9) plus a handful of
-   ground-level splash puddles as static decals that catch
-   `GlowPointRegistry`'s existing lamp colors via emissive tint (not a
-   new light, not a reflection probe). Capped hard by docs/39 §9's VFX
-   rules (≤ 64 particles per instance-class, no per-unit real light).
-   **Editor-dependence: low** — instancing pattern already proven in
-   this codebase; the only genuinely new risk is whether the streak
-   mesh/material reads correctly at the Normal-band 26 px test, a
-   visual judgment call for the creator, same ceiling as every VFX
-   change here.
+2. **[Implemented 2026-09-16, pending Editor verification — see docs/36
+   entry 27] Rain VFX** (closes §2.2, pairs with item 1). New
+   `RainSystem`: a pool of 260 GPU-instanced falling streaks (a hand-
+   authored unit-box mesh, `Graphics.DrawMeshInstanced` — **correction
+   to this entry's original text**, which named `Graphics.
+   RenderMeshInstanced`; the real precedent, `LowPolyFireSystem`, uses
+   `DrawMeshInstanced`, a different/older overload, confirmed by reading
+   that file directly rather than trusting this doc's own paraphrase of
+   it), active count scaled by `WeatherController.Wetness`, respawning
+   around a camera-ground-focus point each time one lands. Landing
+   triggers a short-lived growing splash disc from a separate, smaller
+   pool (40) with a fixed cool emissive tint — **narrower than this
+   entry's original "catch `GlowPointRegistry`'s existing lamp colors"
+   idea**: querying nearby lamp color per splash was judged over-
+   engineered for a cheap ambient effect and left to item 4's own hand-
+   placed, lamp-aware plaza decals instead. Both pools cap well inside
+   docs/39 §9's particle/lifetime rules and render nothing in the Map
+   band (reuses `AnimationLodBudget.CurrentBand`, the same check
+   `MonsterBody`'s own Map-band cull already established). **Editor-
+   dependence: low** — the instancing call itself mirrors a real, read
+   precedent; the one genuinely new risk is the hand-authored box mesh's
+   winding, mitigated with the same `_Cull = Off` safety net
+   `PropLibrary`/`RoofPortraitHologram` already carry after docs/28 rows
+   6/7's real incident. Whether the streak/splash density and mesh read
+   correctly at the Normal-band 26 px test is a visual judgment call for
+   the creator, same ceiling as every VFX change here.
 
 3. **Monster rim/fill light term** (closes §2.4). A cool rim/fresnel
    term added to `CreatureVertexColor.shader` (the shader docs/39 §11

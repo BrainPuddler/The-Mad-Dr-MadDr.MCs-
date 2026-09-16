@@ -684,6 +684,12 @@ public class RuntimeCityBuilder : MonoBehaviour, IHexObstacleQuery
         if (gameObject.GetComponent<RainToggleHud>() == null)
             gameObject.AddComponent<RainToggleHud>();
 
+        // docs/40 §3 item 2: the visual consumer of WeatherController's
+        // Wetness value -- unconditional like the two HUD toggles above
+        // since it costs near-zero every frame while Wetness is 0.
+        if (gameObject.GetComponent<RainSystem>() == null)
+            gameObject.AddComponent<RainSystem>();
+
         var bars = gameObject.GetComponent<HealthBars>();
         if (bars == null) bars = gameObject.AddComponent<HealthBars>();
         bars.Init(this);
