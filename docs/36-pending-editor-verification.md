@@ -994,6 +994,21 @@ rather than vanish.
   (not popping) -- and that NONE are visible when rain is off.
   `MistSystem.cs`'s `MaxClumps`/`MinScale-MaxScale`/`BaseAlpha` range
   are the tuning knobs.
+- **Camera-proximity depth cue** (2026-09-16 third update, creator
+  direction "fall faster and be fast and plentiful close to the
+  camera"): base fall speed raised (24-34 m/s, was 16-24), and streaks
+  within `NearCameraRadius` (32 m) of the camera's own ground position
+  -- `CameraGroundXZ`, deliberately NOT `GroundFocusPoint` (the point
+  the camera is looking AT, which sits ahead of it, not under it) --
+  get up to 1.7x that speed, recomputed live each frame. `NearSpawnBias`
+  (60%) of every respawn also lands inside that same radius (sampled
+  via `sqrt(random)` for even density, not peaked at the exact center),
+  so the pool visibly concentrates near the camera instead of spreading
+  uniformly. Confirm: rain in the foreground/near part of the view
+  looks noticeably faster AND denser than rain farther out, and that
+  panning the camera doesn't leave a stale dense patch behind (the
+  bias recenters on the camera's CURRENT position every frame, not
+  where it was when a streak last spawned).
 - **Winding check specifically**: confirm the streak box and the
   splash quad don't look inside-out or show any missing face from a
   typical yaw angle -- `_Cull = Off` should make even a wrong winding

@@ -328,6 +328,15 @@ docs/39 §11. Each item states its Editor-dependence up front.
    mirroring `LowPolyFireSystem` the first time) — see docs/36 entry
    27's first update.
 
+   **2026-09-16, second follow-up** ("fall faster and be fast and
+   plentiful close to the camera") — base fall speed raised (24-34 m/s,
+   was 16-24), plus a real camera-proximity depth cue: streaks within
+   32 m of the camera's own ground position (not the point it's looking
+   at) fall up to 1.7x faster, and 60% of every respawn lands in that
+   same radius instead of spreading uniformly, so the pool visibly
+   concentrates in the foreground the way real rain close to a lens
+   does. Full detail in docs/36 entry 27's third update.
+
 3. **[Implemented 2026-09-16, pending Editor verification — see docs/36
    entry 28] Monster rim/fill light term** (closes §2.4). A cool rim/
    fresnel term added to `CreatureVertexColor.shader` (the shader

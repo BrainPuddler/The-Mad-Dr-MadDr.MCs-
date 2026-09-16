@@ -40,6 +40,14 @@ using UnityEngine;
 /// Rain streaks fall perfectly vertically -- no wind lean, unlike
 /// `LowPolyFireSystem`'s flames -- since nothing asked for weather wind
 /// and adding one now would be scope no one requested.
+///
+/// 2026-09-16 (creator direction: "fall faster and be fast and
+/// plentiful close to the camera"): base fall speed raised, and a real
+/// depth cue added on top of it -- `NearSpawnBias` of every respawn
+/// clusters within `NearCameraRadius` of the camera's own ground
+/// position (not the point it's looking at) instead of spreading
+/// uniformly, and any streak currently in that radius gets extra fall
+/// speed, recomputed live each frame so it tracks a panning camera.
 /// </summary>
 public class RainSystem : MonoBehaviour
 {
@@ -51,16 +59,35 @@ public class RainSystem : MonoBehaviour
     private const float SpawnHalfExtent = 140f;
     private const float SpawnTopHeight = 45f;   // clears every building tier (docs/18: tallest is 40 m)
 
-    private const int MaxStreaks = 220;
+    // 2026-09-16 creator direction ("fast and plentiful close to the
+    // camera"): raised back up from the 220 mid-pass trim now that a
+    // chunk of the pool concentrates near the camera instead of
+    // spreading evenly -- still comfortably under the 1023
+    // DrawMeshInstanced per-call cap.
+    private const int MaxStreaks = 280;
     private const float StreakWidth = 0.06f;
     // 2026-09-16 creator direction ("longer"): roughly doubled from the
     // original 1.1-1.9 m -- long enough to read as a fast-falling
-    // streak at the default 70 m zoom instead of a short dash. Count
-    // trimmed slightly (260 -> 220) since longer streaks cover more of
-    // the frame per-instance; kept well under the 1023 DrawMeshInstanced
-    // cap either way.
+    // streak at the default 70 m zoom instead of a short dash.
     private const float StreakLengthMin = 2.6f, StreakLengthMax = 4.2f;
-    private const float FallSpeedMin = 16f, FallSpeedMax = 24f;
+    // 2026-09-16 creator direction ("fall faster"): raised from the
+    // original 16-24. NearSpeedMultiplier below stacks ON TOP of this
+    // for streaks close to the camera specifically.
+    private const float FallSpeedMin = 24f, FallSpeedMax = 34f;
+
+    // 2026-09-16 creator direction ("fast and plentiful close to the
+    // camera"): a real depth cue, not just a wider spread -- real rain
+    // close to the lens reads as a blur of fast, dense streaks while
+    // distant rain is a faint, sparser haze. `NearSpawnBias` fraction of
+    // every respawn lands within `NearCameraRadius` of the camera's own
+    // ground position (`CameraGroundXZ`) instead of uniformly across
+    // the whole spawn square, and any streak currently within that
+    // radius gets up to `NearSpeedMultiplier`x its own base fall speed,
+    // recomputed live each frame so a panning camera doesn't leave
+    // stale fast/dense streaks behind.
+    private const float NearCameraRadius = 32f;
+    private const float NearSpeedMultiplier = 1.7f;
+    private const float NearSpawnBias = 0.6f;
 
     private const int MaxSplashes = 40;
     // 2026-09-16: splashes now show BOTH an impact flash and an
@@ -100,7 +127,8 @@ public class RainSystem : MonoBehaviour
         // the player turns it on, by which point every active streak
         // has already respawned at least once against the real camera.
         var initialCenter = GroundFocusPoint();
-        for (var i = 0; i < MaxStreaks; i++) RespawnStreak(i, initialCenter, aboveGround: true);
+        var initialCamXZ = CameraGroundXZ();
+        for (var i = 0; i < MaxStreaks; i++) RespawnStreak(i, initialCenter, initialCamXZ, aboveGround: true);
 
         _splashX = new float[MaxSplashes];
         _splashZ = new float[MaxSplashes];
@@ -122,16 +150,20 @@ public class RainSystem : MonoBehaviour
             return;
 
         var center = GroundFocusPoint();
+        var camXZ = CameraGroundXZ();
         var dt = Time.deltaTime;
         var activeStreaks = Mathf.RoundToInt(MaxStreaks * wetness);
 
         for (var i = 0; i < activeStreaks; i++)
         {
-            _streakY[i] -= _streakSpeed[i] * dt;
+            var dist = Vector2.Distance(new Vector2(_streakX[i], _streakZ[i]), camXZ);
+            var proximity = Mathf.Clamp01(1f - dist / NearCameraRadius);
+            var speedMul = Mathf.Lerp(1f, NearSpeedMultiplier, proximity);
+            _streakY[i] -= _streakSpeed[i] * speedMul * dt;
             if (_streakY[i] - _streakLen[i] * 0.5f <= 0f)
             {
                 SpawnSplash(_streakX[i], _streakZ[i]);
-                RespawnStreak(i, center, aboveGround: false);
+                RespawnStreak(i, center, camXZ, aboveGround: false);
                 continue;
             }
             var pos = new Vector3(_streakX[i], _streakY[i], _streakZ[i]);
@@ -160,19 +192,49 @@ public class RainSystem : MonoBehaviour
         FlushInstances(_rippleMesh, _splashMat, _splashMatrices);
     }
 
-    /// <summary>Re-places one streak at a fresh random XZ within the
-    /// spawn square around `center` and a fresh random height/speed/
-    /// length -- called both at startup (`aboveGround: true`, scattered
-    /// through the fall so the first frame doesn't show every streak
-    /// starting from the same height) and on landing (`aboveGround:
-    /// false`, always from the top).</summary>
-    private void RespawnStreak(int i, Vector3 center, bool aboveGround)
+    /// <summary>Re-places one streak at a fresh XZ and a fresh random
+    /// height/speed/length -- called both at startup (`aboveGround:
+    /// true`, scattered through the fall so the first frame doesn't
+    /// show every streak starting from the same height) and on landing
+    /// (`aboveGround: false`, always from the top). `NearSpawnBias` of
+    /// all respawns land within `NearCameraRadius` of `camXZ` -- radius
+    /// sampled as `sqrt(random)` (the standard uniform-DISC technique,
+    /// compensating for area growing with r², not a naive `random *
+    /// radius` which would under-fill the outer ring) so that patch
+    /// itself reads as evenly dense, not artificially peaked at the
+    /// exact camera point. The rest scatter uniformly across the full
+    /// `center`-anchored square -- the "plentiful close to the camera,
+    /// still present in the distance" split.</summary>
+    private void RespawnStreak(int i, Vector3 center, Vector2 camXZ, bool aboveGround)
     {
-        _streakX[i] = center.x + Random.Range(-SpawnHalfExtent, SpawnHalfExtent);
-        _streakZ[i] = center.z + Random.Range(-SpawnHalfExtent, SpawnHalfExtent);
+        if (Random.value < NearSpawnBias)
+        {
+            var r = Mathf.Sqrt(Random.value) * NearCameraRadius;
+            var a = Random.Range(0f, Mathf.PI * 2f);
+            _streakX[i] = camXZ.x + Mathf.Sin(a) * r;
+            _streakZ[i] = camXZ.y + Mathf.Cos(a) * r;
+        }
+        else
+        {
+            _streakX[i] = center.x + Random.Range(-SpawnHalfExtent, SpawnHalfExtent);
+            _streakZ[i] = center.z + Random.Range(-SpawnHalfExtent, SpawnHalfExtent);
+        }
         _streakLen[i] = Random.Range(StreakLengthMin, StreakLengthMax);
         _streakSpeed[i] = Random.Range(FallSpeedMin, FallSpeedMax);
         _streakY[i] = aboveGround ? Random.Range(0f, SpawnTopHeight) : SpawnTopHeight;
+    }
+
+    /// <summary>The camera's own horizontal position -- not the ground
+    /// point it's looking AT (`GroundFocusPoint`, which sits ahead of a
+    /// pitched-down camera), but literally under/near it, i.e. the
+    /// near/foreground edge of the shot. That distinction is the whole
+    /// point of the "close to the camera" bias above.</summary>
+    private static Vector2 CameraGroundXZ()
+    {
+        var cam = Camera.main;
+        if (cam == null) return Vector2.zero;
+        var pos = cam.transform.position;
+        return new Vector2(pos.x, pos.z);
     }
 
     private void SpawnSplash(float x, float z)
