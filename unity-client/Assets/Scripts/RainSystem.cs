@@ -10,15 +10,23 @@ using UnityEngine;
 /// `LumenCycleController`/`NeonRegistry`/`DynamicLightBudget`.
 ///
 /// GPU-instanced via `Graphics.DrawMeshInstanced`, the same technique
-/// `LowPolyFireSystem` already ships for exterior fire (its own doc
-/// header names the API correctly; an earlier draft of docs/40 called it
-/// `Graphics.RenderMeshInstanced`, a different, newer overload this
-/// codebase doesn't use -- corrected there once this file was written
-/// against the real precedent instead of the doc's own paraphrase of
-/// it). One shared streak mesh + one shared splash mesh, each with one
-/// shared material -- matrices are the only per-instance data, batched
-/// in ≤1023-instance chunks (the hard per-call cap the same precedent
-/// already works around via `FlushBucket`).
+/// `LowPolyFireSystem` already ships for exterior fire, INCLUDING that
+/// file's `mat.enableInstancing = true` (missed on the first pass here,
+/// caught by a real Editor exception -- see docs/36 entry 27's own
+/// update). Two shared meshes (streak, ripple) + two shared materials --
+/// matrices are the only per-instance data, batched in ≤1023-instance
+/// chunks (the hard per-call cap the same precedent already works
+/// around via `FlushBucket`).
+///
+/// 2026-09-16 (creator direction: "rain streaks should be longer,
+/// motion blurred tip and tail. a rain impact splash and ripples on
+/// surfaces"): streaks got a real UV-mapped alpha gradient (soft at
+/// both ends, not a hard-edged box) instead of a flat-alpha box, and
+/// the ground splash became a proper ripple -- a small bright impact
+/// core plus an expanding ring, both from ONE static radial-gradient
+/// texture whose apparent ring radius grows as the instance's own
+/// world-space scale grows over its lifetime (no per-instance texture
+/// animation needed).
 ///
 /// Deliberately does NOT sample `GlowPointRegistry` per splash to tint
 /// individual puddles toward nearby lamp colors -- that's docs/40 §3
@@ -43,21 +51,31 @@ public class RainSystem : MonoBehaviour
     private const float SpawnHalfExtent = 140f;
     private const float SpawnTopHeight = 45f;   // clears every building tier (docs/18: tallest is 40 m)
 
-    private const int MaxStreaks = 260;
-    private const float StreakWidth = 0.05f;
-    private const float StreakLengthMin = 1.1f, StreakLengthMax = 1.9f;
+    private const int MaxStreaks = 220;
+    private const float StreakWidth = 0.06f;
+    // 2026-09-16 creator direction ("longer"): roughly doubled from the
+    // original 1.1-1.9 m -- long enough to read as a fast-falling
+    // streak at the default 70 m zoom instead of a short dash. Count
+    // trimmed slightly (260 -> 220) since longer streaks cover more of
+    // the frame per-instance; kept well under the 1023 DrawMeshInstanced
+    // cap either way.
+    private const float StreakLengthMin = 2.6f, StreakLengthMax = 4.2f;
     private const float FallSpeedMin = 16f, FallSpeedMax = 24f;
 
     private const int MaxSplashes = 40;
-    private const float SplashLifeSeconds = 0.35f;
-    private const float SplashMaxRadius = 0.55f;
-    private const float SplashHeight = 0.02f;
+    // 2026-09-16: splashes now show BOTH an impact flash and an
+    // expanding ripple ring from one growing quad, so the lifetime is a
+    // little longer than the old pure-growth blob needed -- enough time
+    // for the ring to visibly separate from the impact core before it
+    // fades.
+    private const float SplashLifeSeconds = 0.6f;
+    private const float SplashMaxRadius = 0.75f;
 
     private float[] _streakX, _streakZ, _streakY, _streakSpeed, _streakLen;
     private float[] _splashX, _splashZ, _splashAge;
     private bool[] _splashActive;
 
-    private Mesh _boxMesh;
+    private Mesh _streakMesh, _rippleMesh;
     private Material _streakMat, _splashMat;
     private readonly List<Matrix4x4> _streakMatrices = new List<Matrix4x4>();
     private readonly List<Matrix4x4> _splashMatrices = new List<Matrix4x4>();
@@ -65,7 +83,8 @@ public class RainSystem : MonoBehaviour
 
     private void Awake()
     {
-        _boxMesh = BuildBoxMesh();
+        _streakMesh = BuildStreakMesh();
+        _rippleMesh = BuildRippleQuadMesh();
         _streakMat = BuildStreakMaterial();
         _splashMat = BuildSplashMaterial();
 
@@ -126,14 +145,19 @@ public class RainSystem : MonoBehaviour
             _splashAge[i] += dt;
             var t = _splashAge[i] / SplashLifeSeconds;
             if (t >= 1f) { _splashActive[i] = false; continue; }
-            var radius = Mathf.Lerp(0.05f, SplashMaxRadius, t);
-            var pos = new Vector3(_splashX[i], SplashHeight * 0.5f, _splashZ[i]);
-            var scale = new Vector3(radius, SplashHeight, radius);
+            // Eased growth (fast at first, slowing) reads as a real
+            // ripple expanding outward and losing energy -- a linear
+            // Lerp made every ripple's ring speed look identical and
+            // mechanical.
+            var eased = 1f - (1f - t) * (1f - t);
+            var radius = Mathf.Lerp(0.04f, SplashMaxRadius, eased);
+            var pos = new Vector3(_splashX[i], 0.015f, _splashZ[i]);
+            var scale = new Vector3(radius, 1f, radius);
             _splashMatrices.Add(Matrix4x4.TRS(pos, Quaternion.identity, scale));
         }
 
-        FlushInstances(_boxMesh, _streakMat, _streakMatrices);
-        FlushInstances(_boxMesh, _splashMat, _splashMatrices);
+        FlushInstances(_streakMesh, _streakMat, _streakMatrices);
+        FlushInstances(_rippleMesh, _splashMat, _splashMatrices);
     }
 
     /// <summary>Re-places one streak at a fresh random XZ within the
@@ -191,7 +215,7 @@ public class RainSystem : MonoBehaviour
     /// <summary>Same batching idiom as `LowPolyFireSystem.FlushBucket`
     /// -- Graphics.DrawMeshInstanced's hard per-call cap is 1023
     /// instances, so anything above that (never actually reached here:
-    /// MaxStreaks + MaxSplashes is 300) is split across multiple calls.</summary>
+    /// MaxStreaks + MaxSplashes is 260) is split across multiple calls.</summary>
     private void FlushInstances(Mesh mesh, Material material, List<Matrix4x4> matrices)
     {
         var count = matrices.Count;
@@ -206,16 +230,21 @@ public class RainSystem : MonoBehaviour
         }
     }
 
-    /// <summary>A plain unit cube (-0.5..0.5 on every axis, 8 verts/12
-    /// tris) -- no existing helper in `ProceduralMeshKit`/`PropLibrary`
-    /// builds a bare box (its shapes are all more specialized), and this
-    /// is cheap and simple enough to hand-author here rather than route
-    /// through one of them. Used stretched thin for a streak and
-    /// flattened for a splash -- both are the same mesh, only the scale
-    /// in the instance matrix differs.</summary>
-    private static Mesh BuildBoxMesh()
+    /// <summary>A unit box (-0.5..0.5 on every axis, 8 verts/12 tris)
+    /// with a per-vertex UV.y that tracks local Y directly (0 at the
+    /// bottom, 1 at the top) -- every vertex has one unambiguous Y, so
+    /// this mapping is seam-free across all six faces despite vertices
+    /// being shared between faces. UV.x is left at 0 everywhere; the
+    /// gradient texture this pairs with (<see cref="BuildStreakGradient
+    /// Texture"/>) varies only by V, so U is never sampled meaningfully.
+    /// Scaled thin and tall per-instance for the falling streak;
+    /// stretched Y IS the direction of travel, so this UV mapping is
+    /// exactly "fades out along the direction of motion at both ends" --
+    /// the motion-blur look the creator asked for -- with zero per-
+    /// instance cost, baked into one shared texture.</summary>
+    private static Mesh BuildStreakMesh()
     {
-        var vertices = new[]
+        var positions = new[]
         {
             new Vector3(-0.5f, -0.5f, -0.5f), new Vector3(0.5f, -0.5f, -0.5f),
             new Vector3(0.5f, 0.5f, -0.5f), new Vector3(-0.5f, 0.5f, -0.5f),
@@ -231,21 +260,114 @@ public class RainSystem : MonoBehaviour
             3, 6, 2, 3, 7, 6,   // top
             4, 1, 5, 4, 0, 1,   // bottom
         };
-        var mesh = new Mesh { vertices = vertices, triangles = triangles };
+        var uvs = new Vector2[positions.Length];
+        for (var i = 0; i < positions.Length; i++) uvs[i] = new Vector2(0f, positions[i].y + 0.5f);
+
+        var mesh = new Mesh { vertices = positions, triangles = triangles, uv = uvs };
         mesh.RecalculateNormals();
         mesh.RecalculateBounds();
         return mesh;
     }
 
+    /// <summary>A flat quad in the XZ plane (y=0, -0.5..0.5 on X/Z) with
+    /// standard corner UVs -- a ground decal, not a volume, so it never
+    /// needs a box's thickness. Safe from the "vertical billboard can
+    /// go edge-on and vanish under free yaw" risk a streak would have,
+    /// since the camera here is always looking DOWN at a fixed pitch
+    /// (docs/39 §1) -- a horizontal quad's +Y normal is never
+    /// perpendicular to the view direction. `_Cull = Off` (applied to
+    /// its material regardless, same safety net as every hand-authored
+    /// mesh here) makes the exact winding moot either way.</summary>
+    private static Mesh BuildRippleQuadMesh()
+    {
+        var positions = new[]
+        {
+            new Vector3(-0.5f, 0f, -0.5f), new Vector3(0.5f, 0f, -0.5f),
+            new Vector3(0.5f, 0f, 0.5f), new Vector3(-0.5f, 0f, 0.5f),
+        };
+        var triangles = new[] { 0, 2, 1, 0, 3, 2 };
+        var uvs = new[] { new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(0f, 1f) };
+        var mesh = new Mesh { vertices = positions, triangles = triangles, uv = uvs };
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
+    /// <summary>32x64 alpha gradient (RGB stays white -- `mat.color`
+    /// tints it): fully transparent at both V=0 and V=1, full opacity
+    /// across the middle band. Soft `SmoothStep`-eased edges on both
+    /// ends is the whole "motion blurred tip and tail" ask -- a hard-
+    /// edged box (the old geometry-only streak) reads as a solid rod,
+    /// not a fast-moving smear.</summary>
+    private static Texture2D BuildStreakGradientTexture()
+    {
+        const int w = 8, h = 64;
+        var tex = new Texture2D(w, h, TextureFormat.RGBA32, false, true);
+        tex.wrapMode = TextureWrapMode.Clamp;
+        tex.filterMode = FilterMode.Bilinear;
+        var pixels = new Color32[w * h];
+        for (var y = 0; y < h; y++)
+        {
+            var v = y / (float)(h - 1);
+            var fadeIn = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0f, 0.22f, v));
+            var fadeOut = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.72f, 1f, v));
+            var a = (byte)Mathf.RoundToInt(Mathf.Clamp01(fadeIn * fadeOut) * 255f);
+            for (var x = 0; x < w; x++) pixels[y * w + x] = new Color32(255, 255, 255, a);
+        }
+        tex.SetPixels32(pixels);
+        tex.Apply(true);
+        return tex;
+    }
+
+    /// <summary>64x64 radial gradient (RGB white, `mat.color` tints):
+    /// a small bright core near the center (the impact flash) plus a
+    /// thin ring further out (the ripple). Both are baked into ONE
+    /// static texture -- as a ripple instance's own world-space SCALE
+    /// grows over its lifetime (see `Update`'s `radius`), the ring's
+    /// FIXED uv-space position reads as an expanding ring in world
+    /// space, and the core shrinks in relative (though not absolute)
+    /// size, exactly like a real droplet impact settling into an
+    /// outward ripple -- no per-instance texture animation needed.</summary>
+    private static Texture2D BuildRippleTexture()
+    {
+        const int size = 64;
+        var tex = new Texture2D(size, size, TextureFormat.RGBA32, false, true);
+        tex.wrapMode = TextureWrapMode.Clamp;
+        tex.filterMode = FilterMode.Bilinear;
+        var pixels = new Color32[size * size];
+        for (var y = 0; y < size; y++)
+        for (var x = 0; x < size; x++)
+        {
+            var u = (x + 0.5f) / size - 0.5f;
+            var v = (y + 0.5f) / size - 0.5f;
+            var dist = Mathf.Sqrt(u * u + v * v);   // 0 at center, ~0.707 at the corners
+
+            // impact core: bright, tight, fading out by dist 0.16
+            var core = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.02f, 0.16f, dist));
+            // ripple ring: a thin band centered at dist 0.38, fully
+            // faded by 0.30 on the inside and 0.48 on the outside
+            var ringIn = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.30f, 0.38f, dist));
+            var ringOut = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.38f, 0.48f, dist));
+            var ring = Mathf.Clamp01(ringIn * ringOut) * 0.8f;
+
+            var a = (byte)Mathf.RoundToInt(Mathf.Clamp01(core + ring) * 255f);
+            pixels[y * size + x] = new Color32(255, 255, 255, a);
+        }
+        tex.SetPixels32(pixels);
+        tex.Apply(true);
+        return tex;
+    }
+
     /// <summary>Translucent cool grey-blue, unlit-reading (low
-    /// smoothness, no texture) -- docs/39 §7 sanctions VFX as one of the
-    /// few classes allowed alpha-blended geometry. `LabMeshBuilder.
-    /// MakeTransparent` is the existing shared transparency idiom (the
-    /// mastermind's glass dome, water surfaces) reused as-is.</summary>
+    /// smoothness, no base color texture beyond the alpha gradient) --
+    /// docs/39 §7 sanctions VFX as one of the few classes allowed
+    /// alpha-blended geometry. `LabMeshBuilder.MakeTransparent` is the
+    /// existing shared transparency idiom (the mastermind's glass dome,
+    /// water surfaces) reused as-is.</summary>
     private static Material BuildStreakMaterial()
     {
         var mat = new Material(ShaderUtil.FindRenderableShader());
-        mat.color = new Color(0.75f, 0.8f, 0.85f, 0.35f);
+        mat.color = new Color(0.75f, 0.8f, 0.85f, 0.6f);
         // Real Editor exception caught this the first time it actually
         // ran: Graphics.DrawMeshInstanced throws InvalidOperationException
         // ("Material needs to enable instancing") without this --
@@ -256,6 +378,7 @@ public class RainSystem : MonoBehaviour
         // style choice.
         mat.enableInstancing = true;
         LabMeshBuilder.MakeTransparent(mat);
+        if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", BuildStreakGradientTexture());
         ApplyDoubleSidedSafetyNet(mat);
         return mat;
     }
@@ -267,9 +390,10 @@ public class RainSystem : MonoBehaviour
     private static Material BuildSplashMaterial()
     {
         var mat = new Material(ShaderUtil.FindRenderableShader());
-        mat.color = new Color(0.8f, 0.85f, 0.9f, 0.25f);
+        mat.color = new Color(0.8f, 0.85f, 0.9f, 0.55f);
         mat.enableInstancing = true;   // see BuildStreakMaterial's own comment
         LabMeshBuilder.MakeTransparent(mat);
+        if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", BuildRippleTexture());
         if (mat.HasProperty("_EmissionColor"))
         {
             mat.EnableKeyword("_EMISSION");

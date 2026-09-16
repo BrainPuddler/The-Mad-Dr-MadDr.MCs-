@@ -93,12 +93,18 @@ public static class RoadDresser
     // stripes and vegetation don't gain the same "thin water film"
     // specular response asphalt/stone do, and docs/40's own scope is
     // road/sidewalk/plaza, not everything RoadDresser touches.
+    // 2026-09-16 (creator direction: "wet surface, darker and shinier
+    // areas"): all four wetSmoothness/darken pairs below raised/lowered
+    // from their original item-1 values (0.7-0.85 smoothness, 0.55-0.65
+    // darken) for a more pronounced response now that the clone-chain
+    // bug keeping them from ever reaching the screen is fixed -- no
+    // point tuning a value nobody could have seen render before.
     private static Material _asphaltMat;
     private static Material Asphalt()
     {
         if (_asphaltMat != null) return _asphaltMat;
         _asphaltMat = MTextured("asphalt-wet", 0.52f, 0.51f, 0.53f, PbrTextureAtlas.AsphaltWet);
-        WetSurfaceRegistry.Register(_asphaltMat, wetSmoothness: 0.85f, darken: 0.55f);
+        WetSurfaceRegistry.Register(_asphaltMat, wetSmoothness: 0.94f, darken: 0.38f);
         return _asphaltMat;
     }
     private static Material _sidewalkMat;
@@ -106,7 +112,7 @@ public static class RoadDresser
     {
         if (_sidewalkMat != null) return _sidewalkMat;
         _sidewalkMat = M(0.58f, 0.56f, 0.52f);
-        WetSurfaceRegistry.Register(_sidewalkMat, wetSmoothness: 0.7f, darken: 0.65f);
+        WetSurfaceRegistry.Register(_sidewalkMat, wetSmoothness: 0.82f, darken: 0.5f);
         return _sidewalkMat;
     }
     private static Material LanePaint() { return M(0.85f, 0.7f, 0.2f); }
@@ -116,7 +122,7 @@ public static class RoadDresser
     {
         if (_roundaboutCurbMat != null) return _roundaboutCurbMat;
         _roundaboutCurbMat = M(0.62f, 0.6f, 0.56f);
-        WetSurfaceRegistry.Register(_roundaboutCurbMat, wetSmoothness: 0.7f, darken: 0.65f);
+        WetSurfaceRegistry.Register(_roundaboutCurbMat, wetSmoothness: 0.82f, darken: 0.5f);
         return _roundaboutCurbMat;
     }
     private static Material RoundaboutGrass() { return M(0.30f, 0.44f, 0.21f); }
@@ -126,7 +132,7 @@ public static class RoadDresser
     {
         if (_islandStoneMat != null) return _islandStoneMat;
         _islandStoneMat = M(0.58f, 0.58f, 0.6f);
-        WetSurfaceRegistry.Register(_islandStoneMat, wetSmoothness: 0.7f, darken: 0.65f);
+        WetSurfaceRegistry.Register(_islandStoneMat, wetSmoothness: 0.82f, darken: 0.5f);
         return _islandStoneMat;
     }
 
@@ -442,6 +448,24 @@ public static class RoadDresser
         List<(Vector3 dir, bool arterial, float half)> connectors, bool isArterialHex, bool isRoundabout,
         HashSet<HexCoord> buildingHexes, Transform host)
     {
+        // docs/40 §3 item 1 follow-up (creator direction 2026-09-16:
+        // "wet surface, darker and shinier areas" -- read as patchy, not
+        // just a uniform city-wide tint). One in six ordinary hexes gets
+        // its own small puddle, at a hashed (not random) offset from
+        // center -- roundabouts already get a dedicated, better-placed
+        // one from DrawRoundabout, so skip here to avoid doubling up.
+        // Same PuddleDecal() material/fade-with-Wetness item 4 built for
+        // roundabouts, just scattered more broadly across the street
+        // grid instead of one per plaza.
+        if (!isRoundabout && Hash(hex, 881) % 6 == 0)
+        {
+            var offset = new Vector3(
+                (Hash(hex, 883) % 100 / 100f - 0.5f) * 3f, 0f,
+                (Hash(hex, 887) % 100 / 100f - 0.5f) * 3f);
+            b.SpawnPrim(PrimitiveType.Cylinder, center + offset + Vector3.up * 0.38f,
+                new Vector3(1.8f, 0.02f, 1.8f), PuddleDecal(), host);
+        }
+
         // 1. APPROACH ARMS -- straight cardinal strips (drawn first so
         //    the center treatment overlays their inner ends)
         foreach (var (dir, isArterialConnector, half) in connectors)

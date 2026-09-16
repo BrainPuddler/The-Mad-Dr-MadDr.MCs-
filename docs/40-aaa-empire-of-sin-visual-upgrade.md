@@ -309,6 +309,25 @@ docs/39 §11. Each item states its Editor-dependence up front.
    correctly at the Normal-band 26 px test is a visual judgment call for
    the creator, same ceiling as every VFX change here.
 
+   **2026-09-16 polish pass, direct creator direction after seeing it
+   run** ("rain streaks should be longer, motion blurred tip and tail.
+   a rain impact splash and ripples on surfaces, plus wet surface,
+   darker and shiny areas. Clumps of heavier mist floating slowly
+   through viewport") — full detail in docs/36 entry 27's own second
+   update: streaks lengthened + given a real UV alpha-gradient fade at
+   both ends; splashes switched from a filled disc to a proper impact-
+   core-plus-expanding-ring via one static radial texture; item 1's
+   `WetSurfaceRegistry` values strengthened and `RoadDresser.DressHex`
+   now scatters extra `PuddleDecal()`s across ordinary street hexes
+   (not just roundabouts) for patchy "wet areas" instead of one flat
+   city-wide tint; and a NEW system beyond this doc's original six-item
+   plan, `MistSystem.cs` — a small pool of drifting `CloudShard` fog
+   clumps, gated by `Wetness` the same way rain itself is. This also
+   fixed a real, creator-reported runtime exception (`Graphics
+   .DrawMeshInstanced` needs `enableInstancing = true`, missed when
+   mirroring `LowPolyFireSystem` the first time) — see docs/36 entry
+   27's first update.
+
 3. **[Implemented 2026-09-16, pending Editor verification — see docs/36
    entry 28] Monster rim/fill light term** (closes §2.4). A cool rim/
    fresnel term added to `CreatureVertexColor.shader` (the shader

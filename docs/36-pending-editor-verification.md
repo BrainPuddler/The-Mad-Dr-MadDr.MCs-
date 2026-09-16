@@ -907,6 +907,50 @@ only (a missing one-line flag, not a structural misunderstanding) --
 confirmed working now depends on the creator re-running it, not
 re-read here.
 
+**2026-09-16, second update: a full visual pass on creator direction
+("rain streaks should be longer, motion blurred tip and tail. a rain
+impact splash and ripples on surfaces, plus wet surface, darker and
+shiny areas. Clumps of heavier mist floating slowly through
+viewport").** All five asks landed:
+- **Longer streaks**: length range roughly doubled (1.1-1.9 m ->
+  2.6-4.2 m), count trimmed slightly (260 -> 220) to compensate.
+- **Motion-blurred tip/tail**: the streak mesh gained real per-vertex
+  UVs (V tracks local Y, seam-free across all 6 faces since every
+  vertex has one unambiguous Y) paired with a new procedural alpha-
+  gradient texture (`BuildStreakGradientTexture`) that fades to fully
+  transparent at both ends and stays opaque through the middle -- the
+  old geometry-only box read as a solid rod regardless of fall speed.
+- **Impact splash + ripples**: the splash mesh changed from a
+  flattened box to a flat ground quad (safe from the vertical-
+  billboard edge-on risk since the camera always looks down at a fixed
+  pitch), paired with a new radial-gradient texture
+  (`BuildRippleTexture`) baking a bright impact core NEAR the center
+  plus a thin ring farther out into ONE static texture -- as the
+  instance's own world-space scale grows over its lifetime (eased, not
+  linear, so the ripple loses energy realistically), the ring's fixed
+  UV-space radius reads as an expanding ring in world space with zero
+  per-instance texture work.
+- **Wet surface, darker/shinier**: `RoadDresser`'s four
+  `WetSurfaceRegistry.Register` calls all got stronger smoothness/
+  darken values (e.g. Asphalt 0.85/0.55 -> 0.94/0.38) now that the
+  clone-chain bug keeping them from ever reaching the screen is fixed
+  (entry 26's own update) -- no point tuning a value nobody could see
+  before. Also added scattered patchiness: `DressHex` now spawns a
+  `PuddleDecal()` at roughly 1 in 6 ordinary (non-roundabout) hexes, at
+  a hashed offset, so wetness reads as patchy "areas" rather than one
+  flat city-wide tint.
+- **Mist clumps**: new `MistSystem.cs` (docs/36 has no prior entry for
+  this, tracked here since it's the same commit) -- a 12-clump pool of
+  `ProceduralMeshKit.CloudShard` blobs (3 shape variants), individually
+  faded via `MaterialPropertyBlock` (a small bounded set, exactly
+  docs/39 §7's sanctioned exception), drifting slowly and recentering
+  around the camera's ground focus when they wander too far, scaled by
+  `Wetness` the same way rain itself is.
+
+None of this pass has been through a real Editor session -- pure
+reasoning against the mesh/UV/texture math, same standing ceiling as
+every other item in this file.
+
 New `RainSystem`, a pure visual consumer of item 1's
 `WeatherController.Wetness` (no weather state of its own). GPU-
 instanced via `Graphics.DrawMeshInstanced` on a hand-authored unit-box
@@ -927,30 +971,44 @@ winding incident, so even a wrong triangle order should stay visible
 rather than vanish.
 
 - **The actual visual check**: toggle rain ON (the button added in
-  entry 26, same panel) and confirm streaks are actually visible falling
-  through the Close/Normal/Overview bands, at a density that reads as
-  "raining" without looking like sparse debris or an opaque wall --
-  `MaxStreaks`/`StreakWidth`/`StreakLengthMin/Max` in `RainSystem.cs`
-  are the tuning knobs if not.
-- **Splash read**: confirm the landing splash discs are visible as a
-  quick expanding ring/blob at night (their cool emissive tint is tuned
-  for reading against dark wet pavement, not daylight) and that they
-  don't look like a solid disc popping in/out -- `SplashLifeSeconds`/
-  `SplashMaxRadius` are the tuning knobs.
-- **Winding check specifically**: confirm the streak box doesn't look
-  inside-out or show any missing face from a typical yaw angle --
-  `_Cull = Off` should make even a wrong winding fully visible, just
-  possibly with backwards-looking normals/shading, which is a lesser
-  bug than "invisible."
+  entry 26, same panel) and confirm streaks are visibly longer than
+  before and read as SOFT-EDGED (fading at both ends), not a solid
+  rod -- `StreakLengthMin/Max` and `BuildStreakGradientTexture`'s own
+  two `InverseLerp` bands are the tuning knobs if the fade is too
+  sharp/soft or too short/long.
+- **Splash/ripple read**: confirm a landing shows a bright core
+  followed by a visibly EXPANDING RING (not a filled disc growing
+  uniformly) -- if the ring doesn't read as separate from the core,
+  `BuildRippleTexture`'s `core`/`ring` distance bands need retuning,
+  not a structural fix.
+- **Wet-area patchiness**: confirm scattered puddle patches appear on
+  ordinary streets (not just at roundabouts) when rain is on, and that
+  asphalt/sidewalk generally read visibly darker and shinier than the
+  pre-this-pass look -- if the STREET puddles don't appear but the
+  roundabout one does (or vice versa), that's informative: both use
+  the identical `PuddleDecal()`/`WetSurfaceRegistry` path, so a
+  difference between them would point at `DressHex`'s own hash gate
+  specifically, not the shared wet-response system.
+- **Mist read**: confirm 1-2 large, soft, slowly-drifting gray blobs
+  are visible somewhere in view when rain is on, fading in smoothly
+  (not popping) -- and that NONE are visible when rain is off.
+  `MistSystem.cs`'s `MaxClumps`/`MinScale-MaxScale`/`BaseAlpha` range
+  are the tuning knobs.
+- **Winding check specifically**: confirm the streak box and the
+  splash quad don't look inside-out or show any missing face from a
+  typical yaw angle -- `_Cull = Off` should make even a wrong winding
+  fully visible, just possibly with backwards-looking normals/shading,
+  which is a lesser bug than "invisible."
 - **Map-band cull**: zoom out past the Map-band threshold (docs/39 §1.2,
-  ≥250 m) with rain on and confirm streaks/splashes actually disappear
+  ≥250 m) with rain on and confirm streaks/splashes/mist all disappear
   rather than being tiny far-away dots -- this reuses `MonsterBody`'s
-  own Map-band check but has never been seen triggering for this file.
-- **If this looks broken**: `RainSystem` is a single self-contained
-  MonoBehaviour with no other system depending on it (unlike
-  `WetSurfaceRegistry`, nothing reads `RainSystem`'s own state) --
-  deleting its `AddComponent` call in `RuntimeCityBuilder` fully
-  disables it with zero ripple effects.
+  own Map-band check but has never been seen triggering for either file.
+- **If this looks broken**: `RainSystem`/`MistSystem` are both self-
+  contained MonoBehaviours with no other system depending on them --
+  deleting either `AddComponent` call in `RuntimeCityBuilder` fully
+  disables that piece with zero ripple effects. The puddle-scatter
+  addition in `RoadDresser.DressHex` is a single `if` block, equally
+  safe to delete on its own.
 
 ## 28. Monster rim/fill light (docs/40 §3 item 3)
 
