@@ -900,6 +900,10 @@ public class MonsterAgent : MonoBehaviour
 
     private bool _roofDisplay;
     private const float RoofSpinDegPerSec = 40f;
+    // docs/28 §4 follow-up (2026-09-16): smaller than DynamicLightBudget's
+    // shared 8m streetlamp default -- a monster-sized display glow, not a
+    // fixture mounted over open pavement.
+    private const float RoofGlowRange = 5f;
     private GameObject _roofGlow;
 
     /// <summary>2026-08 (creator direction: "if a monster in the factory
@@ -1022,7 +1026,7 @@ public class MonsterAgent : MonoBehaviour
         var renderer = _roofGlow.GetComponent<Renderer>();
         if (renderer != null) renderer.sharedMaterial = mat;
 
-        GlowPointRegistry.Register(_roofGlow.transform, glowColor, isEligible: () => _roofDisplay);
+        GlowPointRegistry.Register(_roofGlow.transform, glowColor, isEligible: () => _roofDisplay, range: RoofGlowRange);
 
         _roofGlow.SetActive(false);
     }

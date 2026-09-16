@@ -31,6 +31,16 @@ public static class GlowPointRegistry
         public LightType LightType;
         public bool SpotAimsWithTransform;
         public System.Func<bool> IsEligible;
+        // docs/28 §4 follow-up (2026-09-16, "per-kind real-light tinting
+        // beyond color... a wider cone/spread for a window's spill vs. a
+        // streetlamp's pool"): -1 is the sentinel for "use
+        // DynamicLightBudget's own shared range/spotConeAngle field,"
+        // same convention this codebase already uses for an optional
+        // per-instance override (MTextured's `smoothness = -1f`) --
+        // every pre-existing call site that never asked for this stays
+        // byte-identical.
+        public float Range;
+        public float ConeAngle;
     }
 
     private static readonly List<Point> Points = new List<Point>();
@@ -70,7 +80,8 @@ public static class GlowPointRegistry
     /// that (from the player's read of the scene) has its headlights
     /// off.</summary>
     public static void Register(Transform point, Color color, LightType lightType = LightType.Point,
-        bool spotAimsWithTransform = false, System.Func<bool> isEligible = null)
+        bool spotAimsWithTransform = false, System.Func<bool> isEligible = null,
+        float range = -1f, float coneAngle = -1f)
     {
         Points.Add(new Point
         {
@@ -79,6 +90,8 @@ public static class GlowPointRegistry
             LightType = lightType,
             SpotAimsWithTransform = spotAimsWithTransform,
             IsEligible = isEligible,
+            Range = range,
+            ConeAngle = coneAngle,
         });
     }
 
@@ -104,7 +117,8 @@ public static class GlowPointRegistry
     /// live predicate (same mechanism the headlight case below already
     /// uses) so the budget selection loop skips a currently-dark window
     /// exactly like it already skips a parked car's headlight.</summary>
-    public static void RegisterPosition(Vector3 worldPosition, Color color, System.Func<bool> isEligible = null)
+    public static void RegisterPosition(Vector3 worldPosition, Color color, System.Func<bool> isEligible = null,
+        float range = -1f)
     {
         Points.Add(new Point
         {
@@ -114,6 +128,8 @@ public static class GlowPointRegistry
             Color = color,
             LightType = LightType.Point,
             IsEligible = isEligible,
+            Range = range,
+            ConeAngle = -1f,
         });
     }
 
@@ -145,6 +161,8 @@ public static class GlowPointRegistry
     public static LightType LightTypeAt(int i) { return Points[i].LightType; }
     public static bool SpotAimsWithTransformAt(int i) { return Points[i].SpotAimsWithTransform; }
     public static bool IsEligibleAt(int i) { var f = Points[i].IsEligible; return f == null || f(); }
+    public static float RangeAt(int i) { return Points[i].Range; }
+    public static float ConeAngleAt(int i) { return Points[i].ConeAngle; }
 }
 
 /// <summary>
@@ -267,7 +285,13 @@ public class DynamicLightBudget : MonoBehaviour
     // looks oversized, that's bloom (LumenCycleController.bloomScale),
     // not this -- this field is about ground reach, not screen-space
     // halo size.
-    [Tooltip("How far each light reaches, in meters, as a straight-line radius from the light itself -- NOT a ground-projected pool size. Needs to comfortably exceed the tallest fixture's mount height (~5.9m for the ornate lamppost globes) or it can't reach the ground at all.")]
+    // 2026-09-16 (docs/28 §4 follow-up): this is now the FALLBACK for any
+    // registered point that didn't ask for its own range --
+    // GlowPointRegistry.Register/RegisterPosition both take an optional
+    // per-point `range` override (window spill and a monster's roof
+    // glow both use a smaller one than this shared streetlamp-tuned
+    // default; see their own call sites).
+    [Tooltip("How far each light reaches, in meters, as a straight-line radius from the light itself -- NOT a ground-projected pool size. Needs to comfortably exceed the tallest fixture's mount height (~5.9m for the ornate lamppost globes) or it can't reach the ground at all. Fallback only -- a registered point with its own range override ignores this.")]
     [Range(1f, 25f)]
     public float range = 8f;
 
@@ -279,12 +303,12 @@ public class DynamicLightBudget : MonoBehaviour
     // wide." GlowPointRegistry now carries a LightType per point
     // (RoadDresser's overhanging-streetlight bulb registers as Spot;
     // everything else stays the previous Point default). This is the
-    // ONE shared cone angle every promoted Spot light uses -- there's no
-    // per-fixture angle yet since only one fixture kind asks for Spot
-    // today; if a second one wants a different cone, this needs to move
-    // onto GlowPointRegistry's per-point data instead of staying a
-    // single shared field here.
-    [Tooltip("Cone angle (degrees) for any promoted light registered as a Spot (currently: the overhanging streetlight, aimed straight down at the road). Ignored for Point lights.")]
+    // FALLBACK cone angle for a promoted Spot light that didn't ask for
+    // its own -- 2026-09-16 (docs/28 §4 follow-up): a second Spot kind,
+    // TrafficCar's headlight, now DOES register a narrower per-point
+    // cone (a real beam, not a wide streetlamp pool), via the same
+    // `range`/`coneAngle` optional overrides `range` above got.
+    [Tooltip("Cone angle (degrees) for any promoted light registered as a Spot that didn't specify its own cone angle (currently: the overhanging streetlight, aimed straight down at the road). Ignored for Point lights.")]
     [Range(1f, 179f)]
     public float spotConeAngle = 48f;
 
@@ -433,7 +457,11 @@ public class DynamicLightBudget : MonoBehaviour
                 pooled.gameObject.SetActive(true);
                 pooled.transform.position = GlowPointRegistry.PositionAt(idx);
                 pooled.color = GlowPointRegistry.ColorAt(idx);
-                pooled.range = range;
+                // docs/28 §4 follow-up: a per-point override, if this
+                // fixture registered one, otherwise the same shared
+                // `range` every point used before this existed.
+                var pointRange = GlowPointRegistry.RangeAt(idx);
+                pooled.range = pointRange >= 0f ? pointRange : range;
                 // Which registered point lands on which pooled slot can
                 // change refresh to refresh (nearest-to-camera reshuffles
                 // as the camera moves), so type/rotation/cone/intensity
@@ -450,7 +478,8 @@ public class DynamicLightBudget : MonoBehaviour
                     pooled.transform.rotation = GlowPointRegistry.SpotAimsWithTransformAt(idx)
                         ? GlowPointRegistry.TransformAt(idx).rotation
                         : SpotDownRotation;
-                    pooled.spotAngle = spotConeAngle;
+                    var pointConeAngle = GlowPointRegistry.ConeAngleAt(idx);
+                    pooled.spotAngle = pointConeAngle >= 0f ? pointConeAngle : spotConeAngle;
                     pooled.intensity = spotIntensity;
                 }
                 else

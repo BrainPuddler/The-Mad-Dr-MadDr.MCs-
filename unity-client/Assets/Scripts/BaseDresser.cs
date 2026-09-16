@@ -2686,18 +2686,43 @@ public class BaseDresser : MonoBehaviour
     /// distinguishes windows within one call (0, 1, 2...); `seedSalt`
     /// distinguishes one CALL SITE from another (Factory vs Control
     /// Centre) so the two don't draw from the identical jitter stream.</summary>
+    // docs/28 §4 follow-up (2026-09-16, "a generic 'any prop can flicker'
+    // author-time hookup"): every faction window SHAPE below (pedestal
+    // cube, castle arrow slit, alien porthole) used to hand-duplicate
+    // this exact lit-roll/color/kind block, with only its own per-shape
+    // jitter salt differing (110/111, 120/121, 130/131). Collapsed into
+    // these two shared calls so a FOURTH shape needs one line instead of
+    // copying the whole block again -- byte-identical to the pre-
+    // refactor behavior, since each call site keeps its own salt
+    // constant and `shapeSalt`/`shapeSalt + 1` reproduce the exact same
+    // jitter stream the old hardcoded pairs did.
+    private const float FactionWindowLitChance = 0.4f;
+
+    private static Color FactionWindowGlowColor()
+    {
+        // Computed fresh every call, not cached -- CityLightingProfile
+        // .Active can change at runtime, same as the inline expression
+        // this replaces always re-evaluated it live.
+        return new Color(1f, 0.85f, 0.55f) * CityLightingProfile.Active.BulbEmissiveBase * 0.9f;
+    }
+
+    private Material RollFactionWindowMat(int index, int seedSalt, int shapeSalt, out bool lit)
+    {
+        lit = PbrTextureAtlas.Jitter(index, seedSalt, shapeSalt) < FactionWindowLitChance;
+        return lit ? PedestalWindowGlowMat() : PedestalWindowMat();
+    }
+
+    private static void RegisterFactionWindowGlow(Renderer renderer, int index, int seedSalt, int shapeSalt)
+    {
+        EmissiveAnimator.Register(renderer, FactionWindowGlowColor(), LightBehaviorKind.Window,
+            PbrTextureAtlas.Jitter(index, seedSalt, shapeSalt + 1));
+    }
+
     private void SpawnPedestalWindow(Transform parent, Vector3 pos, Vector3 scale, int index, int seedSalt)
     {
-        var lit = PbrTextureAtlas.Jitter(index, seedSalt, 110) < 0.4f;
-        if (!lit)
-        {
-            builder.SpawnPrim(PrimitiveType.Cube, pos, scale, PedestalWindowMat(), parent);
-            return;
-        }
-        var go = builder.SpawnPrim(PrimitiveType.Cube, pos, scale, PedestalWindowGlowMat(), parent);
-        EmissiveAnimator.Register(go.GetComponent<Renderer>(),
-            new Color(1f, 0.85f, 0.55f) * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
-            LightBehaviorKind.Window, PbrTextureAtlas.Jitter(index, seedSalt, 111));
+        var mat = RollFactionWindowMat(index, seedSalt, 110, out var lit);
+        var go = builder.SpawnPrim(PrimitiveType.Cube, pos, scale, mat, parent);
+        if (lit) RegisterFactionWindowGlow(go.GetComponent<Renderer>(), index, seedSalt, 110);
     }
 
     /// <summary>2026-08 (docs/31, creator direction: "Mad Doctor windows
@@ -2723,18 +2748,11 @@ public class BaseDresser : MonoBehaviour
         var frameDepth = slitHeight * 0.22f;
         builder.SpawnPrim(PrimitiveType.Cube, pos, new Vector3(frameWidth, frameHeight, frameDepth), DoctorStone(), parent);
 
-        var lit = PbrTextureAtlas.Jitter(index, seedSalt, 120) < 0.4f;
         var slitPos = pos - Vector3.forward * (frameDepth * 0.32f);
         var slitScale = new Vector3(slitWidth, slitHeight, frameDepth * 0.5f);
-        if (!lit)
-        {
-            builder.SpawnPrim(PrimitiveType.Cube, slitPos, slitScale, PedestalWindowMat(), parent);
-            return;
-        }
-        var slitGo = builder.SpawnPrim(PrimitiveType.Cube, slitPos, slitScale, PedestalWindowGlowMat(), parent);
-        EmissiveAnimator.Register(slitGo.GetComponent<Renderer>(),
-            new Color(1f, 0.85f, 0.55f) * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
-            LightBehaviorKind.Window, PbrTextureAtlas.Jitter(index, seedSalt, 121));
+        var mat = RollFactionWindowMat(index, seedSalt, 120, out var lit);
+        var slitGo = builder.SpawnPrim(PrimitiveType.Cube, slitPos, slitScale, mat, parent);
+        if (lit) RegisterFactionWindowGlow(slitGo.GetComponent<Renderer>(), index, seedSalt, 120);
     }
 
     /// <summary>2026-08 (docs/31, creator direction: "Alien windows must
@@ -2800,17 +2818,11 @@ public class BaseDresser : MonoBehaviour
         ringGo.transform.rotation = faceRot * Quaternion.Euler(90f, 0f, 0f);
 
         var glassPos = ringPos - outwardDir * (radius * 0.15f);
-        var lit = PbrTextureAtlas.Jitter(index, seedSalt, 130) < 0.4f;
-        var glassMat = lit ? PedestalWindowGlowMat() : PedestalWindowMat();
+        var glassMat = RollFactionWindowMat(index, seedSalt, 130, out var lit);
         var glassGo = builder.SpawnPrim(PrimitiveType.Cylinder, glassPos,
             new Vector3(radius * 1.5f, radius * 0.12f, radius * 1.5f), glassMat, parent);
         glassGo.transform.rotation = faceRot * Quaternion.Euler(90f, 0f, 0f);
-        if (lit)
-        {
-            EmissiveAnimator.Register(glassGo.GetComponent<Renderer>(),
-                new Color(1f, 0.85f, 0.55f) * CityLightingProfile.Active.BulbEmissiveBase * 0.9f,
-                LightBehaviorKind.Window, PbrTextureAtlas.Jitter(index, seedSalt, 131));
-        }
+        if (lit) RegisterFactionWindowGlow(glassGo.GetComponent<Renderer>(), index, seedSalt, 130);
 
         // rivet ring in the window's own face plane -- the two axes
         // perpendicular to outwardDir, derived from faceRot rather than

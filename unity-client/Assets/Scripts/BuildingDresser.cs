@@ -1115,6 +1115,27 @@ public static class BuildingDresser
         }
     }
 
+    // docs/28 §4 follow-up (2026-09-16, "a generic 'any prop can flicker'
+    // author-time hookup"): a named, documented entry point for the
+    // "failing neon tube" behavior every landmark/movie-palace sign call
+    // site below already wants, instead of each one spelling out
+    // `EmissiveAnimator.Register(..., LightBehaviorKind.Buzz, ...)`
+    // directly. Doesn't hide anything -- `emissiveColor` and `seed`
+    // still vary per call, exactly as before -- it just gives "this prop
+    // buzzes like failing neon" one discoverable name.
+    private static void RegisterBuzzingSign(Renderer renderer, Color emissiveColor, float seed)
+    {
+        EmissiveAnimator.Register(renderer, emissiveColor, LightBehaviorKind.Buzz, seed);
+    }
+
+    // Same idea for the marquee chaser sequence -- one named call instead
+    // of re-deriving `LightBehaviorKind.Chase` plus its two sequence
+    // parameters at the spawn site.
+    private static void RegisterChaserBulb(Renderer renderer, Color emissiveColor, int sequenceIndex, int sequenceLength)
+    {
+        EmissiveAnimator.Register(renderer, emissiveColor, LightBehaviorKind.Chase, 0f, sequenceIndex, sequenceLength);
+    }
+
     // ---- landmark tier: archetype-aware civic set pieces ------------------------
 
     private static void DressLandmark(RuntimeCityBuilder b, string archetype, Transform t,
@@ -1277,7 +1298,7 @@ public static class BuildingDresser
                 b.SpawnPrim(PrimitiveType.Cylinder, torchAt, new Vector3(0.55f, 0.5f, 0.55f), Chrome(), t);
                 var flame = b.SpawnPrim(PrimitiveType.Sphere, torchAt + Vector3.up * 0.8f,
                     new Vector3(0.6f, 0.8f, 0.6f), NeonRed(), t);
-                EmissiveAnimator.Register(flame.GetComponent<Renderer>(), new Color(0.95f, 0.4f, 0.2f) * 1.6f, LightBehaviorKind.Buzz, 0.35f);
+                RegisterBuzzingSign(flame.GetComponent<Renderer>(), new Color(0.95f, 0.4f, 0.2f) * 1.6f, 0.35f);
                 break;
             case "grand_terminal":
                 // NY: a monumental passenger-hall facade -- tall arched
@@ -1310,7 +1331,7 @@ public static class BuildingDresser
                     new Vector3(0.6f, 4f, 0.6f), IronDark(), t);
                 var beacon = b.SpawnPrim(PrimitiveType.Sphere, basePos + Vector3.up * (height + 21.2f),
                     new Vector3(0.8f, 0.8f, 0.8f), NeonRed(), t);
-                EmissiveAnimator.Register(beacon.GetComponent<Renderer>(), new Color(0.95f, 0.25f, 0.3f) * 1.6f, LightBehaviorKind.Buzz, 0.9f);
+                RegisterBuzzingSign(beacon.GetComponent<Renderer>(), new Color(0.95f, 0.25f, 0.3f) * 1.6f, 0.9f);
                 break;
             case "marche_tower":
                 // Montreal: a market-hall clock tower with a silvered dome,
@@ -1366,9 +1387,9 @@ public static class BuildingDresser
                 // emission matches each material's own M(r,g,b,emissive)
                 // color * emissive -- NOT a Color(r,g,b,a) alpha (there's
                 // no transparency involved here).
-                EmissiveAnimator.Register(underglow.GetComponent<Renderer>(), new Color(0.3f, 0.9f, 0.85f) * 1.6f, LightBehaviorKind.Buzz, 0.2f);
-                EmissiveAnimator.Register(bladeSign.GetComponent<Renderer>(), new Color(0.92f, 0.9f, 0.82f) * 0.6f, LightBehaviorKind.Buzz, 0.55f);
-                EmissiveAnimator.Register(letters.GetComponent<Renderer>(), new Color(0.95f, 0.25f, 0.3f) * 1.6f, LightBehaviorKind.Buzz, 0.8f);
+                RegisterBuzzingSign(underglow.GetComponent<Renderer>(), new Color(0.3f, 0.9f, 0.85f) * 1.6f, 0.2f);
+                RegisterBuzzingSign(bladeSign.GetComponent<Renderer>(), new Color(0.92f, 0.9f, 0.82f) * 0.6f, 0.55f);
+                RegisterBuzzingSign(letters.GetComponent<Renderer>(), new Color(0.95f, 0.25f, 0.3f) * 1.6f, 0.8f);
 
                 // docs/28: "clique light that flash on and off in sequence"
                 // -- a row of small chaser bulbs along the marquee's front
@@ -1379,9 +1400,9 @@ public static class BuildingDresser
                     var bx = Mathf.Lerp(-6f, 6f, i / (float)(chaseBulbs - 1));
                     var bulb = b.SpawnPrim(PrimitiveType.Sphere, basePos + new Vector3(bx, 5.2f, Half * 1.45f),
                         new Vector3(0.3f, 0.3f, 0.3f), M(1f, 0.9f, 0.6f, CityLightingProfile.Active.BulbEmissiveBase), t);
-                    EmissiveAnimator.Register(bulb.GetComponent<Renderer>(),
+                    RegisterChaserBulb(bulb.GetComponent<Renderer>(),
                         new Color(1f, 0.9f, 0.6f) * CityLightingProfile.Active.BulbEmissiveBase,
-                        LightBehaviorKind.Chase, 0f, i, chaseBulbs);
+                        i, chaseBulbs);
                 }
                 break;
         }

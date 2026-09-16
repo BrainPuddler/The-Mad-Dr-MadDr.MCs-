@@ -50,6 +50,13 @@ public class BuildingWindowGrid : MonoBehaviour
     internal const float OnRangeStart = 0.2f;
     internal const float OnRangeEnd = 0.75f;
     internal const float OffRangeStart = 0.75f;
+
+    // docs/28 §4 follow-up (2026-09-16): a lit window's real-light range,
+    // deliberately smaller than DynamicLightBudget's own shared 8m
+    // streetlamp-tuned default -- a window is a soft glow spilling a
+    // short way from a wall, not a fixture mounted high over open
+    // pavement. See this file's own `RegisterPosition` call site.
+    private const float WindowSpillRange = 4.5f;
     internal const float OffRangeEnd = 0.98f;
     internal const float AlwaysOnProbability = 0.15f;
     // 2026-08 (creator direction: "The window lights should NEVER flash
@@ -268,7 +275,13 @@ public class BuildingWindowGrid : MonoBehaviour
             // closure over `i` directly would see whatever `i` ends up as
             // AFTER the loop finishes, not this window's own index.
             var windowId = i;
-            if (w.CanGlow) GlowPointRegistry.RegisterPosition(w.Center, w.GlowColor, () => IsWindowOnNow(windowId));
+            // docs/28 §4 follow-up (2026-09-16, "a wider cone/spread for a
+            // window's spill vs. a streetlamp's pool"): a window is a
+            // small, close light source set into a wall, not a fixture
+            // mounted 6m up over open pavement -- WindowSpillRange (below
+            // this class) is well under DynamicLightBudget's own
+            // streetlamp-tuned shared default (8m) on purpose.
+            if (w.CanGlow) GlowPointRegistry.RegisterPosition(w.Center, w.GlowColor, () => IsWindowOnNow(windowId), WindowSpillRange);
         }
         _pending.Clear();
 

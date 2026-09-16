@@ -320,18 +320,48 @@ building. Office towers already flicker floor-by-floor, window-by-
 window, exactly like apartments do — there is no remaining gap here to
 build, this row is closed.
 
-**Still genuinely open** (real, separate follow-ups, not silently
-skipped):
-- Individual window-pane geometry — every "window" here is still one
-  whole floor-height strip, not individual panes; true single-window
-  lit/dark granularity needs real per-pane geometry, a bigger
-  `BuildingDresser` change.
-- Per-kind real-light tinting beyond color (e.g. a wider cone/spread for
-  a window's spill vs. a streetlamp's pool) — every promoted light is a
-  plain `Point` light today regardless of kind.
-- A generic "any prop can flicker" author-time hookup — today's Flicker/
-  Buzz/Chase wiring is hand-written at each specific spawn site; a
-  future pass could expose this as a per-prop-kind config table instead.
+**2026-09-16, second correction, same investigate-before-building
+discipline**: "individual window-pane geometry" is ALSO stale, not
+open. Checked every live window-spawning path before touching code:
+`FacadeKit`'s `WindowBay` already places 4 independent 1.7m windows per
+floor-bay (2026-08 docs/30 follow-up, "the large buildings need many
+windows" -- each registered on `BuildingWindowGrid` with its own
+lit/dark roll, not a shared strip), `BuildingDresser.SpawnWindowRow`
+already places 1-5 individually-spaced windows per wall for Small-tier
+houses, and `DressIndustrial`'s clerestory band is already "a variable
+1-5-pane... row," not a continuous strip either. The only place a
+genuine single wide strip still exists is `DressApartment`'s LEGACY
+branch (`UseFacadeGrammar = false`), which is dead in the shipped
+default same as `DressOffice`'s own legacy branch item 1 above already
+found. There is no remaining "still one floor-height strip" case in any
+code path a real match actually exercises.
+
+**2026-09-16: both remaining items implemented.**
+
+**Per-kind real-light shaping**: `GlowPointRegistry.Register`/
+`RegisterPosition` gained optional `range`/`coneAngle` overrides (-1
+sentinel = "use `DynamicLightBudget`'s own shared field," so every
+pre-existing call site is byte-identical). Applied at the three
+fixtures that actually wanted something different from the streetlamp-
+tuned shared defaults: a lit window's spill (`BuildingWindowGrid
+.WindowSpillRange`, 4.5m vs. the shared 8m), a monster's roof-glow
+display (`MonsterAgent.RoofGlowRange`, 5m), and a car's headlight beam
+(`TrafficCar.HeadlightConeAngleDeg`, 28° vs. the streetlamp's shared
+48°) — the ornate lamppost/overhanging streetlight/roundabout bulb kept
+the shared defaults unchanged, since those were already tuned
+correctly for them specifically.
+
+**Generic "any prop can flicker" hookup**: `BaseDresser` gained
+`RollFactionWindowMat`/`RegisterFactionWindowGlow`, collapsing the
+identical lit-roll/color/kind block `SpawnPedestalWindow`/
+`SpawnArrowSlit`/`SpawnAlienPorthole` used to each hand-duplicate (same
+0.4 threshold, same warm color, same `LightBehaviorKind.Window`, only
+the jitter salt differing) into two shared calls, byte-identical to the
+old per-site behavior. `BuildingDresser` gained `RegisterBuzzingSign`/
+`RegisterChaserBulb`, thin named wrappers around the `Buzz`/`Chase`
+`EmissiveAnimator.Register` calls every landmark/movie-palace sign now
+goes through instead of spelling out the kind and its parameters
+inline. §5 below is updated to point new callers at these first.
 
 ## 5. Adding a new light kind (for whoever's next)
 
@@ -340,17 +370,23 @@ skipped):
    transform, tintColor)`. Omitting the third argument gets a Point
    light (omnidirectional pool — right for most fixtures). Pass
    `LightType.Spot` if the fixture is aimed at something specific (2026-
-   07: the overhanging streetlight, aimed down at the road) —
-   `DynamicLightBudget` aims every promoted Spot light straight down and
-   applies its own shared `spotConeAngle`; there's no per-point
-   direction/angle yet since only one fixture kind has asked for Spot so
-   far. A second one wanting a DIFFERENT aim/angle would need that
-   moved onto `GlowPointRegistry`'s per-point data instead of staying a
-   single shared field on `DynamicLightBudget`.
-3. If it should animate: `EmissiveAnimator.Register(renderer,
-   baseEmissionColorBeforeBoost, kind, seed, ...)` — `baseEmission` is
-   the material's own `color * emissive` (matching how `M()` computes
-   it), NOT a `Color(r,g,b,a)` alpha.
+   07: the overhanging streetlight, aimed down at the road; 2026-09:
+   the car headlight, tracking its own facing) — `DynamicLightBudget`
+   aims a straight-down Spot by default (`spotAimsWithTransform: true`
+   tracks the registrant's own live rotation instead). Pass `range`/
+   `coneAngle` if this fixture's reach/spread genuinely differs from
+   the shared defaults (2026-09: window spill, a monster's roof glow,
+   and the headlight's narrower beam all do) — omit them (or pass
+   nothing) to just use the shared `DynamicLightBudget` fields every
+   older fixture already relies on.
+3. If it should animate: prefer a named wrapper if one already fits —
+   `BuildingDresser.RegisterBuzzingSign`/`RegisterChaserBulb` for a
+   failing-neon or marquee-chaser prop, `BaseDresser
+   .RegisterFactionWindowGlow` (paired with `RollFactionWindowMat`) for
+   a faction window shape. Otherwise call `EmissiveAnimator.Register(
+   renderer, baseEmissionColorBeforeBoost, kind, seed, ...)` directly —
+   `baseEmission` is the material's own `color * emissive` (matching how
+   `M()` computes it), NOT a `Color(r,g,b,a)` alpha.
 4. Nothing else — `DynamicLightBudget` and `EmissiveAnimatorDriver`
    already run once per scene and pick up every new registration
    automatically.

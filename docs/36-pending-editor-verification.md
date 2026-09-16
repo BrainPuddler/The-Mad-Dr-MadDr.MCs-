@@ -1162,3 +1162,54 @@ data, a bigger follow-up, not attempted here.
   self-contained MonoBehaviour with no other system depending on it --
   deleting its `AddComponent` call in `RuntimeCityBuilder` fully
   disables it with zero ripple effects.
+
+## 31. docs/28 §4 cleanup: per-kind light shaping + generic flicker hookup
+
+Creator direction: pick up docs/28 §4's remaining follow-ups. Two of
+the four turned out to be stale (office-tower windows and window-pane
+granularity were already solved by the 2026-08 facade-grammar system --
+corrected in docs/28 directly, no code changed). These two were real
+and are now implemented:
+
+**Per-kind real-light shaping**: `GlowPointRegistry.Register`/
+`RegisterPosition` gained optional `range`/`coneAngle` parameters (-1
+sentinel = fall back to `DynamicLightBudget`'s own shared `range`/
+`spotConeAngle` fields, so every pre-existing call site -- overhanging
+streetlight, ornate lamppost, roundabout bulb -- is byte-identical).
+Three fixtures now use a real override: `BuildingWindowGrid`'s window
+spill (4.5m, vs. the shared 8m streetlamp-tuned default),
+`MonsterAgent`'s roof-glow display (5m), and `TrafficCar`'s headlight
+(28° cone, vs. the streetlight's shared 48°).
+
+**Generic flicker hookup**: `BaseDresser` gained `RollFactionWindowMat`/
+`RegisterFactionWindowGlow`, collapsing three near-identical hand-
+duplicated blocks (`SpawnPedestalWindow`/`SpawnArrowSlit`/
+`SpawnAlienPorthole` each rolled the same 0.4 lit-chance, spawned the
+same warm-glow material, and registered the same `LightBehaviorKind
+.Window` color -- only the jitter salt constants (110/111, 120/121,
+130/131) differed) into two shared calls, using the SAME salt
+constants so the random stream is byte-identical to before.
+`BuildingDresser` gained `RegisterBuzzingSign`/`RegisterChaserBulb`,
+thin named wrappers replacing 6 direct `EmissiveAnimator.Register(...,
+LightBehaviorKind.Buzz/Chase, ...)` calls at the landmark/movie-palace
+sign spawn sites, with the exact same colors/seeds passed through
+unchanged.
+
+- **The actual visual check**: at night, confirm a lit window's glow
+  pool reads distinctly smaller than a streetlamp's, a car's headlight
+  reads as a narrower beam than the overhanging streetlight's wide
+  cone, and every faction window shape (Doctor pedestal windows, castle
+  arrow slits, Alien portholes) still shows the same ~2-in-5 lit
+  pattern and warm color as before this refactor (a regression here
+  would mean the salt-constant preservation missed something).
+- **Landmark neon check**: confirm the Statue-of-Liberty-analogue torch,
+  the iron-tower beacon, and the movie-palace's underglow/blade/letters/
+  chaser-bulb row all still buzz/chase exactly as before -- this was a
+  pure rename to named helpers, zero logic change, so any difference
+  here would point at a mistake in the migration, not a design change.
+- **If this looks broken**: every change here is either a pure rename
+  (`RegisterBuzzingSign`/`RegisterChaserBulb`) or a byte-identical
+  refactor with a documented preserved salt/threshold (the faction-
+  window helpers) or a purely additive sentinel-gated parameter (the
+  range/coneAngle overrides) -- reverting any one piece independently
+  is safe and doesn't require touching the others.

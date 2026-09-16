@@ -71,6 +71,7 @@ public class TrafficCar : MonoBehaviour
     // surroundings, so there's no budget to compete for in the first
     // place.
     private const float HeadlightTiltDeg = 14f;          // "slightly down" from the car's own forward
+    private const float HeadlightConeAngleDeg = 28f;     // docs/28 §4: narrower than the shared 48-degree streetlamp default -- a real beam, not a wide pool
     private const float BulbWorldDiameter = 0.22f;       // roughly a real headlight/taillight lens, meters
     private const float NightEligibleThreshold = 0.05f;  // DayNightState.NightAmount above this: headlight can compete for a real light
     private const float BrakeDecelEpsilon = 0.2f;        // speed must drop by at least this much frame-to-frame to read as braking
@@ -427,9 +428,18 @@ public class TrafficCar : MonoBehaviour
         // comment for why this is the mechanism (not true register/
         // unregister) that keeps a parked or daylight car's headlight
         // from ever holding a budget slot.
+        //
+        // coneAngle (docs/28 §4 follow-up, 2026-09-16): a real headlight
+        // beam is a narrow, forward-focused cone, nothing like the
+        // overhanging streetlight's wide 48-degree down-aimed pool that
+        // DynamicLightBudget's own shared spotConeAngle was tuned for --
+        // this is the first fixture to actually need a DIFFERENT cone,
+        // which is exactly the case that field's own doc comment named
+        // as the reason a per-point override would eventually be needed.
         GlowPointRegistry.Register(_headlightAim, new Color(1f, 0.95f, 0.85f), LightType.Spot,
             spotAimsWithTransform: true,
-            isEligible: () => IsDriving && DayNightState.NightAmount > NightEligibleThreshold);
+            isEligible: () => IsDriving && DayNightState.NightAmount > NightEligibleThreshold,
+            coneAngle: HeadlightConeAngleDeg);
 
         SetBulbsActive(_headlightBulbs, false);
         SetBulbsActive(_brakeLightBulbs, false);
